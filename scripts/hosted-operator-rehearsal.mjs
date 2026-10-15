@@ -539,6 +539,34 @@ function isRehearsalListener(line) {
   return PORTS.some((port) => new RegExp(`:${port}(?:\\s|$)`, 'u').test(line));
 }
 
+function stableListenerIdentities(lines) {
+  if (!Array.isArray(lines))
+    fail('listener-inventory', 'listener-output-invalid');
+  return lines.map((line) => {
+    if (typeof line !== 'string') {
+      fail('listener-inventory', 'listener-output-invalid');
+    }
+    const fields = line.trim().split(/\s+/u);
+    if (
+      fields.length !== 5 ||
+      !/^[A-Z]+$/u.test(fields[0]) ||
+      !/^\d+$/u.test(fields[1]) ||
+      !/^\d+$/u.test(fields[2]) ||
+      fields[3].length === 0 ||
+      fields[4].length === 0
+    ) {
+      fail('listener-inventory', 'listener-output-invalid');
+    }
+    return `${fields[0]} ${fields[3]} ${fields[4]}`;
+  });
+}
+
+function foreignListenerIdentities(lines) {
+  return stableListenerIdentities(lines)
+    .filter((identity) => !isRehearsalListener(identity))
+    .sort();
+}
+
 function stableContainer(value) {
   const state = value.State ?? {};
   const health = state.Health;
@@ -611,7 +639,7 @@ export function foreignInventory(inventory, runId, project) {
     networks: [],
     volumes: [],
     images: inventory.images,
-    listeners: inventory.listeners.filter((line) => !isRehearsalListener(line)),
+    listeners: foreignListenerIdentities(inventory.listeners),
   };
   for (const [kind, property] of [
     ['container', 'containers'],
@@ -1100,12 +1128,35 @@ function assertNoOwnedResources(inventory, runId, project, kind, stage) {
   }
 }
 
-function assertListenerScope(inventory, baseline) {
-  const foreign = (items) => items.filter((line) => !isRehearsalListener(line));
-  if (
-    JSON.stringify(foreign(inventory.listeners)) !==
-    JSON.stringify(foreign(baseline.listeners))
-  ) {
+export function listenerScopeDelta(current, baseline) {
+  const currentCounts = new Map();
+  const baselineCounts = new Map();
+  for (const identity of foreignListenerIdentities(current)) {
+    currentCounts.set(identity, (currentCounts.get(identity) ?? 0) + 1);
+  }
+  for (const identity of foreignListenerIdentities(baseline)) {
+    baselineCounts.set(identity, (baselineCounts.get(identity) ?? 0) + 1);
+  }
+  const identities = new Set([
+    ...currentCounts.keys(),
+    ...baselineCounts.keys(),
+  ]);
+  let added = 0;
+  let removed = 0;
+  for (const identity of identities) {
+    const difference =
+      (currentCounts.get(identity) ?? 0) - (baselineCounts.get(identity) ?? 0);
+    if (difference > 0) added += difference;
+    if (difference < 0) removed -= difference;
+  }
+  return { added, removed };
+}
+
+function assertListenerScope(inventory, baseline, site, onDiagnostic) {
+  onDiagnostic({ site, added: 'unavailable', removed: 'unavailable' });
+  const delta = listenerScopeDelta(inventory.listeners, baseline.listeners);
+  onDiagnostic({ site, ...delta });
+  if (delta.added > 0 || delta.removed > 0) {
     fail('listener-inventory', 'foreign-listener-changed');
   }
 }
@@ -1720,6 +1771,7 @@ export function formatFailureDiagnostic({
   serviceRunId,
   serviceProject,
   serviceImages,
+  listenerScope,
 }) {
   const safe = (value, pattern) =>
     typeof value === 'string' && pattern.test(value) ? value : 'unavailable';
@@ -1757,9 +1809,22 @@ export function formatFailureDiagnostic({
       ? childExitCode
       : 'unavailable';
   const safeFailureCheck = FAILURE_CHECK_BY_CODE.get(failureCode) ?? 'unknown';
+  const safeListenerScope = {
+    callsite: ['primary', 'paired-restore'].includes(listenerScope?.site)
+      ? listenerScope.site
+      : 'not-applicable',
+    added_count:
+      Number.isSafeInteger(listenerScope?.added) && listenerScope.added >= 0
+        ? listenerScope.added
+        : 'unavailable',
+    removed_count:
+      Number.isSafeInteger(listenerScope?.removed) && listenerScope.removed >= 0
+        ? listenerScope.removed
+        : 'unavailable',
+  };
 
   return {
-    schema_version: 4,
+    schema_version: 5,
     result: 'failed',
     phase: 'hosted-docker-operator-v5',
     failed_phase: SAFE_PHASES.has(phase) ? phase : 'runner',
@@ -1780,6 +1845,7 @@ export function formatFailureDiagnostic({
     run_id: safe(runId, /^\d{1,20}$/u),
     attempt: safe(attempt, /^\d{1,4}$/u),
     source_image_ids: safeImageIds,
+    listener_scope: safeListenerScope,
     cleanup_status: safeCleanup,
     cleanup_attempted: attempted,
     owned_cleanup_verified: cleanupVerified,
@@ -1907,7 +1973,9 @@ export function writeFailureDiagnostic(runnerTemp, fields, update = false) {
           'child_exit_code',
         ].every((key) => previous?.[key] === diagnostic[key]) ||
         JSON.stringify(previous?.service_roles) !==
-          JSON.stringify(diagnostic.service_roles)
+          JSON.stringify(diagnostic.service_roles) ||
+        JSON.stringify(previous?.listener_scope) !==
+          JSON.stringify(diagnostic.listener_scope)
       ) {
         fail('receipt-publish', 'failure-diagnostic-identity-mismatch');
       }
@@ -1934,6 +2002,7 @@ async function main() {
   let diagnosticRunId;
   let diagnosticProject;
   let diagnosticImages;
+  let listenerScopeDiagnostic;
   let cleanupState;
   let cleanupVerified = false;
   const env = process.env;
@@ -2324,7 +2393,9 @@ async function main() {
     assertVolumes(active, id, project, { pairedRestore: false });
     assertNetwork(active, id, project);
     assertNoElement(active, id, project);
-    assertListenerScope(active, baseline);
+    assertListenerScope(active, baseline, 'primary', (value) => {
+      listenerScopeDiagnostic = value;
+    });
 
     stage = 'api-route-smoke';
     const fixtureEnv = {
@@ -2510,7 +2581,9 @@ async function main() {
     assertVolumes(active, id, project);
     assertNetwork(active, id, project);
     assertNoElement(active, id, project);
-    assertListenerScope(active, baseline);
+    assertListenerScope(active, baseline, 'paired-restore', (value) => {
+      listenerScopeDiagnostic = value;
+    });
     markers = assertReminderResult(
       runFixtureTask(
         'reminder-restore-fixture',
@@ -2634,6 +2707,10 @@ async function main() {
       serviceRunId: diagnosticRunId,
       serviceProject: diagnosticProject,
       serviceImages: diagnosticImages,
+      listenerScope:
+        failedPhase === 'listener-inventory'
+          ? listenerScopeDiagnostic
+          : undefined,
     };
     if (cleanupState && !cleanupVerified) cleanupStatus = 'pending';
     const diagnosticWritten = writeFailureDiagnostic(diagnosticRoot, {

@@ -518,39 +518,20 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
 
 ### Issue #273 pre-candidate sequence
 
-- [x] Implement #274's calendar-only widget home. The peer-cleared source is
-      merged to current `main` `c49136ecabf2832f5997e554b065b1f8803b6b74`
-      (tree `8b6eff51998571eefa11d0c48bcfdacdb9622745`); its four
-      application/test blobs match the reviewed source. Focused validation
-      passed 52/52 tests, widget TypeScript, changed-file lint, and Prettier.
-      The in-memory room-calendar fixture verifies rendering only; server and
-      gateway capability checks remain the authorization evidence.
-- [x] Integrate #259's legacy meeting HTTP and RPC fail-closed controller
-      guard and capability inventory in the current local candidate. Legacy
-      meeting HTTP/RPC entry points are denied before handler/service
-      execution; the existing welcome-helper and private error-room gates
-      default off. Supported calendar APIs, `!calendar` commands, and ordinary
-      room joins remain available. Focused server tests, locale extraction,
-      targeted lint, and formatting passed; combined-source checks and
-      independent review are pending. See ADR 042 and
-      `docs/legacy-entry-points.md` for the boundaries.
-- [x] Integrate #282's Matrix v12 creator-identifier validation in the local
-      candidate based on `main` `3c4db0d2ce51dce8ca71d5ff6e75ff56fcd08702`
-      (tree `09b9da6579a37daa1871b9a8704a0e4f01935e9f`). The shared server-name
-      parser preserves room-binding behavior; create-event senders retain
-      historical localparts, while `additional_creators` requires current
-      user-ID grammar. Focused authorization/binding tests pass 65/65. The host
-      server Jest run passed 1,439 tests with 33 skipped; two later additions
-      were test-only and passed in that focused suite. TypeScript, changed-file
-      lint, formatting, and both translation dry-runs passed. Final integrated
-      review and hosted checks remain pending.
-- [ ] After the combined source passes integration review and hosted checks,
-      create a fresh candidate for #255 and bind its required Element
-      Web/Desktop and both-backend evidence to that exact source. Historical
-      candidate results do not establish acceptance of the new source.
-- [ ] Complete the remaining operator-readiness gates for the controlled
-      pilot under #251 after fresh exact-source acceptance. No live pilot or
-      production rollout has been performed.
+- [x] Integrate #274, #259, #282, and #272 on frozen application-source
+      candidate `b0e620f3f31b9978705a5e58e647c77ba9b67a97` (tree
+      `f5af0b07fbfb192cdd6dc90fb61cb13e80777efb`).
+- [ ] Complete review and required hosted checks for the peer-cleared,
+      acceptance-helper-only follow-up. Fresh CalDAV (both modes), PostgreSQL
+      first-initialization, and standalone Desktop startup passed; normal-bot
+      Element acceptance failed during Desktop refresh; later route checks and
+      Web interactions were skipped. Operator listener-scope verification
+      failed with cleanup unverified. Causes remain unknown; no archive was
+      published.
+- [ ] After the helper follow-up merges, freeze that exact main commit as the
+      #255 candidate and run all five required acceptance workflows against
+      that SHA. #251 remains pending those results and operator readiness; no
+      live pilot or production rollout has occurred.
 - [ ] Keep issues #275–#278 post-pilot. In particular, defer the #275
       StoreProvider/Redux startup retirement until after the pilot.
 
