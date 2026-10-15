@@ -23,7 +23,7 @@ Radicale/CalDAV stays canonical for calendar data; the app-owned PostgreSQL stor
 
 **Scope lock for the pilot:** Element Web/Desktop standard side panel; `bot-account` full browser acceptance and mandatory both-mode backend/CalDAV contracts; one gateway replica; independent project-owned Radicale store and app-owned PostgreSQL reminder store. Mobile, existing managed Radicale `/data` reuse, arbitrary recurrence authoring and additional UI layouts are not pilot blockers. See beta-scope for exact limits.
 
-## Two kinds of development feedback
+## Three validation layers
 
 1. **Fast change feedback:** run changed-workspace tests/type/lint and deterministic fixture checks while implementing a small vertical slice. The goal is a short, actionable first failure, not an alternative acceptance standard.
 2. **Required PR checks:** retain all current protected CI contexts and affected integration contracts. Targeted tests supplement — never silently replace — required checks.
