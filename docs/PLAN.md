@@ -521,19 +521,21 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
 - [x] Integrate #274, #259, #282, and #272 on frozen application-source
       candidate `b0e620f3f31b9978705a5e58e647c77ba9b67a97` (tree
       `f5af0b07fbfb192cdd6dc90fb61cb13e80777efb`).
-- [ ] Complete required hosted checks for the acceptance-helper follow-up. On
-      current source `030106d6b3119b1d1ea6deb5bffe7823fea92020` (tree
-      `b4db16078638078d126a9d698f2e723d3978913e`), protected CI and CodeQL,
-      normal-bot and appservice Element Web, standalone Desktop, both CalDAV
-      principal modes, and PostgreSQL first-initialization passed. Shared
-      synthetic acceptance gateways have a fixture-only ceiling of 1,000
-      requests per 60 seconds; the server default remains 120. The source-bound
-      operator rehearsal failed at `api-crud-probe`; its failure
-      summary did not preserve the probe's first failed check, code, or HTTP
-      status, so the cause is unknown. A reviewed follow-up adds finite API
-      probe failure details and needs a fresh candidate run; it does not
-      establish the cause of the earlier failure. Private operator-packet
-      review remains open, and no application installation or cold backup has
+- [ ] Complete required hosted checks for the operator sparse-checkout
+      correction. On current source `5253a412192cb242877c719b31b89f1b46e3be93`
+      (tree `4668874919d5a900abd9399505529c3ef5952d31`), CI, CodeQL, standalone
+      Desktop, both CalDAV principal modes, and PostgreSQL first-initialization
+      passed. The appservice Element Web job failed and is deferred for the
+      current pilot; the normal-bot job was still running at the latest
+      metadata check. The source-bound image workflow built three images and
+      verified its manifest, but the operator rehearsal failed and produced no
+      failure artifact. Its trusted sparse checkout omitted the API probe
+      module imported by the runner before failure-summary setup. The reviewed
+      correction adds the module and a regression test for the actual sparse
+      path list; it needs a fresh source-bound run. The earlier API-probe
+      failure on `030106d6b3119b1d1ea6deb5bffe7823fea92020` remains unexplained.
+      Private operator-packet execution-plan blockers are cleared, but external
+      binding remains pending; no application installation or cold backup has
       been performed.
 - [ ] After the helper follow-up merges, freeze that exact main commit as the
       #255 candidate and run all five required acceptance workflows against

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
   chmodSync,
+  copyFileSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -10,7 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { runInNewContext } from 'node:vm';
@@ -1689,4 +1690,56 @@ test('workflow rehearsal input defaults off and executes between manifest verifi
   assert.match(failureUpload, /retention-days: 1/u);
   assert.match(failureUpload, /if-no-files-found: ignore/u);
   assert.doesNotMatch(failureUpload, /\*/u);
+});
+
+test('trusted sparse checkout can load and enter the hosted rehearsal runner', (t) => {
+  const workflow = readFileSync(workflowPath, 'utf8');
+  const lines = workflow.split(/\r?\n/u);
+  const sparseCheckoutIndex = lines.findIndex((line) =>
+    /^\s*sparse-checkout:\s*\|$/u.test(line),
+  );
+  assert.notEqual(sparseCheckoutIndex, -1);
+  const sparseCheckoutIndent =
+    lines[sparseCheckoutIndex].length -
+    lines[sparseCheckoutIndex].trimStart().length;
+  const sparsePaths = [];
+  for (const line of lines.slice(sparseCheckoutIndex + 1)) {
+    if (line.trim() === '') continue;
+    const indent = line.length - line.trimStart().length;
+    if (indent <= sparseCheckoutIndent) break;
+    sparsePaths.push(line.trim());
+  }
+  assert.ok(sparsePaths.includes('dev/element-acceptance-api-probe.mjs'));
+
+  const workspaceRoot = fileURLToPath(new URL('../', import.meta.url));
+  const temporaryRoot = mkdtempSync(join(tmpdir(), 'mcw-tooling-sparse-'));
+  t.after(() => rmSync(temporaryRoot, { recursive: true, force: true }));
+  const toolingRoot = join(temporaryRoot, 'tooling');
+  const runnerTemp = join(temporaryRoot, 'runner-temp');
+  mkdirSync(runnerTemp, { recursive: true });
+  for (const sparsePath of sparsePaths) {
+    const sourcePath = join(workspaceRoot, sparsePath);
+    const destinationPath = join(toolingRoot, sparsePath);
+    mkdirSync(dirname(destinationPath), { recursive: true });
+    copyFileSync(sourcePath, destinationPath);
+  }
+
+  const result = spawnSync(
+    process.execPath,
+    [join(toolingRoot, 'scripts/hosted-operator-rehearsal.mjs')],
+    {
+      cwd: toolingRoot,
+      encoding: 'utf8',
+      env: {
+        OPERATOR_REHEARSAL_ENABLED: 'false',
+        RUNNER_TEMP: runnerTemp,
+      },
+    },
+  );
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(
+    result.stderr,
+    /failed at phase preflight; owned cleanup not-run/u,
+  );
+  assert.doesNotMatch(result.stderr, /ERR_MODULE_NOT_FOUND/u);
 });
