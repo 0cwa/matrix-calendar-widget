@@ -848,7 +848,7 @@ test(
       const env = {
         ...options.env,
         ...resticEnvironment,
-        RESTIC_REPOSITORY: `file:${repository}`,
+        RESTIC_REPOSITORY: `local:${repository}`,
       };
       const result = await defaultCommand(realResticBinary, args, {
         ...options,
