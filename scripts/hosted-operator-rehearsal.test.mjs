@@ -71,6 +71,37 @@ function emptyInventory() {
   };
 }
 
+function ownedContainer(service, mounts) {
+  return {
+    Id: `container-${service}-private-id`,
+    Name: `/${project}-${service}`,
+    Config: {
+      Labels: {
+        'io.matrix-calendar-widget.local-rehearsal': runId,
+        'com.docker.compose.project': project,
+        'com.docker.compose.service': service,
+      },
+    },
+    Mounts: mounts,
+  };
+}
+
+function foreignVolume(name) {
+  return { Name: name, Labels: {} };
+}
+
+function foreignFailure(before, after, checkpoint) {
+  let failure;
+  assert.throws(
+    () => compareForeign(before, after, runId, project, checkpoint),
+    (error) => {
+      failure = error;
+      return error.code === 'foreign-state-changed';
+    },
+  );
+  return failure;
+}
+
 function reminderFixtureSummary({
   flow = 'initial',
   status = 'passed',
@@ -292,7 +323,7 @@ test('failure artifact carries only the closed gateway smoke classification', ()
     gatewayNetworkSmoke,
   });
 
-  assert.equal(diagnostic.schema_version, 9);
+  assert.equal(diagnostic.schema_version, 10);
   assert.equal(diagnostic.failed_phase, 'compose-run-gateway-smoke');
   assert.equal(diagnostic.failure_operation, 'gateway-network-smoke');
   assert.equal(diagnostic.failure_check, 'network-smoke');
@@ -481,7 +512,7 @@ test('failure artifact projects only the API CRUD probe enum fields', () => {
     failureCode: 'api-probe-process-failed',
     apiCrudProbe,
   });
-  assert.equal(diagnostic.schema_version, 9);
+  assert.equal(diagnostic.schema_version, 10);
   assert.equal(diagnostic.failure_check, 'api-contract');
   assert.deepEqual(diagnostic.api_crud_probe, apiCrudProbe);
 
@@ -584,7 +615,7 @@ test('reminder child failures retain only the finite fixture outcome and validat
         childExitCode: error.childExitCode,
         reminderFixture: error.reminderFixture,
       });
-      assert.equal(diagnostic.schema_version, 9);
+      assert.equal(diagnostic.schema_version, 10);
       assert.equal(diagnostic.failure_check, 'reminder-fixture');
       assert.equal(diagnostic.child_exit_code, 1);
       assert.deepEqual(diagnostic.reminder_fixture, error.reminderFixture);
@@ -1306,8 +1337,171 @@ test('foreign inventory failures preserve the cleanup gate and classify each cat
       images: 'unchanged',
       listeners:
         category === 'listeners' ? 'identity-set-cardinality' : 'unchanged',
+      volume_identity_change:
+        category === 'volumes'
+          ? {
+              added_count: 1,
+              removed_count: 0,
+              added_association: 'unattached',
+              removed_association: 'not-applicable',
+            }
+          : {
+              added_count: 'not-applicable',
+              removed_count: 'not-applicable',
+              added_association: 'not-applicable',
+              removed_association: 'not-applicable',
+            },
     });
   }
+});
+
+test('foreign volume deltas stay gated and report bounded direction and owned mount class', () => {
+  const before = emptyInventory();
+  const after = emptyInventory();
+  const removedName = 'private-removed-volume-id';
+  const addedName = 'private-added-volume-id';
+  before.volumes.push(foreignVolume(removedName));
+  before.containers.push(
+    ownedContainer('radicale', [
+      { Type: 'volume', Name: removedName, Destination: '/data' },
+    ]),
+  );
+  after.volumes.push(foreignVolume(addedName));
+  after.containers.push(
+    ownedContainer('postgres', [
+      {
+        Type: 'volume',
+        Name: addedName,
+        Destination: '/var/lib/postgresql/data',
+      },
+    ]),
+  );
+  after.listeners.push('LISTEN 0 128 127.0.0.1:9000 0.0.0.0:*');
+
+  const failure = foreignFailure(before, after, 'owned-cleanup-preflight');
+  assert.equal(failure.stage, 'foreign-inventory');
+  assert.equal(
+    failure.foreignInventoryChange.volumes,
+    'identity-set-cardinality',
+  );
+  assert.equal(
+    failure.foreignInventoryChange.listeners,
+    'identity-set-cardinality',
+  );
+  assert.deepEqual(failure.foreignInventoryChange.volume_identity_change, {
+    added_count: 1,
+    removed_count: 1,
+    added_association: 'postgres-data',
+    removed_association: 'radicale-data',
+  });
+
+  const diagnostic = formatFailureDiagnostic({
+    phase: failure.stage,
+    failureClass: 'gate-failed',
+    operation: 'gate',
+    failureCode: failure.code,
+    foreignInventoryChange: failure.foreignInventoryChange,
+  });
+  assert.equal(diagnostic.schema_version, 10);
+  assert.equal(diagnostic.cleanup_attempted, false);
+  assert.equal(diagnostic.owned_cleanup_verified, false);
+  const serialized = JSON.stringify(diagnostic);
+  assert.doesNotMatch(serialized, /private-(?:removed|added)-volume-id/u);
+  assert.doesNotMatch(serialized, /container-radicale-private-id/u);
+  assert.doesNotMatch(serialized, /container-postgres-private-id/u);
+  assert.doesNotMatch(serialized, /\/var\/lib\/postgresql\/data|\/data/u);
+});
+
+test('foreign volume projection bounds counts and closes malformed or unowned details', () => {
+  const before = emptyInventory();
+  const many = emptyInventory();
+  for (let index = 0; index < 40; index += 1)
+    many.volumes.push(foreignVolume(`private-volume-${index}`));
+  const manyFailure = foreignFailure(before, many);
+  assert.deepEqual(manyFailure.foreignInventoryChange.volume_identity_change, {
+    added_count: '32+',
+    removed_count: 0,
+    added_association: 'unattached',
+    removed_association: 'not-applicable',
+  });
+  assert.doesNotMatch(
+    JSON.stringify(manyFailure.foreignInventoryChange),
+    /private-volume-/u,
+  );
+
+  const unowned = emptyInventory();
+  unowned.volumes.push(foreignVolume('private-unowned-volume-id'));
+  unowned.containers.push({
+    Config: { Labels: { private_label: 'private-label-value' } },
+    Mounts: [
+      {
+        Type: 'volume',
+        Name: 'private-unowned-volume-id',
+        Destination: '/private/path',
+      },
+    ],
+  });
+  const unownedFailure = foreignFailure(before, unowned);
+  assert.deepEqual(
+    unownedFailure.foreignInventoryChange.volume_identity_change,
+    {
+      added_count: 1,
+      removed_count: 0,
+      added_association: 'unknown',
+      removed_association: 'not-applicable',
+    },
+  );
+  assert.doesNotMatch(
+    JSON.stringify(unownedFailure.foreignInventoryChange),
+    /private-unowned|private-label|\/private\/path/u,
+  );
+
+  const malformed = emptyInventory();
+  malformed.volumes.push({
+    Name: { private_identity: 'do-not-project' },
+    Labels: { private_label: 'do-not-project' },
+  });
+  const malformedFailure = foreignFailure(before, malformed);
+  assert.equal(malformedFailure.foreignInventoryChange.volumes, 'unknown');
+  assert.deepEqual(
+    malformedFailure.foreignInventoryChange.volume_identity_change,
+    {
+      added_count: 'unknown',
+      removed_count: 'unknown',
+      added_association: 'unknown',
+      removed_association: 'unknown',
+    },
+  );
+  assert.doesNotMatch(
+    JSON.stringify(malformedFailure.foreignInventoryChange),
+    /do-not-project|private_identity|private_label/u,
+  );
+
+  const inconsistentProjection = formatFailureDiagnostic({
+    foreignInventoryChange: {
+      checkpoint: 'owned-cleanup-preflight',
+      containers: 'unchanged',
+      networks: 'unchanged',
+      volumes: 'identity-set-cardinality',
+      images: 'unchanged',
+      listeners: 'unchanged',
+      volume_identity_change: {
+        added_count: 0,
+        removed_count: 0,
+        added_association: 'not-applicable',
+        removed_association: 'not-applicable',
+      },
+    },
+  });
+  assert.deepEqual(
+    inconsistentProjection.foreign_inventory_change.volume_identity_change,
+    {
+      added_count: 'unknown',
+      removed_count: 'unknown',
+      added_association: 'unknown',
+      removed_association: 'unknown',
+    },
+  );
 });
 
 test('one foreign inventory failure classifies simultaneous changes without resource values', () => {
@@ -1332,6 +1526,12 @@ test('one foreign inventory failure classifies simultaneous changes without reso
     volumes: 'unchanged',
     images: 'unknown',
     listeners: 'identity-set-cardinality',
+    volume_identity_change: {
+      added_count: 'not-applicable',
+      removed_count: 'not-applicable',
+      added_association: 'not-applicable',
+      removed_association: 'not-applicable',
+    },
   });
   const projection = JSON.stringify(failure.foreignInventoryChange);
   assert.equal(projection.includes('private-image-tag'), false);
@@ -1571,7 +1771,7 @@ test('failure diagnostic writes fixed identity and cleanup fields outside task d
     );
     assert.equal(statSync(file).mode & 0o777, 0o600);
     const initial = JSON.parse(readFileSync(file, 'utf8'));
-    assert.equal(initial.schema_version, 9);
+    assert.equal(initial.schema_version, 10);
     assert.equal(initial.failed_phase, 'fixture-setup');
     assert.equal(initial.failure_class, 'gate-failed');
     assert.equal(initial.failure_operation, 'gate');
@@ -1697,6 +1897,12 @@ test('failure artifact admits one fixed foreign outcome from failure cleanup onl
     volumes: 'unchanged',
     images: 'identity-set-cardinality',
     listeners: 'unchanged',
+    volume_identity_change: {
+      added_count: 'not-applicable',
+      removed_count: 'not-applicable',
+      added_association: 'not-applicable',
+      removed_association: 'not-applicable',
+    },
   };
   assert.equal(
     writeFailureDiagnostic(
@@ -1788,6 +1994,13 @@ test('failure diagnostic maps hostile values to closed fields and never claims u
       volumes: ['private-volume'],
       images: 'BEGIN:VCALENDAR',
       listeners: 'secret',
+      volume_identity_change: {
+        added_count: 1,
+        removed_count: 0,
+        added_association: 'private-container-id',
+        removed_association: 'not-applicable',
+        raw_mount: '/private/path token=secret',
+      },
       arbitrary: 'do-not-project',
     },
   });
@@ -1818,6 +2031,12 @@ test('failure diagnostic maps hostile values to closed fields and never claims u
     volumes: 'unknown',
     images: 'unknown',
     listeners: 'unknown',
+    volume_identity_change: {
+      added_count: 'unknown',
+      removed_count: 'unknown',
+      added_association: 'unknown',
+      removed_association: 'unknown',
+    },
   });
   assert.equal(diagnostic.gateway_network_smoke.marker_status, 'invalid');
   assert.deepEqual(diagnostic.gateway_network_smoke.synapse, {
