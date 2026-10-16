@@ -521,26 +521,28 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
 - [x] Integrate #274, #259, #282, and #272 on frozen application-source
       candidate `b0e620f3f31b9978705a5e58e647c77ba9b67a97` (tree
       `f5af0b07fbfb192cdd6dc90fb61cb13e80777efb`).
-- [ ] Refresh source-bound acceptance after integrating the reviewed #291
-      cleanup-settlement and reminder child-outcome changes. Current `main`
-      `2ef7af367adc931273b2807e4edc99c5fc422f33` (tree
-      `aeffa32176d6bce44be61c0e6a121ccce9096fa5`) passes CI, CodeQL, standalone
-      Desktop startup, both-mode CalDAV contracts, and PostgreSQL
-      first-initialization. In the Element Web run, normal-bot functional
-      phases, ordinary timing limits, and all 12 Desktop journey cases passed,
-      but startup/cleanup could not establish the expected UID outcome. The
-      source-bound operator rehearsal failed in the reminder-restore fixture;
-      its child outcome was not preserved, so the cause remains unknown. The
-      current source includes #288's typed GET/404 mapping. The reviewed
-      cleanup-settlement and child-outcome changes improve bounded observation
-      and reporting, but do not establish either failure's cause or an
-      acceptance pass. They require a fresh source-bound run.
-- [ ] After the combined changes merge, freeze that exact main commit as the
-      #255 candidate and run all required acceptance workflows against that
-      SHA. #251 remains pending those results and operator readiness; no live
-      pilot or production rollout has occurred. Source-bound images,
-      application installation, and cold paired backup/recovery also remain
-      pending.
+- [ ] Re-run source-bound acceptance after integrating the issue #291 cleanup
+      sequence fix. Current `main` `23d4b73353c2271caffbc368d9d17bac783d6c3b`
+      (tree `5fe054e6c903e55bbf6df92cd05b7fa400901019`, the reviewed PR #292
+      tree) passed the five protected checks, CodeQL, PostgreSQL
+      first-initialization, both-mode CalDAV contracts, and paired full
+      Element Web/Desktop acceptance in normal-bot and appservice modes. The
+      separate standalone Desktop run failed cleanup: its initial full UID
+      census was empty, but a later pre-deletion census found one effective-UID
+      process. Its identity and lifetime remain unknown. Source tracing found
+      that the existing late-stop branch ran before the settle census; the
+      local correction now evaluates that settled result with a fresh exact
+      account guard before each signal. Full UID-zero, account, and policy
+      proofs remain required. This correction is not acceptance evidence; a
+      fresh standalone cleanup pass is required.
+- [ ] Investigate the reminder-restore failure using the queued source-bound
+      operator run `38798989805`. The prior completed rehearsal failed in that
+      fixture without preserving the child outcome, so the cause remains
+      unknown. Keep the exact integrated SHA as the next #255 candidate and
+      run all required acceptance workflows against it. #251 remains pending
+      those results and operator readiness; no live pilot or production
+      rollout has occurred. Source-bound images, application installation,
+      and cold paired backup/recovery remain pending.
 - [ ] Keep issues #275–#278 post-pilot. In particular, defer the #275
       StoreProvider/Redux startup retirement until after the pilot.
 

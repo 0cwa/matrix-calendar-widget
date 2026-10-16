@@ -2462,6 +2462,20 @@ export async function stopUidProcesses(
   return { status: diagnostics.status, diagnostics };
 }
 
+export function stopCreatedProbeUidProcesses(
+  state,
+  { accountLookup = lookupPasswdAccount, ...stopOptions } = {},
+) {
+  return stopUidProcesses(state, {
+    ...stopOptions,
+    targetMatches: () => {
+      if (state.userMayBeCreated !== true) return false;
+      const account = accountLookup(state.username);
+      return account.state === 'present' && account.uid === state.uid;
+    },
+  });
+}
+
 export async function retryLateEffectiveUidStop(
   state,
   initialStopResult,
@@ -2559,18 +2573,7 @@ export async function retryFinalUidCleanup(
     };
   }
 
-  const guardedStop =
-    stop ??
-    ((target) =>
-      stopUidProcesses(target, {
-        targetMatches: () => {
-          try {
-            return accountMatches(target) === true;
-          } catch {
-            return false;
-          }
-        },
-      }));
+  const guardedStop = stop ?? stopCreatedProbeUidProcesses;
   const retry = await retryLateEffectiveUidStop(
     state,
     initialStopResult,
@@ -2655,6 +2658,33 @@ export async function settleUidLifecycleBeforeUserDeletion(
   } catch {
     return emptyUidLifecycleObservation('unavailable');
   }
+}
+
+export async function settleAndRetryLateEffectiveUidStop(
+  state,
+  initialStopResult,
+  initialObservation,
+  { stop = stopUidProcesses, capture = captureFinalUidLifecycle, wait } = {},
+) {
+  const settle = (observation) =>
+    settleUidLifecycleBeforeUserDeletion(state, observation, {
+      capture,
+      ...(wait === undefined ? {} : { wait }),
+    });
+  const settledObservation = await settle(initialObservation);
+  const retry = await retryLateEffectiveUidStop(
+    state,
+    initialStopResult,
+    settledObservation,
+    { stop, capture },
+  );
+  return {
+    ...retry,
+    observation:
+      retry.lateUidRetry === null
+        ? retry.observation
+        : await settle(retry.observation),
+  };
 }
 
 function captureFinalEgress(state) {
@@ -2972,22 +3002,23 @@ async function cleanupRunner(config) {
     overflow: null,
   };
   if (state !== undefined && !stateInvalid) {
-    const stopResult = await stopUidProcesses(state);
+    const stopResult = await stopCreatedProbeUidProcesses(state);
     processStatus = stopResult.status;
     stopDiagnostics = stopResult.diagnostics;
     egressObservation = captureFinalEgress(state);
     lifecycleBeforeUserdel = captureFinalUidLifecycle(state);
-    const reconciledStop = await retryLateEffectiveUidStop(
+    const reconciledStop = await settleAndRetryLateEffectiveUidStop(
       state,
       stopResult,
       lifecycleBeforeUserdel,
+      {
+        capture: captureFinalUidLifecycle,
+        stop: stopCreatedProbeUidProcesses,
+      },
     );
     processStatus = reconciledStop.stopResult.status;
     lateUidRetry = reconciledStop.lateUidRetry;
-    lifecycleBeforeUserdel = await settleUidLifecycleBeforeUserDeletion(
-      state,
-      reconciledStop.observation,
-    );
+    lifecycleBeforeUserdel = reconciledStop.observation;
     const beforeUserdelClear =
       lifecycleBeforeUserdel.state === 'observed' &&
       lifecycleBeforeUserdel.uidProcessCount === 0;
