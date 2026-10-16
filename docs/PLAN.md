@@ -521,28 +521,27 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
 - [x] Integrate #274, #259, #282, and #272 on frozen application-source
       candidate `b0e620f3f31b9978705a5e58e647c77ba9b67a97` (tree
       `f5af0b07fbfb192cdd6dc90fb61cb13e80777efb`).
-- [ ] Re-run source-bound acceptance after integrating the issue #291 cleanup
-      sequence fix. Current `main` `23d4b73353c2271caffbc368d9d17bac783d6c3b`
-      (tree `5fe054e6c903e55bbf6df92cd05b7fa400901019`, the reviewed PR #292
-      tree) passed the five protected checks, CodeQL, PostgreSQL
-      first-initialization, both-mode CalDAV contracts, and paired full
-      Element Web/Desktop acceptance in normal-bot and appservice modes. The
-      separate standalone Desktop run failed cleanup: its initial full UID
-      census was empty, but a later pre-deletion census found one effective-UID
-      process. Its identity and lifetime remain unknown. Source tracing found
-      that the existing late-stop branch ran before the settle census; the
-      local correction now evaluates that settled result with a fresh exact
-      account guard before each signal. Full UID-zero, account, and policy
-      proofs remain required. This correction is not acceptance evidence; a
-      fresh standalone cleanup pass is required.
-- [ ] Investigate the reminder-restore failure using the queued source-bound
-      operator run `38798989805`. The prior completed rehearsal failed in that
-      fixture without preserving the child outcome, so the cause remains
-      unknown. Keep the exact integrated SHA as the next #255 candidate and
-      run all required acceptance workflows against it. #251 remains pending
-      those results and operator readiness; no live pilot or production
-      rollout has occurred. Source-bound images, application installation,
-      and cold paired backup/recovery remain pending.
+- [x] Merge PR #293's issue #291 cleanup retry against the settled Desktop
+      process census into `main` at `c380f5ff3d5ccfede2a54100473cc4ea1169fe2b`
+      (tree `b79e9cc77db3434ca2707c7d5cc96f0914c41e3f`). This records the
+      source change only; it does not qualify a later integrated candidate.
+- [x] Identify the fixture-level reminder-restore mismatch from source-bound
+      operator run `38798989805`: the restore gateway is configured with
+      `restore-radicale:5232`, but the reminder fixture accepted only the
+      normal `radicale:5232` and normal-flow loopback origins. Candidate
+      `75c65e395987b2c1762c826264a883fe9e85e161` adds flow-specific origin
+      validation and matching cleanup candidates, with focused tests for the
+      exported restore path, exact marker update, owned cleanup, and wrong-flow
+      rejection. This establishes the fixture mismatch and local regression
+      behavior only; actual restore-service acceptance remains unverified.
+- [ ] Re-run source-bound browser and operator acceptance against the exact
+      integrated candidate. The follow-up Web refresh/navigation failure
+      remains unresolved; prior paired Web/Desktop results on PR #292 source
+      `23d4b73353c2271caffbc368d9d17bac783d6c3b` do not qualify the changed
+      source. #255 and #251 remain pending fresh acceptance and operator
+      readiness. Source-bound images are not qualified; application
+      installation and cold paired backup/recovery remain pending. No live
+      pilot or production rollout has occurred.
 - [ ] Keep issues #275–#278 post-pilot. In particular, defer the #275
       StoreProvider/Redux startup retirement until after the pilot.
 
