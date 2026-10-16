@@ -38,8 +38,10 @@ import {
   GATEWAY_NETWORK_SMOKE_SCRIPT,
   gatewayNetworkSmokeArgs,
   handoffGeneratedComposeEnvironment,
+  HOSTED_INHERITED_IMAGE_TMPFS,
   HOSTED_REMINDER_FIXTURE_FAILURE_PHASES,
   listenerScopeDelta,
+  makeComposeOverride,
   parseApiCrudProbeFailure,
   parseGatewayNetworkSmokeFailure,
   parseReminderFixtureOutcome,
@@ -47,6 +49,7 @@ import {
   planOwnedCleanup,
   runTask,
   taskEnvironment,
+  validateComposeModel,
   validateLockedImageInspect,
   writeDockerAdapter,
   writeFailureDiagnostic,
@@ -1198,6 +1201,123 @@ test('fixture tags resolve to immutable linux/amd64 IDs and RepoDigests', () => 
   assert.equal(locked.ref, `ghcr.io/element-hq/synapse@${manifestDigest}`);
   assert.equal(locked.id, imageId);
   assert.equal(locked.architecture, 'amd64');
+});
+
+test('operator Compose replaces pinned inherited scratch volumes with bounded tmpfs', () => {
+  const widgetDockerfile = readFileSync(
+    new URL('../matrix-calendar-widget/Dockerfile', import.meta.url),
+    'utf8',
+  );
+  const radicaleDockerfile = readFileSync(
+    new URL('../radicale-auth/Dockerfile', import.meta.url),
+    'utf8',
+  );
+  assert.ok(
+    widgetDockerfile.includes(
+      'FROM ghcr.io/nordeck/matrix-widget-toolkit/widget-server:1.2.3@sha256:1cb5845a60176e8146a2fe8acde028a5a726f13bc3d4963feccfa581cc9ba62f',
+    ),
+  );
+  assert.ok(
+    radicaleDockerfile.includes(
+      'FROM ghcr.io/kozea/radicale:3.8.0@sha256:0d60d544710bda0fa83bfdea685db731b6cbf74e12d7f22b4997e9cff3a50468',
+    ),
+  );
+  assert.deepEqual(HOSTED_INHERITED_IMAGE_TMPFS, {
+    widget: ['/tmp:mode=1777,size=64m', '/var/cache/nginx:mode=1777,size=64m'],
+    radicale: ['/var/lib/radicale:mode=1777,size=16m'],
+    'restore-radicale': ['/var/lib/radicale:mode=1777,size=16m'],
+  });
+
+  const lock = {
+    images: ['synapse', 'radicale', 'gateway', 'widget', 'postgres'].map(
+      (role, index) => ({
+        role,
+        ref: `example/${role}@sha256:${String(index + 1).repeat(64)}`,
+      }),
+    ),
+  };
+  const override = makeComposeOverride(lock, runId, project);
+  assert.equal((override.match(/^    tmpfs:$/gmu) ?? []).length, 3);
+  assert.equal(
+    (
+      override.match(
+        /^      - "\/var\/lib\/radicale:mode=1777,size=16m"$/gmu,
+      ) ?? []
+    ).length,
+    2,
+  );
+  assert.equal(
+    (override.match(/^      - ".*:mode=1777,size=/gmu) ?? []).length,
+    4,
+  );
+
+  const imageRefs = new Map(lock.images.map(({ role, ref }) => [role, ref]));
+  const services = Object.fromEntries(
+    [
+      'synapse',
+      'radicale',
+      'gateway',
+      'widget',
+      'postgres',
+      'restore-radicale',
+      'restore-gateway',
+    ].map((service) => {
+      const role = service.startsWith('restore-')
+        ? service.slice('restore-'.length)
+        : service;
+      return [
+        service,
+        {
+          image: imageRefs.get(role),
+          labels: { 'io.matrix-calendar-widget.local-rehearsal': runId },
+          ...(HOSTED_INHERITED_IMAGE_TMPFS[service]
+            ? { tmpfs: [...HOSTED_INHERITED_IMAGE_TMPFS[service]] }
+            : {}),
+        },
+      ];
+    }),
+  );
+  services.element = { profiles: ['operator-rehearsal-disabled'] };
+  const model = {
+    services,
+    networks: {
+      default: {
+        labels: { 'io.matrix-calendar-widget.local-rehearsal': runId },
+      },
+    },
+    volumes: Object.fromEntries(
+      [
+        'synapse-data',
+        'radicale-data',
+        'postgres-data',
+        'reminder-restore-radicale-data',
+      ].map((name) => [
+        name,
+        { labels: { 'io.matrix-calendar-widget.local-rehearsal': runId } },
+      ]),
+    ),
+  };
+
+  assert.doesNotThrow(() => validateComposeModel(model, lock, runId, project));
+  assert.deepEqual(Object.keys(model.volumes).sort(), [
+    'postgres-data',
+    'radicale-data',
+    'reminder-restore-radicale-data',
+    'synapse-data',
+  ]);
+  const missingScratchMount = structuredClone(model);
+  missingScratchMount.services.widget.tmpfs.pop();
+  assert.throws(
+    () => validateComposeModel(missingScratchMount, lock, runId, project),
+    throwsCode('inherited-image-volume-mismatch'),
+  );
+  assert.equal(
+    formatFailureDiagnostic({
+      phase: 'compose-validation',
+      failureCode: 'inherited-image-volume-mismatch',
+    }).failure_check,
+    'volume',
+  );
 });
 
 test('locked image drift fails closed', () => {
