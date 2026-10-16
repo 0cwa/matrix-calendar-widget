@@ -47,6 +47,7 @@ import {
   parseReminderFixtureOutcome,
   parseStartupFailureMarker,
   planOwnedCleanup,
+  removeOwnedResources,
   runTask,
   taskEnvironment,
   validateComposeModel,
@@ -1825,6 +1826,320 @@ test('failure cleanup accepts an empty owned set and rejects an unknown service'
         { allowPartial: true },
       ),
     throwsCode('service-image-mismatch'),
+  );
+});
+
+test('owned cleanup removes in order and refuses a remaining foreign network attachment', (t) => {
+  const temporaryRoot = mkdtempSync(join(tmpdir(), 'mcw-owned-cleanup-order-'));
+  chmodSync(temporaryRoot, 0o700);
+  t.after(() => rmSync(temporaryRoot, { recursive: true, force: true }));
+
+  const dockerBin = join(temporaryRoot, 'bin');
+  mkdirSync(dockerBin, { mode: 0o700 });
+  const dockerPath = join(dockerBin, 'docker');
+  const ssPath = join(dockerBin, 'ss');
+  const statePath = join(temporaryRoot, 'state.json');
+  const taskDir = join(temporaryRoot, 'task');
+  mkdirSync(taskDir, { mode: 0o700 });
+
+  writeFileSync(
+    dockerPath,
+    `#!${process.execPath}
+const fs = require('node:fs');
+const statePath = process.env.CLEANUP_STATE;
+const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+const args = process.argv.slice(2);
+state.calls.push(args);
+const save = () => fs.writeFileSync(statePath, JSON.stringify(state), { mode: 0o600 });
+const inspect = (id) => state.containers[id] ?? state.images[id] ?? state.networks[id] ?? state.volumes[id];
+let output = '';
+if (args[0] === 'ps' && args[1] === '-aq') output = Object.keys(state.containers).sort().join('\\n');
+else if (args[0] === 'image' && args[1] === 'ls') output = Object.keys(state.images).sort().join('\\n');
+else if (args[0] === 'network' && args[1] === 'ls') output = Object.keys(state.networks).sort().join('\\n');
+else if (args[0] === 'volume' && args[1] === 'ls') output = Object.keys(state.volumes).sort().join('\\n');
+else if (args[0] === 'volume' && args[1] === 'inspect') output = JSON.stringify(args.slice(2).map((name) => state.volumes[name]));
+else if (args[0] === 'network' && args[1] === 'inspect') output = JSON.stringify(args.slice(2).map((id) => state.networks[id]));
+else if (args[0] === 'inspect') output = JSON.stringify(args.slice(1).map(inspect));
+else if (args[0] === 'container' && args[1] === 'stop') {
+  const id = args.at(-1);
+  state.containers[id].State.Running = false;
+  state.containers[id].State.Status = 'exited';
+  output = id + '\\n';
+} else if (args[0] === 'container' && args[1] === 'rm') {
+  const id = args.at(-1);
+  delete state.containers[id];
+  for (const network of Object.values(state.networks)) delete network.Containers[id];
+  output = id + '\\n';
+} else if (args[0] === 'volume' && args[1] === 'rm') {
+  const name = args.at(-1);
+  delete state.volumes[name];
+  output = name + '\\n';
+} else if (args[0] === 'network' && args[1] === 'rm') {
+  const id = args.at(-1);
+  if (Object.keys(state.networks[id]?.Containers ?? {}).length !== 0) process.exit(1);
+  delete state.networks[id];
+  output = id + '\\n';
+} else process.exit(2);
+save();
+process.stdout.write(output);
+`,
+    { mode: 0o700, flag: 'wx' },
+  );
+  writeFileSync(ssPath, `#!${process.execPath}\nprocess.stdout.write('');\n`, {
+    mode: 0o700,
+    flag: 'wx',
+  });
+  chmodSync(dockerPath, 0o700);
+  chmodSync(ssPath, 0o700);
+
+  const containerId = 'd'.repeat(64);
+  const foreignContainerId = 'e'.repeat(64);
+  const networkId = 'c'.repeat(64);
+  const volumeName = `${project}_radicale-data`;
+  const networkName = `${project}_default`;
+  const localLabel = 'io.matrix-calendar-widget.local-rehearsal';
+  const projectLabel = 'com.docker.compose.project';
+  const volumeLabel = 'com.docker.compose.volume';
+  const containerLabels = {
+    [localLabel]: runId,
+    [projectLabel]: project,
+    'com.docker.compose.service': 'radicale',
+  };
+  const volumeLabels = {
+    [localLabel]: runId,
+    [projectLabel]: project,
+    [volumeLabel]: 'radicale-data',
+  };
+  const networkLabels = { [localLabel]: runId, [projectLabel]: project };
+  const mount = {
+    Type: 'volume',
+    Name: volumeName,
+    Source: `/var/lib/docker/volumes/${volumeName}/_data`,
+    Destination: '/data',
+    Driver: 'local',
+    Mode: 'rw',
+    RW: true,
+    Propagation: '',
+  };
+  const container = {
+    Id: containerId,
+    Name: `/${project}-radicale`,
+    Image: imageId,
+    Config: {
+      Image: 'synthetic:cleanup-test',
+      Labels: containerLabels,
+      Env: [],
+      Cmd: ['sleep', 'infinity'],
+      Entrypoint: null,
+      WorkingDir: '/app',
+      User: '1000',
+    },
+    State: {
+      Status: 'running',
+      Running: true,
+      Paused: false,
+      Restarting: false,
+      OOMKilled: false,
+      Dead: false,
+      ExitCode: 0,
+      Health: null,
+    },
+    Mounts: [mount],
+    HostConfig: {
+      NetworkMode: networkName,
+      PortBindings: null,
+      RestartPolicy: { Name: 'no', MaximumRetryCount: 0 },
+    },
+    NetworkSettings: {
+      Ports: null,
+      Networks: {
+        [networkName]: { NetworkID: networkId, EndpointID: 'owned-endpoint' },
+      },
+    },
+  };
+  const foreignContainer = {
+    ...container,
+    Id: foreignContainerId,
+    Name: '/unrelated-service',
+    Config: { ...container.Config, Labels: {} },
+    Mounts: [],
+    NetworkSettings: {
+      Ports: null,
+      Networks: {
+        [networkName]: { NetworkID: networkId, EndpointID: 'foreign-endpoint' },
+      },
+    },
+  };
+  const stableContainer = (value) => ({
+    Id: value.Id,
+    Name: value.Name,
+    Image: value.Image,
+    Config: {
+      Image: value.Config.Image,
+      Labels: value.Config.Labels,
+      Env: value.Config.Env,
+      Cmd: value.Config.Cmd,
+      Entrypoint: value.Config.Entrypoint,
+      WorkingDir: value.Config.WorkingDir,
+      User: value.Config.User,
+    },
+    State: {
+      Status: value.State.Status,
+      Running: value.State.Running,
+      Paused: value.State.Paused,
+      Restarting: value.State.Restarting,
+      OOMKilled: value.State.OOMKilled,
+      Dead: value.State.Dead,
+      ExitCode: value.State.ExitCode,
+      Health: null,
+    },
+    Mounts: value.Mounts,
+    HostConfig: {
+      NetworkMode: value.HostConfig.NetworkMode,
+      PortBindings: value.HostConfig.PortBindings,
+      RestartPolicy: value.HostConfig.RestartPolicy,
+    },
+    NetworkSettings: {
+      Ports: value.NetworkSettings.Ports,
+      Networks: value.NetworkSettings.Networks,
+    },
+  });
+  const volume = {
+    Name: volumeName,
+    Driver: 'local',
+    Mountpoint: `/var/lib/docker/volumes/${volumeName}/_data`,
+    Labels: volumeLabels,
+    Options: null,
+    Scope: 'local',
+  };
+  const network = (attachments) => ({
+    Id: networkId,
+    Name: networkName,
+    Driver: 'bridge',
+    Scope: 'local',
+    Internal: false,
+    Attachable: false,
+    Ingress: false,
+    Labels: networkLabels,
+    IPAM: { Driver: 'default', Config: [], Options: null },
+    Options: null,
+    Containers: attachments,
+  });
+  const image = {
+    Id: imageId,
+    RepoTags: ['synthetic:cleanup-test'],
+    RepoDigests: [],
+    Config: { Labels: {} },
+  };
+  const ownedAttachment = {
+    Name: `${project}-radicale`,
+    EndpointID: 'owned-endpoint',
+    MacAddress: '02:42:ac:11:00:02',
+    IPv4Address: '172.18.0.2/16',
+    IPv6Address: '',
+  };
+  const foreignAttachment = {
+    Name: 'unrelated-service',
+    EndpointID: 'foreign-endpoint',
+    MacAddress: '02:42:ac:11:00:03',
+    IPv4Address: '172.18.0.3/16',
+    IPv6Address: '',
+  };
+  const baseline = {
+    containers: [],
+    images: [image],
+    networks: [],
+    volumes: [],
+    listeners: [],
+  };
+  const context = {
+    cwd: temporaryRoot,
+    env: { PATH: dockerBin, CLEANUP_STATE: statePath },
+    taskDir,
+  };
+
+  function runCleanup(foreignAttached) {
+    const attachments = { [containerId]: ownedAttachment };
+    const containers = { [containerId]: container };
+    if (foreignAttached) {
+      attachments[foreignContainerId] = foreignAttachment;
+      containers[foreignContainerId] = foreignContainer;
+      baseline.containers = [stableContainer(foreignContainer)];
+    } else {
+      baseline.containers = [];
+    }
+    const plan = {
+      containers: [stableContainer(container)],
+      volumes: [volume],
+      network: network(attachments),
+      partial: false,
+    };
+    writeFileSync(
+      statePath,
+      JSON.stringify({
+        containers,
+        images: { [imageId]: image },
+        networks: { [networkId]: network(attachments) },
+        volumes: { [volumeName]: volume },
+        calls: [],
+      }),
+      { mode: 0o600 },
+    );
+    return { plan, callsPath: statePath };
+  }
+
+  const successful = runCleanup(false);
+  const cleaned = removeOwnedResources({
+    plan: successful.plan,
+    context,
+    baseline,
+    runId,
+    project,
+    prefix: 'success',
+  });
+  assert.deepEqual(cleaned, baseline);
+  const successfulCalls = JSON.parse(
+    readFileSync(successful.callsPath, 'utf8'),
+  ).calls;
+  const removeContainer = successfulCalls.findIndex(
+    (args) => args[0] === 'container' && args[1] === 'rm',
+  );
+  const removeVolume = successfulCalls.findIndex(
+    (args) => args[0] === 'volume' && args[1] === 'rm',
+  );
+  const removeNetwork = successfulCalls.findIndex(
+    (args) => args[0] === 'network' && args[1] === 'rm',
+  );
+  assert.ok(removeContainer >= 0 && removeContainer < removeVolume);
+  assert.ok(removeVolume < removeNetwork);
+
+  const foreign = runCleanup(true);
+  assert.throws(
+    () =>
+      removeOwnedResources({
+        plan: foreign.plan,
+        context,
+        baseline,
+        runId,
+        project,
+        prefix: 'success',
+      }),
+    (error) =>
+      error.stage === 'success-cleanup' &&
+      error.code === 'owned-network-still-attached',
+  );
+  const foreignCalls = JSON.parse(
+    readFileSync(foreign.callsPath, 'utf8'),
+  ).calls;
+  assert.ok(
+    !foreignCalls.some((args) => args[0] === 'network' && args[1] === 'rm'),
+  );
+  assert.equal(
+    Object.hasOwn(
+      JSON.parse(readFileSync(foreign.callsPath, 'utf8')).containers,
+      foreignContainerId,
+    ),
+    true,
   );
 });
 
