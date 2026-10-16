@@ -534,16 +534,30 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       exported restore path, exact marker update, owned cleanup, and wrong-flow
       rejection. This establishes the fixture mismatch and local regression
       behavior only; actual restore-service acceptance remains unverified.
-- [ ] Re-run source-bound browser and operator acceptance against the exact
-      integrated candidate. The follow-up Web refresh/navigation failure
-      remains unresolved; prior paired Web/Desktop results ran on reviewed
-      PR #292 head `ccdaf3be5e540ef04038c0b47e7bdabc3960b12c` (tree
-      `5fe054e6c903e55bbf6df92cd05b7fa400901019`; merge commit
-      `23d4b73353c2271caffbc368d9d17bac783d6c3b` has the same tree) and do not
-      qualify the changed source. #255 and #251 remain pending fresh acceptance and operator
-      readiness. Source-bound images are not qualified; application
-      installation and cold paired backup/recovery remain pending. No live
-      pilot or production rollout has occurred.
+- [x] Run exact-source application acceptance on candidate
+      `99d4c9f9f36aa0b0861a13499a7f7cd512c56920` (application tree
+      `97022a9d2351655d2aae0a50a44a14bd81daacc9`). All five protected checks,
+      browser layout, CodeQL, PostgreSQL, both-mode CalDAV, standalone Desktop,
+      and normal-bot plus appservice Element Web/Desktop acceptance passed.
+      The prior Web refresh failure was not reproduced. Full details and
+      performance samples are in [docs/RELEASE.md](./RELEASE.md). This
+      completes application-source acceptance only.
+- [x] Close issue #291 after the actual settled-census cleanup and normal-bot
+      criteria passed on the accepted application source; its merged source
+      retry alone was not treated as acceptance.
+- [ ] Qualify the three source-bound images and reconcile the manifest/evidence
+      index. Exact-source operator/image run
+      [38892200863](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38892200863)
+      failed during foreign-resource inventory. Its schema-8 summary reports
+      cleanup attempted but unverified (`owned_cleanup_verified=false`), and
+      `foreign_inventory_unchanged=false`; resource kind, any inventory
+      difference, and cause are unknown. No three-image manifest/archive is
+      accepted for this candidate. The source
+      owner is investigating the runner comparison separately; preserving
+      application candidate `99d4c9f` under a later trusted workflow source
+      remains subject to the existing contract and is not acceptance evidence
+      yet. Issues #255 and #251 remain open. No production application
+      installation or wider rollout has occurred.
 - [ ] Keep issues #275–#278 post-pilot. In particular, defer the #275
       StoreProvider/Redux startup retirement until after the pilot.
 
@@ -556,12 +570,14 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       the bounded beta target (see `docs/beta-scope.md`). Require the standard
       side-panel widget layout and overflow checks; pinned/full-width Apps-drawer
       layout certification is deferred. Mobile clients and formal screen-reader
-      certification are deferred beyond this candidate. The earlier hosted
-      candidate
-      `235e7e446df3efd8784d3468f593f2799602767c` passed the paired Web/Desktop
-      run [37857387454](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37857387454):
-      105 Web phases and 12 Desktop cases, including the standard side panel,
-      keyboard/focus, G6 edit/delete, and final cleanup.
+      certification are deferred beyond this candidate. Candidate `99d4c9f`
+      passed full normal-bot and appservice Web/Desktop acceptance, including
+      the standard side panel, G6 preservation and cleanup, reminders,
+      restart/restore, and browser-egress checks. Full appservice browser
+      certification remains deferred until after beta despite the observed
+      pass; backend, identity/authentication, room authorization, and CalDAV
+      contracts remain mandatory in both modes. This scope does not authorize
+      publication or broader rollout.
   - [x] Add current calendar grid/list/details keyboard, focus, accessible-name,
         and axe regressions. Hosted browser fixture checks pass; actual client
         embedding remains unverified; see `docs/calendar-client-validation.md`.

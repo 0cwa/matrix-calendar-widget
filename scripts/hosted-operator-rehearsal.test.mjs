@@ -292,7 +292,7 @@ test('failure artifact carries only the closed gateway smoke classification', ()
     gatewayNetworkSmoke,
   });
 
-  assert.equal(diagnostic.schema_version, 8);
+  assert.equal(diagnostic.schema_version, 9);
   assert.equal(diagnostic.failed_phase, 'compose-run-gateway-smoke');
   assert.equal(diagnostic.failure_operation, 'gateway-network-smoke');
   assert.equal(diagnostic.failure_check, 'network-smoke');
@@ -481,7 +481,7 @@ test('failure artifact projects only the API CRUD probe enum fields', () => {
     failureCode: 'api-probe-process-failed',
     apiCrudProbe,
   });
-  assert.equal(diagnostic.schema_version, 8);
+  assert.equal(diagnostic.schema_version, 9);
   assert.equal(diagnostic.failure_check, 'api-contract');
   assert.deepEqual(diagnostic.api_crud_probe, apiCrudProbe);
 
@@ -584,7 +584,7 @@ test('reminder child failures retain only the finite fixture outcome and validat
         childExitCode: error.childExitCode,
         reminderFixture: error.reminderFixture,
       });
-      assert.equal(diagnostic.schema_version, 8);
+      assert.equal(diagnostic.schema_version, 9);
       assert.equal(diagnostic.failure_check, 'reminder-fixture');
       assert.equal(diagnostic.child_exit_code, 1);
       assert.deepEqual(diagnostic.reminder_fixture, error.reminderFixture);
@@ -1262,6 +1262,173 @@ test('foreign resources with a partial task label fail closed', () => {
   );
 });
 
+test('foreign inventory failures preserve the cleanup gate and classify each category', () => {
+  const cases = [
+    ['containers', { Id: 'container-id', Config: { Labels: {} } }],
+    ['networks', { Id: 'network-id', Name: 'foreign-network', Labels: {} }],
+    ['volumes', { Name: 'foreign-volume', Labels: {} }],
+    ['listeners', 'LISTEN 0 128 127.0.0.1:9000 0.0.0.0:*'],
+  ];
+
+  for (const [category, changedValue] of cases) {
+    const before = emptyInventory();
+    const after = emptyInventory();
+    if (category === 'listeners') {
+      after.listeners.push(changedValue);
+    } else {
+      after[category].push(changedValue);
+    }
+    let failure;
+    assert.throws(
+      () =>
+        compareForeign(
+          before,
+          after,
+          runId,
+          project,
+          'owned-cleanup-preflight',
+        ),
+      (error) => {
+        failure = error;
+        return error.code === 'foreign-state-changed';
+      },
+      category,
+    );
+    assert.equal(failure.stage, 'foreign-inventory');
+    assert.deepEqual(failure.foreignInventoryChange, {
+      checkpoint: 'owned-cleanup-preflight',
+      containers:
+        category === 'containers' ? 'identity-set-cardinality' : 'unchanged',
+      networks:
+        category === 'networks' ? 'identity-set-cardinality' : 'unchanged',
+      volumes:
+        category === 'volumes' ? 'identity-set-cardinality' : 'unchanged',
+      images: 'unchanged',
+      listeners:
+        category === 'listeners' ? 'identity-set-cardinality' : 'unchanged',
+    });
+  }
+});
+
+test('one foreign inventory failure classifies simultaneous changes without resource values', () => {
+  const before = emptyInventory();
+  const after = emptyInventory();
+  after.images.push({ Id: null, RepoTags: ['private-image-tag'] });
+  after.listeners.push('LISTEN 0 128 127.0.0.1:9000 0.0.0.0:*');
+
+  let failure;
+  assert.throws(
+    () =>
+      compareForeign(before, after, runId, project, 'owned-cleanup-preflight'),
+    (error) => {
+      failure = error;
+      return error.code === 'foreign-state-changed';
+    },
+  );
+  assert.deepEqual(failure.foreignInventoryChange, {
+    checkpoint: 'owned-cleanup-preflight',
+    containers: 'unchanged',
+    networks: 'unchanged',
+    volumes: 'unchanged',
+    images: 'unknown',
+    listeners: 'identity-set-cardinality',
+  });
+  const projection = JSON.stringify(failure.foreignInventoryChange);
+  assert.equal(projection.includes('private-image-tag'), false);
+  assert.equal(projection.includes('127.0.0.1:9000'), false);
+});
+
+test('foreign image changes distinguish identity, ordering, and metadata without changing the gate', () => {
+  const image = {
+    Id: imageId,
+    RepoTags: [
+      'matrix-calendar-widget/server:one',
+      'matrix-calendar-widget/server:two',
+    ],
+    RepoDigests: ['matrix-calendar-widget/server@sha256:one'],
+    Created: '2026-10-16T00:00:00Z',
+    Config: { Cmd: ['node', 'server.js'] },
+  };
+  const classify = (images) => {
+    const before = emptyInventory();
+    const after = emptyInventory();
+    before.images = [image];
+    after.images = images;
+    let failure;
+    assert.throws(
+      () =>
+        compareForeign(
+          before,
+          after,
+          runId,
+          project,
+          'owned-cleanup-preflight',
+        ),
+      (error) => {
+        failure = error;
+        return error.code === 'foreign-state-changed';
+      },
+    );
+    return failure.foreignInventoryChange.images;
+  };
+
+  assert.equal(
+    classify([{ ...image, Id: `sha256:${'c'.repeat(64)}` }]),
+    'identity-set-cardinality',
+  );
+  assert.equal(
+    classify([
+      {
+        ...image,
+        RepoTags: [...image.RepoTags].reverse(),
+        RepoDigests: [...image.RepoDigests].reverse(),
+      },
+    ]),
+    'ordering-only',
+  );
+  assert.equal(
+    classify([{ ...image, Created: '2026-10-17T00:00:00Z' }]),
+    'descriptor-metadata',
+  );
+});
+
+test('cleanup checkpoint labels are bound to the preflight and each cleanup census', () => {
+  const helperSource = readFileSync(
+    fileURLToPath(new URL('./hosted-operator-rehearsal.mjs', import.meta.url)),
+    'utf8',
+  );
+  assert.match(
+    helperSource,
+    /compareForeign\(\s*baseline,\s*current,\s*id,\s*project,\s*'owned-cleanup-preflight',?\s*\)/u,
+  );
+  assert.match(
+    helperSource,
+    /compareForeign\(\s*baseline,\s*current,\s*runId,\s*project,\s*'failure-cleanup-preflight',?\s*\)/u,
+  );
+  assert.match(
+    helperSource,
+    /compareForeign\(\s*baseline,\s*afterContainers,[\s\S]*?foreignCheckpoints\.afterContainers/u,
+  );
+  assert.match(
+    helperSource,
+    /compareForeign\(\s*baseline,\s*afterVolumes,[\s\S]*?foreignCheckpoints\.afterVolumes/u,
+  );
+  assert.match(
+    helperSource,
+    /compareForeign\(\s*baseline,\s*finalInventory,[\s\S]*?foreignCheckpoints\.finalInventory/u,
+  );
+  for (const checkpoint of [
+    'success-after-containers',
+    'success-after-volumes',
+    'success-final-inventory',
+    'failure-after-containers',
+    'failure-after-volumes',
+    'failure-final-inventory',
+  ]) {
+    assert.ok(helperSource.includes(`'${checkpoint}'`), checkpoint);
+  }
+});
+
 test('listener scope compares endpoint identities and counts actual changes', () => {
   const baseline = [
     'LISTEN 0 128 127.0.0.1:5232 0.0.0.0:*',
@@ -1404,7 +1571,7 @@ test('failure diagnostic writes fixed identity and cleanup fields outside task d
     );
     assert.equal(statSync(file).mode & 0o777, 0o600);
     const initial = JSON.parse(readFileSync(file, 'utf8'));
-    assert.equal(initial.schema_version, 8);
+    assert.equal(initial.schema_version, 9);
     assert.equal(initial.failed_phase, 'fixture-setup');
     assert.equal(initial.failure_class, 'gate-failed');
     assert.equal(initial.failure_operation, 'gate');
@@ -1478,6 +1645,7 @@ test('failure diagnostic writes fixed identity and cleanup fields outside task d
     assert.equal(initial.cleanup_status, 'pending');
     assert.equal(initial.cleanup_attempted, false);
     assert.equal(initial.owned_cleanup_verified, false);
+    assert.equal(initial.foreign_inventory_change.checkpoint, 'not-applicable');
 
     assert.equal(
       writeFailureDiagnostic(
@@ -1497,6 +1665,76 @@ test('failure diagnostic writes fixed identity and cleanup fields outside task d
   } finally {
     rmSync(runnerTemp, { recursive: true, force: true });
   }
+});
+
+test('failure artifact admits one fixed foreign outcome from failure cleanup only', (t) => {
+  const runnerTemp = mkdtempSync(
+    join(tmpdir(), 'mcw-foreign-cleanup-summary-'),
+  );
+  chmodSync(runnerTemp, 0o700);
+  t.after(() => rmSync(runnerTemp, { recursive: true, force: true }));
+  const fields = {
+    sourceSha,
+    workflowSha: '2'.repeat(40),
+    runId,
+    attempt: '1',
+    phase: 'fixture-setup',
+    failureClass: 'gate-failed',
+    operation: 'gate',
+    failureCode: 'fixture-stage-not-passed',
+    cleanupStatus: 'pending',
+    cleanupAttempted: false,
+  };
+  assert.equal(writeFailureDiagnostic(runnerTemp, fields), true);
+  const pathName = join(
+    runnerTemp,
+    'matrix-calendar-widget-operator-rehearsal-failure.json',
+  );
+  const foreignInventoryChange = {
+    checkpoint: 'failure-cleanup-preflight',
+    containers: 'unchanged',
+    networks: 'unchanged',
+    volumes: 'unchanged',
+    images: 'identity-set-cardinality',
+    listeners: 'unchanged',
+  };
+  assert.equal(
+    writeFailureDiagnostic(
+      runnerTemp,
+      {
+        ...fields,
+        cleanupStatus: 'unverified',
+        cleanupAttempted: true,
+        foreignInventoryChange,
+      },
+      true,
+    ),
+    true,
+  );
+  assert.deepEqual(
+    JSON.parse(readFileSync(pathName, 'utf8')).foreign_inventory_change,
+    foreignInventoryChange,
+  );
+  assert.equal(
+    writeFailureDiagnostic(
+      runnerTemp,
+      {
+        ...fields,
+        cleanupStatus: 'unverified',
+        cleanupAttempted: true,
+        foreignInventoryChange: {
+          ...foreignInventoryChange,
+          checkpoint: 'owned-cleanup-preflight',
+        },
+      },
+      true,
+    ),
+    false,
+  );
+  assert.deepEqual(
+    JSON.parse(readFileSync(pathName, 'utf8')).foreign_inventory_change,
+    foreignInventoryChange,
+  );
 });
 
 test('failure diagnostic maps hostile values to closed fields and never claims unverified cleanup', () => {
@@ -1543,6 +1781,15 @@ test('failure diagnostic maps hostile values to closed fields and never claims u
       added: 'private-count',
       removed: -1,
     },
+    foreignInventoryChange: {
+      checkpoint: 'https://private.example/token=secret',
+      containers: 'token=secret',
+      networks: { id: 'private-resource' },
+      volumes: ['private-volume'],
+      images: 'BEGIN:VCALENDAR',
+      listeners: 'secret',
+      arbitrary: 'do-not-project',
+    },
   });
   const serialized = JSON.stringify(diagnostic);
   assert.equal(diagnostic.failed_phase, 'runner');
@@ -1563,6 +1810,14 @@ test('failure diagnostic maps hostile values to closed fields and never claims u
     callsite: 'not-applicable',
     added_count: 'unavailable',
     removed_count: 'unavailable',
+  });
+  assert.deepEqual(diagnostic.foreign_inventory_change, {
+    checkpoint: 'unknown',
+    containers: 'unknown',
+    networks: 'unknown',
+    volumes: 'unknown',
+    images: 'unknown',
+    listeners: 'unknown',
   });
   assert.equal(diagnostic.gateway_network_smoke.marker_status, 'invalid');
   assert.deepEqual(diagnostic.gateway_network_smoke.synapse, {
@@ -1690,6 +1945,7 @@ test('failure checks use fixed assertion codes and unknown fallback', () => {
     ['volume-set-mismatch', 'volume'],
     ['network-set-mismatch', 'network'],
     ['foreign-listener-changed', 'listener'],
+    ['foreign-state-changed', 'foreign-inventory'],
     ['service-state-mismatch token=secret', 'unknown'],
   ];
   for (const [failureCode, expected] of cases) {
