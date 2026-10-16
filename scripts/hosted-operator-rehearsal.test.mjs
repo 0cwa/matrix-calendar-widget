@@ -1310,6 +1310,34 @@ test('foreign inventory failures preserve the cleanup gate and classify each cat
   }
 });
 
+test('one foreign inventory failure classifies simultaneous changes without resource values', () => {
+  const before = emptyInventory();
+  const after = emptyInventory();
+  after.images.push({ Id: null, RepoTags: ['private-image-tag'] });
+  after.listeners.push('LISTEN 0 128 127.0.0.1:9000 0.0.0.0:*');
+
+  let failure;
+  assert.throws(
+    () =>
+      compareForeign(before, after, runId, project, 'owned-cleanup-preflight'),
+    (error) => {
+      failure = error;
+      return error.code === 'foreign-state-changed';
+    },
+  );
+  assert.deepEqual(failure.foreignInventoryChange, {
+    checkpoint: 'owned-cleanup-preflight',
+    containers: 'unchanged',
+    networks: 'unchanged',
+    volumes: 'unchanged',
+    images: 'unknown',
+    listeners: 'identity-set-cardinality',
+  });
+  const projection = JSON.stringify(failure.foreignInventoryChange);
+  assert.equal(projection.includes('private-image-tag'), false);
+  assert.equal(projection.includes('127.0.0.1:9000'), false);
+});
+
 test('foreign image changes distinguish identity, ordering, and metadata without changing the gate', () => {
   const image = {
     Id: imageId,
