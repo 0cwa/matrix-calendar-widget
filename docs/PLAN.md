@@ -536,9 +536,11 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       behavior only; actual restore-service acceptance remains unverified.
 - [ ] Re-run source-bound browser and operator acceptance against the exact
       integrated candidate. The follow-up Web refresh/navigation failure
-      remains unresolved; prior paired Web/Desktop results on PR #292 source
-      `23d4b73353c2271caffbc368d9d17bac783d6c3b` do not qualify the changed
-      source. #255 and #251 remain pending fresh acceptance and operator
+      remains unresolved; prior paired Web/Desktop results ran on reviewed
+      PR #292 head `ccdaf3be5e540ef04038c0b47e7bdabc3960b12c` (tree
+      `5fe054e6c903e55bbf6df92cd05b7fa400901019`; merge commit
+      `23d4b73353c2271caffbc368d9d17bac783d6c3b` has the same tree) and do not
+      qualify the changed source. #255 and #251 remain pending fresh acceptance and operator
       readiness. Source-bound images are not qualified; application
       installation and cold paired backup/recovery remain pending. No live
       pilot or production rollout has occurred.
