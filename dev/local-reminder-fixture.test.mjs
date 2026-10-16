@@ -80,6 +80,7 @@ function createClient({
   eventCreateResponseLost = false,
   configWriteResponseLost = false,
   foreignEventOnReadback = false,
+  eventHost = 'radicale:5232',
   contextUserId = MEMBER_ID,
   contextRoomId = ROOM_ID,
   priorTitles = [],
@@ -102,7 +103,7 @@ function createClient({
   let createdEvent;
   let eventPersisted = false;
   const responseEvent = () => ({
-    id: `http://radicale:5232/element-acceptance-bot/element-acceptance/${createdEvent.uid}.ics`,
+    id: `http://${eventHost}/element-acceptance-bot/element-acceptance/${createdEvent.uid}.ics`,
     uid: createdEvent.uid,
     title: createdEvent.title,
     alarm: {
@@ -643,19 +644,138 @@ test('keeps prior exact-once room markers while appending the restart canary', a
   }
 });
 
-test('restores two prior exact-once room markers before appending the canary', async () => {
+test('restores two prior exact-once room markers from the restored Radicale origin', async () => {
   const priorTitles = [
     'Reminder acceptance aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
     'Reminder acceptance 11111111-2222-3333-4444-555555555555',
   ];
   const files = fixtureFiles('restore', priorTitles);
-  const client = createClient({ priorTitles });
+  const client = createClient({
+    priorTitles,
+    eventHost: 'restore-radicale:5232',
+  });
   try {
     const result = await execute(files, client);
     assert.equal(result.status, 'passed');
     assert.equal(result.markerCount, 3);
     assert.deepEqual(JSON.parse(readFileSync(files.markerPath, 'utf8')), [
       ...priorTitles,
+      TITLE,
+    ]);
+    assert.ok(
+      client.calls.some(
+        ({ url, method }) =>
+          method === 'GET' &&
+          url.pathname === '/v1/calendar/event' &&
+          url.searchParams.get('eventId') ===
+            'http://restore-radicale:5232/element-acceptance-bot/element-acceptance/local-reminder-12345678-1234-1234-1234-123456789abc.ics',
+      ),
+    );
+  } finally {
+    files.cleanup();
+  }
+});
+
+test('cleans only the owned restored-origin event after a later restore failure', async () => {
+  const priorTitles = [
+    'Reminder acceptance aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+    'Reminder acceptance 11111111-2222-3333-4444-555555555555',
+  ];
+  const files = fixtureFiles('restore', priorTitles);
+  const client = createClient({
+    priorTitles,
+    eventHost: 'restore-radicale:5232',
+    configWriteStatus: 503,
+  });
+  try {
+    const result = await execute(files, client);
+    assert.equal(result.status, 'failed');
+    assert.equal(result.failurePhase, 'reminder-config-write');
+    assert.equal(result.markerWritten, false);
+    assert.deepEqual(result.cleanup, {
+      reminderConfiguration: 'confirmed-absent',
+      event: 'confirmed-absent',
+    });
+    assert.deepEqual(JSON.parse(readFileSync(files.markerPath, 'utf8')), [
+      ...priorTitles,
+    ]);
+    assert.equal(client.eventPersisted, false);
+    assert.ok(
+      client.calls.some(
+        ({ url, method, headers }) =>
+          method === 'DELETE' &&
+          url.pathname === '/v1/calendar/events' &&
+          url.searchParams.get('eventId') ===
+            'http://restore-radicale:5232/element-acceptance-bot/element-acceptance/local-reminder-12345678-1234-1234-1234-123456789abc.ics' &&
+          headers.get('if-match') === ETAG,
+      ),
+    );
+  } finally {
+    files.cleanup();
+  }
+});
+
+test('rejects an event origin from another reminder flow and preserves prior markers', async (t) => {
+  const priorTitles = [
+    'Reminder acceptance aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+    'Reminder acceptance 11111111-2222-3333-4444-555555555555',
+  ];
+  for (const [name, flow, initialMarkers, eventHost] of [
+    [
+      'restore flow with normal Radicale origin',
+      'restore',
+      priorTitles,
+      'radicale:5232',
+    ],
+    [
+      'initial flow with restored Radicale origin',
+      'initial',
+      [],
+      'restore-radicale:5232',
+    ],
+  ]) {
+    await t.test(name, async () => {
+      const files = fixtureFiles(flow, initialMarkers);
+      const client = createClient({ priorTitles: initialMarkers, eventHost });
+      try {
+        const result = await execute(files, client);
+        assert.equal(result.status, 'failed');
+        assert.equal(result.failurePhase, 'event-create');
+        assert.equal(result.markerWritten, false);
+        assert.deepEqual(result.cleanup, {
+          reminderConfiguration: 'not-attempted',
+          event: 'unresolved',
+        });
+        assert.deepEqual(
+          JSON.parse(readFileSync(files.markerPath, 'utf8')),
+          initialMarkers,
+        );
+        assert.equal(client.eventPersisted, true);
+        assert.ok(
+          !client.calls.some(
+            ({ url }) => url.pathname === '/v1/calendar/event',
+          ),
+        );
+        assert.ok(
+          !client.calls.some(
+            ({ url, method }) =>
+              url.pathname === '/v1/calendar/events' && method === 'DELETE',
+          ),
+        );
+      } finally {
+        files.cleanup();
+      }
+    });
+  }
+});
+
+test('preserves the documented loopback event origin for the initial flow', async () => {
+  const files = fixtureFiles();
+  const client = createClient({ eventHost: '127.0.0.1:5232' });
+  try {
+    const result = await execute(files, client);
+    assert.equal(result.status, 'passed');
+    assert.deepEqual(JSON.parse(readFileSync(files.markerPath, 'utf8')), [
       TITLE,
     ]);
   } finally {

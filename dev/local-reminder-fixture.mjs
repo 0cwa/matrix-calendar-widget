@@ -47,6 +47,15 @@ const MARKER_COUNT_BY_FLOW = Object.freeze({
   restart: 1,
   restore: 2,
 });
+const NORMAL_EVENT_RESOURCE_HOSTS = Object.freeze([
+  'radicale:5232',
+  '127.0.0.1:5232',
+]);
+const EVENT_RESOURCE_HOSTS_BY_FLOW = Object.freeze({
+  initial: NORMAL_EVENT_RESOURCE_HOSTS,
+  restart: NORMAL_EVENT_RESOURCE_HOSTS,
+  restore: Object.freeze(['restore-radicale:5232']),
+});
 export const LOCAL_REMINDER_FIXTURE_FAILURE_PHASES = Object.freeze([
   'fixture',
   'openid',
@@ -293,7 +302,7 @@ function strongEtag(value) {
   return typeof value === 'string' && /^"[\x21\x23-\x7e]{1,200}"$/u.test(value);
 }
 
-function eventResourceId(value, fixture, uid) {
+function eventResourceId(value, fixture, uid, flow) {
   const event = value?.event;
   if (
     !isRecord(event) ||
@@ -313,7 +322,7 @@ function eventResourceId(value, fixture, uid) {
   const expectedPath = `/${encodeURIComponent(serviceLocalpart)}/${CALENDAR_ID}/${encodeURIComponent(uid)}.ics`;
   if (
     resource.protocol !== 'http:' ||
-    !['radicale:5232', '127.0.0.1:5232'].includes(resource.host) ||
+    !EVENT_RESOURCE_HOSTS_BY_FLOW[flow]?.includes(resource.host) ||
     resource.username ||
     resource.password ||
     resource.search ||
@@ -325,10 +334,12 @@ function eventResourceId(value, fixture, uid) {
   return { id: resource.toString(), etag: value.etag };
 }
 
-function expectedEventResourceIds(fixture, uid) {
+function expectedEventResourceIds(fixture, uid, flow) {
   const serviceLocalpart = fixture.serviceSender.userId.slice(1).split(':')[0];
   const path = `/${encodeURIComponent(serviceLocalpart)}/${CALENDAR_ID}/${encodeURIComponent(uid)}.ics`;
-  return [`http://radicale:5232${path}`, `http://127.0.0.1:5232${path}`];
+  return (EVENT_RESOURCE_HOSTS_BY_FLOW[flow] ?? []).map(
+    (host) => `http://${host}${path}`,
+  );
 }
 
 function isRelativeMinuteAlarm(alarm, uid) {
@@ -556,6 +567,7 @@ async function cleanupOwnedResources(
   fixture,
   openIdToken,
   event,
+  flow,
   configWriteAttempted,
   configIdentity,
 ) {
@@ -618,9 +630,10 @@ async function cleanupOwnedResources(
   }
   if (event) {
     outcome.event = 'unresolved';
+    if (event.untrustedResourceIdentity) return outcome;
     const resourceIds = [
       ...(event.resourceIds ?? []),
-      ...expectedEventResourceIds(fixture, event.uid),
+      ...expectedEventResourceIds(fixture, event.uid, flow),
     ];
     let allCandidatesAbsent = true;
     for (const resourceId of new Set(resourceIds)) {
@@ -636,7 +649,7 @@ async function cleanupOwnedResources(
         );
         if (response.status === 404) continue;
         allCandidatesAbsent = false;
-        const currentResource = eventResourceId(body, fixture, event.uid);
+        const currentResource = eventResourceId(body, fixture, event.uid, flow);
         if (
           response.status !== 200 ||
           !currentResource ||
@@ -821,7 +834,7 @@ export async function runLocalReminderFixture({
     ownedEvent = {
       uid,
       title,
-      resourceIds: expectedEventResourceIds(fixture, uid),
+      resourceIds: expectedEventResourceIds(fixture, uid, flow),
     };
     const { response: createResponse, body: created } = await gatewayJson(
       fetchImpl,
@@ -833,7 +846,10 @@ export async function runLocalReminderFixture({
       'event-create',
       createInput,
     );
-    const createdResource = eventResourceId(created, fixture, uid);
+    const createdResource = eventResourceId(created, fixture, uid, flow);
+    ownedEvent.untrustedResourceIdentity =
+      (createResponse.status === 200 || createResponse.status === 201) &&
+      !createdResource;
     if (createdResource) {
       ownedEvent.resourceIds = [...ownedEvent.resourceIds, createdResource.id];
     }
@@ -861,7 +877,7 @@ export async function runLocalReminderFixture({
       readQuery,
       'event-readback',
     );
-    const readbackResource = eventResourceId(eventReadback, fixture, uid);
+    const readbackResource = eventResourceId(eventReadback, fixture, uid, flow);
     if (
       eventResponse.status !== 200 ||
       !readbackResource ||
@@ -984,6 +1000,7 @@ export async function runLocalReminderFixture({
         fixture,
         openIdToken,
         ownedEvent,
+        flow,
         configWriteAttempted,
         configIdentity,
       );
