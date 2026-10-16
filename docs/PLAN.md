@@ -558,10 +558,16 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       is derived runner-completion evidence; per-check runtime values were not
       separately captured. The earlier run 38892200863 remains a historical
       failed attempt with unknown cause and unverified cleanup; it is not
-      rewritten by the later pass. Private target-phase proof, image preload
-      and observed IDs, service staging, live pilot UI, actual off-server
-      backup/restore, and timer execution remain pending. Issues #255 and #251
-      remain open; no wider rollout or publication is authorized.
+      rewritten by the later pass. The three application images have since
+      been imported and verified against their exact configuration IDs and
+      platform. Pinned database and helper images, native tools, and a
+      dedicated backup account are prepared; private runtime configuration
+      remains pending. Pilot services remain unstarted. Protected credential
+      staging, final operator recording, live calendar/room canary validation,
+      first real paired backup, isolated gateway restore, disable/rollback,
+      and daily activation
+      remain pending. Issues #255 and #251 remain open; no wider rollout or
+      publication is authorized.
 - [ ] Keep issues #275–#278 post-pilot. In particular, defer the #275
       StoreProvider/Redux startup retirement until after the pilot.
 
