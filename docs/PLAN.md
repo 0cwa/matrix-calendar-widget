@@ -545,19 +545,23 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
 - [x] Close issue #291 after the actual settled-census cleanup and normal-bot
       criteria passed on the accepted application source; its merged source
       retry alone was not treated as acceptance.
-- [ ] Qualify the three source-bound images and reconcile the manifest/evidence
-      index. Exact-source operator/image run
-      [38892200863](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38892200863)
-      failed during foreign-resource inventory. Its schema-8 summary reports
-      cleanup attempted but unverified (`owned_cleanup_verified=false`), and
-      `foreign_inventory_unchanged=false`; resource kind, any inventory
-      difference, and cause are unknown. No three-image manifest/archive is
-      accepted for this candidate. The source
-      owner is investigating the runner comparison separately; preserving
-      application candidate `99d4c9f` under a later trusted workflow source
-      remains subject to the existing contract and is not acceptance evidence
-      yet. Issues #255 and #251 remain open. No production application
-      installation or wider rollout has occurred.
+- [x] Qualify the three source-bound images and reconcile the manifest/evidence
+      index for accepted application `99d4c9f9f36aa0b0861a13499a7f7cd512c56920`
+      (tree `97022a9d2351655d2aae0a50a44a14bd81daacc9`). Trusted workflow run
+      [38913010664](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38913010664),
+      attempt 1, produced the source-bound archive and passed artifact-byte,
+      member, manifest, and pinned CLI verification. The image artifact API
+      SHA-256 is `3e71a5edea6b2a021a539f792f6abf7522b331b6620765f7ecff28b1b306a49f`;
+      manifest SHA-256 is
+      `d0315e465e33e38f093fe4de2faf0e5eb0f57afc6fec7e0c2aa325a727d9ae49`.
+      The same run completed the enabled operator rehearsal success path. This
+      is derived runner-completion evidence; per-check runtime values were not
+      separately captured. The earlier run 38892200863 remains a historical
+      failed attempt with unknown cause and unverified cleanup; it is not
+      rewritten by the later pass. Private target-phase proof, image preload
+      and observed IDs, service staging, live pilot UI, actual off-server
+      backup/restore, and timer execution remain pending. Issues #255 and #251
+      remain open; no wider rollout or publication is authorized.
 - [ ] Keep issues #275–#278 post-pilot. In particular, defer the #275
       StoreProvider/Redux startup retirement until after the pilot.
 
@@ -886,8 +890,13 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
         generated server env with create-only semantics. The tooling now keeps
         a separate private bootstrap file until the generated file and Compose
         model validate, then switches later commands to that generated file.
-        The complete source-bound operator rehearsal still needs a fresh pass;
-        this tooling correction is not acceptance evidence.
+        This tooling history is superseded for the frozen candidate by trusted
+        run [38913010664](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38913010664),
+        which completed the enabled operator rehearsal success path. The pass is
+        derived from the recorded input, mandatory workflow step, helper
+        failure behavior, and overall run conclusion; per-check runtime values
+        were not separately captured. It does not establish target-host,
+        live-UI, off-server backup/restore, or timer acceptance.
 
 This bounded beta path does not complete M4, M5, or the broader M8 work, and it
 does not authorize publication or live rollout. The broad M8 milestone remains

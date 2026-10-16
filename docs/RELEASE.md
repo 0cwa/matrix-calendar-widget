@@ -1,6 +1,6 @@
 # Release gate — current decision and historical evidence
 
-**Decision: application candidate accepted; pilot readiness remains blocked by source-bound image and operator evidence. No production application installation or wider rollout has occurred.** This public index contains sanitized evidence only. Target-specific operator facts, credentials, locations, rendered deployment configuration, and recovery details stay in the private operator record.
+**Decision: the application candidate and source-bound image archive are accepted, and the hosted operator rehearsal reached its source-defined success path; private pilot readiness remains in progress. No live pilot UI, completed target deployment, actual off-server application backup/restore, daily timer, or wider rollout is claimed.** This public index contains sanitized evidence only. Target-specific operator facts, credentials, locations, rendered deployment configuration, and recovery details stay in the private operator record.
 
 ## Current qualification status
 
@@ -8,11 +8,15 @@
 
 Accepted application evidence remains tied to source `99d4c9f` and application tree `97022a9d2351655d2aae0a50a44a14bd81daacc9`. Later trusted tooling and documentation changes have separate provenance.
 
+The source-bound three-image archive was built by trusted workflow run [38913010664](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38913010664), attempt 1, using application source `99d4c9f9f36aa0b0861a13499a7f7cd512c56920` and trusted workflow head `289358712e4e58c452b65d18a03c0a442721245c`. The archive passed exact artifact-byte digest and member checks, source/tooling manifest validation, and the pinned verifier CLI. The image artifact API SHA-256 is `3e71a5edea6b2a021a539f792f6abf7522b331b6620765f7ecff28b1b306a49f`; the source-bound manifest SHA-256 is `d0315e465e33e38f093fe4de2faf0e5eb0f57afc6fec7e0c2aa325a727d9ae49`. These records qualify the three archived image payloads; they do not claim that the images have been loaded on a pilot host.
+
+The same run recorded `operator_rehearsal=true` and completed successfully. The opt-in workflow step is mandatory when enabled, and the trusted helper fails the job when a required predicate fails. This is derived runner-completion evidence for the helper's source-defined success path, including its required service/API, reminder restart, paired-store restore, and owned-cleanup gates. No transient per-check runtime values were captured as a separate receipt, so this record does not publish individual measurements. It does not establish a production host, live UI, or target backup/restore.
+
 The strict normal-bot 0/25-event limits passed: cold activation 1,172.860/1,358.484 ms, refresh 1,696.137/1,664.117 ms, maximum required API response 319.707 ms, and five details samples with a 414.250 ms maximum. Appservice also passed those samples (cold 1,541.487/1,648.783 ms, refresh 1,862.481/1,472.601 ms, API maximum 479.242 ms, details maximum 423.898 ms). Two trusted Element-origin opening errors per mode met the existing strict diagnostic predicate; stacks were trusted and complete, while causes remain unknown and source maps are unsupported. Appservice browser certification remains deferred for the pilot by the existing policy despite this observed pass.
 
-**Release gate: blocked.** The exact-source image/operator rehearsal [38892200863](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38892200863) failed during foreign-resource inventory. Its sanitized schema-8 summary is identified by SHA-256 `8ca5ae56084877db2c839164eec56790979ca126e5d4e717f07275cc64e66712`. Cleanup was attempted but is unverified (`owned_cleanup_verified=false`); `foreign_inventory_unchanged=false`. The resource kind, any inventory difference, and cause are unknown. Other default projections do not prove that earlier operations passed. No three-image manifest/archive is accepted for this candidate. The source owner is investigating the runner comparison separately; this failure does not establish whether application candidate `99d4c9f` may be preserved under a later trusted workflow source, which remains subject to the existing contract.
+**Source-bound release evidence: accepted; private target readiness remains pending.** The prior exact-source image/operator attempt [38892200863](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38892200863) failed during foreign-resource inventory; its schema-8 result remains a historical failure, with cleanup unverified and the cause unknown. A later trusted workflow run [38913010664](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38913010664) independently bound and verified the three-image archive and completed the opt-in operator rehearsal success path for the same frozen application source. The later pass does not rewrite the earlier result.
 
-Issues [#255](https://github.com/0cwa/matrix-calendar-widget/issues/255) and [#251](https://github.com/0cwa/matrix-calendar-widget/issues/251) remain open; #291 is closed after cleanup and normal-bot criteria passed. Keep #275–#278 deferred until after the bounded pilot. Private v8 packet and native-plan source reviews are complete. Final source/image binding, fresh target snapshots, native installation, actual application backup/restore, and timer execution remain pending. No production application is installed. Scoped pilot authority already exists privately; it does not approve broader rollout or registry publication.
+Issues [#255](https://github.com/0cwa/matrix-calendar-widget/issues/255) and [#251](https://github.com/0cwa/matrix-calendar-widget/issues/251) remain open; #291 is closed after cleanup and normal-bot criteria passed. Keep #275–#278 deferred until after the bounded pilot. Private source/package acceptance is recorded; target-phase identity and inventory, image preload and observed IDs, service staging, pilot browser/canary validation, actual off-server backup and paired restore, disable/rollback, and daily scheduling/retention remain private operator gates. No live pilot UI or wider rollout is claimed. Scoped pilot authority does not approve broader rollout or registry publication.
 
 The historical evidence below is retained **for its stated source SHA only** and is not substituted for current-candidate evidence. The application checks above do not qualify an image or complete private operator readiness.
 
@@ -22,9 +26,11 @@ The gate results below record the pre-integration PR [#260](https://github.com/0
 
 ## Owner-approved pilot scope
 
-The bounded pilot uses full Element Web/Desktop acceptance in `bot-account`
-mode. Full appservice-mode Element Web/Desktop browser certification remains
-deferred until after beta, despite the observed appservice pass on this source. This changes only the browser-certification scope:
+The bounded pilot uses full Element Web/Desktop acceptance in the standard
+side panel and `bot-account` mode. Full appservice-mode Element Web/Desktop
+browser certification remains deferred until after beta, despite the observed
+appservice pass on this source. This changes only the
+browser-certification scope:
 backend, identity/authentication, room authorization, and CalDAV contracts
 remain required in both `appservice` and `bot-account` modes. The ordinary
 normal-bot profile retains its strict 0/25-event limits: cold activation and
