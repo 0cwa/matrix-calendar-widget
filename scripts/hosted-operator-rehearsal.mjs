@@ -330,6 +330,33 @@ const FOREIGN_INVENTORY_CHANGE_KINDS = new Set([
   'descriptor-metadata',
   'unknown',
 ]);
+const MAX_FOREIGN_VOLUME_CHANGE_COUNT = 32;
+const FOREIGN_VOLUME_ASSOCIATIONS = new Set([
+  'synapse-data',
+  'synapse-other-mount',
+  'radicale-data',
+  'radicale-other-mount',
+  'postgres-data',
+  'postgres-other-mount',
+  'restore-radicale-data',
+  'restore-radicale-other-mount',
+  'gateway-other-mount',
+  'widget-other-mount',
+  'restore-gateway-other-mount',
+  'multiple',
+  'unattached',
+  'unknown',
+  'not-applicable',
+]);
+const FOREIGN_VOLUME_MOUNT_CLASSES = new Map([
+  ['synapse|/data', 'synapse-data'],
+  ['radicale|/data', 'radicale-data'],
+  ['restore-radicale|/data', 'restore-radicale-data'],
+  ['postgres|/var/lib/postgresql/data', 'postgres-data'],
+]);
+const FOREIGN_VOLUME_OTHER_MOUNT_CLASSES = new Map(
+  SERVICES.map((service) => [service, `${service}-other-mount`]),
+);
 
 export function failureOperationForStage(stage) {
   return (
@@ -1238,6 +1265,7 @@ function projectForeignInventoryChange(value) {
       volumes: 'not-applicable',
       images: 'not-applicable',
       listeners: 'not-applicable',
+      volume_identity_change: notApplicableForeignVolumeIdentityChange(),
     };
   }
   const record =
@@ -1254,7 +1282,95 @@ function projectForeignInventoryChange(value) {
       ? record[category]
       : 'unknown';
   }
+  if (
+    ['unchanged', 'ordering-only', 'descriptor-metadata'].includes(
+      result.volumes,
+    )
+  ) {
+    result.volume_identity_change = notApplicableForeignVolumeIdentityChange();
+  } else if (result.volumes === 'unknown') {
+    result.volume_identity_change = projectForeignVolumeIdentityChange(null);
+  } else {
+    result.volume_identity_change = projectForeignVolumeIdentityChange(
+      record.volume_identity_change,
+    );
+    const { added_count: added, removed_count: removed } =
+      result.volume_identity_change;
+    if (
+      (typeof added === 'number' && added === 0 && removed === 0) ||
+      added === 'not-applicable' ||
+      removed === 'not-applicable'
+    ) {
+      result.volume_identity_change = projectForeignVolumeIdentityChange(null);
+    }
+  }
   return result;
+}
+
+function notApplicableForeignVolumeIdentityChange() {
+  return {
+    added_count: 'not-applicable',
+    removed_count: 'not-applicable',
+    added_association: 'not-applicable',
+    removed_association: 'not-applicable',
+  };
+}
+
+function projectForeignVolumeIdentityChange(value) {
+  const unknown = {
+    added_count: 'unknown',
+    removed_count: 'unknown',
+    added_association: 'unknown',
+    removed_association: 'unknown',
+  };
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return unknown;
+  }
+  const keys = Object.keys(value).sort();
+  if (
+    keys.join(',') !==
+    'added_association,added_count,removed_association,removed_count'
+  ) {
+    return unknown;
+  }
+
+  const projectCount = (count) =>
+    (Number.isSafeInteger(count) &&
+      count >= 0 &&
+      count <= MAX_FOREIGN_VOLUME_CHANGE_COUNT) ||
+    count === `${MAX_FOREIGN_VOLUME_CHANGE_COUNT}+` ||
+    count === 'unknown'
+      ? count
+      : undefined;
+  const validPair = (count, association) => {
+    if (count === 'unknown') return association === 'unknown';
+    if (count === 'not-applicable') return false;
+    if (count === 0) return association === 'not-applicable';
+    return (
+      association !== 'not-applicable' &&
+      !(count === 1 && association === 'multiple')
+    );
+  };
+  const addedCount = projectCount(value.added_count);
+  const removedCount = projectCount(value.removed_count);
+  const addedAssociation = value.added_association;
+  const removedAssociation = value.removed_association;
+  if (
+    addedCount === undefined ||
+    removedCount === undefined ||
+    !FOREIGN_VOLUME_ASSOCIATIONS.has(addedAssociation) ||
+    !FOREIGN_VOLUME_ASSOCIATIONS.has(removedAssociation) ||
+    !validPair(addedCount, addedAssociation) ||
+    !validPair(removedCount, removedAssociation)
+  ) {
+    return unknown;
+  }
+  return {
+    added_count: addedCount,
+    removed_count: removedCount,
+    added_association: addedAssociation,
+    removed_association: removedAssociation,
+  };
 }
 
 function canonicalDiagnosticValue(value, imageField = false) {
@@ -1325,7 +1441,118 @@ function inventoryCategoryChangeKind(category, before, after) {
   }
 }
 
-function classifyForeignInventoryChange(before, after, checkpoint) {
+function boundedForeignVolumeCount(count) {
+  return count > MAX_FOREIGN_VOLUME_CHANGE_COUNT
+    ? `${MAX_FOREIGN_VOLUME_CHANGE_COUNT}+`
+    : count;
+}
+
+function associationForForeignVolume(volumeName, inventory, runId, project) {
+  if (!Array.isArray(inventory?.containers)) return 'unknown';
+  const associations = new Set();
+  try {
+    for (const container of inventory.containers) {
+      if (container === null || typeof container !== 'object') {
+        return 'unknown';
+      }
+      const owner = ownership(container, 'container', runId, project);
+      if (!Array.isArray(container.Mounts)) return 'unknown';
+      for (const mount of container.Mounts) {
+        if (
+          mount === null ||
+          typeof mount !== 'object' ||
+          Array.isArray(mount) ||
+          !['volume', 'bind', 'tmpfs'].includes(mount.Type) ||
+          typeof mount.Destination !== 'string' ||
+          mount.Destination.length === 0
+        ) {
+          return 'unknown';
+        }
+        if (mount.Type !== 'volume') continue;
+        if (typeof mount.Name !== 'string' || mount.Name.length === 0) {
+          return 'unknown';
+        }
+        if (mount.Name !== volumeName) continue;
+        if (owner !== 'owned') return 'unknown';
+        const service = labelsOf(container, 'container')[SERVICE_LABEL];
+        if (!SERVICES.includes(service)) return 'unknown';
+        const association =
+          FOREIGN_VOLUME_MOUNT_CLASSES.get(`${service}|${mount.Destination}`) ??
+          FOREIGN_VOLUME_OTHER_MOUNT_CLASSES.get(service);
+        if (!FOREIGN_VOLUME_ASSOCIATIONS.has(association)) return 'unknown';
+        associations.add(association);
+      }
+    }
+  } catch {
+    return 'unknown';
+  }
+  if (associations.size === 0) return 'unattached';
+  return associations.size === 1 ? [...associations][0] : 'multiple';
+}
+
+function foreignVolumeIdentityChange(
+  beforeInventory,
+  afterInventory,
+  beforeVolumes,
+  afterVolumes,
+  runId,
+  project,
+) {
+  const unknown = {
+    added_count: 'unknown',
+    removed_count: 'unknown',
+    added_association: 'unknown',
+    removed_association: 'unknown',
+  };
+  if (!Array.isArray(beforeVolumes) || !Array.isArray(afterVolumes)) {
+    return unknown;
+  }
+  const names = (volumes) => {
+    const values = volumes.map((volume) => categoryIdentity('volumes', volume));
+    return values.some((name) => name === undefined) ||
+      new Set(values).size !== values.length
+      ? undefined
+      : values;
+  };
+  const beforeNames = names(beforeVolumes);
+  const afterNames = names(afterVolumes);
+  if (beforeNames === undefined || afterNames === undefined) return unknown;
+  const beforeSet = new Set(beforeNames);
+  const afterSet = new Set(afterNames);
+  const added = afterNames.filter((name) => !beforeSet.has(name));
+  const removed = beforeNames.filter((name) => !afterSet.has(name));
+  const summarize = (changed, inventory) => {
+    if (changed.length === 0) return 'not-applicable';
+    const associations = new Set();
+    for (const name of changed) {
+      const association = associationForForeignVolume(
+        name,
+        inventory,
+        runId,
+        project,
+      );
+      if (association === 'unknown') return 'unknown';
+      associations.add(association);
+    }
+    return associations.size === 1 ? [...associations][0] : 'multiple';
+  };
+  return {
+    added_count: boundedForeignVolumeCount(added.length),
+    removed_count: boundedForeignVolumeCount(removed.length),
+    added_association: summarize(added, afterInventory),
+    removed_association: summarize(removed, beforeInventory),
+  };
+}
+
+function classifyForeignInventoryChange(
+  before,
+  after,
+  checkpoint,
+  beforeInventory,
+  afterInventory,
+  runId,
+  project,
+) {
   const result = { checkpoint };
   for (const category of FOREIGN_INVENTORY_CATEGORIES) {
     result[category] = inventoryCategoryChangeKind(
@@ -1334,6 +1561,14 @@ function classifyForeignInventoryChange(before, after, checkpoint) {
       after?.[category],
     );
   }
+  result.volume_identity_change = foreignVolumeIdentityChange(
+    beforeInventory,
+    afterInventory,
+    before?.volumes,
+    after?.volumes,
+    runId,
+    project,
+  );
   return projectForeignInventoryChange(result);
 }
 
@@ -1793,6 +2028,10 @@ export function compareForeign(
         left,
         right,
         checkpoint,
+        before,
+        after,
+        runId,
+        project,
       );
     } catch {
       foreignInventoryChange = projectForeignInventoryChange({ checkpoint });
@@ -2622,7 +2861,7 @@ export function formatFailureDiagnostic({
   );
 
   return {
-    schema_version: 9,
+    schema_version: 10,
     result: 'failed',
     phase: 'hosted-docker-operator-v5',
     failed_phase: SAFE_PHASES.has(phase) ? phase : 'runner',
