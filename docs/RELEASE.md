@@ -1,12 +1,20 @@
 # Release gate — current decision and historical evidence
 
-**Decision: Blocked on current-candidate and operator evidence; no application installation or wider rollout has occurred.** This public index contains sanitized evidence only. Target-specific operator facts, credentials, locations, rendered deployment configuration, and recovery details stay in the private operator record.
+**Decision: application candidate accepted; pilot readiness remains blocked by source-bound image and operator evidence. No application installation, publication, or wider rollout has occurred.** This public index contains sanitized evidence only. Target-specific operator facts, credentials, locations, rendered deployment configuration, and recovery details stay in the private operator record.
 
 ## Current qualification status
 
-**Candidate: not frozen in this index.** Issues #274, #259 and #282 are now closed after source fixes; this does **not** mean their historical test runs apply to current `main`. Recent operator-rehearsal tooling fixes, including #287, still require a fresh exact-source acceptance run and a reconciled manifest/evidence index under [#255](https://github.com/0cwa/matrix-calendar-widget/issues/255). Until that is entered here and the operator gates pass, status remains **blocked**. No image archive, target readiness, or installation approval is inferred from merged PRs.
+**Application candidate:** `99d4c9f9f36aa0b0861a13499a7f7cd512c56920` (application tree `97022a9d2351655d2aae0a50a44a14bd81daacc`), based on current `main` at the same commit. PR #294 is merged. All five protected checks and the browser-layout check passed in [CI run 38892162292](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38892162292); [CodeQL run 38892162238](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38892162238), [PostgreSQL contract run 38892228730](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38892228730), both-mode CalDAV contract run [38892222150](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38892222150), standalone Desktop run [38892215231](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38892215231), and full Element run [38892207008](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38892207008) passed on this source. The full Element run passed normal-bot and appservice Web/Desktop flows, CRUD, preservation, reminders, restart/restore, and owned cleanup. The prior refresh failure was not reproduced on this exact source; this does not establish universal browser compatibility.
 
-The evidence below is retained **for its historical source SHA only**, not as a current-candidate pass. [STATUS.md](./STATUS.md) may have more recent run diagnostics; #255 owns reconciliation of source, run, image and target evidence before promotion.
+This documentation update changes only `docs/RELEASE.md`, `docs/STATUS.md`, and `docs/PLAN.md`. The tested application files remain unchanged; the documentation commit has a different full Git tree from application tree `97022a9`.
+
+The strict normal-bot 0/25-event limits passed: cold activation 1,172.860/1,358.484 ms, refresh 1,696.137/1,664.117 ms, maximum required API response 319.707 ms, and five details samples with a 414.250 ms maximum. Appservice also passed those samples (cold 1,541.487/1,648.783 ms, refresh 1,862.481/1,472.601 ms, API maximum 479.242 ms, details maximum 423.898 ms). Two trusted Element-origin opening errors per mode met the existing strict diagnostic predicate; stacks were trusted and complete, while causes remain unknown and source maps are unsupported. Appservice browser certification remains deferred for the pilot by the existing policy despite this observed pass.
+
+**Release gate: blocked.** The exact-source image/operator rehearsal [38892200863](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38892200863) failed during foreign-resource inventory. Its sanitized schema-8 summary is identified by SHA-256 `8ca5ae56084877db2c839164eec56790979ca126e5d4e717f07275cc64e66712`. Cleanup was attempted but is unverified; ownership was false and foreign-state-unchanged was false. The resource kind, difference, and cause are unknown. Other default projections do not prove that earlier operations passed. No accepted source-bound three-image manifest/archive exists. The source owner is investigating the runner comparison separately; this failure does not establish whether application candidate `99d4c9f` may be preserved under a later trusted workflow source, which remains subject to the existing contract.
+
+Issues [#255](https://github.com/0cwa/matrix-calendar-widget/issues/255) and [#251](https://github.com/0cwa/matrix-calendar-widget/issues/251) remain open; #291 is closed after cleanup and normal-bot criteria passed. Keep #275–#278 deferred until after the bounded pilot. The private operator packet, source/image binding, target snapshots, native install, application backup/restore, and timer remain pending. No production application is installed. Scoped pilot authority already exists privately; it does not approve broader rollout or registry publication.
+
+The historical evidence below is retained **for its stated source SHA only** and is not substituted for current-candidate evidence. The application checks above do not qualify an image or complete private operator readiness.
 
 ## Historical candidate (not current `main`)
 
@@ -15,8 +23,8 @@ The gate results below record the pre-integration PR [#260](https://github.com/0
 ## Owner-approved pilot scope
 
 The bounded pilot uses full Element Web/Desktop acceptance in `bot-account`
-mode. Full appservice-mode Element Web/Desktop browser certification is
-deferred until after beta. This changes only the browser-certification scope:
+mode. Full appservice-mode Element Web/Desktop browser certification remains
+deferred until after beta, despite the observed appservice pass on this source. This changes only the browser-certification scope:
 backend, identity/authentication, room authorization, and CalDAV contracts
 remain required in both `appservice` and `bot-account` modes. The ordinary
 normal-bot profile retains its strict 0/25-event limits: cold activation and
