@@ -266,6 +266,7 @@ const FAILURE_CHECK_BY_CODE = new Map([
   ['volume-set-mismatch', 'volume'],
   ['network-set-mismatch', 'network'],
   ['foreign-listener-changed', 'listener'],
+  ['foreign-state-changed', 'foreign-inventory'],
   ['reminder-fixture-failed', 'reminder-fixture'],
   ['reminder-fixture-summary-invalid', 'reminder-fixture'],
   ['reminder-marker-count-mismatch', 'reminder-fixture'],
@@ -286,6 +287,49 @@ const SAFE_CONTAINER_STATES = new Set([
   'dead',
 ]);
 const SAFE_HEALTH_STATES = new Set(['healthy', 'unhealthy', 'starting']);
+const FOREIGN_INVENTORY_CATEGORIES = Object.freeze([
+  'containers',
+  'networks',
+  'volumes',
+  'images',
+  'listeners',
+]);
+const FOREIGN_INVENTORY_CHECKPOINTS = new Set([
+  'owned-cleanup-preflight',
+  'success-after-containers',
+  'success-after-volumes',
+  'success-final-inventory',
+  'failure-cleanup-preflight',
+  'failure-after-containers',
+  'failure-after-volumes',
+  'failure-final-inventory',
+  'unknown',
+]);
+const CLEANUP_FOREIGN_CHECKPOINTS = Object.freeze({
+  success: Object.freeze({
+    afterContainers: 'success-after-containers',
+    afterVolumes: 'success-after-volumes',
+    finalInventory: 'success-final-inventory',
+  }),
+  failure: Object.freeze({
+    afterContainers: 'failure-after-containers',
+    afterVolumes: 'failure-after-volumes',
+    finalInventory: 'failure-final-inventory',
+  }),
+});
+const FAILURE_CLEANUP_FOREIGN_CHECKPOINTS = new Set([
+  'failure-cleanup-preflight',
+  'failure-after-containers',
+  'failure-after-volumes',
+  'failure-final-inventory',
+]);
+const FOREIGN_INVENTORY_CHANGE_KINDS = new Set([
+  'unchanged',
+  'identity-set-cardinality',
+  'ordering-only',
+  'descriptor-metadata',
+  'unknown',
+]);
 
 export function failureOperationForStage(stage) {
   return (
@@ -810,6 +854,10 @@ class RehearsalFailure extends Error {
     this.reminderFixture = projectReminderFixtureOutcome(
       diagnostic.reminderFixture,
     );
+    this.foreignInventoryChange =
+      diagnostic.foreignInventoryChange === undefined
+        ? undefined
+        : projectForeignInventoryChange(diagnostic.foreignInventoryChange);
   }
 }
 
@@ -1179,6 +1227,114 @@ export function foreignInventory(inventory, runId, project) {
     }
   }
   return result;
+}
+
+function projectForeignInventoryChange(value) {
+  if (value === undefined) {
+    return {
+      checkpoint: 'not-applicable',
+      containers: 'not-applicable',
+      networks: 'not-applicable',
+      volumes: 'not-applicable',
+      images: 'not-applicable',
+      listeners: 'not-applicable',
+    };
+  }
+  const record =
+    value !== null && typeof value === 'object' && !Array.isArray(value)
+      ? value
+      : {};
+  const result = {
+    checkpoint: FOREIGN_INVENTORY_CHECKPOINTS.has(record.checkpoint)
+      ? record.checkpoint
+      : 'unknown',
+  };
+  for (const category of FOREIGN_INVENTORY_CATEGORIES) {
+    result[category] = FOREIGN_INVENTORY_CHANGE_KINDS.has(record[category])
+      ? record[category]
+      : 'unknown';
+  }
+  return result;
+}
+
+function canonicalDiagnosticValue(value, imageField = false) {
+  if (Array.isArray(value)) {
+    const items = value.map((item) => canonicalDiagnosticValue(item));
+    return imageField
+      ? items.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
+      : items;
+  }
+  if (value !== null && typeof value === 'object') {
+    const result = {};
+    for (const key of Object.keys(value).sort()) {
+      const unorderedImageField =
+        imageField && (key === 'RepoTags' || key === 'RepoDigests');
+      result[key] = canonicalDiagnosticValue(value[key], unorderedImageField);
+    }
+    return result;
+  }
+  return value;
+}
+
+function categoryIdentity(category, item) {
+  if (category === 'listeners') {
+    return typeof item === 'string' && item.length > 0 ? item : undefined;
+  }
+  const key = category === 'volumes' ? 'Name' : 'Id';
+  return item !== null &&
+    typeof item === 'object' &&
+    typeof item[key] === 'string' &&
+    item[key].length > 0
+    ? item[key]
+    : undefined;
+}
+
+function canonicalInventoryCategory(category, items) {
+  if (category === 'listeners') return [...items].sort();
+  const key = category === 'volumes' ? 'Name' : 'Id';
+  return [...items]
+    .sort((left, right) => left[key].localeCompare(right[key]))
+    .map((item) => canonicalDiagnosticValue(item, category === 'images'));
+}
+
+function inventoryCategoryChangeKind(category, before, after) {
+  if (JSON.stringify(before) === JSON.stringify(after)) return 'unchanged';
+  if (!Array.isArray(before) || !Array.isArray(after)) return 'unknown';
+  const beforeIds = before.map((item) => categoryIdentity(category, item));
+  const afterIds = after.map((item) => categoryIdentity(category, item));
+  if (
+    beforeIds.some((id) => id === undefined) ||
+    afterIds.some((id) => id === undefined)
+  ) {
+    return 'unknown';
+  }
+  const sortIds = (ids) => [...ids].sort();
+  if (
+    beforeIds.length !== afterIds.length ||
+    JSON.stringify(sortIds(beforeIds)) !== JSON.stringify(sortIds(afterIds))
+  ) {
+    return 'identity-set-cardinality';
+  }
+  try {
+    return JSON.stringify(canonicalInventoryCategory(category, before)) ===
+      JSON.stringify(canonicalInventoryCategory(category, after))
+      ? 'ordering-only'
+      : 'descriptor-metadata';
+  } catch {
+    return 'unknown';
+  }
+}
+
+function classifyForeignInventoryChange(before, after, checkpoint) {
+  const result = { checkpoint };
+  for (const category of FOREIGN_INVENTORY_CATEGORIES) {
+    result[category] = inventoryCategoryChangeKind(
+      category,
+      before?.[category],
+      after?.[category],
+    );
+  }
+  return projectForeignInventoryChange(result);
 }
 
 export function assertTaskServiceSet(
@@ -1621,11 +1777,38 @@ export function assertNoCollision(inventory, runId, project) {
   }
 }
 
-export function compareForeign(before, after, runId, project) {
+export function compareForeign(
+  before,
+  after,
+  runId,
+  project,
+  checkpoint = 'unknown',
+) {
   const left = foreignInventory(before, runId, project);
   const right = foreignInventory(after, runId, project);
   if (JSON.stringify(left) !== JSON.stringify(right)) {
-    fail('foreign-inventory', 'foreign-state-changed');
+    let foreignInventoryChange;
+    try {
+      foreignInventoryChange = classifyForeignInventoryChange(
+        left,
+        right,
+        checkpoint,
+      );
+    } catch {
+      foreignInventoryChange = projectForeignInventoryChange({ checkpoint });
+    }
+    if (
+      FOREIGN_INVENTORY_CATEGORIES.every(
+        (category) => foreignInventoryChange[category] === 'unchanged',
+      )
+    ) {
+      for (const category of FOREIGN_INVENTORY_CATEGORIES) {
+        foreignInventoryChange[category] = 'unknown';
+      }
+    }
+    fail('foreign-inventory', 'foreign-state-changed', {
+      foreignInventoryChange,
+    });
   }
 }
 
@@ -2143,6 +2326,7 @@ function removeOwnedResources({
   prefix,
 }) {
   const stage = `${prefix}-cleanup`;
+  const foreignCheckpoints = CLEANUP_FOREIGN_CHECKPOINTS[prefix] ?? {};
   const plannedContainers = new Map(
     plan.containers.map((value) => [value.Id, value]),
   );
@@ -2176,7 +2360,13 @@ function removeOwnedResources({
     `${prefix}-after-containers`,
     context,
   );
-  compareForeign(baseline, afterContainers, runId, project);
+  compareForeign(
+    baseline,
+    afterContainers,
+    runId,
+    project,
+    foreignCheckpoints.afterContainers ?? 'unknown',
+  );
   assertNoOwnedResources(afterContainers, runId, project, 'container', stage);
   const observedVolumes = afterContainers.volumes.filter(
     (volume) => ownership(volume, 'volume', runId, project) === 'owned',
@@ -2207,7 +2397,13 @@ function removeOwnedResources({
   }
 
   const afterVolumes = captureInventory(`${prefix}-after-volumes`, context);
-  compareForeign(baseline, afterVolumes, runId, project);
+  compareForeign(
+    baseline,
+    afterVolumes,
+    runId,
+    project,
+    foreignCheckpoints.afterVolumes ?? 'unknown',
+  );
   assertNoOwnedResources(afterVolumes, runId, project, 'volume', stage);
   const observedNetworks = afterVolumes.networks.filter(
     (network) => ownership(network, 'network', runId, project) === 'owned',
@@ -2238,7 +2434,13 @@ function removeOwnedResources({
   }
 
   const finalInventory = captureInventory(`${prefix}-final-inventory`, context);
-  compareForeign(baseline, finalInventory, runId, project);
+  compareForeign(
+    baseline,
+    finalInventory,
+    runId,
+    project,
+    foreignCheckpoints.finalInventory ?? 'unknown',
+  );
   assertInventoryEqual(finalInventory, baseline, `${prefix}-final-inventory`);
   for (const kind of ['container', 'network', 'volume']) {
     assertNoOwnedResources(finalInventory, runId, project, kind, stage);
@@ -2360,6 +2562,7 @@ export function formatFailureDiagnostic({
   gatewayNetworkSmoke,
   apiCrudProbe,
   reminderFixture,
+  foreignInventoryChange,
 }) {
   const safe = (value, pattern) =>
     typeof value === 'string' && pattern.test(value) ? value : 'unavailable';
@@ -2414,9 +2617,12 @@ export function formatFailureDiagnostic({
     projectGatewayNetworkSmoke(gatewayNetworkSmoke);
   const safeApiCrudProbe = projectApiCrudProbe(apiCrudProbe);
   const safeReminderFixture = projectReminderFixtureOutcome(reminderFixture);
+  const safeForeignInventoryChange = projectForeignInventoryChange(
+    foreignInventoryChange,
+  );
 
   return {
-    schema_version: 8,
+    schema_version: 9,
     result: 'failed',
     phase: 'hosted-docker-operator-v5',
     failed_phase: SAFE_PHASES.has(phase) ? phase : 'runner',
@@ -2441,6 +2647,7 @@ export function formatFailureDiagnostic({
     gateway_network_smoke: safeGatewayNetworkSmoke,
     api_crud_probe: safeApiCrudProbe,
     reminder_fixture: safeReminderFixture,
+    foreign_inventory_change: safeForeignInventoryChange,
     cleanup_status: safeCleanup,
     cleanup_attempted: attempted,
     owned_cleanup_verified: cleanupVerified,
@@ -2554,6 +2761,15 @@ export function writeFailureDiagnostic(runnerTemp, fields, update = false) {
     if (update) {
       privatePath(file, root);
       const previous = readJson(file, 'receipt-publish');
+      const foreignInventoryChangeUnchanged =
+        JSON.stringify(previous?.foreign_inventory_change) ===
+        JSON.stringify(diagnostic.foreign_inventory_change);
+      const foreignInventoryChangeAddedDuringFailureCleanup =
+        JSON.stringify(previous?.foreign_inventory_change) ===
+          JSON.stringify(projectForeignInventoryChange(undefined)) &&
+        FAILURE_CLEANUP_FOREIGN_CHECKPOINTS.has(
+          diagnostic.foreign_inventory_change?.checkpoint,
+        );
       if (
         ![
           'run_id',
@@ -2576,7 +2792,9 @@ export function writeFailureDiagnostic(runnerTemp, fields, update = false) {
         JSON.stringify(previous?.api_crud_probe) !==
           JSON.stringify(diagnostic.api_crud_probe) ||
         JSON.stringify(previous?.reminder_fixture) !==
-          JSON.stringify(diagnostic.reminder_fixture)
+          JSON.stringify(diagnostic.reminder_fixture) ||
+        (!foreignInventoryChangeUnchanged &&
+          !foreignInventoryChangeAddedDuringFailureCleanup)
       ) {
         fail('receipt-publish', 'failure-diagnostic-identity-mismatch');
       }
@@ -3195,7 +3413,7 @@ async function main() {
     stage = 'owned-cleanup-preflight';
     const current = captureInventory('pre-cleanup', context);
     diagnosticInventory = current;
-    compareForeign(baseline, current, id, project);
+    compareForeign(baseline, current, id, project, 'owned-cleanup-preflight');
     assertNoElement(current, id, project);
     assertPrivateTaskTree(taskDir, {
       runnerTemp,
@@ -3287,6 +3505,10 @@ async function main() {
           ? failureOperationForStage(error.stage)
           : 'runner-error',
       failureCode: error instanceof RehearsalFailure ? error.code : 'unknown',
+      foreignInventoryChange:
+        error instanceof RehearsalFailure
+          ? error.foreignInventoryChange
+          : undefined,
       startupStage:
         error instanceof RehearsalFailure ? error.startupStage : 'unknown',
       childExitCode:
@@ -3321,7 +3543,13 @@ async function main() {
         const { context, baseline, runId, project, images } = cleanupState;
         stage = 'failure-cleanup';
         const current = captureInventory('failure-cleanup', context);
-        compareForeign(baseline, current, runId, project);
+        compareForeign(
+          baseline,
+          current,
+          runId,
+          project,
+          'failure-cleanup-preflight',
+        );
         const plan = planOwnedCleanup(current, runId, project, images, {
           allowPartial: true,
         });
@@ -3334,7 +3562,13 @@ async function main() {
           prefix: 'failure',
         });
         cleanupStatus = 'verified';
-      } catch {
+      } catch (cleanupError) {
+        if (
+          !failure.foreignInventoryChange &&
+          cleanupError instanceof RehearsalFailure
+        ) {
+          failure.foreignInventoryChange = cleanupError.foreignInventoryChange;
+        }
         cleanupStatus = 'unverified';
       }
     }
