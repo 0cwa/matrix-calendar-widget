@@ -536,7 +536,7 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       behavior only; actual restore-service acceptance remains unverified.
 - [x] Run exact-source application acceptance on candidate
       `99d4c9f9f36aa0b0861a13499a7f7cd512c56920` (application tree
-      `97022a9d2351655d2aae0a50a44a14bd81daacc`). All five protected checks,
+      `97022a9d2351655d2aae0a50a44a14bd81daacc9`). All five protected checks,
       browser layout, CodeQL, PostgreSQL, both-mode CalDAV, standalone Desktop,
       and normal-bot plus appservice Element Web/Desktop acceptance passed.
       The prior Web refresh failure was not reproduced. Full details and
@@ -549,14 +549,15 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       index. Exact-source operator/image run
       [38892200863](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38892200863)
       failed during foreign-resource inventory. Its schema-8 summary reports
-      cleanup attempted but unverified, ownership false, and
-      foreign-state-unchanged false; resource kind, difference, and cause are
-      unknown. No accepted three-image manifest/archive exists. The source
+      cleanup attempted but unverified (`owned_cleanup_verified=false`), and
+      `foreign_inventory_unchanged=false`; resource kind, any inventory
+      difference, and cause are unknown. No three-image manifest/archive is
+      accepted for this candidate. The source
       owner is investigating the runner comparison separately; preserving
       application candidate `99d4c9f` under a later trusted workflow source
       remains subject to the existing contract and is not acceptance evidence
-      yet. Issues #255 and #251 remain open. No application installation or
-      publication has occurred.
+      yet. Issues #255 and #251 remain open. No production application
+      installation or wider rollout has occurred.
 - [ ] Keep issues #275–#278 post-pilot. In particular, defer the #275
       StoreProvider/Redux startup retirement until after the pilot.
 

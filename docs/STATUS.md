@@ -2,9 +2,9 @@
 
 _Last updated: 2026-10-16._
 
-_Current `main` and application candidate: `99d4c9f9f36aa0b0861a13499a7f7cd512c56920` (application tree `97022a9d2351655d2aae0a50a44a14bd81daacc`), including PR #294. The exact-source protected checks, CodeQL, PostgreSQL and both-mode CalDAV contracts, standalone Desktop, and normal-bot plus appservice Web/Desktop acceptance passed. The strict 0/25-event timings passed in both profiles; two trusted Element-origin opening errors per profile met the existing diagnostic predicate, with causes unknown. The earlier refresh failure was not reproduced on this source. The source-bound image/operator rehearsal failed at foreign-resource inventory; cleanup was attempted but is unverified, ownership was false, and foreign-state-unchanged was false. No accepted three-image manifest/archive exists. Application installation, source/image binding, private operator packet, target snapshots, native install, application backup/restore, and timer remain pending. See the sanitized [release gate](./RELEASE.md)._
+_Frozen application candidate: `99d4c9f9f36aa0b0861a13499a7f7cd512c56920` (application tree `97022a9d2351655d2aae0a50a44a14bd81daacc9`), accepted from merged PR #294. Exact-source protected checks, CodeQL, PostgreSQL and both-mode CalDAV contracts, standalone Desktop, and normal-bot plus appservice Web/Desktop acceptance passed. Strict 0/25-event timings passed in both profiles; two trusted Element-origin opening errors per profile met the existing diagnostic predicate, with causes unknown. The earlier refresh failure was not reproduced on this source. The source-bound image/operator rehearsal failed at foreign-resource inventory; cleanup is unverified (`owned_cleanup_verified=false`), and `foreign_inventory_unchanged=false`. No three-image manifest/archive is accepted for this candidate. Private v8 packet and native-plan source reviews are complete; final source/image binding, fresh target snapshots, native installation, actual application backup/restore, and timer execution remain pending. See the sanitized [release gate](./RELEASE.md)._
 
-_No production application is installed. Scoped pilot authority is recorded privately; broader rollout and registry publication are not authorized by that scope._
+_No production application is installed. Scoped pilot authority is recorded privately; it does not authorize broader rollout or registry publication._
 
 See the [dated continuation](handoff/2026-10-06/README.md) and
 [exact delivered-slice ledger](handoff/2026-10-06/ledger.json).
@@ -15,11 +15,11 @@ See the [dated continuation](handoff/2026-10-06/README.md) and
 
 For the owner-approved bounded pilot, the required browser profile is full Element Web/Desktop acceptance in `bot-account` mode with the existing strict 0/25-event ordinary-load limits. Full appservice-mode browser certification remains deferred after beta, although both modes passed on this candidate. Backend, identity/authentication, authorization, and CalDAV contract tests remain mandatory in both modes, and `appservice` remains the default mode. Scoped pilot authority is recorded privately; this is not broader rollout or publication authority.
 
-### Current main baseline and next-candidate acceptance status
+### Frozen application candidate and operator gate
 
-`main` is `99d4c9f9f36aa0b0861a13499a7f7cd512c56920` (application tree `97022a9d2351655d2aae0a50a44a14bd81daacc`). Fresh exact-source CI, CodeQL, service contracts, standalone Desktop, and full Element Web/Desktop runs passed; the earlier refresh/navigation failure was not reproduced. This establishes application-source acceptance only.
+Application acceptance remains tied to frozen source `99d4c9f9f36aa0b0861a13499a7f7cd512c56920` (application tree `97022a9d2351655d2aae0a50a44a14bd81daacc9`). Fresh exact-source CI, CodeQL, service contracts, standalone Desktop, and full Element Web/Desktop runs passed; the earlier refresh/navigation failure was not reproduced. Later trusted tooling and documentation changes have separate provenance. This establishes application-source acceptance only.
 
-The exact-source operator/image rehearsal [38892200863](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38892200863) failed during foreign-resource inventory. The sanitized schema-8 result reports cleanup attempted but unverified, ownership false, and foreign-state-unchanged false; resource kind, difference, and cause are unknown. The run summary SHA-256 is `8ca5ae56084877db2c839164eec56790979ca126e5d4e717f07275cc64e66712`. No accepted three-image manifest/archive exists, and other default projections do not establish that preceding operations passed. The source owner is investigating the runner comparison separately. Issues #255 and #251 remain open; #291 is closed after actual cleanup and normal-bot criteria passed. Keep #275–#278 deferred until after the pilot. No production application is installed.
+The exact-source operator/image rehearsal [38892200863](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38892200863) failed during foreign-resource inventory. The sanitized schema-8 result reports cleanup attempted but unverified (`owned_cleanup_verified=false`) and `foreign_inventory_unchanged=false`; resource kind, any inventory difference, and cause are unknown. The run summary SHA-256 is `8ca5ae56084877db2c839164eec56790979ca126e5d4e717f07275cc64e66712`. No three-image manifest/archive is accepted for this candidate, and other default projections do not establish that preceding operations passed. Private v8 packet and native-plan source reviews are complete. Final source/image binding, fresh target snapshots, native installation, actual application backup/restore, and timer execution remain pending. Issues #255 and #251 remain open; #291 is closed after actual cleanup and normal-bot criteria passed. Keep #275–#278 deferred until after the pilot. No production application is installed.
 
 PR #247's hosted evidence is tied to source `acc535dfe69001403c67853b2171672e74056f51`, tree `784aaeac9f6cf733ed7f38b50eb46bcc4b77c333`; merge commit `20dd7357d833238ac23d817bd29bdb0a9f6d4761` has that same tree. The [Element run](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532436) passed for appservice and normal-bot profiles; the [Real Radicale contract](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532535), [CI](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532444), [Desktop workflow](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532500), [PostgreSQL contract](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532435), and [CodeQL](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532479) also passed. These runs validate that source tree, not a fresh run of the later merge commit. Independent review cleared the exact source. CodeRabbit reported workflow success while its review was skipped because the PR was draft; this is not a CodeRabbit approval. The two trusted opening errors are diagnostic only under the explicit opening-stage predicate after every startup, authentication, CRUD, Desktop, reminder, restore, and timing gate passes; unknown, widget-origin, or later errors remain failures.
 
@@ -356,10 +356,17 @@ loading, memory, and actual clients remain unmeasured.
   the follow-up source but does not explain the original failure; no fix to its
   underlying cause is claimed. Issue #9 and operator readiness remain open.
 
-- **Current candidate gate:** application acceptance passed on `99d4c9f`
-  (application tree `97022a9`). See the [sanitized release index](./RELEASE.md)
-  for exact runs and results. This records isolated application behavior only;
-  image qualification and private operator readiness remain blocked.
+- **Historical candidate gate:** application acceptance passed on PR #229 source
+  `fcab6d754d9dc21a2bed8e686a20f6a8a4c2e378`, merged to `main` with the same
+  tree. [CI](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37916317359),
+  [CodeQL](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37916317433),
+  [CalDAV](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37916317441),
+  [standalone Desktop](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37916317482),
+  and [paired Element Web/Desktop](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37916317363)
+  workflows passed; independent source reviews cleared the candidate. This
+  records isolated application behavior only. Private operator readiness,
+  target-specific deployment and recovery validation, and any rollout decision
+  remain open. No production host or configuration was inspected.
 - **Operator readiness:** homeserver/proxy behavior, OpenID query-token log redaction, selected Radicale image/configuration, PostgreSQL endpoint TLS/CA and role, backups/restores, secrets, network exposure, and rollback remain to be verified. The beta baseline uses the project-owned Radicale image and its own store; replacing an existing service or reusing its `/data` is optional and would require additional image/data-path compatibility and recovery evidence. The Compose sidecar does not migrate another service's data.
 - **Release/deployment:** the project remains pre-alpha. Build and contract evidence do not authorize image/chart publication or a live deployment.
 - **Historical source-bound image archive:** trusted main workflow run
@@ -391,11 +398,9 @@ loading, memory, and actual clients remain unmeasured.
   Independent artifact review cleared at the trusted GitHub runner boundary.
   The 644,497,156-byte image ZIP was not downloaded locally, so local
   verification of the full ZIP is not claimed. Both artifacts are listed with
-  a seven-day expiry of 2026-10-16. This historical archive is not accepted for
-  the current source; current run `38892200863` failed at foreign-resource
-  inventory. Source-bound image qualification, target-specific operator
-  comparison, deployment and recovery validation, and private operator
-  readiness remain open; see the [M8 image archive task](./PLAN.md#m8--hardening-and-release).
+  a seven-day expiry of 2026-10-16. Target-specific operator comparison,
+  deployment and recovery validation, and private operator readiness remain
+  open; see the [M8 image archive task](./PLAN.md#m8--hardening-and-release).
 
 ## Documentation note
 
