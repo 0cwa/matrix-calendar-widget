@@ -55,6 +55,19 @@ const VOLUMES = Object.freeze([
   'postgres-data',
   'reminder-restore-radicale-data',
 ]);
+// Config.Volumes on the pinned widget-server and Radicale base images. Keep
+// their unused scratch paths temporary so Compose does not create anonymous
+// volumes that appear as foreign resources in the shared Docker inventory.
+// Mode 1777 allows the images' non-root users to write without UID guesses;
+// size caps bound memory use. Startup and write access remain runtime gates.
+export const HOSTED_INHERITED_IMAGE_TMPFS = Object.freeze({
+  widget: Object.freeze([
+    '/tmp:mode=1777,size=64m',
+    '/var/cache/nginx:mode=1777,size=64m',
+  ]),
+  radicale: Object.freeze(['/var/lib/radicale:mode=1777,size=16m']),
+  'restore-radicale': Object.freeze(['/var/lib/radicale:mode=1777,size=16m']),
+});
 const PORTS = Object.freeze([8008, 5232, 3000, 8080, 5233, 8090]);
 const FAILURE_DIAGNOSTIC_FILE =
   'matrix-calendar-widget-operator-rehearsal-failure.json';
@@ -267,6 +280,7 @@ const FAILURE_CHECK_BY_CODE = new Map([
   ['network-set-mismatch', 'network'],
   ['foreign-listener-changed', 'listener'],
   ['foreign-state-changed', 'foreign-inventory'],
+  ['inherited-image-volume-mismatch', 'volume'],
   ['reminder-fixture-failed', 'reminder-fixture'],
   ['reminder-fixture-summary-invalid', 'reminder-fixture'],
   ['reminder-marker-count-mismatch', 'reminder-fixture'],
@@ -1071,7 +1085,7 @@ export function fixtureIdentity(actual, expectedTag) {
   };
 }
 
-function makeComposeOverride(lock, runId, project) {
+export function makeComposeOverride(lock, runId, project) {
   const byRole = new Map(lock.images.map((image) => [image.role, image.ref]));
   const serviceImage = (service) => {
     if (service === 'restore-radicale') return byRole.get('radicale');
@@ -1089,6 +1103,10 @@ function makeComposeOverride(lock, runId, project) {
       '    labels:',
       `      ${LOCAL_LABEL}: "${runId}"`,
     );
+    const tmpfs = HOSTED_INHERITED_IMAGE_TMPFS[service] ?? [];
+    if (tmpfs.length > 0) {
+      lines.push('    tmpfs:', ...tmpfs.map((mount) => `      - "${mount}"`));
+    }
   }
   lines.push(
     '  element:',
@@ -2294,7 +2312,7 @@ export function handoffGeneratedComposeEnvironment(
   return generatedCompose;
 }
 
-function validateComposeModel(model, lock, runId, project) {
+export function validateComposeModel(model, lock, runId, project) {
   const serviceNames = Object.keys(model?.services ?? {}).sort();
   const expected = [...SERVICES, 'element'].sort();
   if (JSON.stringify(serviceNames) !== JSON.stringify(expected)) {
@@ -2302,6 +2320,15 @@ function validateComposeModel(model, lock, runId, project) {
   }
   const images = new Map(lock.images.map((image) => [image.role, image.ref]));
   for (const service of SERVICES) {
+    const actualTmpfs = model.services[service]?.tmpfs;
+    const expectedTmpfs = HOSTED_INHERITED_IMAGE_TMPFS[service] ?? [];
+    if (
+      (actualTmpfs !== undefined && !Array.isArray(actualTmpfs)) ||
+      JSON.stringify([...(actualTmpfs ?? [])].sort()) !==
+        JSON.stringify([...expectedTmpfs].sort())
+    ) {
+      fail('compose-validation', 'inherited-image-volume-mismatch');
+    }
     const expectedRef =
       service === 'restore-radicale'
         ? images.get('radicale')
