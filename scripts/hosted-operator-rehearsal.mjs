@@ -2583,7 +2583,7 @@ function assertInventoryEqual(actual, expected, stage) {
   }
 }
 
-function removeOwnedResources({
+export function removeOwnedResources({
   plan,
   context,
   baseline,
@@ -2593,6 +2593,9 @@ function removeOwnedResources({
 }) {
   const stage = `${prefix}-cleanup`;
   const foreignCheckpoints = CLEANUP_FOREIGN_CHECKPOINTS[prefix] ?? {};
+  const networkAfterContainerRemoval = plan.network
+    ? { ...plan.network, Containers: {} }
+    : undefined;
   const plannedContainers = new Map(
     plan.containers.map((value) => [value.Id, value]),
   );
@@ -2674,9 +2677,16 @@ function removeOwnedResources({
   const observedNetworks = afterVolumes.networks.filter(
     (network) => ownership(network, 'network', runId, project) === 'owned',
   );
+  if (
+    observedNetworks.some(
+      (network) => Object.keys(network.Containers ?? {}).length !== 0,
+    )
+  ) {
+    fail(stage, 'owned-network-still-attached');
+  }
   assertInventoryEqual(
     observedNetworks,
-    plan.network ? [plan.network] : [],
+    networkAfterContainerRemoval ? [networkAfterContainerRemoval] : [],
     stage,
   );
   if (plan.network) {
@@ -2686,11 +2696,12 @@ function removeOwnedResources({
       context,
     );
     if (fresh.length !== 1) fail(stage, 'network-changed-before-cleanup');
-    assertInventoryEqual(stableNetwork(fresh[0]), plan.network, stage);
-    currentIdentity(plan.network, 'network', runId, project);
-    if (Object.keys(plan.network.Containers ?? {}).length !== 0) {
+    const currentNetwork = stableNetwork(fresh[0]);
+    if (Object.keys(currentNetwork.Containers ?? {}).length !== 0) {
       fail(stage, 'owned-network-still-attached');
     }
+    assertInventoryEqual(currentNetwork, networkAfterContainerRemoval, stage);
+    currentIdentity(plan.network, 'network', runId, project);
     runTask(
       `${prefix}-remove-network`,
       'docker',
