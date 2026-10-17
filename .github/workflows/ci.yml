@@ -45,6 +45,11 @@ jobs:
       - name: Install dependencies
         run: yarn install --frozen-lockfile
 
+      - name: Diagnose formatting of new pilot files (temporary)
+        run: |
+          yarn prettier --write scripts/validate-pilot-sidecar.test.mjs scripts/validate-sidecar-compose.mjs
+          git --no-pager diff -- scripts/validate-pilot-sidecar.test.mjs scripts/validate-sidecar-compose.mjs
+
       - name: Lint E2E
         run: yarn workspace e2e lint
 
