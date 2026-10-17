@@ -473,6 +473,20 @@ same options and shell environment that will be used for deployment:
 node scripts/validate-sidecar-compose.mjs --project-name matrix-calendar-sidecar --env-file deploy/.env.local
 ```
 
+Then start the stack with the same project name and interpolation file so
+Compose reuses its named volumes:
+
+```bash
+docker compose --project-name matrix-calendar-sidecar --env-file deploy/.env.local -f deploy/etke-sidecar.compose.yaml up -d
+```
+
+Route the public API URL without stripping the `/v1` path used by the gateway.
+The browser must be able to reach both HTTPS hostnames. Confirm widget loading,
+Matrix OpenID authentication, and personal-calendar access with a test account
+before inviting users. This example does not enable room-calendar access, move
+existing calendars, or validate a live etke-managed host. Rehearse image
+updates and volume recovery with disposable data before relying on it.
+
 ### Selected #251 pilot: opt-in, source-bound startup contract
 
 The generic Compose file and `.env` example intentionally retain the
@@ -553,20 +567,6 @@ Preserve the existing managed services and stores. Issue
 [#251](https://github.com/0cwa/matrix-calendar-widget/issues/251) governs
 deployment, with the source/evidence ledger in
 [#255](https://github.com/0cwa/matrix-calendar-widget/issues/255).
-
-Then start the stack with the same project name and interpolation file so
-Compose reuses its named volumes:
-
-```bash
-docker compose --project-name matrix-calendar-sidecar --env-file deploy/.env.local -f deploy/etke-sidecar.compose.yaml up -d
-```
-
-Route the public API URL without stripping the `/v1` path used by the gateway.
-The browser must be able to reach both HTTPS hostnames. Confirm widget loading,
-Matrix OpenID authentication, and personal-calendar access with a test account
-before inviting users. This example does not enable room-calendar access, move
-existing calendars, or validate a live etke-managed host. Rehearse image
-updates and volume recovery with disposable data before relying on it.
 
 ## Optional reminder PostgreSQL database
 
