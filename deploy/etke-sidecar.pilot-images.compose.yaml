@@ -1,0 +1,12 @@
+# Opt-in image selection for the approved #251 pilot only.
+# Source: 99d4c9f9f36aa0b0861a13499a7f7cd512c56920
+# Verified archive: workflow 38913010664, attempt 1, linux/amd64.
+# Preflight still compares the locally loaded configuration IDs to the
+# authenticated archive manifest. Tags alone are not sufficient.
+services:
+  radicale:
+    image: matrix-calendar-widget/radicale-openid:archive-38913010664-1
+  server:
+    image: matrix-calendar-widget/server:archive-38913010664-1
+  widget:
+    image: matrix-calendar-widget/widget:archive-38913010664-1
