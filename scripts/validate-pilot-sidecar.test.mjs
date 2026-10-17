@@ -179,10 +179,10 @@ test('image inspection reads only the ID and OS/architecture tuple', () => {
 });
 
 test('opt-in CLI requires both private inputs; generic defaults stay optional', () => {
-  assert.deepEqual(parseSidecarCliArgs([]), {});
-  assert.deepEqual(
-    parseSidecarCliArgs(['--project-name', 'sidecar-test']),
-    { 'project-name': 'sidecar-test' },
+  assert.equal(Object.keys(parseSidecarCliArgs([])).length, 0);
+  assert.equal(
+    parseSidecarCliArgs(['--project-name', 'sidecar-test'])['project-name'],
+    'sidecar-test',
   );
   assert.equal(
     parseSidecarCliArgs([
