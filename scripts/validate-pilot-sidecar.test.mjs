@@ -3,7 +3,6 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { parseSidecarCliArgs } from './validate-sidecar-compose.mjs';
 import {
   loadTrustedPilotManifest,
   parsePilotImageInspection,
@@ -11,6 +10,7 @@ import {
   readPrivatePilotBinding,
   validatePilotSidecarModel,
 } from './validate-pilot-sidecar.mjs';
+import { parseSidecarCliArgs } from './validate-sidecar-compose.mjs';
 
 const expectedBinding = {
   roomId: '!pilot-room:example.org',
@@ -26,10 +26,7 @@ const expectedIds = Object.fromEntries(
 
 function fixture() {
   const services = Object.fromEntries(
-    PILOT_IMAGES.map((image) => [
-      image.service,
-      { image: image.tag },
-    ]),
+    PILOT_IMAGES.map((image) => [image.service, { image: image.tag }]),
   );
   services.server.environment = {
     ROOM_CALENDAR_PRINCIPAL_MODE: 'bot-account',
@@ -74,8 +71,7 @@ test('rejects default, missing and incorrect principal mode even with a valid ro
     if (mode === undefined) {
       delete f.model.services.server.environment.ROOM_CALENDAR_PRINCIPAL_MODE;
     } else {
-      f.model.services.server.environment.ROOM_CALENDAR_PRINCIPAL_MODE =
-        mode;
+      f.model.services.server.environment.ROOM_CALENDAR_PRINCIPAL_MODE = mode;
     }
     mustReject(f);
   }
@@ -84,8 +80,7 @@ test('rejects default, missing and incorrect principal mode even with a valid ro
 test('rejects disabled room access, missing/malformed/extra or wrong binding', () => {
   for (const access of [undefined, 'false', false]) {
     const f = fixture();
-    f.model.services.server.environment.ROOM_CALENDAR_ACCESS_ENABLED =
-      access;
+    f.model.services.server.environment.ROOM_CALENDAR_ACCESS_ENABLED = access;
     mustReject(f);
   }
 
@@ -95,7 +90,9 @@ test('rejects disabled room access, missing/malformed/extra or wrong binding', (
     'invalid-json',
     '[]',
     JSON.stringify([expectedBinding, expectedBinding]),
-    JSON.stringify([{ roomId: '!other:example.org', calendarId: 'team-calendar' }]),
+    JSON.stringify([
+      { roomId: '!other:example.org', calendarId: 'team-calendar' },
+    ]),
     JSON.stringify([{ roomId: expectedBinding.roomId, calendarId: 'other' }]),
     JSON.stringify([{ ...expectedBinding, unexpected: true }]),
   ]) {
@@ -171,7 +168,12 @@ test('image inspection reads only the ID and OS/architecture tuple', () => {
     ),
     { id: 'sha256:' + '1'.repeat(64), platform: 'linux/amd64' },
   );
-  for (const invalid of ['', '{}', '["id", "linux"]', '["id", null, "amd64"]']) {
+  for (const invalid of [
+    '',
+    '{}',
+    '["id", "linux"]',
+    '["id", null, "amd64"]',
+  ]) {
     assert.throws(() => parsePilotImageInspection(invalid), {
       message: 'Pilot sidecar verification failed.',
     });
@@ -213,7 +215,9 @@ test('private file inputs fail closed on absent or unauthenticated content', () 
   try {
     const bindingFile = join(directory, 'binding.json');
     const manifestFile = join(directory, 'manifest.json');
-    writeFileSync(bindingFile, JSON.stringify(expectedBinding), { mode: 0o600 });
+    writeFileSync(bindingFile, JSON.stringify(expectedBinding), {
+      mode: 0o600,
+    });
     assert.deepEqual(readPrivatePilotBinding(bindingFile), expectedBinding);
 
     writeFileSync(
