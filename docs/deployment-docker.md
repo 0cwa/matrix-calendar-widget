@@ -487,6 +487,87 @@ before inviting users. This example does not enable room-calendar access, move
 existing calendars, or validate a live etke-managed host. Rehearse image
 updates and volume recovery with disposable data before relying on it.
 
+### Selected #251 pilot: opt-in, source-bound startup contract
+
+The generic Compose file and `.env` example intentionally retain the
+`appservice` and `:local` defaults for other deployments. They are **not** the
+accepted pilot's startup configuration. For the bounded pilot in
+[beta-scope.md](./beta-scope.md), select `bot-account` in the operator's
+private `deploy/.env.local`, configure exactly one approved room/calendar pair
+and the room-access gate in the ignored `deploy/.env.server`, and use the
+separate [pilot image overlay](../deploy/etke-sidecar.pilot-images.compose.yaml).
+Do not change the generic defaults or silently fall back to them.
+
+The overlay selects all three `archive-38913010664-1` image tags from the
+source-bound Linux/amd64 archive of accepted application source
+`99d4c9f9f36aa0b0861a13499a7f7cd512c56920`. The additional preflight
+requires the exact authenticated `manifest.json` from workflow run
+[38913010664](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38913010664),
+attempt 1, with SHA-256
+`d0315e465e33e38f093fe4de2faf0e5eb0f57afc6fec7e0c2aa325a727d9ae49`.
+First verify that manifest and the image archives using the release procedure
+above; the preflight does **not** substitute for archive verification. The
+manifest must remain in an operator-private file, not in the repository.
+
+Separately, the authorized operator supplies a private, locally protected JSON
+file with exactly the approved `roomId` and `calendarId` from the operator
+record, for example (these are synthetic identifiers):
+
+`{"roomId":"!pilot-room:example.org","calendarId":"team-calendar"}`
+
+No credentials belong in that file. Do not use its example values for a real
+pilot; do not commit the actual file, the rendered configuration, or any target
+identifiers. The selected room binding must independently match the private
+approval. Until those private inputs exist, the pilot preflight must fail.
+
+Run from the repository root with the same shell, project name, optional
+private Compose override, and interpolation file planned for activation:
+
+```bash
+node scripts/validate-sidecar-compose.mjs \
+  --project-name matrix-calendar-sidecar \
+  --env-file deploy/.env.local \
+  --pilot \
+  --pilot-binding-file /private/approved-pilot-binding.json \
+  --pilot-manifest /private/verified-archive-manifest.json
+```
+
+The private file paths above are placeholders. If the operator needs a
+separate private Compose override, add `--compose-override /private/override.yaml`
+to preflight **and** its final `-f` file to the activation command after
+the pilot overlay. The pilot preflight renders the complete Compose model,
+requires `bot-account`, enabled room access, exactly the independently
+approved room/calendar pair, and all three exact archive tags. It then
+inspects only the local images' configuration IDs and OS/architecture,
+matching each image against the pinned authenticated manifest, and fails
+closed on missing files, missing images, wrong mode/binding, changed tags,
+IDs, or platform. It does not print resolved configuration, credentials,
+private binding identifiers, or image metadata. No container is started by
+this validation.
+
+If and only if the separately reviewed target-specific operator authority
+and all private runtime gates permit activation, the corresponding Compose
+command must use the **same** interpolation, project name, overlay, and any
+private override:
+
+```bash
+docker compose --project-name matrix-calendar-sidecar \
+  --env-file deploy/.env.local \
+  -f deploy/etke-sidecar.compose.yaml \
+  -f deploy/etke-sidecar.pilot-images.compose.yaml \
+  up -d
+```
+
+A successful source/Compose preflight is **not** live Matrix identity
+validation, owner authority verification, on-host UI acceptance, backup,
+restore, rollback, or wider-rollout approval. Perform it immediately before
+an authorized startup and re-run it if any manifest, binding, image or
+configuration input changes; avoid any unreviewed mutation in between.
+Preserve the existing managed services and stores. Issue
+[#251](https://github.com/0cwa/matrix-calendar-widget/issues/251) governs
+deployment, with the source/evidence ledger in
+[#255](https://github.com/0cwa/matrix-calendar-widget/issues/255).
+
 ## Optional reminder PostgreSQL database
 
 The server can persist Matrix reminder sidecar state in a separate

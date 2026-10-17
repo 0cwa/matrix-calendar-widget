@@ -32,6 +32,16 @@ jobs:
       - name: Test hosted Docker operator rehearsal guards
         run: node --test scripts/hosted-operator-rehearsal.test.mjs
 
+      - name: Test selected-pilot sidecar contract (synthetic, no host)
+        run: node --test scripts/validate-pilot-sidecar.test.mjs
+
+      - name: Check pilot image overlay syntax (no services started)
+        run: |
+          docker compose --env-file deploy/etke-sidecar.env.example \
+            -f deploy/etke-sidecar.compose.yaml \
+            -f deploy/etke-sidecar.pilot-images.compose.yaml \
+            config --quiet
+
       - name: Install dependencies
         run: yarn install --frozen-lockfile
 
