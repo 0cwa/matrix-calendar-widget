@@ -304,8 +304,7 @@ function composePrefix(options) {
   }
   args.push('-f', COMPOSE_FILE);
   if (options.pilot) args.push('-f', PILOT_COMPOSE_FILE);
-  if (options['compose-override'])
-    args.push('-f', options['compose-override']);
+  if (options['compose-override']) args.push('-f', options['compose-override']);
   return args;
 }
 
