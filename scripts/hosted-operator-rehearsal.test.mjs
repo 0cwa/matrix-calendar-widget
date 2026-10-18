@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   chmodSync,
   copyFileSync,
@@ -31,6 +31,7 @@ import {
   assertNoCollision,
   assertReminderResult,
   assertTaskServiceSet,
+  canonicalLocalJson,
   compareForeign,
   enableHostedSharedDockerRehearsal,
   exactSourceImages,
@@ -42,23 +43,22 @@ import {
   GATEWAY_NETWORK_SMOKE_SCRIPT,
   gatewayNetworkSmokeArgs,
   handoffGeneratedComposeEnvironment,
+  hashExtractedGitTree,
   HOSTED_INHERITED_IMAGE_TMPFS,
   HOSTED_REMINDER_FIXTURE_FAILURE_PHASES,
+  isLocalProfileHostedContext,
+  listenerScopeDelta,
   LOCAL_MICROSANDBOX_MANIFEST_EXAMPLE_WITH_PLACEHOLDERS,
   LOCAL_MICROSANDBOX_MANIFEST_SCHEMA,
   LOCAL_MICROSANDBOX_PROBE_RECEIPT_EXAMPLE_WITH_PLACEHOLDERS,
   LOCAL_MICROSANDBOX_PROBE_RECEIPT_SCHEMA,
-  listenerScopeDelta,
-  canonicalLocalJson,
-  hashExtractedGitTree,
-  isLocalProfileHostedContext,
   localProfileReceipt,
   lockedLocalFixtureIdentity,
   makeComposeOverride,
   parseApiCrudProbeFailure,
   parseGatewayNetworkSmokeFailure,
-  parseReminderFixtureOutcome,
   parseOperatorRehearsalProfileArgs,
+  parseReminderFixtureOutcome,
   parseStartupFailureMarker,
   planOwnedCleanup,
   removeOwnedResources,
@@ -70,8 +70,8 @@ import {
   validateLocalProfileReceipt,
   validateLockedImageInspect,
   writeDockerAdapter,
-  writeLocalDockerShim,
   writeFailureDiagnostic,
+  writeLocalDockerShim,
 } from './hosted-operator-rehearsal.mjs';
 
 const runId = '0123456789abcdef';
@@ -228,7 +228,10 @@ test('local profile manifest is closed and pins source, lineage, endpoint, and o
   );
   assert.equal(validateLocalManifestContract(example), example);
   assert.equal(LOCAL_MICROSANDBOX_MANIFEST_SCHEMA.additionalProperties, false);
-  assert.equal(LOCAL_MICROSANDBOX_PROBE_RECEIPT_SCHEMA.additionalProperties, false);
+  assert.equal(
+    LOCAL_MICROSANDBOX_PROBE_RECEIPT_SCHEMA.additionalProperties,
+    false,
+  );
   assert.equal(
     canonicalLocalJson(
       JSON.parse(
@@ -295,7 +298,10 @@ test('local fixture lock rejects wrong loaded IDs, tags, repo digests, and platf
       RepoDigests: [expected.repo_digest],
     },
   ];
-  assert.equal(lockedLocalFixtureIdentity(actual, expected).ref, expected.repo_digest);
+  assert.equal(
+    lockedLocalFixtureIdentity(actual, expected).ref,
+    expected.repo_digest,
+  );
   for (const invalid of [
     [{ ...actual[0], Id: `sha256:${'e'.repeat(64)}` }],
     [{ ...actual[0], Architecture: 'arm64' }],
@@ -446,7 +452,10 @@ test('microsandbox probe receipt binds current guest identity and manifest prove
       .digest('hex'),
   });
   assert.ok(Object.values(receipt.checks).every((value) => value === 'passed'));
-  assert.equal(validateLocalProbeReceipt(manifest, receiptPath).result, 'passed');
+  assert.equal(
+    validateLocalProbeReceipt(manifest, receiptPath).result,
+    'passed',
+  );
 
   for (const mutate of [
     (value) => {
@@ -483,7 +492,9 @@ test('local profile rejects GitHub hosted context and cannot publish a hosted su
   const result = spawnSync(
     process.execPath,
     [
-      fileURLToPath(new URL('./hosted-operator-rehearsal.mjs', import.meta.url)),
+      fileURLToPath(
+        new URL('./hosted-operator-rehearsal.mjs', import.meta.url),
+      ),
       '--profile',
       'local-microsandbox',
       '--manifest',
@@ -542,7 +553,10 @@ test('local receipt refuses false success and carries only its closed contract',
     null,
     'verified',
   );
-  assert.equal(validateLocalProfileReceipt(successful, manifest).result, 'passed');
+  assert.equal(
+    validateLocalProfileReceipt(successful, manifest).result,
+    'passed',
+  );
   assert.throws(
     () =>
       validateLocalProfileReceipt(
@@ -572,9 +586,13 @@ test('extracted Git archive hashing matches Git tree identity and rejects symlin
     mode: 0o755,
   });
   chmodSync(join(root, 'nested', 'run.sh'), 0o755);
-  const init = spawnSync('git', ['init', '--quiet', root], { encoding: 'utf8' });
+  const init = spawnSync('git', ['init', '--quiet', root], {
+    encoding: 'utf8',
+  });
   assert.equal(init.status, 0, init.stderr);
-  const add = spawnSync('git', ['-C', root, 'add', '--all'], { encoding: 'utf8' });
+  const add = spawnSync('git', ['-C', root, 'add', '--all'], {
+    encoding: 'utf8',
+  });
   assert.equal(add.status, 0, add.stderr);
   const tree = spawnSync('git', ['-C', root, 'write-tree'], {
     encoding: 'utf8',

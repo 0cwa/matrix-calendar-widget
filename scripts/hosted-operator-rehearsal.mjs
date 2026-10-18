@@ -1247,7 +1247,9 @@ export const LOCAL_MICROSANDBOX_PROBE_RECEIPT_EXAMPLE_WITH_PLACEHOLDERS =
       attempt: 1,
       fixture_lock_sha256: '0'.repeat(64),
     },
-    checks: Object.fromEntries(LOCAL_PROBE_CHECKS.map((name) => [name, 'passed'])),
+    checks: Object.fromEntries(
+      LOCAL_PROBE_CHECKS.map((name) => [name, 'passed']),
+    ),
   });
 
 export function canonicalLocalJson(value) {
@@ -1369,7 +1371,9 @@ function validateJsonSchemaValue(
         }
       }
     }
-    for (const [key, propertySchema] of Object.entries(schema.properties ?? {})) {
+    for (const [key, propertySchema] of Object.entries(
+      schema.properties ?? {},
+    )) {
       if (Object.hasOwn(value, key)) {
         validateJsonSchemaValue(value[key], propertySchema, stage, code);
       }
@@ -1496,7 +1500,12 @@ export function hashExtractedGitTree(root) {
         fail('local-profile-provenance', 'archive-tree-entry-invalid');
       }
       if (info.isDirectory()) {
-        entries.push({ name, mode: '40000', digest: visit(file), directory: true });
+        entries.push({
+          name,
+          mode: '40000',
+          digest: visit(file),
+          directory: true,
+        });
       } else if (info.isFile()) {
         const executable = (info.mode & 0o111) !== 0;
         const body = readFileSync(file);
@@ -1586,7 +1595,10 @@ export function validateLocalProbeReceipt(manifest, receiptPath) {
   const observed = Date.parse(receipt.observed_at);
   let currentBootId;
   try {
-    currentBootId = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
+    currentBootId = readFileSync(
+      '/proc/sys/kernel/random/boot_id',
+      'utf8',
+    ).trim();
   } catch {
     fail('local-profile-probe', 'guest-identity-unavailable');
   }
@@ -1671,8 +1683,7 @@ export function validateLocalProfilePaths(manifest, manifestPath) {
     'source-archive-provenance-mismatch',
   );
   localContract(
-    sha256File(paths.tooling_archive) ===
-      manifest.tooling.git_archive_sha256 &&
+    sha256File(paths.tooling_archive) === manifest.tooling.git_archive_sha256 &&
       hashExtractedGitTree(paths.tooling_root) === manifest.tooling.tree,
     'tooling-archive-provenance-mismatch',
   );
@@ -1851,7 +1862,8 @@ export function exactSourceImages(
   const workflowSha = hostedBinding
     ? hostedBinding.workflowSha
     : required(process.env, 'RELEASE_WORKFLOW_SHA');
-  const expectedRepository = hostedBinding?.repository ?? '0cwa/matrix-calendar-widget';
+  const expectedRepository =
+    hostedBinding?.repository ?? '0cwa/matrix-calendar-widget';
   const expectedWorkflowRef =
     hostedBinding?.workflowRef ??
     '0cwa/matrix-calendar-widget/.github/workflows/release-image-archive.yml@refs/heads/main';
@@ -1972,7 +1984,8 @@ export function lockedLocalFixtureIdentity(actual, expected) {
     (candidate) =>
       candidate.role === expected?.role && candidate.tag === expected?.tag,
   );
-  const inspected = Array.isArray(actual) && actual.length === 1 ? actual[0] : null;
+  const inspected =
+    Array.isArray(actual) && actual.length === 1 ? actual[0] : null;
   if (
     !fixture ||
     !inspected ||
@@ -3852,15 +3865,15 @@ function writeLocalProfileReceipt(
   failedPhase,
   cleanupStatus,
 ) {
-  const file = path.join(runnerTemp, `.mcw-local-microsandbox-${id}.receipt.json`);
+  const file = path.join(
+    runnerTemp,
+    `.mcw-local-microsandbox-${id}.receipt.json`,
+  );
   const receipt = validateLocalProfileReceipt(
     localProfileReceipt(manifest, checks, result, failedPhase, cleanupStatus),
     manifest,
   );
-  writePrivate(
-    file,
-    canonicalLocalJson(receipt),
-  );
+  writePrivate(file, canonicalLocalJson(receipt));
   privatePath(file, runnerTemp);
   return file;
 }
@@ -4855,8 +4868,7 @@ async function main() {
     const current = captureInventory('pre-cleanup', context);
     diagnosticInventory = current;
     compareForeign(baseline, current, id, project, 'owned-cleanup-preflight');
-    if (localMode)
-      localChecks.foreign_inventory_preservation = 'passed';
+    if (localMode) localChecks.foreign_inventory_preservation = 'passed';
     assertNoElement(current, id, project);
     assertPrivateTaskTree(taskDir, {
       runnerTemp,
@@ -5065,9 +5077,7 @@ async function main() {
         localChecks.source_binding = 'failed';
       } else if (failedPhase === 'fixture-image-lock') {
         localChecks.fixture_identity = 'failed';
-      } else if (
-        ['api-route-smoke', 'api-crud-probe'].includes(failedPhase)
-      ) {
+      } else if (['api-route-smoke', 'api-crud-probe'].includes(failedPhase)) {
         localChecks.api_authorization_and_crud = 'failed';
       } else if (
         ['reminder-initial', 'reminder-restart'].includes(failedPhase)
