@@ -288,6 +288,28 @@ test('local profile manifest is closed and pins source, lineage, guest networkin
   }
 });
 
+test('local Postgres fixture manifest accepts only the Docker Hub short alias spelling', () => {
+  const shortAlias = structuredClone(
+    LOCAL_MICROSANDBOX_MANIFEST_EXAMPLE_WITH_PLACEHOLDERS,
+  );
+  shortAlias.fixture_lock.images[1].repo_digest = `postgres@sha256:${'0'.repeat(64)}`;
+  assert.equal(validateLocalManifestContract(shortAlias), shortAlias);
+
+  for (const repoDigest of [
+    `registry.example/postgres@sha256:${'0'.repeat(64)}`,
+    `postgres@sha256:${'g'.repeat(64)}`,
+  ]) {
+    const invalid = structuredClone(
+      LOCAL_MICROSANDBOX_MANIFEST_EXAMPLE_WITH_PLACEHOLDERS,
+    );
+    invalid.fixture_lock.images[1].repo_digest = repoDigest;
+    assert.throws(
+      () => validateLocalManifestContract(invalid),
+      (error) => error.code === 'fixture-image-invalid',
+    );
+  }
+});
+
 test('local fixture lock rejects wrong loaded IDs, tags, repo digests, and platforms without pulling', () => {
   const expected = {
     role: 'postgres',
@@ -309,6 +331,17 @@ test('local fixture lock rejects wrong loaded IDs, tags, repo digests, and platf
   assert.equal(
     lockedLocalFixtureIdentity(actual, expected).ref,
     expected.repo_digest,
+  );
+  const shortAlias = {
+    ...expected,
+    repo_digest: `postgres@sha256:${'b'.repeat(64)}`,
+  };
+  assert.equal(
+    lockedLocalFixtureIdentity(
+      [{ ...actual[0], RepoDigests: [shortAlias.repo_digest] }],
+      shortAlias,
+    ).ref,
+    shortAlias.repo_digest,
   );
   for (const invalid of [
     [{ ...actual[0], Id: `sha256:${'e'.repeat(64)}` }],

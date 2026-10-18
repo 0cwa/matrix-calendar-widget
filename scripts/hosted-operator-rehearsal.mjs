@@ -1387,15 +1387,17 @@ export function validateLocalManifestContract(manifest) {
   const fixtureRoles = new Set();
   for (const fixture of manifest.fixture_lock.images) {
     const expected = FIXTURES.find((entry) => entry.role === fixture.role);
-    const expectedRepo =
+    const expectedRepos =
       fixture.role === 'postgres'
-        ? 'docker.io/library/postgres'
-        : 'ghcr.io/element-hq/synapse';
+        ? ['docker.io/library/postgres', 'postgres']
+        : ['ghcr.io/element-hq/synapse'];
     localContract(
       expected !== undefined &&
         !fixtureRoles.has(fixture.role) &&
         fixture.tag === expected.tag &&
-        fixture.repo_digest.startsWith(`${expectedRepo}@sha256:`) &&
+        expectedRepos.some((repo) =>
+          fixture.repo_digest.startsWith(`${repo}@sha256:`),
+        ) &&
         /^.+@sha256:[0-9a-f]{64}$/u.test(fixture.repo_digest),
       'fixture-image-invalid',
     );
