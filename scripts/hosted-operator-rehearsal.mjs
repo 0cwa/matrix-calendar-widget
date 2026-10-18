@@ -1837,7 +1837,7 @@ function writePrivate(file, value) {
   chmodSync(file, 0o600);
 }
 
-function exactSourceImages(
+export function exactSourceImages(
   manifest,
   sourceSha,
   sourceTree,
@@ -1863,8 +1863,7 @@ function exactSourceImages(
     manifest.workflow?.sha !== workflowSha ||
     manifest.workflow?.repository !== expectedRepository ||
     manifest.workflow?.ref !== expectedWorkflowRef ||
-    manifest.workflow?.run_id !==
-      Number(required(process.env, 'RELEASE_RUN_ID')) ||
+    manifest.workflow?.run_id !== Number(runId) ||
     manifest.workflow?.run_attempt !== Number(attempt) ||
     manifest.platform !== 'linux/amd64' ||
     !Array.isArray(manifest.images) ||
@@ -3832,8 +3831,8 @@ export function validateLocalProfileReceipt(receipt, manifest) {
           release_run_id: manifest.release_archive.release_run_id,
           attempt: manifest.release_archive.attempt,
         }) &&
-      JSON.stringify(receipt.fixture_lock) ===
-        JSON.stringify(manifest.fixture_lock) &&
+      canonicalLocalJson(receipt.fixture_lock) ===
+        canonicalLocalJson(manifest.fixture_lock) &&
       receipt.vm_proof.provider === manifest.vm_proof.provider &&
       receipt.vm_proof.instance_id === manifest.vm_proof.instance_id &&
       receipt.vm_proof.guest_kernel === manifest.vm_proof.guest_kernel &&

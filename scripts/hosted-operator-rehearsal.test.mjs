@@ -33,6 +33,7 @@ import {
   assertTaskServiceSet,
   compareForeign,
   enableHostedSharedDockerRehearsal,
+  exactSourceImages,
   failureOperationForStage,
   fixtureIdentity,
   formatFailureDiagnostic,
@@ -308,6 +309,59 @@ test('local fixture lock rejects wrong loaded IDs, tags, repo digests, and platf
   }
 });
 
+test('local release manifest binding uses its explicit run ID without hosted environment', (t) => {
+  const previousRunId = process.env.RELEASE_RUN_ID;
+  delete process.env.RELEASE_RUN_ID;
+  t.after(() => {
+    if (previousRunId === undefined) delete process.env.RELEASE_RUN_ID;
+    else process.env.RELEASE_RUN_ID = previousRunId;
+  });
+
+  const source = LOCAL_MICROSANDBOX_MANIFEST_EXAMPLE_WITH_PLACEHOLDERS.source;
+  const lineage =
+    LOCAL_MICROSANDBOX_MANIFEST_EXAMPLE_WITH_PLACEHOLDERS.tooling
+      .accepted_hosted_lineage;
+  const runId = '38913010664';
+  const attempt = '1';
+  const names = ['server', 'widget', 'radicale'];
+  const prefixes = [
+    'matrix-calendar-widget/server',
+    'matrix-calendar-widget/widget',
+    'matrix-calendar-widget/radicale-openid',
+  ];
+  const manifest = {
+    schema_version: 2,
+    source: {
+      sha: source.commit,
+      tree: source.tree,
+      dispatch_sha: lineage,
+    },
+    workflow: {
+      sha: lineage,
+      repository: '0cwa/matrix-calendar-widget',
+      ref: '0cwa/matrix-calendar-widget/.github/workflows/release-image-archive.yml@refs/heads/main',
+      run_id: Number(runId),
+      run_attempt: Number(attempt),
+    },
+    platform: 'linux/amd64',
+    images: names.map((name, index) => ({
+      name,
+      tag: `${prefixes[index]}:archive-${runId}-${attempt}`,
+      image_id: imageId,
+      buildx_manifest_digest: manifestDigest,
+      platform: 'linux/amd64',
+    })),
+  };
+
+  assert.equal(
+    exactSourceImages(manifest, source.commit, source.tree, runId, attempt, {
+      dispatchSha: lineage,
+      workflowSha: lineage,
+    }).length,
+    3,
+  );
+});
+
 test('microsandbox probe receipt binds current guest identity and manifest provenance', (t) => {
   const runnerTemp = mkdtempSync(join(tmpdir(), 'mcw-local-vm-proof-'));
   chmodSync(runnerTemp, 0o700);
@@ -455,7 +509,9 @@ test('local profile rejects GitHub hosted context and cannot publish a hosted su
 });
 
 test('local receipt refuses false success and carries only its closed contract', () => {
-  const manifest = LOCAL_MICROSANDBOX_MANIFEST_EXAMPLE_WITH_PLACEHOLDERS;
+  const manifest = JSON.parse(
+    canonicalLocalJson(LOCAL_MICROSANDBOX_MANIFEST_EXAMPLE_WITH_PLACEHOLDERS),
+  );
   const checkNames = [
     'source_binding',
     'fixture_identity',
