@@ -1,17 +1,20 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   chmodSync,
   copyFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { delimiter, dirname, join } from 'node:path';
+import { release as osRelease, tmpdir } from 'node:os';
+import { delimiter, dirname, isAbsolute, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { runInNewContext } from 'node:vm';
@@ -28,8 +31,10 @@ import {
   assertNoCollision,
   assertReminderResult,
   assertTaskServiceSet,
+  canonicalLocalJson,
   compareForeign,
   enableHostedSharedDockerRehearsal,
+  exactSourceImages,
   failureOperationForStage,
   fixtureIdentity,
   formatFailureDiagnostic,
@@ -38,12 +43,21 @@ import {
   GATEWAY_NETWORK_SMOKE_SCRIPT,
   gatewayNetworkSmokeArgs,
   handoffGeneratedComposeEnvironment,
+  hashExtractedGitTree,
   HOSTED_INHERITED_IMAGE_TMPFS,
   HOSTED_REMINDER_FIXTURE_FAILURE_PHASES,
+  isLocalProfileHostedContext,
   listenerScopeDelta,
+  LOCAL_MICROSANDBOX_MANIFEST_EXAMPLE_WITH_PLACEHOLDERS,
+  LOCAL_MICROSANDBOX_MANIFEST_SCHEMA,
+  LOCAL_MICROSANDBOX_PROBE_RECEIPT_EXAMPLE_WITH_PLACEHOLDERS,
+  LOCAL_MICROSANDBOX_PROBE_RECEIPT_SCHEMA,
+  localProfileReceipt,
+  lockedLocalFixtureIdentity,
   makeComposeOverride,
   parseApiCrudProbeFailure,
   parseGatewayNetworkSmokeFailure,
+  parseOperatorRehearsalProfileArgs,
   parseReminderFixtureOutcome,
   parseStartupFailureMarker,
   planOwnedCleanup,
@@ -51,9 +65,13 @@ import {
   runTask,
   taskEnvironment,
   validateComposeModel,
+  validateLocalManifestContract,
+  validateLocalProbeReceipt,
+  validateLocalProfileReceipt,
   validateLockedImageInspect,
   writeDockerAdapter,
   writeFailureDiagnostic,
+  writeLocalDockerShim,
 } from './hosted-operator-rehearsal.mjs';
 
 const runId = '0123456789abcdef';
@@ -174,6 +192,496 @@ function apiProbeSummary(failedStage, failureCode, failureHttpStatus = null) {
     ...(failureCode === undefined ? {} : { failureCode, failureHttpStatus }),
   };
 }
+
+test('profile selection keeps hosted as the zero-argument default and requires an absolute local manifest', () => {
+  assert.deepEqual(parseOperatorRehearsalProfileArgs([]), {
+    profile: 'hosted',
+  });
+  assert.deepEqual(
+    parseOperatorRehearsalProfileArgs([
+      '--profile',
+      'local-microsandbox',
+      '--manifest',
+      '/private/job/manifest.json',
+    ]),
+    {
+      profile: 'local-microsandbox',
+      manifestPath: '/private/job/manifest.json',
+    },
+  );
+  for (const args of [
+    ['--profile', 'local-microsandbox'],
+    ['--profile', 'hosted'],
+    ['--profile', 'local-microsandbox', '--manifest', 'relative.json'],
+    ['--manifest', '/private/job/manifest.json'],
+  ]) {
+    assert.throws(
+      () => parseOperatorRehearsalProfileArgs(args),
+      (error) => error.code === 'profile-arguments-invalid',
+    );
+  }
+});
+
+test('local profile manifest is closed and pins source, lineage, guest networking, and fixture identities', () => {
+  const example = structuredClone(
+    LOCAL_MICROSANDBOX_MANIFEST_EXAMPLE_WITH_PLACEHOLDERS,
+  );
+  assert.equal(validateLocalManifestContract(example), example);
+  assert.equal(example.vm_proof.network_enabled, true);
+  assert.equal(
+    Object.hasOwn(example.synthetic_identity, 'external_matrix_egress'),
+    false,
+  );
+  assert.equal(LOCAL_MICROSANDBOX_MANIFEST_SCHEMA.additionalProperties, false);
+  assert.equal(
+    LOCAL_MICROSANDBOX_PROBE_RECEIPT_SCHEMA.additionalProperties,
+    false,
+  );
+  assert.equal(
+    canonicalLocalJson(
+      JSON.parse(
+        canonicalLocalJson(
+          LOCAL_MICROSANDBOX_PROBE_RECEIPT_EXAMPLE_WITH_PLACEHOLDERS,
+        ),
+      ),
+    ),
+    canonicalLocalJson(
+      LOCAL_MICROSANDBOX_PROBE_RECEIPT_EXAMPLE_WITH_PLACEHOLDERS,
+    ),
+  );
+
+  const invalidManifests = [
+    (value) => {
+      value.extra = 'closed contracts reject unknown keys';
+    },
+    (value) => {
+      value.source.commit = 'a'.repeat(40);
+    },
+    (value) => {
+      value.tooling.accepted_hosted_lineage = 'b'.repeat(40);
+    },
+    (value) => {
+      value.vm_proof.host_mounts = ['/host'];
+    },
+    (value) => {
+      value.vm_proof.host_credentials_mounted = true;
+    },
+    (value) => {
+      value.vm_proof.network_enabled = false;
+    },
+    (value) => {
+      value.paths.docker_socket = '/job/private/other.sock';
+    },
+    (value) => {
+      value.fixture_lock.images[1].role = 'synapse';
+    },
+    (value) => {
+      value.fixture_lock.images[1].metadata_proof_sha256 = 'bad';
+    },
+  ];
+  for (const mutate of invalidManifests) {
+    const invalid = structuredClone(
+      LOCAL_MICROSANDBOX_MANIFEST_EXAMPLE_WITH_PLACEHOLDERS,
+    );
+    mutate(invalid);
+    assert.throws(() => validateLocalManifestContract(invalid));
+  }
+});
+
+test('local Postgres fixture manifest accepts only the Docker Hub short alias spelling', () => {
+  const shortAlias = structuredClone(
+    LOCAL_MICROSANDBOX_MANIFEST_EXAMPLE_WITH_PLACEHOLDERS,
+  );
+  shortAlias.fixture_lock.images[1].repo_digest = `postgres@sha256:${'0'.repeat(64)}`;
+  assert.equal(validateLocalManifestContract(shortAlias), shortAlias);
+
+  for (const repoDigest of [
+    `registry.example/postgres@sha256:${'0'.repeat(64)}`,
+    `postgres@sha256:${'g'.repeat(64)}`,
+  ]) {
+    const invalid = structuredClone(
+      LOCAL_MICROSANDBOX_MANIFEST_EXAMPLE_WITH_PLACEHOLDERS,
+    );
+    invalid.fixture_lock.images[1].repo_digest = repoDigest;
+    assert.throws(
+      () => validateLocalManifestContract(invalid),
+      (error) => error.code === 'fixture-image-invalid',
+    );
+  }
+});
+
+test('local fixture lock rejects wrong loaded IDs, tags, repo digests, and platforms without pulling', () => {
+  const expected = {
+    role: 'postgres',
+    tag: 'postgres:16.15-alpine3.23',
+    repo_digest: `docker.io/library/postgres@sha256:${'b'.repeat(64)}`,
+    image_id: `sha256:${'c'.repeat(64)}`,
+    platform: 'linux/amd64',
+    metadata_proof_sha256: 'd'.repeat(64),
+  };
+  const actual = [
+    {
+      Id: expected.image_id,
+      Os: 'linux',
+      Architecture: 'amd64',
+      RepoTags: [expected.tag],
+      RepoDigests: [expected.repo_digest],
+    },
+  ];
+  assert.equal(
+    lockedLocalFixtureIdentity(actual, expected).ref,
+    expected.repo_digest,
+  );
+  const shortAlias = {
+    ...expected,
+    repo_digest: `postgres@sha256:${'b'.repeat(64)}`,
+  };
+  assert.equal(
+    lockedLocalFixtureIdentity(
+      [{ ...actual[0], RepoDigests: [shortAlias.repo_digest] }],
+      shortAlias,
+    ).ref,
+    shortAlias.repo_digest,
+  );
+  for (const invalid of [
+    [{ ...actual[0], Id: `sha256:${'e'.repeat(64)}` }],
+    [{ ...actual[0], Architecture: 'arm64' }],
+    [{ ...actual[0], RepoTags: ['postgres:latest'] }],
+    [{ ...actual[0], RepoDigests: [] }],
+  ]) {
+    assert.throws(
+      () => lockedLocalFixtureIdentity(invalid, expected),
+      (error) => error.code === 'fixture-lock-mismatch',
+    );
+  }
+});
+
+test('local release manifest binding uses its explicit run ID without hosted environment', (t) => {
+  const previousRunId = process.env.RELEASE_RUN_ID;
+  delete process.env.RELEASE_RUN_ID;
+  t.after(() => {
+    if (previousRunId === undefined) delete process.env.RELEASE_RUN_ID;
+    else process.env.RELEASE_RUN_ID = previousRunId;
+  });
+
+  const source = LOCAL_MICROSANDBOX_MANIFEST_EXAMPLE_WITH_PLACEHOLDERS.source;
+  const lineage =
+    LOCAL_MICROSANDBOX_MANIFEST_EXAMPLE_WITH_PLACEHOLDERS.tooling
+      .accepted_hosted_lineage;
+  const runId = '38913010664';
+  const attempt = '1';
+  const names = ['server', 'widget', 'radicale'];
+  const prefixes = [
+    'matrix-calendar-widget/server',
+    'matrix-calendar-widget/widget',
+    'matrix-calendar-widget/radicale-openid',
+  ];
+  const manifest = {
+    schema_version: 2,
+    source: {
+      sha: source.commit,
+      tree: source.tree,
+      dispatch_sha: lineage,
+    },
+    workflow: {
+      sha: lineage,
+      repository: '0cwa/matrix-calendar-widget',
+      ref: '0cwa/matrix-calendar-widget/.github/workflows/release-image-archive.yml@refs/heads/main',
+      run_id: Number(runId),
+      run_attempt: Number(attempt),
+    },
+    platform: 'linux/amd64',
+    images: names.map((name, index) => ({
+      name,
+      tag: `${prefixes[index]}:archive-${runId}-${attempt}`,
+      image_id: imageId,
+      buildx_manifest_digest: manifestDigest,
+      platform: 'linux/amd64',
+    })),
+  };
+
+  assert.equal(
+    exactSourceImages(manifest, source.commit, source.tree, runId, attempt, {
+      dispatchSha: lineage,
+      workflowSha: lineage,
+    }).length,
+    3,
+  );
+});
+
+test('microsandbox probe receipt binds current guest identity and manifest provenance', (t) => {
+  const runnerTemp = mkdtempSync(join(tmpdir(), 'mcw-local-vm-proof-'));
+  chmodSync(runnerTemp, 0o700);
+  t.after(() => rmSync(runnerTemp, { recursive: true, force: true }));
+  const manifest = structuredClone(
+    LOCAL_MICROSANDBOX_MANIFEST_EXAMPLE_WITH_PLACEHOLDERS,
+  );
+  manifest.paths.runner_temp = runnerTemp;
+  manifest.paths.docker_socket = join(runnerTemp, 'docker', 'docker.sock');
+  manifest.vm_proof.docker_endpoint = `unix://${manifest.paths.docker_socket}`;
+  manifest.vm_proof.guest_kernel = osRelease();
+  const receiptPath = join(runnerTemp, 'vm-probe.json');
+  const receipt = structuredClone(
+    LOCAL_MICROSANDBOX_PROBE_RECEIPT_EXAMPLE_WITH_PLACEHOLDERS,
+  );
+  receipt.instance_id = manifest.vm_proof.instance_id;
+  receipt.guest_kernel = osRelease();
+  receipt.guest_boot_id = readFileSync(
+    '/proc/sys/kernel/random/boot_id',
+    'utf8',
+  ).trim();
+  receipt.observed_at = new Date().toISOString();
+  receipt.docker_endpoint = manifest.vm_proof.docker_endpoint;
+  receipt.provenance = {
+    source_commit: manifest.source.commit,
+    source_tree: manifest.source.tree,
+    source_archive_sha256: manifest.source.git_archive_sha256,
+    tooling_commit: manifest.tooling.commit,
+    tooling_tree: manifest.tooling.tree,
+    tooling_archive_sha256: manifest.tooling.git_archive_sha256,
+    helper_sha256: manifest.tooling.helper_sha256,
+    release_manifest_sha256: manifest.release_archive.manifest_sha256,
+    release_run_id: manifest.release_archive.release_run_id,
+    attempt: manifest.release_archive.attempt,
+    fixture_lock_sha256: createHash('sha256')
+      .update(canonicalLocalJson(manifest.fixture_lock))
+      .digest('hex'),
+  };
+  const writeReceipt = (value) => {
+    const bytes = canonicalLocalJson(value);
+    writeFileSync(receiptPath, bytes, { mode: 0o600 });
+    chmodSync(receiptPath, 0o600);
+    manifest.vm_proof.probe_receipt_sha256 = createHash('sha256')
+      .update(bytes)
+      .digest('hex');
+  };
+  writeReceipt(receipt);
+  assert.equal(receipt.schema_version, 1);
+  assert.equal(receipt.result, 'passed');
+  assert.equal(receipt.provider, 'microsandbox');
+  assert.equal(receipt.network_enabled, true);
+  assert.equal(receipt.provider, manifest.vm_proof.provider);
+  assert.equal(receipt.instance_id, manifest.vm_proof.instance_id);
+  assert.equal(receipt.guest_kernel, manifest.vm_proof.guest_kernel);
+  assert.equal(receipt.guest_kernel, osRelease());
+  assert.equal(
+    receipt.guest_boot_id,
+    readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim(),
+  );
+  assert.equal(
+    new Date(Date.parse(receipt.observed_at)).toISOString(),
+    receipt.observed_at,
+  );
+  assert.equal(receipt.network_enabled, manifest.vm_proof.network_enabled);
+  assert.equal(receipt.host_mounts.length, 0);
+  assert.equal(receipt.host_docker_socket_forwarded, false);
+  assert.equal(receipt.host_credentials_mounted, false);
+  assert.equal(receipt.docker_endpoint, manifest.vm_proof.docker_endpoint);
+  assert.deepEqual(receipt.provenance, {
+    source_commit: manifest.source.commit,
+    source_tree: manifest.source.tree,
+    source_archive_sha256: manifest.source.git_archive_sha256,
+    tooling_commit: manifest.tooling.commit,
+    tooling_tree: manifest.tooling.tree,
+    tooling_archive_sha256: manifest.tooling.git_archive_sha256,
+    helper_sha256: manifest.tooling.helper_sha256,
+    release_manifest_sha256: manifest.release_archive.manifest_sha256,
+    release_run_id: manifest.release_archive.release_run_id,
+    attempt: manifest.release_archive.attempt,
+    fixture_lock_sha256: createHash('sha256')
+      .update(canonicalLocalJson(manifest.fixture_lock))
+      .digest('hex'),
+  });
+  assert.ok(Object.values(receipt.checks).every((value) => value === 'passed'));
+  assert.equal(
+    validateLocalProbeReceipt(manifest, receiptPath).result,
+    'passed',
+  );
+
+  for (const mutate of [
+    (value) => {
+      value.host_mounts = ['/host'];
+    },
+    (value) => {
+      value.guest_boot_id = '00000000-0000-0000-0000-000000000000';
+    },
+    (value) => {
+      value.network_enabled = false;
+    },
+    (value) => {
+      value.checks.namespaces = 'failed';
+    },
+    (value) => {
+      value.provenance.tooling_commit = 'f'.repeat(40);
+    },
+  ]) {
+    const invalid = structuredClone(receipt);
+    mutate(invalid);
+    writeReceipt(invalid);
+    assert.throws(() => validateLocalProbeReceipt(manifest, receiptPath));
+  }
+});
+
+test('local profile rejects GitHub hosted context and cannot publish a hosted summary', (t) => {
+  assert.equal(isLocalProfileHostedContext({}), false);
+  assert.equal(isLocalProfileHostedContext({ GITHUB_ACTIONS: 'true' }), true);
+  assert.equal(
+    isLocalProfileHostedContext({ RUNNER_ENVIRONMENT: 'github-hosted' }),
+    true,
+  );
+
+  const temporaryRoot = mkdtempSync(join(tmpdir(), 'mcw-local-profile-guard-'));
+  t.after(() => rmSync(temporaryRoot, { recursive: true, force: true }));
+  const summaryPath = join(temporaryRoot, 'summary.md');
+  const result = spawnSync(
+    process.execPath,
+    [
+      fileURLToPath(
+        new URL('./hosted-operator-rehearsal.mjs', import.meta.url),
+      ),
+      '--profile',
+      'local-microsandbox',
+      '--manifest',
+      join(temporaryRoot, 'not-read-on-hosted-runner.json'),
+    ],
+    {
+      cwd: temporaryRoot,
+      encoding: 'utf8',
+      env: {
+        PATH: process.env.PATH,
+        OPERATOR_REHEARSAL_ENABLED: 'true',
+        GITHUB_ACTIONS: 'true',
+        GITHUB_STEP_SUMMARY: summaryPath,
+      },
+    },
+  );
+  assert.equal(result.status, 1);
+  assert.equal(
+    result.stderr,
+    'Local microsandbox operator rehearsal failed; owned cleanup not-run.\n',
+  );
+  assert.equal(existsSync(summaryPath), false);
+});
+
+test('local receipt refuses false success and carries only its closed contract', () => {
+  const manifest = JSON.parse(
+    canonicalLocalJson(LOCAL_MICROSANDBOX_MANIFEST_EXAMPLE_WITH_PLACEHOLDERS),
+  );
+  const checkNames = [
+    'source_binding',
+    'fixture_identity',
+    'api_authorization_and_crud',
+    'reminder_initial_and_restart',
+    'paired_store_restore',
+    'owned_cleanup',
+    'foreign_inventory_preservation',
+  ];
+  assert.equal(
+    validateLocalProfileReceipt(
+      localProfileReceipt(
+        manifest,
+        Object.fromEntries(checkNames.map((name) => [name, 'not-run'])),
+        'failed',
+        'preflight',
+        'not-run',
+      ),
+      manifest,
+    ).result,
+    'failed',
+  );
+  const checks = Object.fromEntries(checkNames.map((name) => [name, 'passed']));
+  const successful = localProfileReceipt(
+    manifest,
+    checks,
+    'passed',
+    null,
+    'verified',
+  );
+  assert.equal(
+    validateLocalProfileReceipt(successful, manifest).result,
+    'passed',
+  );
+  const roundTripped = JSON.parse(canonicalLocalJson(successful));
+  assert.equal(
+    validateLocalProfileReceipt(roundTripped, manifest).result,
+    'passed',
+  );
+  assert.equal(successful.vm_proof.network_enabled, true);
+  assert.equal(
+    Object.hasOwn(successful.synthetic_identity, 'external_matrix_egress'),
+    false,
+  );
+  assert.throws(
+    () =>
+      validateLocalProfileReceipt(
+        {
+          ...successful,
+          vm_proof: { ...successful.vm_proof, network_enabled: false },
+        },
+        manifest,
+      ),
+    (error) => error.code === 'local-receipt-provenance-mismatch',
+  );
+  assert.throws(
+    () =>
+      validateLocalProfileReceipt(
+        {
+          ...roundTripped,
+          tooling: { ...roundTripped.tooling, helper_sha256: 'f'.repeat(64) },
+        },
+        manifest,
+      ),
+    (error) => error.code === 'local-receipt-provenance-mismatch',
+  );
+  assert.throws(
+    () =>
+      validateLocalProfileReceipt(
+        { ...successful, cleanup_status: 'unverified' },
+        manifest,
+      ),
+    (error) => error.code === 'local-receipt-false-success',
+  );
+  assert.throws(
+    () =>
+      validateLocalProfileReceipt(
+        { ...successful, unexpected: 'private-path' },
+        manifest,
+      ),
+    (error) => error.code === 'local-receipt-shape-invalid',
+  );
+});
+
+test('extracted Git archive hashing matches Git tree identity and rejects symlinks', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'mcw-git-tree-hash-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeFileSync(join(root, 'file.txt'), 'local tree hash fixture\n', {
+    mode: 0o644,
+  });
+  mkdirSync(join(root, 'nested'));
+  writeFileSync(join(root, 'nested', 'run.sh'), '#!/bin/sh\nexit 0\n', {
+    mode: 0o755,
+  });
+  chmodSync(join(root, 'nested', 'run.sh'), 0o755);
+  const init = spawnSync('git', ['init', '--quiet', root], {
+    encoding: 'utf8',
+  });
+  assert.equal(init.status, 0, init.stderr);
+  const add = spawnSync('git', ['-C', root, 'add', '--all'], {
+    encoding: 'utf8',
+  });
+  assert.equal(add.status, 0, add.stderr);
+  const tree = spawnSync('git', ['-C', root, 'write-tree'], {
+    encoding: 'utf8',
+  });
+  assert.equal(tree.status, 0, tree.stderr);
+  rmSync(join(root, '.git'), { recursive: true, force: true });
+  assert.equal(hashExtractedGitTree(root), tree.stdout.trim());
+  symlinkSync(join(root, 'file.txt'), join(root, 'link.txt'));
+  assert.throws(
+    () => hashExtractedGitTree(root),
+    (error) => error.code === 'archive-tree-entry-invalid',
+  );
+});
 
 test('gateway network smoke passes through the direct Node entrypoint for expected service responses', async () => {
   const compose = [
@@ -911,6 +1419,53 @@ test('hosted shared-Docker mode requires a private adapter and exact hosted main
   );
 });
 
+test('local Docker shim runs without PATH resolving Node and keeps hosted shim behavior unchanged', (t) => {
+  const taskDir = mkdtempSync(join(tmpdir(), 'mcw-local-docker-shim-'));
+  chmodSync(taskDir, 0o700);
+  t.after(() => rmSync(taskDir, { recursive: true, force: true }));
+  const nativeDocker = join(taskDir, 'native-docker');
+  const argsCapture = join(taskDir, 'docker-args.json');
+  writeFileSync(
+    nativeDocker,
+    '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$DOCKER_ARGS_CAPTURE"\nprintf adapter-ok\n',
+    { mode: 0o700, flag: 'wx' },
+  );
+  chmodSync(nativeDocker, 0o700);
+  const shim = writeLocalDockerShim(taskDir, nativeDocker);
+  const source = readFileSync(shim.dockerAdapterPath, 'utf8');
+  assert.equal(source.split('\n', 1)[0], `#!${process.execPath}`);
+  assert.ok(isAbsolute(process.execPath));
+  assert.match(source, /addOperatorRehearsalProfileToComposeArgs/u);
+  assert.doesNotMatch(
+    source,
+    /GITHUB_ACTIONS|GITHUB_REF|GITHUB_REPOSITORY|RUNNER_ENVIRONMENT|MATRIX_CALENDAR_HOSTED_SHARED_DOCKER_REHEARSAL/u,
+  );
+  assert.equal(statSync(shim.dockerAdapterPath).mode & 0o777, 0o700);
+
+  const args = ['compose', '-p', project, 'config'];
+  const result = spawnSync(shim.dockerAdapterPath, args, {
+    encoding: 'utf8',
+    env: { PATH: '', DOCKER_ARGS_CAPTURE: argsCapture },
+    timeout: 5000,
+  });
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout, 'adapter-ok');
+  assert.equal(result.stderr, '');
+  assert.deepEqual(
+    readFileSync(argsCapture, 'utf8').trimEnd().split('\n'),
+    addOperatorRehearsalProfileToComposeArgs(args),
+  );
+
+  const hostedDir = join(taskDir, 'hosted');
+  mkdirSync(hostedDir, { mode: 0o700 });
+  const hostedShim = writeDockerAdapter(hostedDir, nativeDocker);
+  assert.equal(
+    readFileSync(hostedShim.dockerAdapterPath, 'utf8').split('\n', 1)[0],
+    '#!/usr/bin/env node',
+  );
+});
+
 function throwsCode(code) {
   return (error) => error?.code === code;
 }
@@ -944,7 +1499,24 @@ test('fixture setup keeps a bootstrap env until validated output is handed off',
     environment.MATRIX_CALENDAR_LOCAL_COMPOSE_ENV_FILE,
     paths.bootstrapEnvFile,
   );
+  assert.equal(
+    environment.MATRIX_CALENDAR_DEV_SYNAPSE_PORT_MAPPING,
+    '127.0.0.1:8008:8008',
+  );
+  assert.equal(
+    environment.MATRIX_CALENDAR_DEV_RADICALE_PORT_MAPPING,
+    '127.0.0.1:5232:5232',
+  );
   assert.equal(environment.ELEMENT_ACCEPTANCE_SERVER_ENV_FILE, paths.envFile);
+  for (const key of [
+    'GITHUB_ACTIONS',
+    'GITHUB_REF',
+    'GITHUB_REPOSITORY',
+    'RUNNER_ENVIRONMENT',
+    'MATRIX_CALENDAR_HOSTED_SHARED_DOCKER_REHEARSAL',
+  ]) {
+    assert.equal(environment[key], undefined, key);
+  }
 
   writeFileSync(paths.bootstrapEnvFile, 'bootstrap-only\n', { mode: 0o600 });
   chmodSync(paths.bootstrapEnvFile, 0o600);

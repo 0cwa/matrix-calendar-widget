@@ -29,6 +29,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
+import { release as osRelease } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
@@ -876,6 +877,871 @@ const FIXTURES = Object.freeze([
   { role: 'postgres', tag: 'postgres:16.15-alpine3.23' },
 ]);
 
+const LOCAL_PROFILE = 'local-microsandbox';
+const LOCAL_BASE_COMMIT = '80c6baaa7401abff65e2c033a762c5328ddb7284';
+const LOCAL_ACCEPTED_HOSTED_LINEAGE =
+  '289358712e4e58c452b65d18a03c0a442721245c';
+const LOCAL_SOURCE_COMMIT = '99d4c9f9f36aa0b0861a13499a7f7cd512c56920';
+const LOCAL_SOURCE_TREE = '97022a9d2351655d2aae0a50a44a14bd81daacc9';
+const LOCAL_RELEASE_MANIFEST_SHA256 =
+  'd0315e465e33e38f093fe4de2faf0e5eb0f57afc6fec7e0c2aa325a727d9ae49';
+const LOCAL_RELEASE_RUN_ID = '38913010664';
+const LOCAL_RELEASE_ATTEMPT = '1';
+const LOCAL_PROBE_CHECKS = Object.freeze([
+  'cgroup_v2',
+  'namespaces',
+  'overlay_mount_write_unmount',
+  'writable_docker_data',
+]);
+const LOCAL_PROFILE_PATH_KEYS = Object.freeze([
+  'runner_temp',
+  'source_root',
+  'tooling_root',
+  'source_archive',
+  'tooling_archive',
+  'vm_probe_receipt',
+  'docker_socket',
+  'docker_config_root',
+]);
+
+export const LOCAL_MICROSANDBOX_MANIFEST_SCHEMA = Object.freeze({
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  title: 'Matrix Calendar Widget local microsandbox rehearsal manifest v1',
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schema_version',
+    'profile',
+    'vm_proof',
+    'paths',
+    'source',
+    'tooling',
+    'release_archive',
+    'fixture_lock',
+    'synthetic_identity',
+  ],
+  properties: {
+    schema_version: { const: 1 },
+    profile: { const: LOCAL_PROFILE },
+    vm_proof: {
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'provider',
+        'instance_id',
+        'guest_kernel',
+        'probe_receipt_sha256',
+        'network_enabled',
+        'host_mounts',
+        'host_docker_socket_forwarded',
+        'host_credentials_mounted',
+        'docker_endpoint',
+      ],
+      properties: {
+        provider: { const: 'microsandbox' },
+        instance_id: { type: 'string', minLength: 1, maxLength: 128 },
+        guest_kernel: { type: 'string', minLength: 1, maxLength: 128 },
+        probe_receipt_sha256: {
+          type: 'string',
+          pattern: '^[0-9a-f]{64}$',
+        },
+        network_enabled: { const: true },
+        host_mounts: { type: 'array', maxItems: 0 },
+        host_docker_socket_forwarded: { const: false },
+        host_credentials_mounted: { const: false },
+        docker_endpoint: { type: 'string', minLength: 1, maxLength: 4096 },
+      },
+    },
+    paths: {
+      type: 'object',
+      additionalProperties: false,
+      required: LOCAL_PROFILE_PATH_KEYS,
+      properties: Object.fromEntries(
+        LOCAL_PROFILE_PATH_KEYS.map((key) => [key, { type: 'string' }]),
+      ),
+    },
+    source: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['commit', 'tree', 'git_archive_sha256'],
+      properties: {
+        commit: { const: LOCAL_SOURCE_COMMIT },
+        tree: { const: LOCAL_SOURCE_TREE },
+        git_archive_sha256: { type: 'string', pattern: '^[0-9a-f]{64}$' },
+      },
+    },
+    tooling: {
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'commit',
+        'tree',
+        'git_archive_sha256',
+        'helper_sha256',
+        'base_commit',
+        'accepted_hosted_lineage',
+      ],
+      properties: {
+        commit: { type: 'string', pattern: '^[0-9a-f]{40}$' },
+        tree: { type: 'string', pattern: '^[0-9a-f]{40}$' },
+        git_archive_sha256: { type: 'string', pattern: '^[0-9a-f]{64}$' },
+        helper_sha256: { type: 'string', pattern: '^[0-9a-f]{64}$' },
+        base_commit: { const: LOCAL_BASE_COMMIT },
+        accepted_hosted_lineage: {
+          const: LOCAL_ACCEPTED_HOSTED_LINEAGE,
+        },
+      },
+    },
+    release_archive: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['root', 'manifest_sha256', 'release_run_id', 'attempt'],
+      properties: {
+        root: { type: 'string' },
+        manifest_sha256: { const: LOCAL_RELEASE_MANIFEST_SHA256 },
+        release_run_id: { const: LOCAL_RELEASE_RUN_ID },
+        attempt: { const: 1 },
+      },
+    },
+    fixture_lock: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['schema_version', 'platform', 'images'],
+      properties: {
+        schema_version: { const: 1 },
+        platform: { const: 'linux/amd64' },
+        images: {
+          type: 'array',
+          minItems: 2,
+          maxItems: 2,
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: [
+              'role',
+              'tag',
+              'repo_digest',
+              'image_id',
+              'platform',
+              'metadata_proof_sha256',
+            ],
+            properties: {
+              role: { enum: ['synapse', 'postgres'] },
+              tag: { type: 'string' },
+              repo_digest: { type: 'string' },
+              image_id: { type: 'string', pattern: '^sha256:[0-9a-f]{64}$' },
+              platform: { const: 'linux/amd64' },
+              metadata_proof_sha256: {
+                type: 'string',
+                pattern: '^[0-9a-f]{64}$',
+              },
+            },
+          },
+        },
+      },
+    },
+    synthetic_identity: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['mode', 'credential_root', 'host_credentials_mounted'],
+      properties: {
+        mode: { const: 'synthetic' },
+        credential_root: { type: 'string' },
+        host_credentials_mounted: { const: false },
+      },
+    },
+  },
+});
+
+export const LOCAL_MICROSANDBOX_MANIFEST_EXAMPLE_WITH_PLACEHOLDERS =
+  Object.freeze({
+    schema_version: 1,
+    profile: LOCAL_PROFILE,
+    vm_proof: {
+      provider: 'microsandbox',
+      instance_id: 'replace-with-current-microsandbox-instance-id',
+      guest_kernel: 'replace-with-guest-kernel-release',
+      probe_receipt_sha256: '0'.repeat(64),
+      network_enabled: true,
+      host_mounts: [],
+      host_docker_socket_forwarded: false,
+      host_credentials_mounted: false,
+      docker_endpoint: 'unix:///job/private/docker/docker.sock',
+    },
+    paths: {
+      runner_temp: '/job/private/runner-temp',
+      source_root: '/job/private/source',
+      tooling_root: '/job/private/tooling',
+      source_archive: '/job/private/source.tar',
+      tooling_archive: '/job/private/tooling.tar',
+      vm_probe_receipt: '/job/private/vm-probe-receipt.json',
+      docker_socket: '/job/private/docker/docker.sock',
+      docker_config_root: '/job/private/docker-config',
+    },
+    source: {
+      commit: LOCAL_SOURCE_COMMIT,
+      tree: LOCAL_SOURCE_TREE,
+      git_archive_sha256: '0'.repeat(64),
+    },
+    tooling: {
+      commit: '0'.repeat(40),
+      tree: '0'.repeat(40),
+      git_archive_sha256: '0'.repeat(64),
+      helper_sha256: '0'.repeat(64),
+      base_commit: LOCAL_BASE_COMMIT,
+      accepted_hosted_lineage: LOCAL_ACCEPTED_HOSTED_LINEAGE,
+    },
+    release_archive: {
+      root: '/job/private/release-archive',
+      manifest_sha256: LOCAL_RELEASE_MANIFEST_SHA256,
+      release_run_id: LOCAL_RELEASE_RUN_ID,
+      attempt: 1,
+    },
+    fixture_lock: {
+      schema_version: 1,
+      platform: 'linux/amd64',
+      images: [
+        {
+          role: 'synapse',
+          tag: FIXTURES[0].tag,
+          repo_digest: 'ghcr.io/element-hq/synapse@sha256:' + '0'.repeat(64),
+          image_id: `sha256:${'0'.repeat(64)}`,
+          platform: 'linux/amd64',
+          metadata_proof_sha256: '0'.repeat(64),
+        },
+        {
+          role: 'postgres',
+          tag: FIXTURES[1].tag,
+          repo_digest: 'docker.io/library/postgres@sha256:' + '0'.repeat(64),
+          image_id: `sha256:${'0'.repeat(64)}`,
+          platform: 'linux/amd64',
+          metadata_proof_sha256: '0'.repeat(64),
+        },
+      ],
+    },
+    synthetic_identity: {
+      mode: 'synthetic',
+      credential_root: '/job/private/synthetic-credentials',
+      host_credentials_mounted: false,
+    },
+  });
+
+export const LOCAL_MICROSANDBOX_PROBE_RECEIPT_SCHEMA = Object.freeze({
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  title: 'Matrix Calendar Widget microsandbox probe receipt v1',
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schema_version',
+    'result',
+    'provider',
+    'instance_id',
+    'guest_kernel',
+    'guest_boot_id',
+    'observed_at',
+    'network_enabled',
+    'host_mounts',
+    'host_docker_socket_forwarded',
+    'host_credentials_mounted',
+    'docker_endpoint',
+    'provenance',
+    'checks',
+  ],
+  properties: {
+    schema_version: { const: 1 },
+    result: { const: 'passed' },
+    provider: { const: 'microsandbox' },
+    instance_id: { type: 'string', minLength: 1, maxLength: 128 },
+    guest_kernel: { type: 'string', minLength: 1, maxLength: 128 },
+    guest_boot_id: {
+      type: 'string',
+      pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+    },
+    observed_at: { type: 'string', format: 'date-time' },
+    network_enabled: { const: true },
+    host_mounts: { type: 'array', maxItems: 0 },
+    host_docker_socket_forwarded: { const: false },
+    host_credentials_mounted: { const: false },
+    docker_endpoint: { type: 'string', minLength: 1, maxLength: 4096 },
+    provenance: {
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'source_commit',
+        'source_tree',
+        'source_archive_sha256',
+        'tooling_commit',
+        'tooling_tree',
+        'tooling_archive_sha256',
+        'helper_sha256',
+        'release_manifest_sha256',
+        'release_run_id',
+        'attempt',
+        'fixture_lock_sha256',
+      ],
+      properties: {
+        source_commit: { const: LOCAL_SOURCE_COMMIT },
+        source_tree: { const: LOCAL_SOURCE_TREE },
+        source_archive_sha256: {
+          type: 'string',
+          pattern: '^[0-9a-f]{64}$',
+        },
+        tooling_commit: { type: 'string', pattern: '^[0-9a-f]{40}$' },
+        tooling_tree: { type: 'string', pattern: '^[0-9a-f]{40}$' },
+        tooling_archive_sha256: {
+          type: 'string',
+          pattern: '^[0-9a-f]{64}$',
+        },
+        helper_sha256: { type: 'string', pattern: '^[0-9a-f]{64}$' },
+        release_manifest_sha256: { const: LOCAL_RELEASE_MANIFEST_SHA256 },
+        release_run_id: { const: LOCAL_RELEASE_RUN_ID },
+        attempt: { const: 1 },
+        fixture_lock_sha256: {
+          type: 'string',
+          pattern: '^[0-9a-f]{64}$',
+        },
+      },
+    },
+    checks: {
+      type: 'object',
+      additionalProperties: false,
+      required: LOCAL_PROBE_CHECKS,
+      properties: Object.fromEntries(
+        LOCAL_PROBE_CHECKS.map((name) => [name, { const: 'passed' }]),
+      ),
+    },
+  },
+});
+
+export const LOCAL_MICROSANDBOX_PROBE_RECEIPT_EXAMPLE_WITH_PLACEHOLDERS =
+  Object.freeze({
+    schema_version: 1,
+    result: 'passed',
+    provider: 'microsandbox',
+    instance_id: 'replace-with-current-microsandbox-instance-id',
+    guest_kernel: 'replace-with-guest-kernel-release',
+    guest_boot_id: '00000000-0000-0000-0000-000000000000',
+    observed_at: '2026-01-01T00:00:00.000Z',
+    network_enabled: true,
+    host_mounts: [],
+    host_docker_socket_forwarded: false,
+    host_credentials_mounted: false,
+    docker_endpoint: 'unix:///job/private/docker/docker.sock',
+    provenance: {
+      source_commit: LOCAL_SOURCE_COMMIT,
+      source_tree: LOCAL_SOURCE_TREE,
+      source_archive_sha256: '0'.repeat(64),
+      tooling_commit: '0'.repeat(40),
+      tooling_tree: '0'.repeat(40),
+      tooling_archive_sha256: '0'.repeat(64),
+      helper_sha256: '0'.repeat(64),
+      release_manifest_sha256: LOCAL_RELEASE_MANIFEST_SHA256,
+      release_run_id: LOCAL_RELEASE_RUN_ID,
+      attempt: 1,
+      fixture_lock_sha256: '0'.repeat(64),
+    },
+    checks: Object.fromEntries(
+      LOCAL_PROBE_CHECKS.map((name) => [name, 'passed']),
+    ),
+  });
+
+export function canonicalLocalJson(value) {
+  const canonical = (current) => {
+    if (Array.isArray(current)) {
+      return `[${current.map((entry) => canonical(entry)).join(',')}]`;
+    }
+    if (current && typeof current === 'object') {
+      return `{${Object.keys(current)
+        .sort()
+        .map((key) => `${JSON.stringify(key)}:${canonical(current[key])}`)
+        .join(',')}}`;
+    }
+    return JSON.stringify(current);
+  };
+  return `${canonical(value)}\n`;
+}
+
+export function parseOperatorRehearsalProfileArgs(args) {
+  if (args.length === 0) return { profile: 'hosted' };
+  if (
+    args.length === 4 &&
+    args[0] === '--profile' &&
+    args[1] === LOCAL_PROFILE &&
+    args[2] === '--manifest' &&
+    path.isAbsolute(args[3])
+  ) {
+    return { profile: LOCAL_PROFILE, manifestPath: path.resolve(args[3]) };
+  }
+  throw new RehearsalFailure('preflight', 'profile-arguments-invalid');
+}
+
+function assertExactKeys(value, expected, stage, code) {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join('\0') !== [...expected].sort().join('\0')
+  ) {
+    fail(stage, code);
+  }
+}
+
+function validSha(value, bytes = 40) {
+  return (
+    typeof value === 'string' &&
+    new RegExp(`^[0-9a-f]{${bytes}}$`, 'u').test(value)
+  );
+}
+
+function isAbsoluteNormalizedPath(value) {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    path.isAbsolute(value) &&
+    path.resolve(value) === value &&
+    !value.includes('\0')
+  );
+}
+
+function localContract(condition, code) {
+  if (!condition) fail('local-profile-manifest', code);
+}
+
+function validateJsonSchemaValue(
+  value,
+  schema,
+  stage = 'local-profile-manifest',
+  code = 'manifest-schema-invalid',
+) {
+  const types = Array.isArray(schema.type) ? schema.type : [schema.type];
+  const matches = (type) =>
+    type === 'object'
+      ? value !== null && typeof value === 'object' && !Array.isArray(value)
+      : type === 'array'
+        ? Array.isArray(value)
+        : type === 'integer'
+          ? Number.isInteger(value)
+          : typeof value === type;
+  if (
+    (types[0] !== undefined && !types.some(matches)) ||
+    (Object.hasOwn(schema, 'const') && value !== schema.const) ||
+    (schema.enum && !schema.enum.includes(value))
+  ) {
+    fail(stage, code);
+  }
+  if (typeof value === 'string') {
+    if (
+      (schema.minLength !== undefined && value.length < schema.minLength) ||
+      (schema.maxLength !== undefined && value.length > schema.maxLength) ||
+      (schema.pattern && !new RegExp(schema.pattern, 'u').test(value)) ||
+      (schema.format === 'date-time' && !Number.isFinite(Date.parse(value)))
+    ) {
+      fail(stage, code);
+    }
+  } else if (Array.isArray(value)) {
+    if (
+      (schema.minItems !== undefined && value.length < schema.minItems) ||
+      (schema.maxItems !== undefined && value.length > schema.maxItems)
+    ) {
+      fail(stage, code);
+    }
+    if (schema.items) {
+      for (const item of value)
+        validateJsonSchemaValue(item, schema.items, stage, code);
+    }
+  } else if (value !== null && typeof value === 'object') {
+    if (schema.additionalProperties === false) {
+      assertExactKeys(value, schema.required ?? [], stage, code);
+      for (const key of Object.keys(value)) {
+        if (!Object.hasOwn(schema.properties ?? {}, key)) {
+          fail(stage, code);
+        }
+      }
+    } else if (schema.required) {
+      for (const key of schema.required) {
+        if (!Object.hasOwn(value, key)) {
+          fail(stage, code);
+        }
+      }
+    }
+    for (const [key, propertySchema] of Object.entries(
+      schema.properties ?? {},
+    )) {
+      if (Object.hasOwn(value, key)) {
+        validateJsonSchemaValue(value[key], propertySchema, stage, code);
+      }
+    }
+  }
+}
+
+export function validateLocalManifestContract(manifest) {
+  validateJsonSchemaValue(manifest, LOCAL_MICROSANDBOX_MANIFEST_SCHEMA);
+  for (const value of Object.values(manifest.paths)) {
+    localContract(isAbsoluteNormalizedPath(value), 'path-invalid');
+  }
+  localContract(
+    isAbsoluteNormalizedPath(manifest.release_archive.root) &&
+      isAbsoluteNormalizedPath(manifest.synthetic_identity.credential_root),
+    'path-invalid',
+  );
+  const fixtureRoles = new Set();
+  for (const fixture of manifest.fixture_lock.images) {
+    const expected = FIXTURES.find((entry) => entry.role === fixture.role);
+    const expectedRepos =
+      fixture.role === 'postgres'
+        ? ['docker.io/library/postgres', 'postgres']
+        : ['ghcr.io/element-hq/synapse'];
+    localContract(
+      expected !== undefined &&
+        !fixtureRoles.has(fixture.role) &&
+        fixture.tag === expected.tag &&
+        expectedRepos.some((repo) =>
+          fixture.repo_digest.startsWith(`${repo}@sha256:`),
+        ) &&
+        /^.+@sha256:[0-9a-f]{64}$/u.test(fixture.repo_digest),
+      'fixture-image-invalid',
+    );
+    fixtureRoles.add(fixture.role);
+  }
+  localContract(fixtureRoles.size === FIXTURES.length, 'fixture-lock-invalid');
+  localContract(
+    manifest.vm_proof.docker_endpoint ===
+      `unix://${manifest.paths.docker_socket}`,
+    'docker-endpoint-mismatch',
+  );
+  return manifest;
+}
+
+function validatePrivateDirectory(file, root, code, { empty = false } = {}) {
+  try {
+    const info = lstatSync(file);
+    if (
+      info.isSymbolicLink() ||
+      !info.isDirectory() ||
+      info.uid !== process.getuid?.() ||
+      (info.mode & 0o777) !== 0o700 ||
+      (root &&
+        !path.resolve(file).startsWith(`${path.resolve(root)}${path.sep}`)) ||
+      realpathSync(file) !== path.resolve(file) ||
+      (empty && readdirSync(file).length !== 0)
+    ) {
+      fail('local-profile-paths', code);
+    }
+  } catch (error) {
+    if (error instanceof RehearsalFailure) throw error;
+    fail('local-profile-paths', code);
+  }
+}
+
+function validatePrivateRegularFile(file, root, code) {
+  try {
+    const info = lstatSync(file);
+    if (
+      info.isSymbolicLink() ||
+      !info.isFile() ||
+      info.uid !== process.getuid?.() ||
+      (info.mode & 0o777) !== 0o600 ||
+      !path.resolve(file).startsWith(`${path.resolve(root)}${path.sep}`) ||
+      realpathSync(file) !== path.resolve(file)
+    ) {
+      fail('local-profile-paths', code);
+    }
+  } catch (error) {
+    if (error instanceof RehearsalFailure) throw error;
+    fail('local-profile-paths', code);
+  }
+}
+
+function validatePrivateDockerSocket(file, root) {
+  try {
+    const info = lstatSync(file);
+    if (
+      info.isSymbolicLink() ||
+      !info.isSocket() ||
+      info.uid !== process.getuid?.() ||
+      (info.mode & 0o777) !== 0o600 ||
+      !path.resolve(file).startsWith(`${path.resolve(root)}${path.sep}`) ||
+      realpathSync(file) !== path.resolve(file)
+    ) {
+      fail('local-profile-paths', 'docker-socket-invalid');
+    }
+  } catch (error) {
+    if (error instanceof RehearsalFailure) throw error;
+    fail('local-profile-paths', 'docker-socket-invalid');
+  }
+}
+
+function sha256File(file) {
+  return createHash('sha256').update(readFileSync(file)).digest('hex');
+}
+
+function gitObjectHash(type, body) {
+  return createHash('sha1')
+    .update(`${type} ${body.length}\0`)
+    .update(body)
+    .digest();
+}
+
+export function hashExtractedGitTree(root) {
+  const visit = (directory) => {
+    const entries = [];
+    for (const name of readdirSync(directory)) {
+      if (name === '.git' || name.includes('/')) {
+        fail('local-profile-provenance', 'archive-tree-entry-invalid');
+      }
+      const file = path.join(directory, name);
+      const info = lstatSync(file);
+      if (info.uid !== process.getuid?.() || info.isSymbolicLink()) {
+        fail('local-profile-provenance', 'archive-tree-entry-invalid');
+      }
+      if (info.isDirectory()) {
+        entries.push({
+          name,
+          mode: '40000',
+          digest: visit(file),
+          directory: true,
+        });
+      } else if (info.isFile()) {
+        const executable = (info.mode & 0o111) !== 0;
+        const body = readFileSync(file);
+        entries.push({
+          name,
+          mode: executable ? '100755' : '100644',
+          digest: gitObjectHash('blob', body),
+          directory: false,
+        });
+      } else {
+        fail('local-profile-provenance', 'archive-tree-entry-invalid');
+      }
+    }
+    entries.sort((left, right) =>
+      Buffer.compare(
+        Buffer.from(left.name + (left.directory ? '/' : '')),
+        Buffer.from(right.name + (right.directory ? '/' : '')),
+      ),
+    );
+    const body = Buffer.concat(
+      entries.flatMap((entry) => [
+        Buffer.from(`${entry.mode} ${entry.name}\0`),
+        entry.digest,
+      ]),
+    );
+    return gitObjectHash('tree', body);
+  };
+  try {
+    const rootInfo = lstatSync(root);
+    if (
+      rootInfo.isSymbolicLink() ||
+      !rootInfo.isDirectory() ||
+      realpathSync(root) !== path.resolve(root)
+    ) {
+      fail('local-profile-provenance', 'archive-root-invalid');
+    }
+    return visit(root).toString('hex');
+  } catch (error) {
+    if (error instanceof RehearsalFailure) throw error;
+    fail('local-profile-provenance', 'archive-tree-invalid');
+  }
+}
+
+export function validateLocalProbeReceipt(manifest, receiptPath) {
+  validatePrivateRegularFile(
+    receiptPath,
+    manifest.paths.runner_temp,
+    'vm-probe-receipt-invalid',
+  );
+  const bytes = readFileSync(receiptPath);
+  localContract(
+    createHash('sha256').update(bytes).digest('hex') ===
+      manifest.vm_proof.probe_receipt_sha256,
+    'vm-probe-receipt-digest-mismatch',
+  );
+  let receipt;
+  try {
+    receipt = JSON.parse(bytes.toString('utf8'));
+  } catch {
+    fail('local-profile-probe', 'vm-probe-receipt-invalid');
+  }
+  localContract(
+    canonicalLocalJson(receipt) === bytes.toString('utf8'),
+    'vm-probe-receipt-not-canonical',
+  );
+  validateJsonSchemaValue(
+    receipt,
+    LOCAL_MICROSANDBOX_PROBE_RECEIPT_SCHEMA,
+    'local-profile-probe',
+    'vm-probe-receipt-invalid',
+  );
+  const expectedProvenance = {
+    source_commit: manifest.source.commit,
+    source_tree: manifest.source.tree,
+    source_archive_sha256: manifest.source.git_archive_sha256,
+    tooling_commit: manifest.tooling.commit,
+    tooling_tree: manifest.tooling.tree,
+    tooling_archive_sha256: manifest.tooling.git_archive_sha256,
+    helper_sha256: manifest.tooling.helper_sha256,
+    release_manifest_sha256: manifest.release_archive.manifest_sha256,
+    release_run_id: manifest.release_archive.release_run_id,
+    attempt: manifest.release_archive.attempt,
+    fixture_lock_sha256: createHash('sha256')
+      .update(canonicalLocalJson(manifest.fixture_lock))
+      .digest('hex'),
+  };
+  const observed = Date.parse(receipt.observed_at);
+  let currentBootId;
+  try {
+    currentBootId = readFileSync(
+      '/proc/sys/kernel/random/boot_id',
+      'utf8',
+    ).trim();
+  } catch {
+    fail('local-profile-probe', 'guest-identity-unavailable');
+  }
+  localContract(
+    receipt.schema_version === 1 &&
+      receipt.result === 'passed' &&
+      receipt.provider === manifest.vm_proof.provider &&
+      receipt.instance_id === manifest.vm_proof.instance_id &&
+      receipt.guest_kernel === manifest.vm_proof.guest_kernel &&
+      receipt.guest_kernel === osRelease() &&
+      receipt.guest_boot_id === currentBootId &&
+      typeof receipt.observed_at === 'string' &&
+      Number.isFinite(observed) &&
+      new Date(observed).toISOString() === receipt.observed_at &&
+      receipt.network_enabled === manifest.vm_proof.network_enabled &&
+      Array.isArray(receipt.host_mounts) &&
+      receipt.host_mounts.length === 0 &&
+      receipt.host_docker_socket_forwarded === false &&
+      receipt.host_credentials_mounted === false &&
+      receipt.docker_endpoint === manifest.vm_proof.docker_endpoint &&
+      canonicalLocalJson(receipt.provenance) ===
+        canonicalLocalJson(expectedProvenance) &&
+      LOCAL_PROBE_CHECKS.every((name) => receipt.checks[name] === 'passed'),
+    'vm-probe-receipt-facts-invalid',
+  );
+  return receipt;
+}
+
+export function validateLocalProfilePaths(manifest, manifestPath) {
+  validateLocalManifestContract(manifest);
+  const { paths } = manifest;
+  validatePrivateDirectory(paths.runner_temp, null, 'runner-temp-invalid');
+  validatePrivateRegularFile(
+    manifestPath,
+    paths.runner_temp,
+    'manifest-file-invalid',
+  );
+  for (const directory of [
+    paths.source_root,
+    paths.tooling_root,
+    paths.docker_config_root,
+    manifest.release_archive.root,
+    manifest.synthetic_identity.credential_root,
+  ]) {
+    validatePrivateDirectory(
+      directory,
+      paths.runner_temp,
+      'private-directory-invalid',
+      {
+        empty:
+          directory === paths.docker_config_root ||
+          directory === manifest.synthetic_identity.credential_root,
+      },
+    );
+  }
+  for (const file of [
+    paths.source_archive,
+    paths.tooling_archive,
+    paths.vm_probe_receipt,
+    path.join(manifest.release_archive.root, 'manifest.json'),
+  ]) {
+    validatePrivateRegularFile(file, paths.runner_temp, 'private-file-invalid');
+  }
+  validatePrivateDockerSocket(paths.docker_socket, paths.runner_temp);
+  validatePrivateDirectory(
+    path.dirname(paths.docker_socket),
+    paths.runner_temp,
+    'docker-socket-parent-invalid',
+  );
+  const releaseManifestPath = path.join(
+    manifest.release_archive.root,
+    'manifest.json',
+  );
+  localContract(
+    sha256File(releaseManifestPath) ===
+      manifest.release_archive.manifest_sha256,
+    'release-manifest-digest-mismatch',
+  );
+  localContract(
+    sha256File(paths.source_archive) === manifest.source.git_archive_sha256 &&
+      hashExtractedGitTree(paths.source_root) === manifest.source.tree,
+    'source-archive-provenance-mismatch',
+  );
+  localContract(
+    sha256File(paths.tooling_archive) === manifest.tooling.git_archive_sha256 &&
+      hashExtractedGitTree(paths.tooling_root) === manifest.tooling.tree,
+    'tooling-archive-provenance-mismatch',
+  );
+  const helperPath = path.join(
+    paths.tooling_root,
+    'scripts/hosted-operator-rehearsal.mjs',
+  );
+  localContract(
+    realpathSync(fileURLToPath(import.meta.url)) === realpathSync(helperPath) &&
+      sha256File(helperPath) === manifest.tooling.helper_sha256,
+    'helper-provenance-mismatch',
+  );
+  const releaseManifest = readJson(releaseManifestPath, 'image-lock');
+  const sourceImages = exactSourceImages(
+    releaseManifest,
+    manifest.source.commit,
+    manifest.source.tree,
+    manifest.release_archive.release_run_id,
+    String(manifest.release_archive.attempt),
+    {
+      dispatchSha: LOCAL_ACCEPTED_HOSTED_LINEAGE,
+      workflowSha: LOCAL_ACCEPTED_HOSTED_LINEAGE,
+    },
+  );
+  const probeReceipt = validateLocalProbeReceipt(
+    manifest,
+    paths.vm_probe_receipt,
+  );
+  validatePrivateDirectory(
+    path.dirname(manifestPath),
+    paths.runner_temp,
+    'manifest-parent-invalid',
+  );
+  return { releaseManifest, sourceImages, probeReceipt };
+}
+
+export function readLocalProfileManifest(manifestPath) {
+  try {
+    const info = lstatSync(manifestPath);
+    if (
+      !path.isAbsolute(manifestPath) ||
+      path.resolve(manifestPath) !== manifestPath ||
+      info.isSymbolicLink() ||
+      !info.isFile() ||
+      info.uid !== process.getuid?.() ||
+      (info.mode & 0o777) !== 0o600 ||
+      realpathSync(manifestPath) !== path.resolve(manifestPath)
+    ) {
+      fail('local-profile-manifest', 'manifest-file-invalid');
+    }
+    const text = readFileSync(manifestPath, 'utf8');
+    const manifest = JSON.parse(text);
+    localContract(
+      canonicalLocalJson(manifest) === text,
+      'manifest-not-canonical',
+    );
+    return validateLocalManifestContract(manifest);
+  } catch (error) {
+    if (error instanceof RehearsalFailure) throw error;
+    fail('local-profile-manifest', 'manifest-invalid');
+  }
+}
+
 class RehearsalFailure extends Error {
   constructor(stage, code = 'gate-failed', diagnostic = {}) {
     super('Hosted operator rehearsal failed');
@@ -946,6 +1812,14 @@ function isSupportedGitHubHostedRunner(environment) {
   );
 }
 
+export function isLocalProfileHostedContext(environment) {
+  return (
+    environment?.GITHUB_ACTIONS === 'true' ||
+    environment?.RUNNER_ENVIRONMENT === 'github-hosted' ||
+    environment?.[HOSTED_SHARED_DOCKER_SELECTION] === 'true'
+  );
+}
+
 function privatePath(file, root, directory = false) {
   let info;
   try {
@@ -969,19 +1843,34 @@ function writePrivate(file, value) {
   chmodSync(file, 0o600);
 }
 
-function exactSourceImages(manifest, sourceSha, sourceTree, runId, attempt) {
+export function exactSourceImages(
+  manifest,
+  sourceSha,
+  sourceTree,
+  runId,
+  attempt,
+  hostedBinding,
+) {
+  const dispatchSha = hostedBinding
+    ? hostedBinding.dispatchSha
+    : required(process.env, 'RELEASE_DISPATCH_SHA');
+  const workflowSha = hostedBinding
+    ? hostedBinding.workflowSha
+    : required(process.env, 'RELEASE_WORKFLOW_SHA');
+  const expectedRepository =
+    hostedBinding?.repository ?? '0cwa/matrix-calendar-widget';
+  const expectedWorkflowRef =
+    hostedBinding?.workflowRef ??
+    '0cwa/matrix-calendar-widget/.github/workflows/release-image-archive.yml@refs/heads/main';
   if (
     manifest?.schema_version !== 2 ||
     manifest.source?.sha !== sourceSha ||
     manifest.source?.tree !== sourceTree ||
-    manifest.source?.dispatch_sha !==
-      required(process.env, 'RELEASE_DISPATCH_SHA') ||
-    manifest.workflow?.sha !== required(process.env, 'RELEASE_WORKFLOW_SHA') ||
-    manifest.workflow?.repository !== '0cwa/matrix-calendar-widget' ||
-    manifest.workflow?.ref !==
-      '0cwa/matrix-calendar-widget/.github/workflows/release-image-archive.yml@refs/heads/main' ||
-    manifest.workflow?.run_id !==
-      Number(required(process.env, 'RELEASE_RUN_ID')) ||
+    manifest.source?.dispatch_sha !== dispatchSha ||
+    manifest.workflow?.sha !== workflowSha ||
+    manifest.workflow?.repository !== expectedRepository ||
+    manifest.workflow?.ref !== expectedWorkflowRef ||
+    manifest.workflow?.run_id !== Number(runId) ||
     manifest.workflow?.run_attempt !== Number(attempt) ||
     manifest.platform !== 'linux/amd64' ||
     !Array.isArray(manifest.images) ||
@@ -1082,6 +1971,36 @@ export function fixtureIdentity(actual, expectedTag) {
     repoDigests: digests,
     os: actual[0].Os,
     architecture: actual[0].Architecture,
+  };
+}
+
+export function lockedLocalFixtureIdentity(actual, expected) {
+  const fixture = FIXTURES.find(
+    (candidate) =>
+      candidate.role === expected?.role && candidate.tag === expected?.tag,
+  );
+  const inspected =
+    Array.isArray(actual) && actual.length === 1 ? actual[0] : null;
+  if (
+    !fixture ||
+    !inspected ||
+    inspected.Id !== expected.image_id ||
+    inspected.Os !== 'linux' ||
+    inspected.Architecture !== 'amd64' ||
+    !inspected.RepoTags?.includes(expected.tag) ||
+    !inspected.RepoDigests?.includes(expected.repo_digest) ||
+    !validSha(expected.metadata_proof_sha256, 64)
+  ) {
+    fail('fixture-image-lock', 'fixture-lock-mismatch');
+  }
+  return {
+    ref: expected.repo_digest,
+    id: expected.image_id,
+    repoDigests: [...new Set(inspected.RepoDigests)].sort(),
+    os: inspected.Os,
+    architecture: inspected.Architecture,
+    tag: expected.tag,
+    metadataProofSha256: expected.metadata_proof_sha256,
   };
 }
 
@@ -2226,14 +3145,23 @@ function findNativeDockerExecutable(searchPath, stage = 'preflight') {
   fail(stage, 'docker-cli-unavailable');
 }
 
-export function writeDockerAdapter(taskDir, dockerExecutable) {
+function writeDockerShim(taskDir, dockerExecutable, nodeExecutable) {
   const dockerBinDir = path.join(taskDir, 'docker-bin');
   mkdirSync(dockerBinDir, { mode: 0o700 });
   chmodSync(dockerBinDir, 0o700);
   const dockerAdapterPath = path.join(dockerBinDir, 'docker');
   const helperPath = fileURLToPath(import.meta.url);
   const helperUrl = pathToFileURL(helperPath).href;
-  const source = `#!/usr/bin/env node
+  if (
+    nodeExecutable !== undefined &&
+    (!path.isAbsolute(nodeExecutable) || /[\s\r\n]/u.test(nodeExecutable))
+  ) {
+    fail('docker-api-preflight', 'local-node-runtime-invalid');
+  }
+  const shebang = nodeExecutable
+    ? `#!${nodeExecutable}`
+    : '#!/usr/bin/env node';
+  const source = `${shebang}
 import { spawn } from 'node:child_process';
 import { addOperatorRehearsalProfileToComposeArgs } from ${JSON.stringify(helperUrl)};
 const args = addOperatorRehearsalProfileToComposeArgs(process.argv.slice(2));
@@ -2256,6 +3184,14 @@ child.on('exit', (code, signal) => {
   writePrivate(dockerAdapterPath, source);
   chmodSync(dockerAdapterPath, 0o700);
   return { dockerBinDir, dockerAdapterPath };
+}
+
+export function writeDockerAdapter(taskDir, dockerExecutable) {
+  return writeDockerShim(taskDir, dockerExecutable);
+}
+
+export function writeLocalDockerShim(taskDir, dockerExecutable) {
+  return writeDockerShim(taskDir, dockerExecutable, process.execPath);
 }
 
 function composeArgs(sourceRoot, project, envFile, overrideFile) {
@@ -2773,6 +3709,180 @@ function safeReceipt({
   };
 }
 
+export function localProfileReceipt(
+  manifest,
+  checks,
+  result,
+  failedPhase,
+  cleanupStatus,
+) {
+  const safeFailedPhase = SAFE_PHASES.has(failedPhase) ? failedPhase : 'runner';
+  return {
+    schema_version: 1,
+    profile: LOCAL_PROFILE,
+    result,
+    phase: 'local-microsandbox-operator-v1',
+    failed_phase: result === 'passed' ? null : safeFailedPhase,
+    cleanup_status: cleanupStatus,
+    source: {
+      commit: manifest.source.commit,
+      tree: manifest.source.tree,
+      git_archive_sha256: manifest.source.git_archive_sha256,
+    },
+    tooling: {
+      commit: manifest.tooling.commit,
+      tree: manifest.tooling.tree,
+      git_archive_sha256: manifest.tooling.git_archive_sha256,
+      helper_sha256: manifest.tooling.helper_sha256,
+    },
+    release_archive: {
+      manifest_sha256: manifest.release_archive.manifest_sha256,
+      release_run_id: manifest.release_archive.release_run_id,
+      attempt: manifest.release_archive.attempt,
+    },
+    fixture_lock: {
+      schema_version: manifest.fixture_lock.schema_version,
+      platform: manifest.fixture_lock.platform,
+      images: manifest.fixture_lock.images.map((image) => ({ ...image })),
+    },
+    vm_proof: {
+      provider: manifest.vm_proof.provider,
+      instance_id: manifest.vm_proof.instance_id,
+      guest_kernel: manifest.vm_proof.guest_kernel,
+      probe_receipt_sha256: manifest.vm_proof.probe_receipt_sha256,
+      network_enabled: manifest.vm_proof.network_enabled,
+      host_mounts: [],
+      host_docker_socket_forwarded: false,
+      host_credentials_mounted: false,
+    },
+    synthetic_identity: {
+      mode: 'synthetic',
+      host_credentials_mounted: false,
+    },
+    checks: { ...checks },
+  };
+}
+
+export function validateLocalProfileReceipt(receipt, manifest) {
+  assertExactKeys(
+    receipt,
+    [
+      'schema_version',
+      'profile',
+      'result',
+      'phase',
+      'failed_phase',
+      'cleanup_status',
+      'source',
+      'tooling',
+      'release_archive',
+      'fixture_lock',
+      'vm_proof',
+      'synthetic_identity',
+      'checks',
+    ],
+    'receipt-publish',
+    'local-receipt-shape-invalid',
+  );
+  localContract(
+    receipt.schema_version === 1 &&
+      receipt.profile === LOCAL_PROFILE &&
+      receipt.phase === 'local-microsandbox-operator-v1' &&
+      ['passed', 'failed'].includes(receipt.result) &&
+      ['verified', 'unverified', 'not-run'].includes(receipt.cleanup_status),
+    'local-receipt-identity-invalid',
+  );
+  const checkNames = [
+    'source_binding',
+    'fixture_identity',
+    'api_authorization_and_crud',
+    'reminder_initial_and_restart',
+    'paired_store_restore',
+    'owned_cleanup',
+    'foreign_inventory_preservation',
+  ];
+  assertExactKeys(
+    receipt.checks,
+    checkNames,
+    'receipt-publish',
+    'local-receipt-checks-invalid',
+  );
+  localContract(
+    checkNames.every((name) =>
+      ['passed', 'failed', 'not-run', 'unverified'].includes(
+        receipt.checks[name],
+      ),
+    ),
+    'local-receipt-checks-invalid',
+  );
+  const successIsComplete =
+    receipt.result !== 'passed' ||
+    (receipt.failed_phase === null &&
+      receipt.cleanup_status === 'verified' &&
+      checkNames.every((name) => receipt.checks[name] === 'passed'));
+  localContract(successIsComplete, 'local-receipt-false-success');
+  localContract(
+    receipt.result !== 'failed' ||
+      (typeof receipt.failed_phase === 'string' &&
+        SAFE_PHASES.has(receipt.failed_phase)),
+    'local-receipt-failure-phase-invalid',
+  );
+  localContract(
+    canonicalLocalJson(receipt.source) ===
+      canonicalLocalJson({
+        commit: manifest.source.commit,
+        tree: manifest.source.tree,
+        git_archive_sha256: manifest.source.git_archive_sha256,
+      }) &&
+      canonicalLocalJson(receipt.tooling) ===
+        canonicalLocalJson({
+          commit: manifest.tooling.commit,
+          tree: manifest.tooling.tree,
+          git_archive_sha256: manifest.tooling.git_archive_sha256,
+          helper_sha256: manifest.tooling.helper_sha256,
+        }) &&
+      canonicalLocalJson(receipt.release_archive) ===
+        canonicalLocalJson({
+          manifest_sha256: manifest.release_archive.manifest_sha256,
+          release_run_id: manifest.release_archive.release_run_id,
+          attempt: manifest.release_archive.attempt,
+        }) &&
+      canonicalLocalJson(receipt.fixture_lock) ===
+        canonicalLocalJson(manifest.fixture_lock) &&
+      receipt.vm_proof.provider === manifest.vm_proof.provider &&
+      receipt.vm_proof.instance_id === manifest.vm_proof.instance_id &&
+      receipt.vm_proof.guest_kernel === manifest.vm_proof.guest_kernel &&
+      receipt.vm_proof.probe_receipt_sha256 ===
+        manifest.vm_proof.probe_receipt_sha256 &&
+      receipt.vm_proof.network_enabled === true &&
+      receipt.vm_proof.network_enabled === manifest.vm_proof.network_enabled,
+    'local-receipt-provenance-mismatch',
+  );
+  return receipt;
+}
+
+function writeLocalProfileReceipt(
+  runnerTemp,
+  id,
+  manifest,
+  checks,
+  result,
+  failedPhase,
+  cleanupStatus,
+) {
+  const file = path.join(
+    runnerTemp,
+    `.mcw-local-microsandbox-${id}.receipt.json`,
+  );
+  const receipt = validateLocalProfileReceipt(
+    localProfileReceipt(manifest, checks, result, failedPhase, cleanupStatus),
+    manifest,
+  );
+  writePrivate(file, canonicalLocalJson(receipt));
+  privatePath(file, runnerTemp);
+  return file;
+}
+
 export function formatSuccessSummary(receipt) {
   if (
     receipt?.result !== 'passed' ||
@@ -3092,6 +4202,11 @@ async function main() {
   let stage = 'preflight';
   let taskDir;
   let receiptPath;
+  let localMode = false;
+  let localInputsValidated = false;
+  let localManifest;
+  let localProbeReceipt;
+  let localChecks;
   const failureIdentity = {};
   let diagnosticRoot;
   let diagnosticInventory;
@@ -3101,42 +4216,85 @@ async function main() {
   let listenerScopeDiagnostic;
   let cleanupState;
   let cleanupVerified = false;
+  let id;
   const env = process.env;
   try {
+    const invocation = parseOperatorRehearsalProfileArgs(process.argv.slice(2));
+    localMode = invocation.profile === LOCAL_PROFILE;
     if (env.OPERATOR_REHEARSAL_ENABLED !== 'true') {
       fail('preflight', 'operator-rehearsal-not-enabled');
     }
-    if (
-      env[HOSTED_SHARED_DOCKER_SELECTION] !== 'true' ||
-      !isSupportedGitHubHostedRunner(env)
-    ) {
-      fail('preflight', 'hosted-runner-context-invalid');
-    }
-    const sourceRoot = path.resolve(
-      required(env, 'GITHUB_WORKSPACE'),
-      'source',
-    );
-    const toolingRoot = path.resolve(
-      required(env, 'GITHUB_WORKSPACE'),
-      'tooling',
-    );
-    const archiveRoot = path.resolve(required(env, 'ARCHIVE_ROOT'));
-    const sourceSha = requireSha(required(env, 'RELEASE_SOURCE_SHA'));
-    const workflowSha = requireSha(required(env, 'RELEASE_WORKFLOW_SHA'));
-    const runId = required(env, 'RELEASE_RUN_ID');
-    const attempt = required(env, 'RELEASE_RUN_ATTEMPT');
-    if (!/^\d{1,20}$/u.test(runId) || !/^\d{1,4}$/u.test(attempt)) {
-      fail('preflight', 'run-identity-invalid');
+    let sourceRoot;
+    let toolingRoot;
+    let archiveRoot;
+    let sourceSha;
+    let workflowSha;
+    let runId;
+    let attempt;
+    let runnerTemp;
+    let sourceImagesFromProfile;
+    if (localMode) {
+      if (isLocalProfileHostedContext(env)) {
+        fail('preflight', 'local-profile-hosted-context-rejected');
+      }
+      localManifest = readLocalProfileManifest(invocation.manifestPath);
+      const validated = validateLocalProfilePaths(
+        localManifest,
+        invocation.manifestPath,
+      );
+      localInputsValidated = true;
+      localProbeReceipt = validated.probeReceipt;
+      sourceImagesFromProfile = validated.sourceImages;
+      sourceRoot = localManifest.paths.source_root;
+      toolingRoot = localManifest.paths.tooling_root;
+      archiveRoot = localManifest.release_archive.root;
+      sourceSha = localManifest.source.commit;
+      workflowSha = localManifest.tooling.commit;
+      runId = localManifest.release_archive.release_run_id;
+      attempt = String(localManifest.release_archive.attempt);
+      runnerTemp = localManifest.paths.runner_temp;
+      id = createHash('sha256')
+        .update(
+          `${runId}:${attempt}:${localManifest.vm_proof.instance_id}:${randomBytes(16).toString('hex')}`,
+        )
+        .digest('hex')
+        .slice(0, 16);
+      localChecks = {
+        source_binding: 'passed',
+        fixture_identity: 'not-run',
+        api_authorization_and_crud: 'not-run',
+        reminder_initial_and_restart: 'not-run',
+        paired_store_restore: 'not-run',
+        owned_cleanup: 'not-run',
+        foreign_inventory_preservation: 'not-run',
+      };
+    } else {
+      if (
+        env[HOSTED_SHARED_DOCKER_SELECTION] !== 'true' ||
+        !isSupportedGitHubHostedRunner(env)
+      ) {
+        fail('preflight', 'hosted-runner-context-invalid');
+      }
+      sourceRoot = path.resolve(required(env, 'GITHUB_WORKSPACE'), 'source');
+      toolingRoot = path.resolve(required(env, 'GITHUB_WORKSPACE'), 'tooling');
+      archiveRoot = path.resolve(required(env, 'ARCHIVE_ROOT'));
+      sourceSha = requireSha(required(env, 'RELEASE_SOURCE_SHA'));
+      workflowSha = requireSha(required(env, 'RELEASE_WORKFLOW_SHA'));
+      runId = required(env, 'RELEASE_RUN_ID');
+      attempt = required(env, 'RELEASE_RUN_ATTEMPT');
+      if (!/^\d{1,20}$/u.test(runId) || !/^\d{1,4}$/u.test(attempt)) {
+        fail('preflight', 'run-identity-invalid');
+      }
+      runnerTemp = path.resolve(required(env, 'RUNNER_TEMP'));
+      id = createHash('sha256')
+        .update(`${runId}:${attempt}`)
+        .digest('hex')
+        .slice(0, 16);
     }
     Object.assign(failureIdentity, { sourceSha, workflowSha, runId, attempt });
-    const id = createHash('sha256')
-      .update(`${runId}:${attempt}`)
-      .digest('hex')
-      .slice(0, 16);
     const project = `mcw-p0-${id}`;
     diagnosticRunId = id;
     diagnosticProject = project;
-    const runnerTemp = path.resolve(required(env, 'RUNNER_TEMP'));
     const runnerInfo = lstatSync(runnerTemp);
     if (
       runnerInfo.isSymbolicLink() ||
@@ -3147,21 +4305,15 @@ async function main() {
       fail('preflight', 'runner-temp-invalid');
     }
     diagnosticRoot = runnerTemp;
-    const checkoutSha = gitValue(
-      sourceRoot,
-      ['rev-parse', 'HEAD'],
-      'source-binding',
-    );
-    const checkoutTree = gitValue(
-      sourceRoot,
-      ['rev-parse', 'HEAD^{tree}'],
-      'source-binding',
-    );
-    const trustedSha = gitValue(
-      toolingRoot,
-      ['rev-parse', 'HEAD'],
-      'source-binding',
-    );
+    const checkoutSha = localMode
+      ? localManifest.source.commit
+      : gitValue(sourceRoot, ['rev-parse', 'HEAD'], 'source-binding');
+    const checkoutTree = localMode
+      ? localManifest.source.tree
+      : gitValue(sourceRoot, ['rev-parse', 'HEAD^{tree}'], 'source-binding');
+    const trustedSha = localMode
+      ? localManifest.tooling.commit
+      : gitValue(toolingRoot, ['rev-parse', 'HEAD'], 'source-binding');
     if (
       checkoutSha !== sourceSha ||
       trustedSha !== workflowSha ||
@@ -3169,21 +4321,23 @@ async function main() {
     ) {
       fail('source-binding', 'checkout-sha-mismatch');
     }
-    const dispatchSha = required(env, 'RELEASE_DISPATCH_SHA');
-    requireSha(dispatchSha);
-    const sourceIsDispatchAncestor = spawn('git', [
-      '-C',
-      sourceRoot,
-      'merge-base',
-      '--is-ancestor',
-      sourceSha,
-      dispatchSha,
-    ]);
-    if (
-      sourceIsDispatchAncestor.error ||
-      sourceIsDispatchAncestor.status !== 0
-    ) {
-      fail('source-binding', 'source-not-dispatch-ancestor');
+    if (!localMode) {
+      const dispatchSha = required(env, 'RELEASE_DISPATCH_SHA');
+      requireSha(dispatchSha);
+      const sourceIsDispatchAncestor = spawn('git', [
+        '-C',
+        sourceRoot,
+        'merge-base',
+        '--is-ancestor',
+        sourceSha,
+        dispatchSha,
+      ]);
+      if (
+        sourceIsDispatchAncestor.error ||
+        sourceIsDispatchAncestor.status !== 0
+      ) {
+        fail('source-binding', 'source-not-dispatch-ancestor');
+      }
     }
     for (const helper of [
       'dev/up.sh',
@@ -3218,23 +4372,28 @@ async function main() {
       startupDiagnosticModule.formatStartupStageFailure;
 
     stage = 'image-lock';
-    const manifest = readJson(path.join(archiveRoot, 'manifest.json'), stage);
-    const sourceImages = exactSourceImages(
-      manifest,
-      sourceSha,
-      checkoutTree,
-      runId,
-      attempt,
-    );
+    const sourceImages = localMode
+      ? sourceImagesFromProfile
+      : exactSourceImages(
+          readJson(path.join(archiveRoot, 'manifest.json'), stage),
+          sourceSha,
+          checkoutTree,
+          runId,
+          attempt,
+        );
     failureIdentity.sourceImageIds = sourceImages.map((image) => image.id);
     const toolContext = { cwd: sourceRoot };
     taskDir = path.join(runnerTemp, `mcw-p0-${id}`);
     mkdirSync(taskDir, { mode: 0o700 });
     chmodSync(taskDir, 0o700);
     privatePath(taskDir, runnerTemp, true);
-    const dockerConfig = path.join(taskDir, 'docker-config');
-    mkdirSync(dockerConfig, { mode: 0o700 });
-    chmodSync(dockerConfig, 0o700);
+    const dockerConfig = localMode
+      ? localManifest.paths.docker_config_root
+      : path.join(taskDir, 'docker-config');
+    if (!localMode) {
+      mkdirSync(dockerConfig, { mode: 0o700 });
+      chmodSync(dockerConfig, 0o700);
+    }
     const homeDir = path.join(taskDir, 'home');
     const tmpDir = path.join(taskDir, 'tmp');
     for (const directory of [homeDir, tmpDir]) {
@@ -3245,7 +4404,9 @@ async function main() {
       required(process.env, 'PATH'),
       'docker-api-preflight',
     );
-    const dockerAdapter = writeDockerAdapter(taskDir, dockerExecutable);
+    const dockerAdapter = localMode
+      ? writeLocalDockerShim(taskDir, dockerExecutable)
+      : writeDockerAdapter(taskDir, dockerExecutable);
     const paths = {
       runnerTemp,
       taskDir,
@@ -3275,10 +4436,15 @@ async function main() {
       project,
       paths,
     );
+    if (localMode) {
+      dockerEnv.DOCKER_HOST = localManifest.vm_proof.docker_endpoint;
+    }
     const context = { cwd: sourceRoot, env: dockerEnv, taskDir };
     stage = 'docker-api-preflight';
     if (
-      dockerEnv.DOCKER_HOST !== undefined ||
+      (localMode
+        ? dockerEnv.DOCKER_HOST !== localManifest.vm_proof.docker_endpoint
+        : dockerEnv.DOCKER_HOST !== undefined) ||
       dockerEnv.DOCKER_CONTEXT !== undefined ||
       dockerEnv.DOCKER_API_VERSION !== undefined
     ) {
@@ -3316,21 +4482,31 @@ async function main() {
       validateImageInspect(actual, image);
     }
 
-    stage = 'fixture-image-pull';
+    stage = localMode ? 'fixture-image-lock' : 'fixture-image-pull';
     const fixtureImages = [];
     for (const fixture of FIXTURES) {
-      runTask(
-        `pull-${fixture.role}`,
-        'docker',
-        ['pull', '--platform', 'linux/amd64', fixture.tag],
-        context,
-      );
+      if (!localMode) {
+        runTask(
+          `pull-${fixture.role}`,
+          'docker',
+          ['pull', '--platform', 'linux/amd64', fixture.tag],
+          context,
+        );
+      }
       const actual = dockerJson(
         `inspect-${fixture.role}`,
         ['image', 'inspect', fixture.tag],
         context,
       );
-      const locked = fixtureIdentity(actual, fixture.tag);
+      let locked;
+      if (localMode) {
+        const externalLock = localManifest.fixture_lock.images.find(
+          (image) => image.role === fixture.role,
+        );
+        locked = lockedLocalFixtureIdentity(actual, externalLock);
+      } else {
+        locked = fixtureIdentity(actual, fixture.tag);
+      }
       const repeated = dockerJson(
         `inspect-pinned-${fixture.role}`,
         ['image', 'inspect', locked.ref],
@@ -3347,6 +4523,7 @@ async function main() {
     ) {
       fail('image-lock', 'five-image-lock-invalid');
     }
+    if (localMode) localChecks.fixture_identity = 'passed';
     const lock = { schema_version: 1, platform: 'linux/amd64', images };
     const lockPath = path.join(taskDir, 'image-lock.json');
     writePrivate(lockPath, `${JSON.stringify(lock)}\n`);
@@ -3397,12 +4574,14 @@ async function main() {
       { mode: 0o600 },
     );
 
-    enableHostedSharedDockerRehearsal(dockerEnv, env, {
-      taskDir,
-      dockerBinDir: dockerAdapter.dockerBinDir,
-      dockerAdapterPath: dockerAdapter.dockerAdapterPath,
-      dockerExecutable,
-    });
+    if (!localMode) {
+      enableHostedSharedDockerRehearsal(dockerEnv, env, {
+        taskDir,
+        dockerBinDir: dockerAdapter.dockerBinDir,
+        dockerAdapterPath: dockerAdapter.dockerAdapterPath,
+        dockerExecutable,
+      });
+    }
 
     stage = 'start-calendaring-services';
     verifyLockedImages(images, context, 'pre-start-image-lock');
@@ -3564,6 +4743,7 @@ async function main() {
       { apiCrudProbeParser: parseApiCrudProbeFailure },
     );
     assertApiCrudProbePassed(apiOutput);
+    if (localMode) localChecks.api_authorization_and_crud = 'passed';
 
     stage = 'reminder-initial';
     let markers = assertInitialReminderState(paths.eventFile);
@@ -3631,6 +4811,7 @@ async function main() {
       path.join(sourceRoot, 'dev/element-acceptance-reminder-restore.mjs'),
       'snapshot',
     ]);
+    if (localMode) localChecks.reminder_initial_and_restart = 'passed';
 
     stage = 'paired-store-restore';
     verifyLockedImages(images, context, 'pre-restore-image-lock');
@@ -3686,11 +4867,13 @@ async function main() {
       'verify-restore',
     ]);
     if (markers !== 3) fail(stage, 'restored-delivery-count-invalid');
+    if (localMode) localChecks.paired_store_restore = 'passed';
 
     stage = 'owned-cleanup-preflight';
     const current = captureInventory('pre-cleanup', context);
     diagnosticInventory = current;
     compareForeign(baseline, current, id, project, 'owned-cleanup-preflight');
+    if (localMode) localChecks.foreign_inventory_preservation = 'passed';
     assertNoElement(current, id, project);
     assertPrivateTaskTree(taskDir, {
       runnerTemp,
@@ -3711,12 +4894,14 @@ async function main() {
         volumes_before: baseline.volumes.length,
       },
     });
-    receiptPath = path.join(runnerTemp, `.mcw-p0-${id}.receipt.json`);
-    writePrivate(
-      receiptPath,
-      `${JSON.stringify({ ...receipt, cleanup_verified: false })}\n`,
-    );
-    privatePath(receiptPath, runnerTemp);
+    if (!localMode) {
+      receiptPath = path.join(runnerTemp, `.mcw-p0-${id}.receipt.json`);
+      writePrivate(
+        receiptPath,
+        `${JSON.stringify({ ...receipt, cleanup_verified: false })}\n`,
+      );
+      privatePath(receiptPath, runnerTemp);
+    }
 
     stage = 'owned-cleanup';
     removeOwnedResources({
@@ -3728,6 +4913,7 @@ async function main() {
       prefix: 'success',
     });
     cleanupVerified = true;
+    if (localMode) localChecks.owned_cleanup = 'passed';
 
     stage = 'task-files-cleanup';
     assertPrivateTaskTree(taskDir, {
@@ -3743,31 +4929,46 @@ async function main() {
     rmSync(taskDir, { recursive: true, force: false });
     if (lstatSync(taskDir, { throwIfNoEntry: false }))
       fail(stage, 'task-directory-remains');
-    const successReceipt = {
-      ...receipt,
-      result: 'passed',
-      cleanup_verified: true,
-      checks: { ...receipt.checks, owned_cleanup: true },
-    };
-    writeFileSync(receiptPath, `${JSON.stringify(successReceipt)}\n`, {
-      mode: 0o600,
-      flag: 'w',
-    });
-    chmodSync(receiptPath, 0o600);
-    privatePath(receiptPath, runnerTemp);
-    if (!env.GITHUB_STEP_SUMMARY)
-      fail('receipt-publish', 'summary-path-missing');
-    writeFileSync(
-      env.GITHUB_STEP_SUMMARY,
-      formatSuccessSummary(successReceipt),
-      {
-        flag: 'a',
+    if (localMode) {
+      receiptPath = writeLocalProfileReceipt(
+        runnerTemp,
+        id,
+        localManifest,
+        localChecks,
+        'passed',
+        null,
+        'verified',
+      );
+      process.stdout.write(
+        'Local microsandbox operator rehearsal passed; owned cleanup was verified.\n',
+      );
+    } else {
+      const successReceipt = {
+        ...receipt,
+        result: 'passed',
+        cleanup_verified: true,
+        checks: { ...receipt.checks, owned_cleanup: true },
+      };
+      writeFileSync(receiptPath, `${JSON.stringify(successReceipt)}\n`, {
         mode: 0o600,
-      },
-    );
-    process.stdout.write(
-      'Hosted Docker operator rehearsal passed; owned cleanup was verified.\n',
-    );
+        flag: 'w',
+      });
+      chmodSync(receiptPath, 0o600);
+      privatePath(receiptPath, runnerTemp);
+      if (!env.GITHUB_STEP_SUMMARY)
+        fail('receipt-publish', 'summary-path-missing');
+      writeFileSync(
+        env.GITHUB_STEP_SUMMARY,
+        formatSuccessSummary(successReceipt),
+        {
+          flag: 'a',
+          mode: 0o600,
+        },
+      );
+      process.stdout.write(
+        'Hosted Docker operator rehearsal passed; owned cleanup was verified.\n',
+      );
+    }
   } catch (error) {
     const failedPhase = error instanceof RehearsalFailure ? error.stage : stage;
     let cleanupStatus = cleanupVerified ? 'verified' : 'not-run';
@@ -3808,11 +5009,13 @@ async function main() {
           : undefined,
     };
     if (cleanupState && !cleanupVerified) cleanupStatus = 'pending';
-    const diagnosticWritten = writeFailureDiagnostic(diagnosticRoot, {
-      ...failure,
-      cleanupStatus,
-      cleanupAttempted,
-    });
+    const diagnosticWritten = localMode
+      ? false
+      : writeFailureDiagnostic(diagnosticRoot, {
+          ...failure,
+          cleanupStatus,
+          cleanupAttempted,
+        });
     if (cleanupState && !cleanupVerified) {
       cleanupStatus = 'unverified';
       cleanupAttempted = true;
@@ -3839,6 +5042,7 @@ async function main() {
           prefix: 'failure',
         });
         cleanupStatus = 'verified';
+        if (localMode) localChecks.owned_cleanup = 'passed';
       } catch (cleanupError) {
         if (
           !failure.foreignInventoryChange &&
@@ -3849,6 +5053,55 @@ async function main() {
         cleanupStatus = 'unverified';
       }
     }
+    if (localMode && taskDir && lstatSync(taskDir, { throwIfNoEntry: false })) {
+      try {
+        assertPrivateTaskTree(taskDir, {
+          runnerTemp: localManifest.paths.runner_temp,
+          dockerAdapterPath: path.join(taskDir, 'docker-bin', 'docker'),
+        });
+        if (
+          realpathSync(taskDir) !== taskDir ||
+          !taskDir.startsWith(`${localManifest.paths.runner_temp}${path.sep}`)
+        ) {
+          fail('task-files-cleanup', 'task-directory-path-invalid');
+        }
+        rmSync(taskDir, { recursive: true, force: false });
+        if (lstatSync(taskDir, { throwIfNoEntry: false }))
+          fail('task-files-cleanup', 'task-directory-remains');
+      } catch {
+        cleanupStatus = 'unverified';
+        cleanupAttempted = true;
+      }
+    }
+    if (localMode && localChecks) {
+      if (
+        ['source-binding', 'image-lock', 'source-image-inspect'].includes(
+          failedPhase,
+        )
+      ) {
+        localChecks.source_binding = 'failed';
+      } else if (failedPhase === 'fixture-image-lock') {
+        localChecks.fixture_identity = 'failed';
+      } else if (['api-route-smoke', 'api-crud-probe'].includes(failedPhase)) {
+        localChecks.api_authorization_and_crud = 'failed';
+      } else if (
+        ['reminder-initial', 'reminder-restart'].includes(failedPhase)
+      ) {
+        localChecks.reminder_initial_and_restart = 'failed';
+      } else if (failedPhase === 'paired-store-restore') {
+        localChecks.paired_store_restore = 'failed';
+      } else if (
+        ['owned-cleanup', 'owned-cleanup-preflight'].includes(failedPhase)
+      ) {
+        localChecks.owned_cleanup = 'failed';
+      }
+      if (failure.foreignInventoryChange) {
+        localChecks.foreign_inventory_preservation = 'failed';
+      }
+      if (cleanupStatus === 'verified') localChecks.owned_cleanup = 'passed';
+      else if (localChecks.owned_cleanup !== 'failed')
+        localChecks.owned_cleanup = cleanupStatus;
+    }
     if (diagnosticWritten) {
       writeFailureDiagnostic(
         diagnosticRoot,
@@ -3856,7 +5109,7 @@ async function main() {
         true,
       );
     }
-    if (env.GITHUB_STEP_SUMMARY) {
+    if (!localMode && env.GITHUB_STEP_SUMMARY) {
       try {
         writeFileSync(
           env.GITHUB_STEP_SUMMARY,
@@ -3871,9 +5124,30 @@ async function main() {
         // The fixed stderr line below remains safe if the runner summary is unavailable.
       }
     }
-    process.stderr.write(
-      `Hosted Docker operator rehearsal failed at phase ${SAFE_PHASES.has(failedPhase) ? failedPhase : 'runner'}; owned cleanup ${cleanupStatus}.\n`,
-    );
+    if (localMode) {
+      if (localInputsValidated && localManifest && id && localChecks) {
+        try {
+          receiptPath = writeLocalProfileReceipt(
+            localManifest.paths.runner_temp,
+            id,
+            localManifest,
+            localChecks,
+            'failed',
+            failedPhase,
+            cleanupStatus,
+          );
+        } catch {
+          // Do not reveal a private path or replace the fixed failure line.
+        }
+      }
+      process.stderr.write(
+        `Local microsandbox operator rehearsal failed; owned cleanup ${cleanupStatus}.\n`,
+      );
+    } else {
+      process.stderr.write(
+        `Hosted Docker operator rehearsal failed at phase ${SAFE_PHASES.has(failedPhase) ? failedPhase : 'runner'}; owned cleanup ${cleanupStatus}.\n`,
+      );
+    }
     process.exitCode = 1;
   }
 }
