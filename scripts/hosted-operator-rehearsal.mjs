@@ -3828,21 +3828,21 @@ export function validateLocalProfileReceipt(receipt, manifest) {
     'local-receipt-failure-phase-invalid',
   );
   localContract(
-    JSON.stringify(receipt.source) ===
-      JSON.stringify({
+    canonicalLocalJson(receipt.source) ===
+      canonicalLocalJson({
         commit: manifest.source.commit,
         tree: manifest.source.tree,
         git_archive_sha256: manifest.source.git_archive_sha256,
       }) &&
-      JSON.stringify(receipt.tooling) ===
-        JSON.stringify({
+      canonicalLocalJson(receipt.tooling) ===
+        canonicalLocalJson({
           commit: manifest.tooling.commit,
           tree: manifest.tooling.tree,
           git_archive_sha256: manifest.tooling.git_archive_sha256,
           helper_sha256: manifest.tooling.helper_sha256,
         }) &&
-      JSON.stringify(receipt.release_archive) ===
-        JSON.stringify({
+      canonicalLocalJson(receipt.release_archive) ===
+        canonicalLocalJson({
           manifest_sha256: manifest.release_archive.manifest_sha256,
           release_run_id: manifest.release_archive.release_run_id,
           attempt: manifest.release_archive.attempt,

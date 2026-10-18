@@ -601,6 +601,11 @@ test('local receipt refuses false success and carries only its closed contract',
     validateLocalProfileReceipt(successful, manifest).result,
     'passed',
   );
+  const roundTripped = JSON.parse(canonicalLocalJson(successful));
+  assert.equal(
+    validateLocalProfileReceipt(roundTripped, manifest).result,
+    'passed',
+  );
   assert.equal(successful.vm_proof.network_enabled, true);
   assert.equal(
     Object.hasOwn(successful.synthetic_identity, 'external_matrix_egress'),
@@ -612,6 +617,17 @@ test('local receipt refuses false success and carries only its closed contract',
         {
           ...successful,
           vm_proof: { ...successful.vm_proof, network_enabled: false },
+        },
+        manifest,
+      ),
+    (error) => error.code === 'local-receipt-provenance-mismatch',
+  );
+  assert.throws(
+    () =>
+      validateLocalProfileReceipt(
+        {
+          ...roundTripped,
+          tooling: { ...roundTripped.tooling, helper_sha256: 'f'.repeat(64) },
         },
         manifest,
       ),
