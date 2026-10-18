@@ -54,13 +54,23 @@ function hasExactKeys(value, keys) {
   );
 }
 
-function readBoundedPrivateFile(filename, maxBytes) {
+function readBoundedPrivateFile(filename, maxBytes, requirePrivateOwner = false) {
   let fd;
   try {
     // Reject symlinks and non-regular files; private inputs are never logged.
     fd = openSync(filename, constants.O_RDONLY | constants.O_NOFOLLOW);
     const stat = fstatSync(fd);
-    if (!stat.isFile() || stat.size < 1 || stat.size > maxBytes) fail();
+    if (
+      !stat.isFile() ||
+      stat.size < 1 ||
+      stat.size > maxBytes ||
+      (requirePrivateOwner &&
+        ((stat.mode & 0o077) !== 0 ||
+          (typeof process.geteuid === 'function' &&
+            stat.uid !== process.geteuid())))
+    ) {
+      fail();
+    }
     const bytes = readFileSync(fd);
     if (bytes.length < 1 || bytes.length > maxBytes) fail();
     return bytes;
@@ -74,7 +84,7 @@ function readBoundedPrivateFile(filename, maxBytes) {
 export function readPrivatePilotBinding(filename) {
   try {
     const value = JSON.parse(
-      readBoundedPrivateFile(filename, 4096).toString('utf8'),
+      readBoundedPrivateFile(filename, 4096, true).toString('utf8'),
     );
     if (
       !hasExactKeys(value, ['roomId', 'calendarId']) ||

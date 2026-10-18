@@ -511,7 +511,9 @@ manifest must remain in an operator-private file, not in the repository.
 
 Separately, the authorized operator supplies a private, locally protected JSON
 file with exactly the approved `roomId` and `calendarId` from the operator
-record, for example (these are synthetic identifiers):
+record. On POSIX systems, the binding file must be owned by the invoking
+operator and have no group or world permission bits; mode `0600` is suitable.
+For example (these are synthetic identifiers):
 
 `{"roomId":"!pilot-room:example.org","calendarId":"team-calendar"}`
 

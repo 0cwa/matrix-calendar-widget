@@ -1,5 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  chownSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -219,6 +226,36 @@ test('private file inputs fail closed on absent or unauthenticated content', () 
       mode: 0o600,
     });
     assert.deepEqual(readPrivatePilotBinding(bindingFile), expectedBinding);
+
+    for (const mode of [0o640, 0o644]) {
+      chmodSync(bindingFile, mode);
+      assert.throws(() => readPrivatePilotBinding(bindingFile), {
+        message: 'Pilot sidecar verification failed.',
+      });
+    }
+    chmodSync(bindingFile, 0o600);
+
+    const symlinkFile = join(directory, 'binding-link.json');
+    symlinkSync(bindingFile, symlinkFile);
+    assert.throws(() => readPrivatePilotBinding(symlinkFile), {
+      message: 'Pilot sidecar verification failed.',
+    });
+    assert.throws(() => readPrivatePilotBinding(directory), {
+      message: 'Pilot sidecar verification failed.',
+    });
+
+    if (
+      typeof process.geteuid === 'function' &&
+      typeof process.getegid === 'function' &&
+      process.geteuid() === 0
+    ) {
+      const otherOwner = process.geteuid() === 1 ? 2 : 1;
+      chownSync(bindingFile, otherOwner, process.getegid());
+      assert.throws(() => readPrivatePilotBinding(bindingFile), {
+        message: 'Pilot sidecar verification failed.',
+      });
+      chownSync(bindingFile, process.geteuid(), process.getegid());
+    }
 
     writeFileSync(
       manifestFile,
