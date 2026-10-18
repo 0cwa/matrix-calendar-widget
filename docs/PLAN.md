@@ -568,6 +568,16 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       and daily activation
       remain pending. Issues #255 and #251 remain open; no wider rollout or
       publication is authorized.
+- [x] Add an explicit `--profile local-microsandbox --manifest PATH` authoring
+      path to the operator rehearsal. The closed v1 manifest binds curated
+      source/tooling archives, the accepted release manifest, a current guest
+      probe receipt, private guest-local Docker access, and offline fixture
+      locks; the local profile reuses the same install, API, reminder restart,
+      paired restore, rollback, and owned-cleanup lifecycle without selecting
+      the hosted shared-daemon adapter. Focused contract tests pass. No local
+      VM rehearsal was run during authoring, so actual guest execution,
+      resource cleanup, and foreign-state preservation remain unverified;
+      issues #251 and #255 stay open.
 - [ ] Keep issues #275–#278 post-pilot. In particular, defer the #275
       StoreProvider/Redux startup retirement until after the pilot.
 
