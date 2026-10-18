@@ -222,11 +222,16 @@ test('profile selection keeps hosted as the zero-argument default and requires a
   }
 });
 
-test('local profile manifest is closed and pins source, lineage, endpoint, and offline fixture identities', () => {
+test('local profile manifest is closed and pins source, lineage, guest networking, and fixture identities', () => {
   const example = structuredClone(
     LOCAL_MICROSANDBOX_MANIFEST_EXAMPLE_WITH_PLACEHOLDERS,
   );
   assert.equal(validateLocalManifestContract(example), example);
+  assert.equal(example.vm_proof.network_enabled, true);
+  assert.equal(
+    Object.hasOwn(example.synthetic_identity, 'external_matrix_egress'),
+    false,
+  );
   assert.equal(LOCAL_MICROSANDBOX_MANIFEST_SCHEMA.additionalProperties, false);
   assert.equal(
     LOCAL_MICROSANDBOX_PROBE_RECEIPT_SCHEMA.additionalProperties,
@@ -260,6 +265,9 @@ test('local profile manifest is closed and pins source, lineage, endpoint, and o
     },
     (value) => {
       value.vm_proof.host_credentials_mounted = true;
+    },
+    (value) => {
+      value.vm_proof.network_enabled = false;
     },
     (value) => {
       value.paths.docker_socket = '/job/private/other.sock';
@@ -418,7 +426,7 @@ test('microsandbox probe receipt binds current guest identity and manifest prove
   assert.equal(receipt.schema_version, 1);
   assert.equal(receipt.result, 'passed');
   assert.equal(receipt.provider, 'microsandbox');
-  assert.equal(receipt.network_mode, 'none');
+  assert.equal(receipt.network_enabled, true);
   assert.equal(receipt.provider, manifest.vm_proof.provider);
   assert.equal(receipt.instance_id, manifest.vm_proof.instance_id);
   assert.equal(receipt.guest_kernel, manifest.vm_proof.guest_kernel);
@@ -431,7 +439,7 @@ test('microsandbox probe receipt binds current guest identity and manifest prove
     new Date(Date.parse(receipt.observed_at)).toISOString(),
     receipt.observed_at,
   );
-  assert.equal(receipt.network_mode, manifest.vm_proof.network_mode);
+  assert.equal(receipt.network_enabled, manifest.vm_proof.network_enabled);
   assert.equal(receipt.host_mounts.length, 0);
   assert.equal(receipt.host_docker_socket_forwarded, false);
   assert.equal(receipt.host_credentials_mounted, false);
@@ -463,6 +471,9 @@ test('microsandbox probe receipt binds current guest identity and manifest prove
     },
     (value) => {
       value.guest_boot_id = '00000000-0000-0000-0000-000000000000';
+    },
+    (value) => {
+      value.network_enabled = false;
     },
     (value) => {
       value.checks.namespaces = 'failed';
@@ -556,6 +567,22 @@ test('local receipt refuses false success and carries only its closed contract',
   assert.equal(
     validateLocalProfileReceipt(successful, manifest).result,
     'passed',
+  );
+  assert.equal(successful.vm_proof.network_enabled, true);
+  assert.equal(
+    Object.hasOwn(successful.synthetic_identity, 'external_matrix_egress'),
+    false,
+  );
+  assert.throws(
+    () =>
+      validateLocalProfileReceipt(
+        {
+          ...successful,
+          vm_proof: { ...successful.vm_proof, network_enabled: false },
+        },
+        manifest,
+      ),
+    (error) => error.code === 'local-receipt-provenance-mismatch',
   );
   assert.throws(
     () =>
@@ -1389,6 +1416,14 @@ test('fixture setup keeps a bootstrap env until validated output is handed off',
   assert.equal(
     environment.MATRIX_CALENDAR_LOCAL_COMPOSE_ENV_FILE,
     paths.bootstrapEnvFile,
+  );
+  assert.equal(
+    environment.MATRIX_CALENDAR_DEV_SYNAPSE_PORT_MAPPING,
+    '127.0.0.1:8008:8008',
+  );
+  assert.equal(
+    environment.MATRIX_CALENDAR_DEV_RADICALE_PORT_MAPPING,
+    '127.0.0.1:5232:5232',
   );
   assert.equal(environment.ELEMENT_ACCEPTANCE_SERVER_ENV_FILE, paths.envFile);
   for (const key of [

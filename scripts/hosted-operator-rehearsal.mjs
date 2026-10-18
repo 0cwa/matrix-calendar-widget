@@ -931,7 +931,7 @@ export const LOCAL_MICROSANDBOX_MANIFEST_SCHEMA = Object.freeze({
         'instance_id',
         'guest_kernel',
         'probe_receipt_sha256',
-        'network_mode',
+        'network_enabled',
         'host_mounts',
         'host_docker_socket_forwarded',
         'host_credentials_mounted',
@@ -945,7 +945,7 @@ export const LOCAL_MICROSANDBOX_MANIFEST_SCHEMA = Object.freeze({
           type: 'string',
           pattern: '^[0-9a-f]{64}$',
         },
-        network_mode: { const: 'none' },
+        network_enabled: { const: true },
         host_mounts: { type: 'array', maxItems: 0 },
         host_docker_socket_forwarded: { const: false },
         host_credentials_mounted: { const: false },
@@ -1043,17 +1043,11 @@ export const LOCAL_MICROSANDBOX_MANIFEST_SCHEMA = Object.freeze({
     synthetic_identity: {
       type: 'object',
       additionalProperties: false,
-      required: [
-        'mode',
-        'credential_root',
-        'host_credentials_mounted',
-        'external_matrix_egress',
-      ],
+      required: ['mode', 'credential_root', 'host_credentials_mounted'],
       properties: {
         mode: { const: 'synthetic' },
         credential_root: { type: 'string' },
         host_credentials_mounted: { const: false },
-        external_matrix_egress: { const: false },
       },
     },
   },
@@ -1068,7 +1062,7 @@ export const LOCAL_MICROSANDBOX_MANIFEST_EXAMPLE_WITH_PLACEHOLDERS =
       instance_id: 'replace-with-current-microsandbox-instance-id',
       guest_kernel: 'replace-with-guest-kernel-release',
       probe_receipt_sha256: '0'.repeat(64),
-      network_mode: 'none',
+      network_enabled: true,
       host_mounts: [],
       host_docker_socket_forwarded: false,
       host_credentials_mounted: false,
@@ -1129,7 +1123,6 @@ export const LOCAL_MICROSANDBOX_MANIFEST_EXAMPLE_WITH_PLACEHOLDERS =
       mode: 'synthetic',
       credential_root: '/job/private/synthetic-credentials',
       host_credentials_mounted: false,
-      external_matrix_egress: false,
     },
   });
 
@@ -1146,7 +1139,7 @@ export const LOCAL_MICROSANDBOX_PROBE_RECEIPT_SCHEMA = Object.freeze({
     'guest_kernel',
     'guest_boot_id',
     'observed_at',
-    'network_mode',
+    'network_enabled',
     'host_mounts',
     'host_docker_socket_forwarded',
     'host_credentials_mounted',
@@ -1165,7 +1158,7 @@ export const LOCAL_MICROSANDBOX_PROBE_RECEIPT_SCHEMA = Object.freeze({
       pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
     },
     observed_at: { type: 'string', format: 'date-time' },
-    network_mode: { const: 'none' },
+    network_enabled: { const: true },
     host_mounts: { type: 'array', maxItems: 0 },
     host_docker_socket_forwarded: { const: false },
     host_credentials_mounted: { const: false },
@@ -1229,7 +1222,7 @@ export const LOCAL_MICROSANDBOX_PROBE_RECEIPT_EXAMPLE_WITH_PLACEHOLDERS =
     guest_kernel: 'replace-with-guest-kernel-release',
     guest_boot_id: '00000000-0000-0000-0000-000000000000',
     observed_at: '2026-01-01T00:00:00.000Z',
-    network_mode: 'none',
+    network_enabled: true,
     host_mounts: [],
     host_docker_socket_forwarded: false,
     host_credentials_mounted: false,
@@ -1613,7 +1606,7 @@ export function validateLocalProbeReceipt(manifest, receiptPath) {
       typeof receipt.observed_at === 'string' &&
       Number.isFinite(observed) &&
       new Date(observed).toISOString() === receipt.observed_at &&
-      receipt.network_mode === manifest.vm_proof.network_mode &&
+      receipt.network_enabled === manifest.vm_proof.network_enabled &&
       Array.isArray(receipt.host_mounts) &&
       receipt.host_mounts.length === 0 &&
       receipt.host_docker_socket_forwarded === false &&
@@ -3746,7 +3739,7 @@ export function localProfileReceipt(
       instance_id: manifest.vm_proof.instance_id,
       guest_kernel: manifest.vm_proof.guest_kernel,
       probe_receipt_sha256: manifest.vm_proof.probe_receipt_sha256,
-      network_mode: manifest.vm_proof.network_mode,
+      network_enabled: manifest.vm_proof.network_enabled,
       host_mounts: [],
       host_docker_socket_forwarded: false,
       host_credentials_mounted: false,
@@ -3754,7 +3747,6 @@ export function localProfileReceipt(
     synthetic_identity: {
       mode: 'synthetic',
       host_credentials_mounted: false,
-      external_matrix_egress: false,
     },
     checks: { ...checks },
   };
@@ -3850,7 +3842,9 @@ export function validateLocalProfileReceipt(receipt, manifest) {
       receipt.vm_proof.instance_id === manifest.vm_proof.instance_id &&
       receipt.vm_proof.guest_kernel === manifest.vm_proof.guest_kernel &&
       receipt.vm_proof.probe_receipt_sha256 ===
-        manifest.vm_proof.probe_receipt_sha256,
+        manifest.vm_proof.probe_receipt_sha256 &&
+      receipt.vm_proof.network_enabled === true &&
+      receipt.vm_proof.network_enabled === manifest.vm_proof.network_enabled,
     'local-receipt-provenance-mismatch',
   );
   return receipt;
