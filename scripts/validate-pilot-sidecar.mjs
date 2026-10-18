@@ -54,7 +54,11 @@ function hasExactKeys(value, keys) {
   );
 }
 
-function readBoundedPrivateFile(filename, maxBytes, requirePrivateOwner = false) {
+function readBoundedPrivateFile(
+  filename,
+  maxBytes,
+  requirePrivateOwner = false,
+) {
   let fd;
   try {
     // Reject symlinks and non-regular files; private inputs are never logged.
