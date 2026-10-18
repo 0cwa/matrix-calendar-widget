@@ -3145,14 +3145,23 @@ function findNativeDockerExecutable(searchPath, stage = 'preflight') {
   fail(stage, 'docker-cli-unavailable');
 }
 
-function writeDockerShim(taskDir, dockerExecutable) {
+function writeDockerShim(taskDir, dockerExecutable, nodeExecutable) {
   const dockerBinDir = path.join(taskDir, 'docker-bin');
   mkdirSync(dockerBinDir, { mode: 0o700 });
   chmodSync(dockerBinDir, 0o700);
   const dockerAdapterPath = path.join(dockerBinDir, 'docker');
   const helperPath = fileURLToPath(import.meta.url);
   const helperUrl = pathToFileURL(helperPath).href;
-  const source = `#!/usr/bin/env node
+  if (
+    nodeExecutable !== undefined &&
+    (!path.isAbsolute(nodeExecutable) || /[\s\r\n]/u.test(nodeExecutable))
+  ) {
+    fail('docker-api-preflight', 'local-node-runtime-invalid');
+  }
+  const shebang = nodeExecutable
+    ? `#!${nodeExecutable}`
+    : '#!/usr/bin/env node';
+  const source = `${shebang}
 import { spawn } from 'node:child_process';
 import { addOperatorRehearsalProfileToComposeArgs } from ${JSON.stringify(helperUrl)};
 const args = addOperatorRehearsalProfileToComposeArgs(process.argv.slice(2));
@@ -3182,7 +3191,7 @@ export function writeDockerAdapter(taskDir, dockerExecutable) {
 }
 
 export function writeLocalDockerShim(taskDir, dockerExecutable) {
-  return writeDockerShim(taskDir, dockerExecutable);
+  return writeDockerShim(taskDir, dockerExecutable, process.execPath);
 }
 
 function composeArgs(sourceRoot, project, envFile, overrideFile) {
@@ -4207,6 +4216,7 @@ async function main() {
   let listenerScopeDiagnostic;
   let cleanupState;
   let cleanupVerified = false;
+  let id;
   const env = process.env;
   try {
     const invocation = parseOperatorRehearsalProfileArgs(process.argv.slice(2));
@@ -4222,7 +4232,6 @@ async function main() {
     let runId;
     let attempt;
     let runnerTemp;
-    let id;
     let sourceImagesFromProfile;
     if (localMode) {
       if (isLocalProfileHostedContext(env)) {

@@ -14,7 +14,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { release as osRelease, tmpdir } from 'node:os';
-import { delimiter, dirname, join } from 'node:path';
+import { delimiter, dirname, isAbsolute, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { runInNewContext } from 'node:vm';
@@ -1403,18 +1403,51 @@ test('hosted shared-Docker mode requires a private adapter and exact hosted main
   );
 });
 
-test('local Docker shim only adds the Element-disabled Compose profile and contains no hosted selection', (t) => {
+test('local Docker shim runs without PATH resolving Node and keeps hosted shim behavior unchanged', (t) => {
   const taskDir = mkdtempSync(join(tmpdir(), 'mcw-local-docker-shim-'));
   chmodSync(taskDir, 0o700);
   t.after(() => rmSync(taskDir, { recursive: true, force: true }));
-  const shim = writeLocalDockerShim(taskDir, process.execPath);
+  const nativeDocker = join(taskDir, 'native-docker');
+  const argsCapture = join(taskDir, 'docker-args.json');
+  writeFileSync(
+    nativeDocker,
+    '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$DOCKER_ARGS_CAPTURE"\nprintf adapter-ok\n',
+    { mode: 0o700, flag: 'wx' },
+  );
+  chmodSync(nativeDocker, 0o700);
+  const shim = writeLocalDockerShim(taskDir, nativeDocker);
   const source = readFileSync(shim.dockerAdapterPath, 'utf8');
+  assert.equal(source.split('\n', 1)[0], `#!${process.execPath}`);
+  assert.ok(isAbsolute(process.execPath));
   assert.match(source, /addOperatorRehearsalProfileToComposeArgs/u);
   assert.doesNotMatch(
     source,
     /GITHUB_ACTIONS|GITHUB_REF|GITHUB_REPOSITORY|RUNNER_ENVIRONMENT|MATRIX_CALENDAR_HOSTED_SHARED_DOCKER_REHEARSAL/u,
   );
   assert.equal(statSync(shim.dockerAdapterPath).mode & 0o777, 0o700);
+
+  const args = ['compose', '-p', project, 'config'];
+  const result = spawnSync(shim.dockerAdapterPath, args, {
+    encoding: 'utf8',
+    env: { PATH: '', DOCKER_ARGS_CAPTURE: argsCapture },
+    timeout: 5000,
+  });
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout, 'adapter-ok');
+  assert.equal(result.stderr, '');
+  assert.deepEqual(
+    readFileSync(argsCapture, 'utf8').trimEnd().split('\n'),
+    addOperatorRehearsalProfileToComposeArgs(args),
+  );
+
+  const hostedDir = join(taskDir, 'hosted');
+  mkdirSync(hostedDir, { mode: 0o700 });
+  const hostedShim = writeDockerAdapter(hostedDir, nativeDocker);
+  assert.equal(
+    readFileSync(hostedShim.dockerAdapterPath, 'utf8').split('\n', 1)[0],
+    '#!/usr/bin/env node',
+  );
 });
 
 function throwsCode(code) {
