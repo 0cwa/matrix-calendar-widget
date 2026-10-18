@@ -578,9 +578,19 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       restore artifacts in guest-private storage. The local profile reuses the same install, API,
       reminder restart, paired restore, rollback, and owned-cleanup lifecycle
       without selecting the hosted shared-daemon adapter. Focused contract tests
-      pass. No local VM rehearsal was run during authoring, so actual guest
-      execution, resource cleanup, and foreign-state preservation remain
-      unverified; issues #251 and #255 stay open.
+      pass. A local rehearsal subsequently passed on accepted application
+      source `99d4c9f9f36aa0b0861a13499a7f7cd512c56920` with helper commit
+      `61e4cf7b4285b8fbc986d89e8a25337f407a6f89`. The closed receipt records
+      source and fixture binding, API authorization/CRUD, reminder initial and
+      restart behavior, paired-store restore, owned cleanup, and foreign-state
+      preservation as passed. It used a network-enabled synthetic guest with no
+      host-directory mount, forwarded host Docker socket, or host credentials;
+      the guest was stopped and run-owned resources were removed afterward. An
+      earlier failed attempt remains recorded with cleanup marked unverified;
+      its separately verified cleanup is not attributed to that receipt. This
+      establishes local rehearsal only. Issues #251 and #255 and the separate
+      production target, owner-input, canary, backup, and restore gates remain
+      open.
 - [ ] Keep issues #275–#278 post-pilot. In particular, defer the #275
       StoreProvider/Redux startup retirement until after the pilot.
 
