@@ -3172,6 +3172,21 @@ test('failure checks use fixed assertion codes and unknown fallback', () => {
     ['network-set-mismatch', 'network'],
     ['foreign-listener-changed', 'listener'],
     ['foreign-state-changed', 'foreign-inventory'],
+    ['cleanup-service-set-invalid', 'cleanup-resource-set'],
+    ['cleanup-volume-set-invalid', 'cleanup-resource-set'],
+    ['cleanup-network-set-invalid', 'cleanup-resource-set'],
+    ['resource-owner-changed', 'cleanup-resource-identity'],
+    ['unknown-service', 'cleanup-resource-set'],
+    ['container-image-invalid', 'cleanup-resource-identity'],
+    ['owned-container-remains', 'cleanup-container'],
+    ['container-changed-before-cleanup', 'cleanup-container'],
+    ['owned-volume-remains', 'cleanup-volume'],
+    ['volume-changed-before-cleanup', 'cleanup-volume'],
+    ['owned-volume-still-mounted', 'cleanup-volume'],
+    ['owned-network-remains', 'cleanup-network'],
+    ['network-changed-before-cleanup', 'cleanup-network'],
+    ['owned-network-still-attached', 'cleanup-network'],
+    ['inventory-postcondition-failed', 'cleanup-inventory'],
     ['service-state-mismatch token=secret', 'unknown'],
   ];
   for (const [failureCode, expected] of cases) {
@@ -3194,6 +3209,56 @@ test('failure checks use fixed assertion codes and unknown fallback', () => {
       removed_count: 1,
     },
   );
+});
+
+test('cleanup failure diagnostics retain the fixed check and safe phase only', () => {
+  const fixedChecks = [
+    ['owned-container-remains', 'cleanup-container'],
+    ['owned-volume-still-mounted', 'cleanup-volume'],
+    ['owned-network-still-attached', 'cleanup-network'],
+    ['inventory-postcondition-failed', 'cleanup-inventory'],
+  ];
+
+  for (const [failureCode, failureCheck] of fixedChecks) {
+    const diagnostic = formatFailureDiagnostic({
+      sourceSha,
+      workflowSha: '2'.repeat(40),
+      runId,
+      attempt: '1',
+      phase: 'success-cleanup',
+      failureClass: 'gate-failed',
+      operation: failureOperationForStage('success-cleanup'),
+      failureCode,
+      cleanupStatus: 'verified',
+      cleanupAttempted: true,
+    });
+
+    assert.equal(diagnostic.failed_phase, 'success-cleanup');
+    assert.equal(diagnostic.failure_operation, 'cleanup-assertion');
+    assert.equal(diagnostic.failure_check, failureCheck);
+    assert.equal(diagnostic.cleanup_status, 'verified');
+    assert.equal(diagnostic.foreign_inventory_unchanged, true);
+    assert.doesNotMatch(JSON.stringify(diagnostic), new RegExp(failureCode));
+  }
+
+  const unknownCode = 'arbitrary error token=synthetic-private-value';
+  const hostile = formatFailureDiagnostic({
+    sourceSha,
+    workflowSha: '2'.repeat(40),
+    runId,
+    attempt: '1',
+    phase: 'success-cleanup',
+    failureClass: 'gate-failed',
+    operation: failureOperationForStage('success-cleanup'),
+    failureCode: unknownCode,
+    errorMessage: unknownCode,
+    cleanupStatus: 'unverified',
+    cleanupAttempted: true,
+  });
+  assert.equal(hostile.failed_phase, 'success-cleanup');
+  assert.equal(hostile.failure_operation, 'cleanup-assertion');
+  assert.equal(hostile.failure_check, 'unknown');
+  assert.doesNotMatch(JSON.stringify(hostile), /synthetic-private-value/u);
 });
 
 test('startup failure markers accept only one source-formatted closed marker matching child status', () => {
