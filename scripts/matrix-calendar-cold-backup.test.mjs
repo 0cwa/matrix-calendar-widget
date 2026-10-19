@@ -153,6 +153,7 @@ function fakeCommands({
   duplicatePostgresContainers = false,
   postgresRunning = true,
   failContainerDump = false,
+  containerDumpStderr = '',
   emptyContainerDump = false,
   changePostgresContainerAfterDump = false,
   onContainerDump,
@@ -409,7 +410,9 @@ function fakeCommands({
       return {
         status: failContainerDump || waitForContainerDumpAbort ? 1 : 0,
         stdout: 'synthetic-container-database-diagnostic',
-        stderr: failContainerDump ? 'private container pg_dump detail' : '',
+        stderr: failContainerDump
+          ? 'private container pg_dump detail'
+          : containerDumpStderr,
       };
     }
     if (name === 'docker') return { status: 0, stdout: 'ok' };
@@ -845,7 +848,7 @@ test('container-exec streams a verified custom dump over a local socket and reco
     ),
     [
       'PATH=/usr/local/bin:/usr/bin:/bin',
-      'PGPASSFILE=/dev/null',
+      'PGPASSFILE=/dev/null/.pgpass',
       'PGSERVICEFILE=/dev/null',
     ],
     'only safe environment variables reach pg_dump',
@@ -958,9 +961,16 @@ test('container-exec fails closed when its target identity is ambiguous or untru
   }
 });
 
-test('container-exec removes partial dumps on command or post-dump identity failure', async (t) => {
+test('container-exec removes partial dumps on command warning or post-dump identity failure', async (t) => {
   const cases = [
     { name: 'pg_dump failure', options: { failContainerDump: true } },
+    {
+      name: 'successful pg_dump with libpq passfile warning',
+      options: {
+        containerDumpStderr:
+          'WARNING: password file "/dev/null" is not a plain file\n',
+      },
+    },
     { name: 'empty pg_dump output', options: { emptyContainerDump: true } },
     {
       name: 'container identity changes after dump',
