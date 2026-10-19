@@ -3,6 +3,8 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const OUTCOME_ENVIRONMENT_KEYS = Object.freeze({
+  web_member_outsider_journey:
+    'ELEMENT_ACCEPTANCE_PHASE_WEB_MEMBER_OUTSIDER_JOURNEY',
   desktop_journey: 'ELEMENT_ACCEPTANCE_PHASE_DESKTOP_JOURNEY',
   desktop_journey_cleanup: 'ELEMENT_ACCEPTANCE_PHASE_DESKTOP_JOURNEY_CLEANUP',
   reminder_room: 'ELEMENT_ACCEPTANCE_PHASE_REMINDER_ROOM',
@@ -25,7 +27,18 @@ const STATUS_BY_OUTCOME = Object.freeze({
   skipped: 'skipped',
 });
 
-export function summarizeActionPhaseOutcomes(outcomes) {
+const WEB_JOURNEY_ELAPSED_ENVIRONMENT_KEY =
+  'ELEMENT_ACCEPTANCE_WEB_MEMBER_OUTSIDER_JOURNEY_ELAPSED_MS';
+
+function parseElapsedSeconds(value) {
+  if (typeof value !== 'string' || !/^\d{1,12}$/u.test(value)) return null;
+
+  const elapsedMilliseconds = Number(value);
+  if (!Number.isSafeInteger(elapsedMilliseconds)) return null;
+  return Number((elapsedMilliseconds / 1000).toFixed(3));
+}
+
+export function summarizeActionPhaseOutcomes(outcomes, elapsedMilliseconds) {
   const phaseStatuses = {};
   let reportComplete = true;
 
@@ -45,32 +58,63 @@ export function summarizeActionPhaseOutcomes(outcomes) {
     phaseStatuses[phase] = status;
   }
 
+  const journeyOutcome = phaseStatuses.web_member_outsider_journey;
+  const journeyElapsedSeconds =
+    journeyOutcome === 'passed' || journeyOutcome === 'failed'
+      ? parseElapsedSeconds(String(elapsedMilliseconds))
+      : null;
+  if (
+    (journeyOutcome === 'passed' || journeyOutcome === 'failed') &&
+    journeyElapsedSeconds === null
+  ) {
+    reportComplete = false;
+  }
+  if (journeyOutcome === 'skipped') reportComplete = false;
+
   const firstFailedPhase = reportComplete
     ? (ACTION_PHASES.find((phase) => phaseStatuses[phase] === 'failed') ??
       'none')
     : 'unknown';
+  const firstFailedCategory =
+    firstFailedPhase === 'web_member_outsider_journey'
+      ? 'web-journey-command'
+      : firstFailedPhase === 'none'
+        ? 'none'
+        : firstFailedPhase === 'unknown'
+          ? 'unknown'
+          : 'workflow-step';
 
   return {
     phases: phaseStatuses,
     first_failed_phase: firstFailedPhase,
+    first_failed_category: firstFailedCategory,
+    web_member_outsider_journey: {
+      status: journeyOutcome,
+      elapsed_seconds: journeyElapsedSeconds,
+    },
+    first_failed_elapsed_seconds:
+      firstFailedPhase === 'web_member_outsider_journey'
+        ? journeyElapsedSeconds
+        : null,
     report_complete: reportComplete,
   };
 }
 
-export function formatActionPhaseSummary(outcomes) {
-  return `action_phase_summary=${JSON.stringify(summarizeActionPhaseOutcomes(outcomes))}\n`;
+export function formatActionPhaseSummary(outcomes, elapsedMilliseconds) {
+  return `action_phase_summary=${JSON.stringify(summarizeActionPhaseOutcomes(outcomes, elapsedMilliseconds))}\n`;
 }
 
 export function appendActionPhaseSummary(
   summaryPath,
   outcomes,
   append = appendFileSync,
+  elapsedMilliseconds,
 ) {
   if (typeof summaryPath !== 'string' || summaryPath.length === 0) {
     throw new Error('invalid-summary-path');
   }
 
-  const summaryLine = formatActionPhaseSummary(outcomes);
+  const summaryLine = formatActionPhaseSummary(outcomes, elapsedMilliseconds);
   append(summaryPath, summaryLine, { encoding: 'utf8', mode: 0o600 });
   return summaryLine;
 }
@@ -84,6 +128,10 @@ function readActionPhaseOutcomes(environment) {
   );
 }
 
+function readWebJourneyElapsedMilliseconds(environment) {
+  return environment[WEB_JOURNEY_ELAPSED_ENVIRONMENT_KEY];
+}
+
 export function runActionPhaseSummary(
   summaryPath,
   environment,
@@ -94,6 +142,7 @@ export function runActionPhaseSummary(
       summaryPath,
       readActionPhaseOutcomes(environment),
       append,
+      readWebJourneyElapsedMilliseconds(environment),
     );
     return { exitCode: 0, errorMessage: '' };
   } catch {
