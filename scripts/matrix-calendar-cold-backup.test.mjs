@@ -699,10 +699,7 @@ test('captures the configured paired stores, resumes services, then uploads one 
 });
 
 test('anchors Compose file paths at the configured project directory', async (t) => {
-  const composeVersion = await defaultCommand('docker', [
-    'compose',
-    'version',
-  ]);
+  const composeVersion = await defaultCommand('docker', ['compose', 'version']);
   if (composeVersion.status !== 0) {
     t.skip('Docker Compose is unavailable.');
     return;
