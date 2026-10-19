@@ -15,6 +15,11 @@ on:
         options:
           - all
           - server-only
+      operator_rehearsal:
+        description: Run the complete no-Element hosted Docker operator rehearsal before upload
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -51,6 +56,8 @@ jobs:
 
       - name: Validate the requested source SHA
         shell: bash
+        env:
+          INPUT_OPERATOR_REHEARSAL: ${{ inputs.operator_rehearsal }}
         run: |
           set -euo pipefail
           if [[ ! "$RELEASE_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
@@ -59,6 +66,10 @@ jobs:
           fi
           if [[ "$RELEASE_IMAGE_SET" != 'all' && "$RELEASE_IMAGE_SET" != 'server-only' ]]; then
             echo 'image_set must be all or server-only.' >&2
+            exit 1
+          fi
+          if [[ "$RELEASE_IMAGE_SET" == 'server-only' && "$INPUT_OPERATOR_REHEARSAL" == 'true' ]]; then
+            echo 'operator_rehearsal requires image_set=all.' >&2
             exit 1
           fi
           if [[ "$GITHUB_REF" != 'refs/heads/main' ]]; then
@@ -87,6 +98,8 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             .github/workflows/release-image-archive.yml
+            dev/element-acceptance-api-probe.mjs
+            scripts/hosted-operator-rehearsal.mjs
             scripts/release-image-archive.mjs
           sparse-checkout-cone-mode: false
 
@@ -237,6 +250,25 @@ jobs:
           node tooling/scripts/release-image-archive.mjs verify \
             --archive-root "$ARCHIVE_ROOT" \
             --expected-source-sha "$RELEASE_SOURCE_SHA"
+
+      - name: Run the opt-in hosted Docker operator rehearsal
+        id: operator_rehearsal
+        if: ${{ inputs.operator_rehearsal }}
+        env:
+          OPERATOR_REHEARSAL_ENABLED: 'true'
+          MATRIX_CALENDAR_HOSTED_SHARED_DOCKER_REHEARSAL: 'true'
+        run: node tooling/scripts/hosted-operator-rehearsal.mjs
+
+      - name: Upload the sanitized operator rehearsal failure summary
+        if: ${{ failure() && inputs.operator_rehearsal && steps.operator_rehearsal.outcome == 'failure' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: matrix-calendar-widget-operator-rehearsal-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/matrix-calendar-widget-operator-rehearsal-failure.json
+          if-no-files-found: ignore
+          overwrite: false
+          retention-days: 1
+          compression-level: 6
 
       - name: Upload immutable per-run image archive
         id: upload

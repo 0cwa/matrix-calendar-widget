@@ -11,6 +11,9 @@ x-reminder-gateway-environment: &reminder-gateway-environment
   MATRIX_CALENDAR_REMINDER_CONFIGURATION_ENABLED: 'true'
   ROOM_CALENDAR_REMINDER_DELIVERY_ENABLED: 'true'
   MATRIX_CALENDAR_REMINDER_DATABASE_TLS_MODE: trusted-private-network
+  # Keep the same bounded budget across the reminder restart and restore gateways.
+  MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_REQUESTS: '1000'
+  MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_WINDOW_MS: '60000'
   MEETINGWIDGET_URL: http://widget:80/
   MEETINGWIDGET_COCKPIT_URL: http://widget:80/cockpit
   BREAKOUT_SESSION_WIDGET_URL: http://widget:80/

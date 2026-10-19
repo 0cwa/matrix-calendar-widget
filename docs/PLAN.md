@@ -39,6 +39,9 @@ This is the executable plan for the initial fork. Agents should keep checkboxes 
 - [x] Add gateway API module to the inherited bot/server deployable.
 - [x] Implement widget Matrix OpenID request/exchange.
 - [x] Validate Matrix identity server-side.
+- [x] Keep OpenID userinfo on `HOMESERVER_URL` by default, with an optional
+      validated fixed origin for this request only. Refuse redirects because
+      the proof is sent in the query (ADR024).
 - [x] Resolve room membership and authorization context.
 - [x] Implement CalDAV service discovery and calendar enumeration against Radicale (#44/#49/#55/#56).
 - [x] Define the server-side Radicale credential/delegation strategy without handling user Matrix passwords (ADR009 / #54).
@@ -454,12 +457,28 @@ DST regression or recurrence-editing criteria above.
       record the actual target's ingress,
       DNS/TLS/proxy, account ownership, MAS, credential issuance, and secret
       facts; validate encrypted off-server Restic-compatible S3 backups with
-      daily scheduling, 30-day retention, custody, and paired Radicale plus
-      app-owned PostgreSQL restore; and rehearse install, disable, and rollback.
+      daily scheduling and up to 30 populated-calendar-day recovery points;
+      missed daily runs leave gaps. Verify independent recovery-key custody,
+      paired Radicale plus app-owned PostgreSQL restore, and install/disable/
+      rollback. The coordinator's automatic forget/prune path is opt-in and
+      requires the configured Restic host and project tag to match the Compose
+      project name; target acceptance and recovery evidence remain open.
       The bounded beta baseline uses the project-owned Radicale image and its
       own store. Do not record private server, domain, account, provider, or
       credential details in public docs. Beta readiness and deployment remain
       not ready until these gates and a separate rollout decision are complete.
+  - [x] Add reviewed source-only local rehearsal support: [prebuilt/no-pull
+        setup](../dev/up.sh), [API probe](../dev/element-acceptance-api-probe.mjs),
+        [reminder fixture](../dev/local-reminder-fixture.mjs), and [paired
+        restore helper](../dev/element-acceptance-reminder-restore.mjs).
+        Focused tooling checks use in-process HTTP, fake commands, and fixed-enum
+        formatter cases. The composite action records fixed-enum step outcomes,
+        using `unknown` for absent, cancelled, or unrecognized outcomes. It
+        reports the first tracked failure only when the report is complete;
+        otherwise `first_failed_phase` is `unknown`. A diagnostic write failure
+        is marked unavailable without changing acceptance or cleanup outcomes.
+        No external service or real API, image store, restart, or restore was exercised;
+        this does not pass local Stage B or image/cache/runtime acceptance.
 - [ ] Room-target diagnostics beyond the supported calendar/event paths.
 
 Room access, event writes, reminder configuration, reminder delivery, and
@@ -498,6 +517,88 @@ access and event writes stay disabled by default.
 
 ## M8 — Hardening and release
 
+Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](./RELEASE.md). It binds evidence to an exact source candidate, keeps target-specific operator facts private, and does not grant deployment approval.
+
+### Issue #273 pre-candidate sequence
+
+- [x] Integrate #274, #259, #282, and #272 on frozen application-source
+      candidate `b0e620f3f31b9978705a5e58e647c77ba9b67a97` (tree
+      `f5af0b07fbfb192cdd6dc90fb61cb13e80777efb`).
+- [x] Merge PR #293's issue #291 cleanup retry against the settled Desktop
+      process census into `main` at `c380f5ff3d5ccfede2a54100473cc4ea1169fe2b`
+      (tree `b79e9cc77db3434ca2707c7d5cc96f0914c41e3f`). This records the
+      source change only; it does not qualify a later integrated candidate.
+- [x] Identify the fixture-level reminder-restore mismatch from source-bound
+      operator run `38798989805`: the restore gateway is configured with
+      `restore-radicale:5232`, but the reminder fixture accepted only the
+      normal `radicale:5232` and normal-flow loopback origins. Candidate
+      `75c65e395987b2c1762c826264a883fe9e85e161` adds flow-specific origin
+      validation and matching cleanup candidates, with focused tests for the
+      exported restore path, exact marker update, owned cleanup, and wrong-flow
+      rejection. This establishes the fixture mismatch and local regression
+      behavior only; actual restore-service acceptance remains unverified.
+- [x] Run exact-source application acceptance on candidate
+      `99d4c9f9f36aa0b0861a13499a7f7cd512c56920` (application tree
+      `97022a9d2351655d2aae0a50a44a14bd81daacc9`). All five protected checks,
+      browser layout, CodeQL, PostgreSQL, both-mode CalDAV, standalone Desktop,
+      and normal-bot plus appservice Element Web/Desktop acceptance passed.
+      The prior Web refresh failure was not reproduced. Full details and
+      performance samples are in [docs/RELEASE.md](./RELEASE.md). This
+      completes application-source acceptance only.
+- [x] Close issue #291 after the actual settled-census cleanup and normal-bot
+      criteria passed on the accepted application source; its merged source
+      retry alone was not treated as acceptance.
+- [x] Qualify the three source-bound images and reconcile the manifest/evidence
+      index for accepted application `99d4c9f9f36aa0b0861a13499a7f7cd512c56920`
+      (tree `97022a9d2351655d2aae0a50a44a14bd81daacc9`). Trusted workflow run
+      [38913010664](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38913010664),
+      attempt 1, produced the source-bound archive and passed artifact-byte,
+      member, manifest, and pinned CLI verification. The image artifact API
+      SHA-256 is `3e71a5edea6b2a021a539f792f6abf7522b331b6620765f7ecff28b1b306a49f`;
+      manifest SHA-256 is
+      `d0315e465e33e38f093fe4de2faf0e5eb0f57afc6fec7e0c2aa325a727d9ae49`.
+      The same run completed the enabled operator rehearsal success path. This
+      is derived runner-completion evidence; per-check runtime values were not
+      separately captured. The earlier run 38892200863 remains a historical
+      failed attempt with unknown cause and unverified cleanup; it is not
+      rewritten by the later pass. The three application images have since
+      been imported and verified against their exact configuration IDs and
+      platform. Pinned database and helper images, native tools, and a
+      dedicated backup account are prepared; private runtime configuration
+      remains pending. Pilot services remain unstarted. Protected credential
+      staging, final operator recording, live calendar/room canary validation,
+      first real paired backup, isolated gateway restore, disable/rollback,
+      and daily activation
+      remain pending. Issues #255 and #251 remain open; no wider rollout or
+      publication is authorized.
+- [x] Add an explicit `--profile local-microsandbox --manifest PATH` authoring
+      path to the operator rehearsal. The closed v1 manifest binds curated
+      source/tooling archives, the accepted release manifest, a current-boot
+      guest probe receipt, private guest-local Docker access, normal guest
+      networking, and preloaded fixture image locks. The profile makes no
+      egress-isolation claim; the common lifecycle configures Matrix, CalDAV,
+      and PostgreSQL against synthetic guest-local services and keeps paired
+      restore artifacts in guest-private storage. The local profile reuses the same install, API,
+      reminder restart, paired restore, rollback, and owned-cleanup lifecycle
+      without selecting the hosted shared-daemon adapter. Focused contract tests
+      pass. A local rehearsal subsequently passed on accepted application
+      source `99d4c9f9f36aa0b0861a13499a7f7cd512c56920` with helper commit
+      `61e4cf7b4285b8fbc986d89e8a25337f407a6f89`. The closed receipt records
+      source and fixture binding, API authorization/CRUD, reminder initial and
+      restart behavior, paired-store restore, owned cleanup, and foreign-state
+      preservation as passed. It used a network-enabled synthetic guest with no
+      host-directory mount, forwarded host Docker socket, or host credentials;
+      the guest was stopped and run-owned resources were removed afterward. An
+      earlier failed attempt remains recorded with cleanup marked unverified;
+      its separately verified cleanup is not attributed to that receipt. This
+      establishes local rehearsal only. Issues #251 and #255 and the separate
+      production target, owner-input, canary, backup, and restore gates remain
+      open.
+- [ ] Issues #275 and #276 were explicitly re-scoped for bounded pre-pilot
+      source cleanup. Issue #277 remains separately gated after the pilot. This
+      source cleanup does not change the frozen application candidate or pilot
+      gates, and any candidate incorporating it requires fresh qualification.
+
 - [x] Wire a separate Chromium calendar-component fixture at 320, 390, 768, and
       1280 CSS pixels, with measured overflow, keyboard focus, and axe checks.
       Hosted passing evidence is required; actual Matrix clients remain a
@@ -507,12 +608,14 @@ access and event writes stay disabled by default.
       the bounded beta target (see `docs/beta-scope.md`). Require the standard
       side-panel widget layout and overflow checks; pinned/full-width Apps-drawer
       layout certification is deferred. Mobile clients and formal screen-reader
-      certification are deferred beyond this candidate. The earlier hosted
-      candidate
-      `235e7e446df3efd8784d3468f593f2799602767c` passed the paired Web/Desktop
-      run [37857387454](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37857387454):
-      105 Web phases and 12 Desktop cases, including the standard side panel,
-      keyboard/focus, G6 edit/delete, and final cleanup.
+      certification are deferred beyond this candidate. Candidate `99d4c9f`
+      passed full normal-bot and appservice Web/Desktop acceptance, including
+      the standard side panel, G6 preservation and cleanup, reminders,
+      restart/restore, and browser-egress checks. Full appservice browser
+      certification remains deferred until after beta despite the observed
+      pass; backend, identity/authentication, room authorization, and CalDAV
+      contracts remain mandatory in both modes. This scope does not authorize
+      publication or broader rollout.
   - [x] Add current calendar grid/list/details keyboard, focus, accessible-name,
         and axe regressions. Hosted browser fixture checks pass; actual client
         embedding remains unverified; see `docs/calendar-client-validation.md`.
@@ -556,17 +659,45 @@ access and event writes stay disabled by default.
       Compose `radicale-data` and `server-data` volumes, with separate external
       PostgreSQL guidance; etke-managed `/data` remains unverified (PR #170).
       The public runbook now recommends pinned Restic 0.19.1, generic
-      S3-compatible storage, operator-managed daily systemd scheduling, and 30
-      daily retention points. It preserves a coordinated PostgreSQL custom
-      dump and isolated restore boundaries. The coordinator does not select a
-      provider or validate a real S3 endpoint, scheduled run, or target-host
+      S3-compatible storage, operator-managed daily systemd scheduling, and up to
+      30 populated-calendar-day recovery points; missed daily runs leave gaps.
+      It preserves a coordinated PostgreSQL custom dump and isolated restore
+      boundaries. The coordinator does not select a provider or validate a real S3 endpoint, scheduled run, or target-host
       recovery.
   - [x] Add a host-local cold-capture coordinator and generic systemd service
-        and timer templates. Focused tests use fake commands only. The templates
+        and timer templates. Focused service tests use fake commands; an
+        opt-in local Restic test uses synthetic captures and a new file
+        repository. Neither test path exercises S3. The templates
         remain operator-installed and disabled; the coordinator uploads a
-        verified paired capture after service restart and does not run Restic
-        initialization, retention, or pruning. Real S3, scheduling, and
-        target-host recovery remain open operator gates.
+        verified paired capture after service restart and never initializes a
+        Restic repository. `resticRetentionEnabled` defaults off; when enabled
+        it runs the fixed `forget --keep-daily 30 --prune` policy after
+        successful upload. The configured repository, host, comma-joined tag
+        pair, and `host,tags` grouping scope snapshots eligible for forgetting;
+        prune itself scans the repository, preserves data referenced by any
+        retained snapshot, and may remove or repack other unreferenced data.
+        Automatic prune requires repository-wide maintenance authority and an
+        S3 I/O budget; a dedicated pilot repository or prefix is planned.
+        `--keep-daily 30` retains points for up to 30 populated calendar days,
+        so missed backup days leave gaps. Fake-command tests cover
+        the backup-only default, scope validation, command order, failed-upload
+        skip, and retention failure reporting. Real S3, scheduling, and
+        target-host recovery remain open operator gates. The separate
+        `cleanupSuccessfulCapture` option defaults off and may remove only the
+        current marked staging directory after bounded snapshot readback and
+        local identity checks; keep it disabled until an independent isolated
+        restore succeeds. It does not sweep older captures or change remote
+        retention.
+  - [x] Add an opt-in `container-exec` PostgreSQL dump transport for isolated
+        database services. The default `native` transport is unchanged. The
+        container path requires exact Compose project/service labels and a
+        digest-pinned image, streams the custom dump through a Unix socket
+        without a password argument, verifies the same running container after
+        capture, and records additive transport/version metadata in the
+        checksummed capture manifest. The existing dump filename and custom
+        format remain unchanged, so prior restore steps do not require the new
+        manifest. Focused tests cover identity refusal, partial-output cleanup,
+        and preservation of the native default.
 - [x] Container images and deployment docs use fork-owned names. This covers
       repository-owned image builds and documented operator-run deployment
       boundaries, not a live etke-host deployment or recovery validation.
@@ -756,9 +887,30 @@ access and event writes stay disabled by default.
       trusted Element-origin opening errors per profile qualified for the
       approved opening-stage diagnostic policy; their cause is unknown. This
       is isolated application evidence, not operator or deployment acceptance.
+- [ ] Run the owner-approved normal-bot-only browser acceptance for the
+      integrated PR #260 candidate. The full Element Web/Desktop journey must
+      pass in `bot-account` mode, including authorization, CRUD and stale-write
+      rejection, reminders across gateway restart, paired Radicale/PostgreSQL
+      restore, G6 unsupported-resource preservation and owned cleanup, and
+      keyboard/focus, standard side-panel layout, and browser-egress checks.
+      Keep the ordinary 0/25-event thresholds unchanged:
+      cold activation and same-range refresh at or below 2,000 ms, each
+      required decoded non-OpenID calendar API response at or below 1,000 ms,
+      and all five 25-event details samples at or below 500 ms. The five
+      protected checks, CodeQL, browser-layout and real Radicale/PostgreSQL
+      contracts, and independent review must be bound to the exact integrated
+      source. Full appservice-mode Element Web/Desktop browser certification
+      is deferred until after beta; backend, identity/authentication, room
+      authorization, and CalDAV contracts remain mandatory in both modes.
+      The forward-merge base is `56ebedd97ffa778cb433707cbcd5a74beaafe5a7`
+      (tree `529bd984f398ae1921b68189fa9a66c274e1b349`); checks on the prior
+      `3643166` head or on `main` alone do not establish acceptance of the
+      integrated candidate. This scope does not authorize production
+      installation or rollout.
 - [ ] Complete private operator readiness evidence for the merged candidate
-      before any separate rollout decision. Independent source review is
-      complete. Full isolated local Stage B and source-bound server
+      before any separate rollout decision. Independent review is complete
+      only for PR #260's pre-integration candidate; review of the integrated
+      source remains required. Full isolated local Stage B and source-bound server
       image/cache/runtime acceptance remain open, followed by actual
       target-specific deployment facts and recovery validation. The reminder
       restore helper honors explicit skip-Element mode during quiescence while
@@ -772,6 +924,29 @@ access and event writes stay disabled by default.
         PR #243 candidate `9e1bea6017279646808fe778aa294a8ad32b578c`. This
         synthetic contract does not validate the operator's database endpoint,
         TLS, host mounts, backup, or recovery.
+  - [x] Make the opt-in hosted Docker rehearsal's endpoint mode explicit.
+        Only the trusted release workflow on a GitHub-hosted Linux runner may
+        select Docker CLI's default endpoint, and the helper does so only after
+        validating its private Docker config and adapter plus a collision-free
+        foreign-resource baseline. The normal local prebuilt path still
+        requires its private non-default Unix socket. The hosted runner shares
+        one daemon with the job: inventory detects foreign state but does not
+        isolate or prevent damage to resources visible to that daemon. These
+        environment checks select a test mode; they are not authentication.
+        The earlier source-bound attempt rejected the hosted default endpoint
+        before service startup. A later attempt reached fixture setup, where
+        source tracing found that the runner removed the bootstrap Compose env
+        file before the fixture helper loaded it, while the helper creates its
+        generated server env with create-only semantics. The tooling now keeps
+        a separate private bootstrap file until the generated file and Compose
+        model validate, then switches later commands to that generated file.
+        This tooling history is superseded for the frozen candidate by trusted
+        run [38913010664](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38913010664),
+        which completed the enabled operator rehearsal success path. The pass is
+        derived from the recorded input, mandatory workflow step, helper
+        failure behavior, and overall run conclusion; per-check runtime values
+        were not separately captured. It does not establish target-host,
+        live-UI, off-server backup/restore, or timer acceptance.
 
 This bounded beta path does not complete M4, M5, or the broader M8 work, and it
 does not authorize publication or live rollout. The broad M8 milestone remains

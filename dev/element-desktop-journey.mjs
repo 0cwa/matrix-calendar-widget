@@ -1991,6 +1991,48 @@ export function appendDesktopJourneyOutcome({
   privateFileStat(path, MAX_EVIDENCE_BYTES);
 }
 
+export function appendDesktopRefreshFailureWithFallback({
+  filePath,
+  runnerTemp,
+  failurePoint,
+  errorClass,
+  gatewayReadDiagnostic,
+  roomNavigationDiagnostic,
+  desktopEventCreateDiagnostic,
+  webBEditSaveDiagnostic,
+}) {
+  const minimal = {
+    filePath,
+    runnerTemp,
+    phase: 'desktop-a-refresh',
+    status: 'failed',
+    failurePoint,
+    errorClass,
+  };
+  const withOptionalDiagnostics = {
+    ...minimal,
+    ...(gatewayReadDiagnostic === undefined ? {} : { gatewayReadDiagnostic }),
+    ...(roomNavigationDiagnostic === undefined
+      ? {}
+      : { roomNavigationDiagnostic }),
+    ...(desktopEventCreateDiagnostic === undefined
+      ? {}
+      : { desktopEventCreateDiagnostic }),
+    ...(webBEditSaveDiagnostic === undefined ? {} : { webBEditSaveDiagnostic }),
+  };
+  try {
+    appendDesktopJourneyOutcome(withOptionalDiagnostics);
+    return true;
+  } catch {
+    try {
+      appendDesktopJourneyOutcome(minimal);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
 export function appendDesktopLoginStep({
   filePath,
   runnerTemp,

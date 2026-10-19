@@ -32,6 +32,9 @@ describe('reminder database configuration', () => {
   const originalRateLimitMaxKeys =
     process.env.MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_MAX_KEYS;
   const originalPgPort = process.env.PGPORT;
+  const originalEnableWelcomeWorkflow = process.env.ENABLE_WELCOME_WORKFLOW;
+  const originalEnablePrivateRoomErrorSending =
+    process.env.ENABLE_PRIVATE_ROOM_ERROR_SENDING;
 
   afterEach(() => {
     if (originalDatabaseUrl === undefined) {
@@ -67,6 +70,34 @@ describe('reminder database configuration', () => {
     } else {
       process.env.PGPORT = originalPgPort;
     }
+    if (originalEnableWelcomeWorkflow === undefined) {
+      delete process.env.ENABLE_WELCOME_WORKFLOW;
+    } else {
+      process.env.ENABLE_WELCOME_WORKFLOW = originalEnableWelcomeWorkflow;
+    }
+    if (originalEnablePrivateRoomErrorSending === undefined) {
+      delete process.env.ENABLE_PRIVATE_ROOM_ERROR_SENDING;
+    } else {
+      process.env.ENABLE_PRIVATE_ROOM_ERROR_SENDING =
+        originalEnablePrivateRoomErrorSending;
+    }
+  });
+
+  it('keeps legacy private-room workflows opt-in by default', () => {
+    delete process.env.ENABLE_WELCOME_WORKFLOW;
+    delete process.env.ENABLE_PRIVATE_ROOM_ERROR_SENDING;
+
+    expect(configuration().config).toMatchObject({
+      enable_welcome_workflow: false,
+      enable_private_room_error_sending: false,
+    });
+
+    process.env.ENABLE_WELCOME_WORKFLOW = 'true';
+    process.env.ENABLE_PRIVATE_ROOM_ERROR_SENDING = 'true';
+    expect(configuration().config).toMatchObject({
+      enable_welcome_workflow: true,
+      enable_private_room_error_sending: true,
+    });
   });
 
   it('uses bounded gateway rate-limit defaults and loads overrides', () => {
@@ -578,5 +609,64 @@ describe('room calendar principal mode configuration', () => {
     expect(configuration().config.room_calendar_principal_mode).toBe(
       'bot-account',
     );
+  });
+});
+
+describe('Matrix OpenID userinfo origin configuration', () => {
+  const variable = 'MATRIX_OPENID_USERINFO_URL';
+  const originalValue = process.env[variable];
+
+  afterEach(() => {
+    if (originalValue === undefined) {
+      delete process.env[variable];
+    } else {
+      process.env[variable] = originalValue;
+    }
+  });
+
+  it('is optional and loads the explicit operator origin', () => {
+    delete process.env[variable];
+    expect(
+      configuration().config.matrix_openid_userinfo_origin,
+    ).toBeUndefined();
+
+    process.env[variable] = 'https://openid.example.org';
+    expect(configuration().config.matrix_openid_userinfo_origin).toBe(
+      'https://openid.example.org',
+    );
+
+    process.env[variable] = '';
+    expect(
+      configuration().config.matrix_openid_userinfo_origin,
+    ).toBeUndefined();
+  });
+
+  it('accepts HTTPS origins and loopback HTTP origins for isolated tests', () => {
+    const schema = ValidationSchema.extract(variable);
+    for (const value of [
+      'https://openid.example.org',
+      'https://openid.example.org/',
+      'http://localhost:8008',
+      'http://127.0.0.1:8008',
+      'http://[::1]:8008',
+    ]) {
+      expect(schema.validate(value).error).toBeUndefined();
+    }
+  });
+
+  it('rejects insecure remote URLs and values that are not origins', () => {
+    const schema = ValidationSchema.extract(variable);
+    for (const value of [
+      'http://openid.example.org',
+      'ftp://openid.example.org',
+      'file:///tmp/openid',
+      'https://user:password@openid.example.org',
+      'https://@openid.example.org',
+      'https://openid.example.org/_matrix/federation/v1/openid/userinfo',
+      'https://openid.example.org?access_token=proof',
+      'https://openid.example.org#fragment',
+    ]) {
+      expect(schema.validate(value).error).toBeDefined();
+    }
   });
 });

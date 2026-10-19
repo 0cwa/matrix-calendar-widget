@@ -51,6 +51,7 @@ import { WelcomeWorkflowController } from './controller/WelcomeWorkflowControlle
 import { WidgetController } from './controller/WidgetController';
 import { registerDateRangeFormatter } from './dateRangeFormatter';
 import { EventContentRenderer } from './EventContentRenderer';
+import { LegacyMeetingDisabledGuard } from './guard/LegacyMeetingDisabledGuard';
 import { IAppConfiguration } from './IAppConfiguration';
 import { RoomMatrixEventsReader } from './io/RoomMatrixEventsReader';
 import { WidgetLayoutConfigReader } from './io/WidgetLayoutConfigReader';
@@ -334,6 +335,7 @@ const i18nFactory: FactoryProvider<void> = {
     MeetingClient,
     MatrixCalendarAuthorizationFactory,
     MatrixAuthMiddleware,
+    LegacyMeetingDisabledGuard,
     {
       provide: ModuleProviderToken.ROOM_CALENDAR_CALDAV_ACCESS,
       useClass: RoomCalendarCalDavAccess,

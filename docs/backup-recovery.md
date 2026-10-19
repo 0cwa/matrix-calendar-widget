@@ -78,7 +78,7 @@ service restart behavior, and systemd credential support on the target host
 before enabling the timer.
 
 After the cold archives and any PostgreSQL dump are complete, the coordinator
-should back up the completed backup directory under one stable host identity and
+backs up the completed backup directory under one stable host identity and
 stable tags, for example:
 
 ```bash
@@ -89,11 +89,9 @@ restic backup --host matrix-calendar-sidecar --tag matrix-calendar-sidecar \
 The capture directory name contains a backup timestamp, so `host,tags` is set
 for both backup and retention; otherwise each dated source path would form a
 separate retention group. Keep the repository prefix, host identity, and both
-tags stable for this deployment.
-
-Scope retention to that identity and tag pair. First review the proposed
-deletions with `--dry-run`; only after confirming the selection, schedule the
-same command without `--dry-run` and with `--prune`:
+tags stable for this deployment. The coordinator defaults to backup-only when
+`resticRetentionEnabled` is absent or `false`. Before enabling it, review the
+proposed selection against the exact configured repository, host, and tag pair:
 
 ```bash
 restic forget --host matrix-calendar-sidecar \
@@ -101,8 +99,8 @@ restic forget --host matrix-calendar-sidecar \
   --group-by host,tags --keep-daily 30 --dry-run
 ```
 
-After reviewing the preview, use the same scope and policy without dry-run and
-with pruning enabled:
+With `resticRetentionEnabled: true`, the coordinator runs the same filters and
+grouping after a successful upload, replacing `--dry-run` with `--prune`:
 
 ```bash
 restic forget --host matrix-calendar-sidecar \
@@ -110,20 +108,41 @@ restic forget --host matrix-calendar-sidecar \
   --group-by host,tags --keep-daily 30 --prune
 ```
 
-This policy keeps one point for each of up to 30 days with a successful backup.
-A missed timer run leaves a gap; the timer does not guarantee a daily recovery
-point. Pruning can lock the repository while it runs, so schedule it where it
-will not overlap a backup. Check the repository periodically and alert on
-service failure or incomplete backup results. Run `restic check` periodically
-to check repository structure. The shipped coordinator runs `restic backup`
-only; it never initializes a repository or runs `forget` or `prune`. Review the
-dry-run selection and retention schedule separately on the target host.
+The fixed policy keeps one recovery point for each of up to 30 recent
+populated calendar dates. A missed timer run leaves a gap: it creates no point
+for that date, so the policy does not guarantee 30 snapshots or 30 elapsed days
+of coverage. The oldest retained point can be more than 30 elapsed days old.
+
+The host filter and one comma-joined tag pair select the snapshots eligible
+for forgetting; both tags in that pair must match. Restic's `--prune` then
+performs repository-wide garbage collection: it scans snapshots and repository
+data, removes data no remaining snapshot references, and may repack partially
+used pack files. It preserves data referenced by retained snapshots, including
+foreign snapshots, but prune can read, remove, or rewrite repository data
+beyond this project's snapshot set. The dry run above previews the forget
+selection; it does not bound prune's repository-wide scan or repacking.
+
+The coordinator runs prune after forgetting so unreferenced data does not
+accumulate. Automatic pruning therefore requires repository-wide maintenance
+authority and a budget for S3 reads, writes, and deletes. Plan a dedicated
+repository or S3 prefix for the pilot. Keep retention disabled on a shared
+repository unless the operator has explicitly approved repository-wide prune
+activity. When using a shared repository, choose a Compose `projectName`
+unique to this deployment; automatic retention requires `resticHost` and one
+configured tag to equal that project name. Invalid or missing scope fails
+configuration validation before any command runs. A retention failure exits
+the service as a retention-stage failure even though the backup completed;
+the local capture and uploaded snapshot remain available for inspection.
+Check the repository periodically and alert on service failure or incomplete
+backup results. Run `restic check` periodically to check repository structure.
 
 Restic does not schedule itself. A host operator may install the example
 oneshot service and daily timer to invoke the shipped coordinator after local
 validation. Its daily timer can run a backup each day, while successful daily
 recovery points still depend on the service and target being available. The
-30-day policy above is controlled separately; the coordinator does not prune.
+example timer is not enabled by the project. Keep automatic retention off for
+an initial deployment until the exact target selection, credentials, and
+isolated restore have been reviewed.
 
 ## Use the shipped host-local coordinator
 
@@ -155,9 +174,76 @@ until its placeholders and host paths are replaced:
   "awsRegion": "<selected-region>",
   "awsProfile": "default",
   "resticHost": "matrix-calendar-sidecar",
-  "resticTags": ["matrix-calendar-sidecar", "cold-paired-store"]
+  "resticTags": ["matrix-calendar-sidecar", "cold-paired-store"],
+  "resticRetentionEnabled": false,
+  "cleanupSuccessfulCapture": false
 }
 ```
+
+When the reminder database is enabled, the coordinator keeps `native` as the
+default `postgresDumpTransport`: it uses the host's PostgreSQL client and the
+protected libpq service and password files described below. An operator may
+instead opt into `container-exec` for a database that accepts passwordless
+local-socket authentication. In that mode, add an explicit `postgresContainer`
+object with the exact Compose project and service labels, an image reference
+pinned by digest, and the database and role names used for the dump. For
+example, merge these fields into the configuration above and set
+`pgService` to `null`:
+
+```json
+{
+  "reminderDatabaseEnabled": true,
+  "pgService": null,
+  "postgresDumpTransport": "container-exec",
+  "postgresContainer": {
+    "projectName": "calendar-database",
+    "serviceName": "database",
+    "image": "postgres:<tag>@sha256:<reviewed-image-digest>",
+    "database": "<database-name>",
+    "username": "<dump-role>"
+  }
+}
+```
+
+The coordinator requires exactly one running container with those Compose
+labels, verifies its configured image reference and immutable local image ID,
+and checks that the same container remains running before and after the dump.
+It runs `pg_dump` over the container's Unix socket with a clean environment,
+`--no-password`, an explicit database and role, and `/dev/null` passfile and
+service-file paths. Inherited PostgreSQL environment settings cannot redirect
+the dump or supply credentials.
+The database's local authentication rules must permit that connection; if they
+require a password or use peer authentication incompatible with the configured
+role, retain the native transport. Both transports produce the same custom
+format dump, which the host `pg_restore --list` checks before the capture is
+accepted. The checksummed `capture-manifest.json` records whether a dump was
+included, its transport and format, and the client and validation-tool
+versions, without recording container names or database credentials. The
+manifest is additive: recovery of older captures does not require it.
+
+`resticRetentionEnabled` is an opt-in boolean and defaults to `false` when
+omitted. Its fixed `--keep-daily 30` policy keeps one recovery point for each
+of up to 30 recent populated calendar dates; missed backup days leave gaps and
+are not covered. After a successful upload, it also invokes repository-wide
+Restic pruning. The `resticHost` and comma-joined `resticTags` scope the
+snapshots eligible for forgetting; they do not scope prune's repository scan
+or I/O. Enabling it requires `resticHost` and one of the two stable
+`resticTags` to match `projectName`. Review the forget dry-run, select a
+dedicated pilot repository or S3 prefix, and approve repository-wide prune
+authority and I/O budget before enabling it. A shared repository requires
+explicit approval for that repository-wide maintenance.
+
+`cleanupSuccessfulCapture` is a separate opt-in boolean and defaults to
+`false`. Keep it off until an independent isolated restore has succeeded. When
+enabled, the coordinator removes only the current run's marked staging
+directory, and only after Restic reports a snapshot ID and bounded readback
+confirms that snapshot's ID, host, tags, capture path, expected file entries
+and sizes, and exact marker bytes. It also rechecks the private capture-root
+and current-directory identities and the staged file set before unlinking the
+known files. A failed upload, readback, or local identity check leaves the
+capture for inspection. Older, unmarked, or foreign directories are never
+swept by this option; it does not delete repository snapshots or change remote
+retention.
 
 The Compose env file, Restic password, S3 credentials, and optional PostgreSQL
 password are read only through protected paths; none is copied into a capture.
@@ -165,18 +251,25 @@ The service template supplies the Restic password and S3 shared-credentials
 file with `LoadCredential=` and creates a private Restic cache directory. If
 running the coordinator outside systemd, set `RESTIC_CACHE_DIR` to an existing
 private directory. If the reminder database is enabled, set
-`reminderDatabaseEnabled` to `true`, set `pgService` to the selected libpq
-service, configure `PGSERVICEFILE` to a password-free service definition, and
-load a protected `.pgpass`-format file with `LoadCredential=` into
-`PGPASSFILE`. The coordinator rejects a selected libpq service containing a
-`password=` entry.
+`reminderDatabaseEnabled` to `true`. With the default `native` transport, set
+`pgService` to the selected libpq service, configure `PGSERVICEFILE` to a
+password-free service definition, and load a protected `.pgpass`-format file
+with `LoadCredential=` into `PGPASSFILE`. The coordinator rejects a selected
+libpq service containing a `password=` entry. The opt-in `container-exec`
+transport does not use those host-side PostgreSQL files; it requires the
+passwordless local-socket authentication described above.
 Keep an independent recovery copy of the Restic repository password outside
 the host and S3 account; the project neither generates nor copies it.
 
 Before writing a capture, the coordinator validates configuration and private
 file permissions, the Compose model, the local Docker socket, the pinned helper
-image, both project-prefixed volumes, Restic, optional PostgreSQL tools, and
-that exactly one `widget`, `server`, and `radicale` container is running. A
+image, both project-prefixed volumes, Restic, and the tools required by the
+selected PostgreSQL transport. Native mode checks the host `pg_dump`; both
+database modes check host `pg_restore`. Container-exec mode also verifies the
+exactly labeled running database container, its configured digest reference,
+its immutable local image ID, and its in-container `pg_dump` version. The
+coordinator also requires exactly one `widget`, `server`, and `radicale`
+container to be running. A
 missing credential, invalid config, missing helper image, stopped service, or
 overlapping run fails closed before service changes. It does not pull images.
 It requires all three services to be running at the beginning; it will not
@@ -191,10 +284,16 @@ restarting `radicale`, `server`, and `widget`. It uploads only after every
 restart succeeds and the local directory has a `.capture-complete` marker.
 Any stop, dump, archive, verification, checksum, or restart failure prevents
 upload and leaves an unmarked local directory for operator inspection. Restic
-failure, including an incomplete-backup result, leaves the verified local
-capture marked complete but reports a failed run. The coordinator does not
-delete local captures automatically. Nonempty diagnostics from the dump,
-restore-list, or tar validation commands are treated as a failed capture stage.
+backup failure, including an incomplete-backup result, leaves the verified
+local capture marked complete but skips retention and reports an upload-stage
+failure. When opt-in retention is enabled, forget/prune runs only after Restic
+reports a successful backup; its failure reports a retention-stage failure
+without removing the local capture or undoing the uploaded snapshot. If
+`cleanupSuccessfulCapture` is enabled, cleanup follows retention and requires
+snapshot readback plus a final local identity and file-set check; otherwise the
+successful local capture remains. Nonempty diagnostics from the dump,
+restore-list, or tar validation commands are treated as a failed capture
+stage.
 
 The lock is exclusive and a stale lock is not removed automatically; verify
 that no run is active before clearing one. A handled `SIGTERM` or `SIGINT`
@@ -355,9 +454,9 @@ the operator's protected backup record. Do not record secrets or event data.
 After the local capture is complete, upload `BACKUP_DIR` to the configured
 Restic repository using the stable host and tags described above. First review
 the retention preview; only then enable automatic pruning. Keep the local
-capture until Restic reports a complete snapshot. A successful upload does not
-prove that the files can be restored or that the S3 service meets a durability
-target.
+capture until an independent isolated restore has succeeded. A successful
+upload does not prove that the files can be restored or that the S3 service
+meets a durability target.
 
 ## Restore into an isolated Compose project
 

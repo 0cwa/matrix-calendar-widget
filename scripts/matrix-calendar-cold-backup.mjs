@@ -9,12 +9,14 @@ import {
   mkdir,
   open,
   readFile,
+  readdir,
   realpath,
   rename,
+  rmdir,
   unlink,
   writeFile,
 } from 'node:fs/promises';
-import { isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const COMPOSE_FILE = 'deploy/etke-sidecar.compose.yaml';
@@ -25,9 +27,12 @@ const VOLUME_SUFFIXES = ['radicale-data', 'server-data'];
 const ARCHIVE_NAMES = ['radicale-data.tar', 'server-data.tar'];
 const DUMP_NAME = 'reminder-postgresql.dump';
 const DUMP_PARTIAL_NAME = `${DUMP_NAME}.partial`;
+const CAPTURE_MANIFEST_NAME = 'capture-manifest.json';
 const CHECKSUM_NAME = 'SHA256SUMS';
 const CAPTURE_MARKER_NAME = '.capture-complete';
+const CAPTURE_MARKER_CONTENT = 'Cold capture verified and services resumed.\n';
 const LOCK_NAME = '.matrix-calendar-cold-backup.lock';
+const SNAPSHOT_ID = /^[a-f0-9]{64}$/u;
 const COMMAND_TIMEOUT_MS = 30_000;
 const CHILD_KILL_GRACE_MS = 5_000;
 const CAPTURE_TIMEOUT_MS = 30 * 60_000;
@@ -48,11 +53,15 @@ const CONFIG_KEYS = new Set([
   'helperImage',
   'reminderDatabaseEnabled',
   'pgService',
+  'postgresDumpTransport',
+  'postgresContainer',
   'repository',
   'awsRegion',
   'awsProfile',
   'resticHost',
   'resticTags',
+  'resticRetentionEnabled',
+  'cleanupSuccessfulCapture',
 ]);
 
 const SAFE_TAG = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/u;
@@ -60,6 +69,10 @@ const SAFE_PROJECT = /^[a-z0-9][a-z0-9_-]{0,62}$/u;
 const SAFE_SERVICE = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$/u;
 const SAFE_REGION = /^[a-z0-9][a-z0-9-]{0,62}$/u;
 const SAFE_IMAGE = /^[a-z0-9][a-z0-9./:_-]*@sha256:[a-f0-9]{64}$/u;
+const SAFE_DATABASE_NAME = /^[A-Za-z_][A-Za-z0-9_.-]{0,62}$/u;
+const SAFE_POSTGRES_VERSION =
+  /^pg_(?:dump|restore) \(PostgreSQL\) [0-9]+(?:\.[0-9]+){0,2}(?: \([^()\r\n]*\))?$/u;
+const POSTGRES_CONTAINER_PATH = '/usr/local/bin:/usr/bin:/bin';
 
 export class ColdBackupFailure extends Error {
   constructor(stage) {
@@ -112,7 +125,8 @@ function validateConfig(config) {
   }
 
   if (
-    !SAFE_PROJECT.test(config.projectName ?? '') ||
+    typeof config.projectName !== 'string' ||
+    !SAFE_PROJECT.test(config.projectName) ||
     !isSafePath(config.projectDirectory) ||
     !isSafePath(config.composeEnvFile) ||
     !isSafePath(config.captureRoot) ||
@@ -123,18 +137,82 @@ function validateConfig(config) {
     !SAFE_REGION.test(config.awsRegion ?? '') ||
     (config.awsProfile !== undefined &&
       !SAFE_SERVICE.test(config.awsProfile ?? '')) ||
-    !SAFE_TAG.test(config.resticHost ?? '') ||
+    typeof config.resticHost !== 'string' ||
+    !SAFE_TAG.test(config.resticHost) ||
     !Array.isArray(config.resticTags) ||
     config.resticTags.length !== 2 ||
-    !config.resticTags.every((tag) => SAFE_TAG.test(tag)) ||
-    new Set(config.resticTags).size !== config.resticTags.length
+    !config.resticTags.every(
+      (tag) => typeof tag === 'string' && SAFE_TAG.test(tag),
+    ) ||
+    new Set(config.resticTags).size !== config.resticTags.length ||
+    (config.resticRetentionEnabled !== undefined &&
+      typeof config.resticRetentionEnabled !== 'boolean') ||
+    (config.cleanupSuccessfulCapture !== undefined &&
+      typeof config.cleanupSuccessfulCapture !== 'boolean')
+  ) {
+    fail('configuration');
+  }
+
+  const dumpTransport = config.postgresDumpTransport ?? 'native';
+  if (!['native', 'container-exec'].includes(dumpTransport)) {
+    fail('configuration');
+  }
+
+  if (config.postgresContainer !== undefined) {
+    if (
+      dumpTransport !== 'container-exec' ||
+      !isRecord(config.postgresContainer)
+    ) {
+      fail('configuration');
+    }
+    const container = config.postgresContainer;
+    if (
+      Object.keys(container).some(
+        (key) =>
+          ![
+            'projectName',
+            'serviceName',
+            'image',
+            'database',
+            'username',
+          ].includes(key),
+      ) ||
+      typeof container.projectName !== 'string' ||
+      !SAFE_PROJECT.test(container.projectName) ||
+      typeof container.serviceName !== 'string' ||
+      !SAFE_SERVICE.test(container.serviceName) ||
+      !SAFE_IMAGE.test(container.image ?? '') ||
+      typeof container.database !== 'string' ||
+      !SAFE_DATABASE_NAME.test(container.database) ||
+      typeof container.username !== 'string' ||
+      !SAFE_DATABASE_NAME.test(container.username)
+    ) {
+      fail('configuration');
+    }
+  } else if (dumpTransport === 'container-exec') {
+    fail('configuration');
+  }
+
+  if (
+    config.resticRetentionEnabled &&
+    (config.resticHost !== config.projectName ||
+      !config.resticTags.includes(config.projectName))
   ) {
     fail('configuration');
   }
 
   if (config.reminderDatabaseEnabled) {
-    if (!SAFE_SERVICE.test(config.pgService ?? '')) fail('configuration');
+    if (dumpTransport === 'native') {
+      if (!SAFE_SERVICE.test(config.pgService ?? '')) fail('configuration');
+    } else if (config.pgService !== null) {
+      fail('configuration');
+    }
   } else if (config.pgService !== null) {
+    fail('configuration');
+  } else if (
+    dumpTransport !== 'native' ||
+    config.postgresContainer !== undefined
+  ) {
     fail('configuration');
   }
 
@@ -167,17 +245,53 @@ async function requirePrivateDirectory(path, stage) {
   if (!isSafePath(path)) fail(stage);
   let info;
   try {
-    info = await lstat(path);
+    info = await lstat(path, { bigint: true });
   } catch {
     fail(stage);
   }
   if (
     !info.isDirectory() ||
-    (info.mode & PRIVATE_DIRECTORY_MASK) !== 0 ||
-    (typeof process.getuid === 'function' && info.uid !== process.getuid())
+    (info.mode & BigInt(PRIVATE_DIRECTORY_MASK)) !== 0n ||
+    (typeof process.getuid === 'function' &&
+      info.uid !== BigInt(process.getuid()))
   ) {
     fail(stage);
   }
+  return info;
+}
+
+async function requireNoSymlinkAncestors(path, stage) {
+  let current = resolve(path);
+  while (true) {
+    let info;
+    try {
+      info = await lstat(current, { bigint: true });
+    } catch {
+      fail(stage);
+    }
+    if (info.isSymbolicLink()) fail(stage);
+    const parent = dirname(current);
+    if (parent === current) return;
+    current = parent;
+  }
+}
+
+function directoryIdentity(info) {
+  return {
+    dev: info.dev,
+    ino: info.ino,
+    uid: info.uid,
+    mode: info.mode,
+  };
+}
+
+function sameDirectoryIdentity(left, right) {
+  return (
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.uid === right.uid &&
+    left.mode === right.mode
+  );
 }
 
 async function validateConfigFiles(config, runtimeEnv) {
@@ -187,7 +301,13 @@ async function validateConfigFiles(config, runtimeEnv) {
     'preflight',
   );
   await requirePrivateDirectory(runtimeEnv.RESTIC_CACHE_DIR, 'preflight');
-  await requirePrivateDirectory(config.captureRoot, 'preflight');
+  const captureRootInfo = await requirePrivateDirectory(
+    config.captureRoot,
+    'preflight',
+  );
+  if (config.cleanupSuccessfulCapture) {
+    await requireNoSymlinkAncestors(config.captureRoot, 'preflight');
+  }
 
   let projectInfo;
   let composeInfo;
@@ -207,7 +327,10 @@ async function validateConfigFiles(config, runtimeEnv) {
 
   await requirePrivateRegularFile(config.composeEnvFile, 'preflight');
 
-  if (config.reminderDatabaseEnabled) {
+  if (
+    config.reminderDatabaseEnabled &&
+    postgresDumpTransport(config) === 'native'
+  ) {
     await requirePrivateRegularFile(runtimeEnv.PGSERVICEFILE, 'preflight');
     await requirePrivateRegularFile(runtimeEnv.PGPASSFILE, 'preflight');
     if (
@@ -221,11 +344,22 @@ async function validateConfigFiles(config, runtimeEnv) {
   }
 
   try {
+    const resolvedCaptureRoot = await realpath(config.captureRoot);
+    const resolvedCaptureRootInfo = await lstat(resolvedCaptureRoot, {
+      bigint: true,
+    });
+    if (
+      !resolvedCaptureRootInfo.isDirectory() ||
+      !sameDirectoryIdentity(captureRootInfo, resolvedCaptureRootInfo)
+    ) {
+      fail('preflight');
+    }
     return {
       projectDirectory: await realpath(config.projectDirectory),
       composeFile: await realpath(join(config.projectDirectory, COMPOSE_FILE)),
       composeEnvFile: await realpath(config.composeEnvFile),
-      captureRoot: await realpath(config.captureRoot),
+      captureRoot: resolvedCaptureRoot,
+      captureRootIdentity: directoryIdentity(resolvedCaptureRootInfo),
     };
   } catch {
     fail('preflight');
@@ -259,6 +393,8 @@ function composeArgs(config, paths, args) {
     'compose',
     '--project-name',
     config.projectName,
+    '--project-directory',
+    paths.projectDirectory,
     '--env-file',
     paths.composeEnvFile,
     '-f',
@@ -291,6 +427,9 @@ function commandEnvironment(config, paths, runtimeEnv, kind) {
     };
   }
   if (kind === 'postgres') {
+    if (postgresDumpTransport(config) !== 'native') {
+      return { PATH: FIXED_PATH, HOME: process.env.HOME ?? '/' };
+    }
     return {
       PATH: FIXED_PATH,
       HOME: process.env.HOME ?? '/',
@@ -592,6 +731,209 @@ async function inspectJson(
   }
 }
 
+function postgresDumpTransport(config) {
+  return config.postgresDumpTransport ?? 'native';
+}
+
+function postgresDockerOptions(config, paths, runtimeEnv, signal) {
+  return {
+    cwd: paths.projectDirectory,
+    env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
+    signal,
+    timeoutMs: COMMAND_TIMEOUT_MS,
+  };
+}
+
+async function inspectPostgresContainer(
+  config,
+  paths,
+  runtimeEnv,
+  deps,
+  stage,
+  signal,
+  expectedIdentity,
+) {
+  const target = config.postgresContainer;
+  const options = postgresDockerOptions(config, paths, runtimeEnv, signal);
+  const listing = await runCommand(
+    deps,
+    'docker',
+    [
+      'ps',
+      '--all',
+      '--filter',
+      `label=com.docker.compose.project=${target.projectName}`,
+      '--filter',
+      `label=com.docker.compose.service=${target.serviceName}`,
+      '--format',
+      'json',
+    ],
+    options,
+    stage,
+  );
+  const records = parseJsonLines(listing, stage);
+  if (records.length !== 1) fail(stage);
+  const listedId = records[0].ID ?? records[0].Id ?? records[0].id;
+  if (
+    typeof listedId !== 'string' ||
+    !/^[a-f0-9]{12,64}$/u.test(listedId) ||
+    String(records[0].State ?? records[0].state ?? '').toLowerCase() !==
+      'running'
+  ) {
+    fail(stage);
+  }
+
+  const id = await runCommand(
+    deps,
+    'docker',
+    ['inspect', '--format', '{{.Id}}', listedId],
+    options,
+    stage,
+  );
+  const fullId = id.trim();
+  if (!/^[a-f0-9]{64}$/u.test(fullId) || !fullId.startsWith(listedId)) {
+    fail(stage);
+  }
+
+  const labels = await inspectJson(
+    config,
+    paths,
+    runtimeEnv,
+    deps,
+    fullId,
+    '{{json .Config.Labels}}',
+    stage,
+    signal,
+  );
+  const configuredImage = (
+    await runCommand(
+      deps,
+      'docker',
+      ['inspect', '--format', '{{.Config.Image}}', fullId],
+      options,
+      stage,
+    )
+  ).trim();
+  const imageId = (
+    await runCommand(
+      deps,
+      'docker',
+      ['inspect', '--format', '{{.Image}}', fullId],
+      options,
+      stage,
+    )
+  ).trim();
+  const expectedImageId = (
+    await runCommand(
+      deps,
+      'docker',
+      ['image', 'inspect', '--format', '{{.Id}}', target.image],
+      options,
+      stage,
+    )
+  ).trim();
+  const state = await inspectJson(
+    config,
+    paths,
+    runtimeEnv,
+    deps,
+    fullId,
+    '{{json .State}}',
+    stage,
+    signal,
+  );
+
+  if (
+    !isRecord(labels) ||
+    labels['com.docker.compose.project'] !== target.projectName ||
+    labels['com.docker.compose.service'] !== target.serviceName ||
+    configuredImage !== target.image ||
+    !/^sha256:[a-f0-9]{64}$/u.test(imageId) ||
+    imageId !== expectedImageId ||
+    !isRecord(state) ||
+    state.Running !== true ||
+    String(state.Status).toLowerCase() !== 'running'
+  ) {
+    fail(stage);
+  }
+
+  const identity = {
+    id: fullId,
+    image: configuredImage,
+    imageId,
+    projectName: target.projectName,
+    serviceName: target.serviceName,
+  };
+  if (
+    expectedIdentity &&
+    Object.keys(identity).some((key) => identity[key] !== expectedIdentity[key])
+  ) {
+    fail(stage);
+  }
+  return identity;
+}
+
+function validatePostgresVersion(output, tool, stage) {
+  const version = output.trim();
+  if (
+    !version.startsWith(`${tool} (PostgreSQL) `) ||
+    !SAFE_POSTGRES_VERSION.test(version)
+  ) {
+    fail(stage);
+  }
+  return version;
+}
+
+async function postgresToolVersion(
+  config,
+  paths,
+  runtimeEnv,
+  deps,
+  tool,
+  args,
+  stage,
+  signal,
+) {
+  const output = await runCommand(
+    deps,
+    tool,
+    args,
+    {
+      env: commandEnvironment(config, paths, runtimeEnv, 'postgres'),
+      signal,
+    },
+    stage,
+  );
+  return validatePostgresVersion(output, tool, stage);
+}
+
+async function dockerExecPostgresVersion(
+  config,
+  paths,
+  runtimeEnv,
+  deps,
+  containerId,
+  stage,
+  signal,
+) {
+  const output = await runCommand(
+    deps,
+    'docker',
+    [
+      'exec',
+      containerId,
+      '/usr/bin/env',
+      '-i',
+      `PATH=${POSTGRES_CONTAINER_PATH}`,
+      'pg_dump',
+      '--version',
+    ],
+    postgresDockerOptions(config, paths, runtimeEnv, signal),
+    stage,
+  );
+  return validatePostgresVersion(output, 'pg_dump', stage);
+}
+
 async function verifyContainerIdentityAndMounts(
   config,
   paths,
@@ -797,27 +1139,57 @@ async function dockerPreflight(config, paths, deps, runtimeEnv, signal) {
     'preflight',
   );
 
+  let postgresPreflight;
   if (config.reminderDatabaseEnabled) {
-    const postgresEnv = commandEnvironment(
+    const transport = postgresDumpTransport(config);
+    const containerIdentity =
+      transport === 'container-exec'
+        ? await inspectPostgresContainer(
+            config,
+            paths,
+            runtimeEnv,
+            deps,
+            'preflight',
+            signal,
+          )
+        : undefined;
+    const pgDumpVersion =
+      transport === 'native'
+        ? await postgresToolVersion(
+            config,
+            paths,
+            runtimeEnv,
+            deps,
+            'pg_dump',
+            ['--version'],
+            'preflight',
+            signal,
+          )
+        : await dockerExecPostgresVersion(
+            config,
+            paths,
+            runtimeEnv,
+            deps,
+            containerIdentity.id,
+            'preflight',
+            signal,
+          );
+    const pgRestoreVersion = await postgresToolVersion(
       config,
       paths,
       runtimeEnv,
-      'postgres',
-    );
-    await runCommand(
-      deps,
-      'pg_dump',
-      ['--version'],
-      { env: postgresEnv, signal },
-      'preflight',
-    );
-    await runCommand(
       deps,
       'pg_restore',
       ['--version'],
-      { env: postgresEnv, signal },
       'preflight',
+      signal,
     );
+    postgresPreflight = {
+      transport,
+      pgDumpVersion,
+      pgRestoreVersion,
+      ...(containerIdentity ? { containerIdentity } : {}),
+    };
   }
 
   const ids = await composeServices(
@@ -848,6 +1220,7 @@ async function dockerPreflight(config, paths, deps, runtimeEnv, signal) {
     'preflight',
     signal,
   );
+  return postgresPreflight;
 }
 
 function makeRunName(now, id) {
@@ -901,6 +1274,329 @@ async function requireNonemptyFile(path, stage) {
   if (!info.isFile() || info.isSymbolicLink() || info.size === 0) fail(stage);
 }
 
+function isPrivateOwnedDirectory(info) {
+  return (
+    info.isDirectory() &&
+    (info.mode & 0o077n) === 0n &&
+    (typeof process.getuid !== 'function' ||
+      info.uid === BigInt(process.getuid()))
+  );
+}
+
+async function currentCaptureDirectoryIdentity(
+  paths,
+  captureDirectory,
+  runName,
+  expectedCaptureIdentity,
+) {
+  await requireNoSymlinkAncestors(captureDirectory, 'verification');
+  if (
+    captureDirectory !== join(paths.captureRoot, runName) ||
+    dirname(captureDirectory) !== paths.captureRoot ||
+    basename(captureDirectory) !== runName
+  ) {
+    fail('verification');
+  }
+
+  let resolvedRoot;
+  let resolvedCapture;
+  let rootInfo;
+  let captureInfo;
+  try {
+    [resolvedRoot, resolvedCapture, rootInfo, captureInfo] = await Promise.all([
+      realpath(paths.captureRoot),
+      realpath(captureDirectory),
+      lstat(paths.captureRoot, { bigint: true }),
+      lstat(captureDirectory, { bigint: true }),
+    ]);
+  } catch {
+    fail('verification');
+  }
+
+  if (
+    resolvedRoot !== paths.captureRoot ||
+    resolvedCapture !== captureDirectory ||
+    !isPrivateOwnedDirectory(rootInfo) ||
+    !sameDirectoryIdentity(rootInfo, paths.captureRootIdentity) ||
+    !isPrivateOwnedDirectory(captureInfo) ||
+    (expectedCaptureIdentity !== undefined &&
+      !sameDirectoryIdentity(captureInfo, expectedCaptureIdentity))
+  ) {
+    fail('verification');
+  }
+
+  return directoryIdentity(captureInfo);
+}
+
+function fileIdentity(info) {
+  return {
+    dev: info.dev,
+    ino: info.ino,
+    uid: info.uid,
+    mode: info.mode,
+    nlink: info.nlink,
+    size: info.size,
+    mtimeNs: info.mtimeNs,
+    ctimeNs: info.ctimeNs,
+  };
+}
+
+function sameFileIdentity(left, right) {
+  return (
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.uid === right.uid &&
+    left.mode === right.mode &&
+    left.nlink === right.nlink &&
+    left.size === right.size &&
+    left.mtimeNs === right.mtimeNs &&
+    left.ctimeNs === right.ctimeNs
+  );
+}
+
+async function captureFileIdentities(captureDirectory, expectedNames) {
+  let entries;
+  try {
+    entries = await readdir(captureDirectory);
+  } catch {
+    fail('verification');
+  }
+  const sortedEntries = [...entries].sort();
+  const sortedExpected = [...expectedNames].sort();
+  if (
+    sortedEntries.length !== sortedExpected.length ||
+    sortedEntries.some((name, index) => name !== sortedExpected[index])
+  ) {
+    fail('verification');
+  }
+
+  const identities = new Map();
+  for (const name of expectedNames) {
+    let info;
+    try {
+      info = await lstat(join(captureDirectory, name), { bigint: true });
+    } catch {
+      fail('verification');
+    }
+    if (
+      !info.isFile() ||
+      info.nlink !== 1n ||
+      (info.mode & 0o077n) !== 0n ||
+      (typeof process.getuid === 'function' &&
+        info.uid !== BigInt(process.getuid())) ||
+      info.size === 0n
+    ) {
+      fail('verification');
+    }
+    identities.set(name, fileIdentity(info));
+  }
+  return identities;
+}
+
+async function localCaptureProof(
+  paths,
+  captureDirectory,
+  runName,
+  expectedCaptureIdentity,
+  expectedNames,
+) {
+  const captureIdentity = await currentCaptureDirectoryIdentity(
+    paths,
+    captureDirectory,
+    runName,
+    expectedCaptureIdentity,
+  );
+  const files = await captureFileIdentities(captureDirectory, expectedNames);
+  let marker;
+  try {
+    marker = await readFile(
+      join(captureDirectory, CAPTURE_MARKER_NAME),
+      'utf8',
+    );
+  } catch {
+    fail('verification');
+  }
+  if (marker !== CAPTURE_MARKER_CONTENT) fail('verification');
+  return { captureIdentity, files };
+}
+
+function sameCaptureProof(left, right, expectedNames) {
+  if (!sameDirectoryIdentity(left.captureIdentity, right.captureIdentity)) {
+    return false;
+  }
+  return expectedNames.every((name) => {
+    const expected = left.files.get(name);
+    const current = right.files.get(name);
+    return (
+      expected !== undefined &&
+      current !== undefined &&
+      sameFileIdentity(expected, current)
+    );
+  });
+}
+
+function captureFileNames(hasDatabase) {
+  return [
+    ...ARCHIVE_NAMES,
+    ...(hasDatabase ? [DUMP_NAME] : []),
+    CAPTURE_MANIFEST_NAME,
+    CHECKSUM_NAME,
+    CAPTURE_MARKER_NAME,
+  ];
+}
+
+function resticSnapshotId(backupOutput) {
+  const records = parseJsonLines(backupOutput, 'verification');
+  const summaries = records.filter(
+    (record) => record.message_type === 'summary',
+  );
+  const summary = records.at(-1);
+  if (
+    summaries.length !== 1 ||
+    summary?.message_type !== 'summary' ||
+    summary.dry_run === true ||
+    typeof summary.snapshot_id !== 'string' ||
+    !SNAPSHOT_ID.test(summary.snapshot_id)
+  ) {
+    fail('verification');
+  }
+  return summary.snapshot_id;
+}
+
+function verifyResticListing(
+  listingOutput,
+  snapshotId,
+  config,
+  captureDirectory,
+  expectedNames,
+  captureProof,
+) {
+  const records = parseJsonLines(listingOutput, 'verification');
+  if (records.length !== expectedNames.length + 2) fail('verification');
+  const snapshot = records[0];
+  if (
+    snapshot.message_type !== 'snapshot' ||
+    snapshot.id !== snapshotId ||
+    snapshot.hostname !== config.resticHost ||
+    !Array.isArray(snapshot.paths) ||
+    snapshot.paths.length !== 1 ||
+    snapshot.paths[0] !== captureDirectory ||
+    !Array.isArray(snapshot.tags)
+  ) {
+    fail('verification');
+  }
+
+  const actualTags = [...snapshot.tags].sort();
+  const expectedTags = [...config.resticTags].sort();
+  if (
+    actualTags.length !== expectedTags.length ||
+    actualTags.some((tag, index) => tag !== expectedTags[index])
+  ) {
+    fail('verification');
+  }
+
+  const nodes = records.slice(1);
+  if (nodes.some((node) => node.message_type !== 'node')) {
+    fail('verification');
+  }
+  const nodesByPath = new Map();
+  for (const node of nodes) {
+    if (typeof node.path !== 'string' || nodesByPath.has(node.path)) {
+      fail('verification');
+    }
+    nodesByPath.set(node.path, node);
+  }
+  if (nodesByPath.size !== expectedNames.length + 1) fail('verification');
+
+  const directoryNode = nodesByPath.get(captureDirectory);
+  if (directoryNode?.type !== 'dir') fail('verification');
+  for (const name of expectedNames) {
+    const node = nodesByPath.get(join(captureDirectory, name));
+    const fileIdentity = captureProof.files.get(name);
+    if (
+      node?.type !== 'file' ||
+      !Number.isSafeInteger(node.size) ||
+      BigInt(node.size) !== fileIdentity?.size
+    ) {
+      fail('verification');
+    }
+  }
+}
+
+async function verifyResticSnapshot(
+  snapshotId,
+  config,
+  paths,
+  runtimeEnv,
+  deps,
+  signal,
+  captureDirectory,
+  expectedNames,
+  captureProof,
+) {
+  const commandOptions = {
+    env: commandEnvironment(config, paths, runtimeEnv, 'restic'),
+    signal,
+    timeoutMs: UPLOAD_TIMEOUT_MS,
+  };
+  const listing = await runCommand(
+    deps,
+    'restic',
+    ['ls', '--json', '--recursive', snapshotId, captureDirectory],
+    commandOptions,
+    'verification',
+  );
+  verifyResticListing(
+    listing,
+    snapshotId,
+    config,
+    captureDirectory,
+    expectedNames,
+    captureProof,
+  );
+
+  const marker = await runCommand(
+    deps,
+    'restic',
+    ['dump', snapshotId, join(captureDirectory, CAPTURE_MARKER_NAME)],
+    commandOptions,
+    'verification',
+  );
+  if (marker !== CAPTURE_MARKER_CONTENT) fail('verification');
+}
+
+async function removeVerifiedCapture(
+  paths,
+  captureDirectory,
+  runName,
+  expectedNames,
+  captureProof,
+) {
+  const currentProof = await localCaptureProof(
+    paths,
+    captureDirectory,
+    runName,
+    captureProof.captureIdentity,
+    expectedNames,
+  );
+  if (!sameCaptureProof(captureProof, currentProof, expectedNames)) {
+    fail('verification');
+  }
+
+  const removalOrder = expectedNames.filter(
+    (name) => name !== CAPTURE_MARKER_NAME,
+  );
+  removalOrder.push(CAPTURE_MARKER_NAME);
+  try {
+    for (const name of removalOrder) {
+      await unlink(join(captureDirectory, name));
+    }
+    await rmdir(captureDirectory);
+  } catch {
+    fail('verification');
+  }
+}
+
 async function hashFile(path, stage) {
   return new Promise((resolveHash, rejectHash) => {
     const hash = createHash('sha256');
@@ -918,6 +1614,7 @@ async function capturePostgres(
   deps,
   captureDirectory,
   signal,
+  postgresPreflight,
 ) {
   if (!config.reminderDatabaseEnabled) {
     for (const name of [DUMP_NAME, DUMP_PARTIAL_NAME]) {
@@ -928,49 +1625,132 @@ async function capturePostgres(
         if (error instanceof ColdBackupFailure) throw error;
       }
     }
-    return false;
+    return { enabled: false };
   }
 
   const partialPath = join(captureDirectory, DUMP_PARTIAL_NAME);
   const finalPath = join(captureDirectory, DUMP_NAME);
   const env = commandEnvironment(config, paths, runtimeEnv, 'postgres');
-  await runCommand(
-    deps,
-    'pg_dump',
-    ['--format=custom'],
-    {
-      cwd: paths.projectDirectory,
-      env,
-      signal,
-      timeoutMs: CAPTURE_TIMEOUT_MS,
-      stdoutPath: partialPath,
-      captureStderr: true,
-    },
-    'database',
-    true,
-  );
-  await requireNonemptyFile(partialPath, 'database');
-  await runCommand(
-    deps,
-    'pg_restore',
-    ['--list', partialPath],
-    {
-      cwd: paths.projectDirectory,
-      env,
-      signal,
-      timeoutMs: CAPTURE_TIMEOUT_MS,
-      discardStdout: true,
-      captureStderr: true,
-    },
-    'database',
-    true,
-  );
   try {
+    if (postgresPreflight?.transport === 'native') {
+      await runCommand(
+        deps,
+        'pg_dump',
+        ['--format=custom'],
+        {
+          cwd: paths.projectDirectory,
+          env,
+          signal,
+          timeoutMs: CAPTURE_TIMEOUT_MS,
+          stdoutPath: partialPath,
+          captureStderr: true,
+        },
+        'database',
+        true,
+      );
+    } else if (postgresPreflight?.transport === 'container-exec') {
+      await inspectPostgresContainer(
+        config,
+        paths,
+        runtimeEnv,
+        deps,
+        'database',
+        signal,
+        postgresPreflight.containerIdentity,
+      );
+      const currentVersion = await dockerExecPostgresVersion(
+        config,
+        paths,
+        runtimeEnv,
+        deps,
+        postgresPreflight.containerIdentity.id,
+        'database',
+        signal,
+      );
+      if (currentVersion !== postgresPreflight.pgDumpVersion) {
+        fail('database');
+      }
+      await inspectPostgresContainer(
+        config,
+        paths,
+        runtimeEnv,
+        deps,
+        'database',
+        signal,
+        postgresPreflight.containerIdentity,
+      );
+      await runCommand(
+        deps,
+        'docker',
+        [
+          'exec',
+          postgresPreflight.containerIdentity.id,
+          '/usr/bin/env',
+          '-i',
+          `PATH=${POSTGRES_CONTAINER_PATH}`,
+          'PGPASSFILE=/dev/null',
+          'PGSERVICEFILE=/dev/null',
+          'pg_dump',
+          '--no-password',
+          '--host=/var/run/postgresql',
+          '--format=custom',
+          `--username=${config.postgresContainer.username}`,
+          `--dbname=${config.postgresContainer.database}`,
+        ],
+        {
+          ...postgresDockerOptions(config, paths, runtimeEnv, signal),
+          timeoutMs: CAPTURE_TIMEOUT_MS,
+          stdoutPath: partialPath,
+          captureStderr: true,
+        },
+        'database',
+        true,
+      );
+      await inspectPostgresContainer(
+        config,
+        paths,
+        runtimeEnv,
+        deps,
+        'database',
+        signal,
+        postgresPreflight.containerIdentity,
+      );
+    } else {
+      fail('database');
+    }
+
+    await requireNonemptyFile(partialPath, 'database');
+    await runCommand(
+      deps,
+      'pg_restore',
+      ['--list', partialPath],
+      {
+        cwd: paths.projectDirectory,
+        env,
+        signal,
+        timeoutMs: CAPTURE_TIMEOUT_MS,
+        discardStdout: true,
+        captureStderr: true,
+      },
+      'database',
+      true,
+    );
     await rename(partialPath, finalPath);
   } catch {
+    try {
+      await unlink(partialPath);
+    } catch (error) {
+      if (error?.code !== 'ENOENT') fail('database');
+    }
     fail('database');
   }
-  return true;
+  return {
+    enabled: true,
+    format: 'custom',
+    transport: postgresPreflight.transport,
+    pgDumpVersion: postgresPreflight.pgDumpVersion,
+    pgRestoreVersion: postgresPreflight.pgRestoreVersion,
+  };
 }
 
 function archiveCommand(config, volumeName) {
@@ -1060,8 +1840,24 @@ async function captureArchive(
   }
 }
 
-async function writeChecksums(captureDirectory, hasDatabase) {
-  const names = [...ARCHIVE_NAMES, ...(hasDatabase ? [DUMP_NAME] : [])];
+async function writeCaptureManifest(captureDirectory, postgresDump) {
+  const manifest = {
+    schemaVersion: 1,
+    postgresDump,
+  };
+  await createOutputFile(
+    join(captureDirectory, CAPTURE_MANIFEST_NAME),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+    'verification',
+  );
+}
+
+async function writeChecksums(captureDirectory, postgresDump) {
+  const names = [
+    ...ARCHIVE_NAMES,
+    ...(postgresDump.enabled ? [DUMP_NAME] : []),
+    CAPTURE_MANIFEST_NAME,
+  ];
   const lines = [];
   for (const name of names) {
     const path = join(captureDirectory, name);
@@ -1132,15 +1928,20 @@ export async function runColdBackup(configInput, dependencies = {}) {
   const signal = dependencies.signal;
   const lockPath = join(paths.captureRoot, LOCK_NAME);
   await refuseExistingLock(lockPath);
-  await dockerPreflight(config, paths, deps, runtimeEnv, signal).catch(
-    (error) => {
-      if (error instanceof ColdBackupFailure) throw error;
-      fail('preflight');
-    },
-  );
+  const postgresPreflight = await dockerPreflight(
+    config,
+    paths,
+    deps,
+    runtimeEnv,
+    signal,
+  ).catch((error) => {
+    if (error instanceof ColdBackupFailure) throw error;
+    fail('preflight');
+  });
 
   const lockHandle = await acquireLock(lockPath);
   let captureDirectory;
+  let captureDirectoryIdentity;
   let stopAttempted = false;
   let failure;
 
@@ -1173,12 +1974,30 @@ export async function runColdBackup(configInput, dependencies = {}) {
       'preflight',
       signal,
     );
+    if (postgresPreflight?.containerIdentity) {
+      await inspectPostgresContainer(
+        config,
+        paths,
+        runtimeEnv,
+        deps,
+        'preflight',
+        signal,
+        postgresPreflight.containerIdentity,
+      );
+    }
     const runName = makeRunName(deps.now(), deps.id());
     captureDirectory = join(paths.captureRoot, runName);
     try {
       await mkdir(captureDirectory, { mode: 0o700 });
     } catch {
       fail('capture');
+    }
+    if (config.cleanupSuccessfulCapture) {
+      captureDirectoryIdentity = await currentCaptureDirectoryIdentity(
+        paths,
+        captureDirectory,
+        runName,
+      );
     }
 
     // From the first stop onward, every exit path attempts dependency-order resume.
@@ -1223,13 +2042,14 @@ export async function runColdBackup(configInput, dependencies = {}) {
       );
     }
 
-    const hasDatabase = await capturePostgres(
+    const postgresDump = await capturePostgres(
       config,
       paths,
       runtimeEnv,
       deps,
       captureDirectory,
       signal,
+      postgresPreflight,
     );
     for (let index = 0; index < VOLUME_SUFFIXES.length; index += 1) {
       const volumeName = `${config.projectName}_${VOLUME_SUFFIXES[index]}`;
@@ -1244,7 +2064,8 @@ export async function runColdBackup(configInput, dependencies = {}) {
         signal,
       );
     }
-    await writeChecksums(captureDirectory, hasDatabase);
+    await writeCaptureManifest(captureDirectory, postgresDump);
+    await writeChecksums(captureDirectory, postgresDump);
     await assertStoppedServices(
       config,
       paths,
@@ -1261,9 +2082,22 @@ export async function runColdBackup(configInput, dependencies = {}) {
 
     await createOutputFile(
       join(captureDirectory, CAPTURE_MARKER_NAME),
-      'Cold capture verified and services resumed.\n',
+      CAPTURE_MARKER_CONTENT,
       'verification',
     );
+
+    let expectedCaptureNames;
+    let captureProof;
+    if (config.cleanupSuccessfulCapture) {
+      expectedCaptureNames = captureFileNames(postgresDump.enabled);
+      captureProof = await localCaptureProof(
+        paths,
+        captureDirectory,
+        runName,
+        captureDirectoryIdentity,
+        expectedCaptureNames,
+      );
+    }
 
     const resticArgs = [
       'backup',
@@ -1277,18 +2111,77 @@ export async function runColdBackup(configInput, dependencies = {}) {
       'host,tags',
       captureDirectory,
     ];
-    await runCommand(
+    if (config.cleanupSuccessfulCapture) {
+      resticArgs.splice(1, 0, '--quiet', '--json');
+    }
+    const uploadOutput = await runCommand(
       deps,
       'restic',
       resticArgs,
-      {
-        env: commandEnvironment(config, paths, runtimeEnv, 'restic'),
-        signal,
-        timeoutMs: UPLOAD_TIMEOUT_MS,
-        discardStdout: true,
-      },
+      config.cleanupSuccessfulCapture
+        ? {
+            env: commandEnvironment(config, paths, runtimeEnv, 'restic'),
+            signal,
+            timeoutMs: UPLOAD_TIMEOUT_MS,
+          }
+        : {
+            env: commandEnvironment(config, paths, runtimeEnv, 'restic'),
+            signal,
+            timeoutMs: UPLOAD_TIMEOUT_MS,
+            discardStdout: true,
+          },
       'upload',
     );
+    const snapshotId = config.cleanupSuccessfulCapture
+      ? resticSnapshotId(uploadOutput)
+      : undefined;
+
+    if (config.resticRetentionEnabled) {
+      await runCommand(
+        deps,
+        'restic',
+        [
+          'forget',
+          '--host',
+          config.resticHost,
+          '--tag',
+          config.resticTags.join(','),
+          '--group-by',
+          'host,tags',
+          '--keep-daily',
+          '30',
+          '--prune',
+        ],
+        {
+          env: commandEnvironment(config, paths, runtimeEnv, 'restic'),
+          signal,
+          timeoutMs: UPLOAD_TIMEOUT_MS,
+          discardStdout: true,
+        },
+        'retention',
+      );
+    }
+
+    if (config.cleanupSuccessfulCapture) {
+      await verifyResticSnapshot(
+        snapshotId,
+        config,
+        paths,
+        runtimeEnv,
+        deps,
+        signal,
+        captureDirectory,
+        expectedCaptureNames,
+        captureProof,
+      );
+      await removeVerifiedCapture(
+        paths,
+        captureDirectory,
+        runName,
+        expectedCaptureNames,
+        captureProof,
+      );
+    }
   } catch (error) {
     failure =
       error instanceof ColdBackupFailure
@@ -1310,7 +2203,9 @@ export async function runColdBackup(configInput, dependencies = {}) {
   }
 
   if (failure) throw failure;
-  return { captureDirectory };
+  return config.cleanupSuccessfulCapture
+    ? { captureDirectory, captureDirectoryRemoved: true }
+    : { captureDirectory };
 }
 
 async function readConfigFile(path) {
@@ -1355,11 +2250,15 @@ async function main() {
         'checksums',
         'resume',
         'upload',
+        'retention',
       ].includes(error.stage)
         ? error.stage
         : 'configuration';
     process.stderr.write(
-      `Cold backup failed during ${stage}; inspect host configuration and service state.\n`,
+      stage === 'retention'
+        ? 'Cold backup upload completed, but retention failed; inspect the ' +
+            'repository and configured scope.\n'
+        : `Cold backup failed during ${stage}; inspect host configuration and service state.\n`,
     );
     process.exitCode = 1;
   } finally {

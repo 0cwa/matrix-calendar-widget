@@ -16,6 +16,7 @@
  */
 
 import Joi from 'joi';
+import { isIP } from 'node:net';
 import { IAppConfiguration } from './IAppConfiguration';
 import {
   DEFAULT_CALDAV_EVENT_RESPONSE_MAX_BYTES,
@@ -27,6 +28,52 @@ import type { RoomCalendarPrincipalMode } from './service/RoomCalendarPrincipalI
 const optionalEnvironmentValue = (
   value: string | undefined,
 ): string | undefined => (value === '' ? undefined : value);
+
+const isLoopbackAddress = (hostname: string): boolean => {
+  const normalizedHostname = hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (normalizedHostname === 'localhost') {
+    return true;
+  }
+  if (isIP(normalizedHostname) === 4) {
+    return normalizedHostname.startsWith('127.');
+  }
+  return normalizedHostname === '::1';
+};
+
+const validateOpenIdUserInfoOrigin: Joi.CustomValidator<string> = (
+  value,
+  helpers,
+) => {
+  const match = value.match(/^https?:\/\/([^/?#]+)\/?$/i);
+  if (value !== value.trim() || !match || match[1].includes('@')) {
+    return helpers.error('any.invalid');
+  }
+
+  let origin: URL;
+  try {
+    origin = new URL(value);
+  } catch {
+    return helpers.error('any.invalid');
+  }
+
+  if (
+    origin.origin === 'null' ||
+    origin.pathname !== '/' ||
+    origin.search !== '' ||
+    origin.hash !== '' ||
+    origin.username !== '' ||
+    origin.password !== '' ||
+    (origin.protocol === 'http:' && !isLoopbackAddress(origin.hostname))
+  ) {
+    return helpers.error('any.invalid');
+  }
+
+  return value;
+};
+
+const openIdUserInfoOriginSchema = Joi.string()
+  .empty('')
+  .custom(validateOpenIdUserInfoOrigin);
 
 const toBoolean = (
   value: string | undefined,
@@ -58,6 +105,9 @@ function createConfiguration() {
 
     access_token: process.env.ACCESS_TOKEN as string,
     homeserver_url: process.env.HOMESERVER_URL as string,
+    matrix_openid_userinfo_origin: optionalEnvironmentValue(
+      process.env.MATRIX_OPENID_USERINFO_URL,
+    ),
     radicale_url: process.env.RADICALE_URL,
     caldav_max_event_response_bytes: toNumber(
       process.env.MATRIX_CALENDAR_CALDAV_MAX_EVENT_RESPONSE_BYTES,
@@ -142,7 +192,7 @@ function createConfiguration() {
 
     enable_welcome_workflow: toBoolean(
       process.env.ENABLE_WELCOME_WORKFLOW,
-      true,
+      false,
     ),
     enable_control_room_migration: toBoolean(
       process.env.ENABLE_CONTROL_ROOM_MIGRATION,
@@ -150,7 +200,7 @@ function createConfiguration() {
     ),
     enable_private_room_error_sending: toBoolean(
       process.env.ENABLE_PRIVATE_ROOM_ERROR_SENDING,
-      true,
+      false,
     ),
     default_events_config:
       process.env.DEFAULT_EVENTS_CONFIG ?? 'conf/default_events.json',
@@ -196,6 +246,7 @@ export const ValidationSchema = Joi.object({
 
   ACCESS_TOKEN: Joi.string().required(),
   HOMESERVER_URL: Joi.string().required().uri(),
+  MATRIX_OPENID_USERINFO_URL: openIdUserInfoOriginSchema,
   RADICALE_URL: Joi.string().uri(),
   MATRIX_CALENDAR_CALDAV_MAX_EVENT_RESPONSE_BYTES: Joi.number()
     .integer()

@@ -131,10 +131,14 @@ export class MatrixAuthMiddleware implements NestMiddleware {
     }
 
     const access_token = encodeURIComponent(openIdTokenFromWidget.access_token);
-    const fetchUrl = `${this.appConfig.homeserver_url}${MatrixEndpoint.USER_INFO}?access_token=${access_token}`;
+    const userInfoOrigin = this.appConfig.matrix_openid_userinfo_origin;
+    const userInfoBaseUrl = userInfoOrigin
+      ? userInfoOrigin.replace(/\/$/, '')
+      : this.appConfig.homeserver_url;
+    const fetchUrl = `${userInfoBaseUrl}${MatrixEndpoint.USER_INFO}?access_token=${access_token}`;
     let response;
     try {
-      response = await fetch(fetchUrl);
+      response = await fetch(fetchUrl, { redirect: 'error' });
     } catch {
       throw new Error('Unable to verify Matrix identity');
     }

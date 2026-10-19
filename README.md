@@ -30,12 +30,15 @@ M7 provides bounded `!calendar upcoming`, `event`, `create`, and `delete`/`cance
 
 M8 includes process-local calendar-gateway and bot-command limits, bounded CalDAV responses, redirect refusal, and discovery href confinement. Hosted browser evidence includes ten total room-control cases (PR #213), then twelve total list/month cases with a prepared 1,000-event benchmark (PR #216); all use synthetic components. The 1,000-event month samples include a long task up to 2.63 seconds; this is not a capacity promise. These results do not validate Element Web/Desktop. The project remains pre-alpha: operator validation of proxy/log behavior, the selected project-owned Radicale deployment, PostgreSQL TLS/CA, backups, and recovery is still required. An existing etke image override or data-store reuse is required only if that reuse is selected. No live deployment or publication is authorized.
 
+The source-bound image archive workflow offers an optional `operator_rehearsal` input, defaulting to false. When enabled, it runs the no-Element Docker integration, API authorization and CRUD checks, reminder restart, and paired-store restore on the same fresh hosted runner before artifact upload. A pass is recorded only after exact owned-resource cleanup and foreign-state verification. This does not certify Element browser clients, a local Podman/SELinux host, an off-server backup destination, or a production installation; those remain separate gates.
+
 ## Start here
 
 - [AGENTS.md](./AGENTS.md) — rules for humans and coding agents
 - [Architecture](./docs/ARCHITECTURE.md)
 - [Implementation plan](./docs/PLAN.md)
 - [Current project status](./docs/STATUS.md)
+- [Current release gate and sanitized evidence index](./docs/RELEASE.md)
 - [Controlled beta scope and acceptance](./docs/beta-scope.md)
 - [Security policy](./SECURITY.md)
 - [Threat model](./docs/threat-model.md) — current trust boundaries, controls, and open risks

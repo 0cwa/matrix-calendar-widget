@@ -51,6 +51,7 @@
     "badCommand": "Der Hilfe-Befehl ist leider nicht richtig. Schreibe <code>{{trigger}} help</code>",
     "badLanguageCode": "Die ausgewählte Sprache wird nicht unterstützt",
     "generic": "Leider konnte Dein Befehl nicht korrekt ausgeführt werden: {{message}}",
+    "legacySetupDisabled": "Der alte Widget-Einrichtungsbefehl ist deaktiviert. Verwende das Kalender-Widget und <code>!calendar help</code> für Bot-Befehle.",
     "noCommandProvided": "Der Befehl steht nicht zur Verfügung. Schreibe <code>{{trigger}} help</code>",
     "noLanguageCode": "Bitte übergebe einen gültigen Sprach-Code ({{availableLanguageCodes}})"
   },
@@ -58,8 +59,8 @@
     "<p>Verfügbare Befehle:</p>",
     "<ul>",
     "<li><code>!meeting lang &lt;en|de&gt;</code> (Die Sprache des {{botName}} in diesem Raum ändern.)</li>",
-    "<li><code>!meeting setup</code> (Fügt den Kalender zum Raum hinzu.)</li>",
     "<li><code>!meeting status</code> (Überprüft die Fähigkeit, den Kalender hinzufügen zu können.)</li>",
+    "<li><code>!calendar help</code> (Zeigt die Kalender-Bot-Befehle an.)</li>",
     "</ul>"
   ],
   "meeting": {
@@ -150,7 +151,7 @@
     }
   },
   "welcome": {
-    "botIsAdmin": "Ich bin nun Moderator in Deinem Raum <a href='{{originalRoomLink}}'>{{originalRoomName}}</a>. Vielen Dank! <br> Schreibe nun den Hilfe-Befehl <code>!meeting setup</code> und ich werde für Dich die Meeting-Funktionalitäten zu Deinem Raum hinzufügen.",
+    "botIsAdmin": "Der Bot ist Moderator in Deinem Raum <a href='{{originalRoomLink}}'>{{originalRoomName}}</a>. Der alte Widget-Einrichtungsbefehl ist deaktiviert. Verwende das Kalender-Widget und <code>!calendar help</code> für Bot-Befehle.",
     "botNotAdmin": "Ich bin noch kein Moderator in Deinem Raum <a href='{{originalRoomLink}}'>{{originalRoomName}}</a>. So kann ich Dir leider nicht helfen.<br>",
     "errors": {
       "meetingWidgetExists": "Die Kalender-Funktion ist bereits vorhanden. Du findest sie in deinem Raum <a href='{{originalRoomLink}}'>{{originalRoomName}}</a> unter der Überschrift Widgets.",

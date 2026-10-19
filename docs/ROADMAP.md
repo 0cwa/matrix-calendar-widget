@@ -1,41 +1,52 @@
-# Roadmap
+# Roadmap — delivery first, then a smaller calendar architecture
 
-The roadmap describes sequencing and intent. Detailed acceptance criteria live in [PLAN.md](./PLAN.md).
+_Status: 2026-10-19. Pre-alpha; candidate qualification and operator evidence remain incomplete. Execute only within recorded, target-specific owner authorization._
 
-| Phase | Goal                        | User-visible result                                         |
-| ----- | --------------------------- | ----------------------------------------------------------- |
-| M0    | safe hard fork              | repo can be developed without upstream ambiguity            |
-| M1    | domain seam                 | inherited UI runs on calendar-domain abstractions           |
-| M2    | identity + CalDAV discovery | widget can securely list Radicale calendars                 |
-| M3    | VEVENT CRUD                 | real events can be created, edited, and deleted             |
-| M4    | collection management       | Radicale event calendars can be managed from the widget     |
-| M5    | serious calendaring         | recurrence, alarms, attendees, and round-trip fidelity      |
-| M6    | Matrix team features        | room policy, member targeting, reminders, MatrixRTC linkage |
-| M7    | fallback commands           | essential access from non-widget clients                    |
-| M8    | hardening                   | beta deployment, security, scale, compatibility             |
+This page describes **sequencing**, not release acceptance. The [roadmap issue #273](https://github.com/0cwa/matrix-calendar-widget/issues/273) is the issue-level priority/dependency index; [docs/RELEASE.md](./RELEASE.md) is the source-bound release gate; [docs/beta-scope.md](./beta-scope.md) defines what the controlled pilot must prove. [docs/STATUS.md](./STATUS.md) records evolving evidence, and [docs/PLAN.md](./PLAN.md) retains the detailed M0–M8 implementation history. When those records disagree, do not infer readiness from historical test success: reconcile the actual source SHA and evidence in #255.
 
-## Product direction
+## Engineering decision
 
-The intended experience is closer to a team calendar inside Element than a generic Radicale administration panel. Protocol complexity should appear only where it helps interoperability or diagnosis.
+**Keep the existing CalDAV/Matrix implementation. Do not restart, replatform, split it into microservices, or rewrite the preservation-first iCalendar codec.** The immediate objective is to get one small, reversible pilot qualified and running. Widget startup and route cleanup (#275/#276) were explicitly re-scoped and completed before the pilot; remaining server retirement (#277) stays gated on the pilot. The longer-term objective is to remove NeoDateFix meeting runtime dependencies from the normal calendar path and make calendar changes cheaper to implement and validate.
 
-Collection management is part of the product, but DAV vocabulary should stay mostly behind an “advanced” boundary. Users manage **Calendars**.
+Radicale/CalDAV stays canonical for calendar data; the app-owned PostgreSQL store stays separate for reminder state. Matrix identity, room membership/power/binding checks and server-side authorization stay mandatory. The Matrix widget is the primary UI and bounded `!calendar` commands remain a fallback.
 
-## Near-term priorities
+## Priority order
 
-1. Keep M4 collection-timezone editing deferred until a compatible CalDAV behavior is established. Calendar creation, visibility, rename, deletion, description/color editing, mixed-collection safeguards, and manager-only diagnostics are already on `main`.
-2. Continue bounded M5 recurrence and iCalendar slices with focused round-trip and timezone regressions. The pinned Radicale server ignores `CALDAV:timezone`; do not send that unsupported query element.
-3. M2 is complete on the pinned development stack: PR #146 closed #48 with the first-party OpenID-only Radicale module/image, and PR #147 closed #45 with real-container same-user enumeration and fail-closed denial before CalDAV I/O. Matrix-password CalDAV login remains unsupported. This contract does not verify the etke-host image override or preservation of its existing `/data` store.
-4. Complete M6 issue #7's appservice-principal proof exchange and actor, membership, power, exact binding, and cross-room isolation checks. Keep room-owned reads and writes default-off until those checks pass. [ADR037](./adrs/adr037-independent-radicale-store-for-controlled-beta.md) selects a new project-owned Radicale store for the controlled beta; existing-service or store reuse remains gated on the selected image override and preservation of its existing `/data` store.
-5. M7 has localized `!calendar help` and widget guidance. Add event queries and data-changing commands only after the M6 room-owned calendar authorization path is ready.
-6. Treat Docker build smoke and deployment documentation as groundwork, not deployment verification. Verify the operator's host-specific service and database contract before claiming an etke-managed deployment.
+| Order                                           | Workstream                                                                                                                                                                                                                           | Issues                                              | Exit / blocking rule                                                                                                                                                                 |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **P0 completed: pilot-correctness foundations** | Calendar-only root, fail-closed inherited meeting entry points, Matrix v12 creator permissions                                                                                                                                       | #274, #259, #282                                    | Implementations merged and issues closed. Their tests/evidence **must still be refreshed on the eventual candidate**; closure is not deployment acceptance.                          |
+| **P0 active: exact-source qualification**       | Continue the source-bound release gate. PR #317 reconciled `docs/RELEASE.md`, but #255 remains open for exact-source qualification and evidence.                                                                                     | #255, #9                                            | Do not use earlier SHA evidence to bless a changed candidate. Do not weaken protected checks or security/performance limits.                                                         |
+| **P0 active: approved operator pilot**          | Continue the scoped #251 pilot after source/runtime evidence and target/recovery gates pass. The latest public update says services remain stopped pending a reviewed materializer correction.                                       | #251                                                | Keep actions within recorded target-specific authority and all source, target and recovery gates. Wider rollout still requires a separate decision.                                  |
+| **P1 scoped source cleanup**                    | **Complete:** #275 Redux/invitation startup removal and #276 widget-route retirement. **Gated:** retire legacy server handlers in a separately reviewed slice; see the [source-only inventory](./legacy-server-inventory.md).        | #275, #276 complete; #277 after #251                | #277 remains gated on the pilot under #251 (or explicit re-scope). Preserve calendar behavior and qualify any source change against its exact SHA.                                   |
+| **P2 post-pilot follow-on maintenance**         | #278 consolidation follows #277. #256 is closed; PR #318 adds one Web journey duration and #320 covers sparse imports, while baseline/full feedback evidence remains outstanding. #257 remains evidence-triggered; #258 is complete. | #278 after #277; #256 residual; #257; #258 complete | Keep #278 blocked until #277. Track #256 residual work independently; measure feedback and change-radius outcomes without weakening critical behavior or exact-source certification. |
+| **Deferred feature expansion**                  | Collection timezone, advanced recurrence and broad interoperability                                                                                                                                                                  | #5, #6                                              | Re-prioritize only after operational evidence and a deliberate scope decision.                                                                                                       |
 
-See [STATUS.md](./STATUS.md) for transient PR/CI details.
+**P0 pilot boundary:** One room / two accounts; operator can repeat recovery.
 
-## Explicit non-goals for the first beta
+**Scope lock for the pilot:** Element Web/Desktop standard side panel; `bot-account` full browser acceptance and mandatory both-mode backend/CalDAV contracts; one gateway replica; independent project-owned Radicale store and app-owned PostgreSQL reminder store. Mobile, existing managed Radicale `/data` reuse, arbitrary recurrence authoring and additional UI layouts are not pilot blockers. See beta-scope for exact limits.
 
-- CardDAV/address books.
-- First-class VJOURNAL support.
-- A generic WebDAV file manager.
-- Reimplementing CalDAV in Matrix.
-- Depending on homeserver support for an unstable calendar MSC.
-- Feature parity with every historical NeoDateFix meeting-room capability.
+## Three validation layers
+
+1. **Fast change feedback:** run changed-workspace tests/type/lint and deterministic fixture checks while implementing a small vertical slice. The goal is a short, actionable first failure, not an alternative acceptance standard.
+2. **Required PR checks:** retain all current protected CI contexts and affected integration contracts. Targeted tests supplement — never silently replace — required checks.
+3. **Source-bound release certification:** run the complete approved Element Web/Desktop, real CalDAV/identity/authorization, image, recovery and operator-rehearsal evidence for the **frozen SHA**. Hosted fixtures do not establish production-host acceptance.
+
+See [DEVELOPMENT.md](./DEVELOPMENT.md) and #256. Keep major dependency upgrades outside a frozen candidate except for independently justified blockers. Freeze only after planned P0 source changes are integrated; if a blocker changes the SHA, record the new candidate and rerun relevant required evidence.
+
+## Architecture direction and constraints
+
+- **Widget:** calendar home and editor depend on `CalendarRepository`, domain types and the Matrix Widget API, not NeoDate meeting Redux or meeting routes. Issues #275 and #276 are complete; legacy deep links keep their tested redirect to calendar home.
+- **Gateway:** transport validation and permission checks wrap calendar use cases; do not make frontend capabilities an authorization boundary. Retire unreachable meeting controllers/services after pilot (#277), not as an untested pre-pilot rewrite.
+- **CalDAV:** keep the stable codec facade and unknown-property round-trip semantics; incrementally isolate projection, recurrence, patching and serialization **only when that reduces actual change radius** (#257).
+- **UI transport:** the bounded editor-state/presentation extraction is complete in #258; preserve ETags, focus/keyboard behavior and the wire protocol.
+- **Boundary enforcement:** after legacy runtime retirement, add a small, explicitly allowlisted import-boundary check so new calendar modules cannot reintroduce meeting UI/Redux dependencies (#278). Do not assume every inherited import is unused without tracing it.
+
+No new ADR is needed merely to restate this sequence. Changes to persistence, auth, public API, permissions, calendar semantics or deployment topology still need an ADR under [AGENTS.md](../AGENTS.md).
+
+## Measure improvement, not just activity
+
+The fast local/workspace route is documented in [DEVELOPMENT.md](./DEVELOPMENT.md), and PR #320 adds the sparse-checkout/static-import regression. PR #318 records sanitized elapsed time for the Web member/outsider Element journey only; it is not a full certification duration or feedback baseline. After the pilot, complete #256's remaining work despite the issue's closed state: inventory and extract stable harness responsibilities where useful; record baseline time to first actionable developer test failure, all five protected-check durations, full Element/source-bound certification duration, flaky-run frequency, setup-only failures, and test-harness change radius; then remeasure and demonstrate faster actionable feedback, fewer setup-only failures, or simpler maintenance. Keep the full certification as the release gate; add a separate minimal smoke suite only if measurably useful. Preserve all security, preservation, recovery, and accessibility gates. Further #257 codec/controller extraction stays post-pilot and is justified only by a concrete change that demonstrates avoidable change radius.
+
+## Not now
+
+No big-bang architecture rewrite, new service split, wholesale dependency upgrades, cosmetic file-size refactors, or broad feature additions as conditions for the first pilot. Archive NeoDate provenance and copyright notices even when live code is retired.

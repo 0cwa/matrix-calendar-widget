@@ -29,8 +29,13 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   appendComposeOverrideFiles,
+  appendLocalComposeEnvFile,
   DEFAULT_RADICALE_IMAGE,
+  hasLocalComposeResourceOwnership,
   loadElementAcceptanceOverrides,
+  LOCAL_REHEARSAL_LABEL,
+  withLocalNoPullComposeArgs,
+  withLocalOwnedDockerRunArgs,
 } from './element-acceptance-overrides.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -53,6 +58,298 @@ test('unset overrides preserve existing Compose arguments and image default', ()
     baseArguments,
   );
   assert.equal(overrides.radicaleImage, DEFAULT_RADICALE_IMAGE);
+  assert.equal(
+    withLocalNoPullComposeArgs(['up', '-d', 'synapse'], false)[0],
+    'up',
+  );
+  assert.deepEqual(withLocalNoPullComposeArgs(['up', '-d', 'synapse'], false), [
+    'up',
+    '-d',
+    'synapse',
+  ]);
+  assert.deepEqual(
+    appendLocalComposeEnvFile(['compose', '-p', 'existing'], overrides),
+    ['compose', '-p', 'existing'],
+  );
+});
+
+test('local prebuilt controls bind private project, env, override, and endpoint inputs', (t) => {
+  const runnerTemp = mkdtempSync(
+    join(tmpdir(), 'mcw-local-prebuilt-overrides-'),
+  );
+  t.after(() => rmSync(runnerTemp, { recursive: true, force: true }));
+  const configDirectory = join(runnerTemp, 'docker-config');
+  const engineDirectory = join(runnerTemp, 'engine');
+  mkdirSync(configDirectory, { mode: 0o700 });
+  mkdirSync(engineDirectory, { mode: 0o700 });
+  const overrideFile = join(runnerTemp, 'images.override.yaml');
+  const envFile = join(runnerTemp, 'compose.env');
+  writeFileSync(overrideFile, 'services: {}\n', { mode: 0o600 });
+  writeFileSync(envFile, '\n', { mode: 0o600 });
+  const runId = '0123456789abcdef';
+  const environment = {
+    MATRIX_CALENDAR_LOCAL_PREBUILT_REHEARSAL: 'true',
+    ELEMENT_ACCEPTANCE_LOCAL_RUN_ID: runId,
+    COMPOSE_PROJECT_NAME: `mcw-p0-${runId}`,
+    ELEMENT_ACCEPTANCE_SKIP_ELEMENT: 'true',
+    ELEMENT_ACCEPTANCE_COMPOSE_OVERRIDE_FILES: JSON.stringify([overrideFile]),
+    MATRIX_CALENDAR_LOCAL_COMPOSE_OVERRIDE_FILE: overrideFile,
+    MATRIX_CALENDAR_LOCAL_COMPOSE_ENV_FILE: envFile,
+    ELEMENT_ACCEPTANCE_RADICALE_IMAGE:
+      'matrix-calendar-widget/radicale-openid:archive-12-1',
+    RUNNER_TEMP: runnerTemp,
+    DOCKER_HOST: `unix://${join(engineDirectory, 'docker.sock')}`,
+    DOCKER_CONFIG: configDirectory,
+    MATRIX_CALENDAR_DEV_SYNAPSE_PORT_MAPPING: '127.0.0.1:8008:8008',
+    MATRIX_CALENDAR_DEV_RADICALE_PORT_MAPPING: '127.0.0.1:5232:5232',
+  };
+  const controls = loadElementAcceptanceOverrides(environment, ROOT);
+
+  assert.equal(controls.localPrebuilt, true);
+  assert.equal(controls.hostedSharedDocker, false);
+  assert.equal(controls.runId, runId);
+  assert.equal(controls.projectName, `mcw-p0-${runId}`);
+  assert.equal(controls.composeOverrideFile, overrideFile);
+  assert.equal(controls.composeEnvFile, envFile);
+  assert.deepEqual(
+    appendLocalComposeEnvFile(
+      ['compose', '-p', controls.projectName],
+      controls,
+    ),
+    ['compose', '--env-file', envFile, '-p', controls.projectName],
+  );
+  assert.deepEqual(
+    withLocalNoPullComposeArgs(['up', '-d', 'synapse', 'radicale'], true),
+    ['up', '--pull', 'never', '--no-build', '-d', 'synapse', 'radicale'],
+  );
+  assert.deepEqual(
+    withLocalNoPullComposeArgs(['run', '--rm', 'synapse', 'generate'], true),
+    ['run', '--pull', 'never', '--rm', 'synapse', 'generate'],
+  );
+  assert.deepEqual(
+    withLocalNoPullComposeArgs(
+      ['up', '--pull=never', '--no-build', '-d', 'widget'],
+      true,
+    ),
+    ['up', '--pull=never', '--no-build', '-d', 'widget'],
+  );
+  assert.throws(
+    () =>
+      withLocalNoPullComposeArgs(['up', '--pull', 'missing', 'synapse'], true),
+    /refuses Compose pulls/u,
+  );
+  assert.throws(
+    () => withLocalNoPullComposeArgs(['up', '--build', 'radicale'], true),
+    /refuses Compose builds/u,
+  );
+  assert.throws(
+    () => withLocalNoPullComposeArgs(['build', 'radicale'], true),
+    /refuses image builds and pulls/u,
+  );
+  assert.throws(
+    () => withLocalNoPullComposeArgs(['pull', 'radicale'], true),
+    /refuses image builds and pulls/u,
+  );
+  assert.deepEqual(
+    withLocalOwnedDockerRunArgs(
+      ['run', '--rm', '--network', 'none', 'radicale:archive-1-1'],
+      controls,
+      2,
+    ),
+    [
+      'run',
+      '--pull=never',
+      '--label',
+      `io.matrix-calendar-widget.local-rehearsal=${runId}`,
+      '--name',
+      `mcw-p0-${runId}-local-${runId}-2`,
+      '--rm',
+      '--network',
+      'none',
+      'radicale:archive-1-1',
+    ],
+  );
+});
+
+test('hosted shared-Docker mode accepts only the GitHub-hosted default endpoint', (t) => {
+  const runnerTemp = mkdtempSync(
+    join(tmpdir(), 'mcw-hosted-shared-docker-overrides-'),
+  );
+  t.after(() => rmSync(runnerTemp, { recursive: true, force: true }));
+  const configDirectory = join(runnerTemp, 'docker-config');
+  mkdirSync(configDirectory, { mode: 0o700 });
+  const overrideFile = join(runnerTemp, 'images.override.yaml');
+  const envFile = join(runnerTemp, 'compose.env');
+  writeFileSync(overrideFile, 'services: {}\n', { mode: 0o600 });
+  writeFileSync(envFile, '\n', { mode: 0o600 });
+  const runId = '0123456789abcdef';
+  const hostedEnvironment = {
+    MATRIX_CALENDAR_LOCAL_PREBUILT_REHEARSAL: 'true',
+    MATRIX_CALENDAR_HOSTED_SHARED_DOCKER_REHEARSAL: 'true',
+    ELEMENT_ACCEPTANCE_LOCAL_RUN_ID: runId,
+    COMPOSE_PROJECT_NAME: `mcw-p0-${runId}`,
+    ELEMENT_ACCEPTANCE_SKIP_ELEMENT: 'true',
+    ELEMENT_ACCEPTANCE_COMPOSE_OVERRIDE_FILES: JSON.stringify([overrideFile]),
+    MATRIX_CALENDAR_LOCAL_COMPOSE_OVERRIDE_FILE: overrideFile,
+    MATRIX_CALENDAR_LOCAL_COMPOSE_ENV_FILE: envFile,
+    ELEMENT_ACCEPTANCE_RADICALE_IMAGE:
+      'matrix-calendar-widget/radicale-openid:archive-12-1',
+    RUNNER_TEMP: runnerTemp,
+    DOCKER_CONFIG: configDirectory,
+    GITHUB_ACTIONS: 'true',
+    RUNNER_ENVIRONMENT: 'github-hosted',
+    RUNNER_OS: 'Linux',
+    GITHUB_REPOSITORY: '0cwa/matrix-calendar-widget',
+    GITHUB_REF: 'refs/heads/main',
+    MATRIX_CALENDAR_DEV_SYNAPSE_PORT_MAPPING: '127.0.0.1:8008:8008',
+    MATRIX_CALENDAR_DEV_RADICALE_PORT_MAPPING: '127.0.0.1:5232:5232',
+  };
+
+  const controls = loadElementAcceptanceOverrides(hostedEnvironment, ROOT);
+  assert.equal(controls.localPrebuilt, true);
+  assert.equal(controls.hostedSharedDocker, true);
+
+  for (const invalidEnvironment of [
+    { ...hostedEnvironment, DOCKER_HOST: 'tcp://docker.example.invalid:2376' },
+    { ...hostedEnvironment, DOCKER_HOST: 'unix:///tmp/custom/docker.sock' },
+    { ...hostedEnvironment, DOCKER_CONTEXT: 'default' },
+    { ...hostedEnvironment, COMPOSE_PROFILES: 'element' },
+    { ...hostedEnvironment, COMPOSE_FILE: 'compose.yaml' },
+    { ...hostedEnvironment, RUNNER_ENVIRONMENT: 'self-hosted' },
+    { ...hostedEnvironment, RUNNER_OS: 'Windows' },
+    { ...hostedEnvironment, GITHUB_REPOSITORY: 'other/project' },
+    { ...hostedEnvironment, GITHUB_REF: 'refs/heads/feature' },
+    { ...hostedEnvironment, GITHUB_ACTIONS: 'false' },
+    {
+      ...hostedEnvironment,
+      MATRIX_CALENDAR_HOSTED_SHARED_DOCKER_REHEARSAL: 'invalid',
+    },
+  ]) {
+    assert.throws(
+      () => loadElementAcceptanceOverrides(invalidEnvironment, ROOT),
+      /Local prebuilt rehearsal controls are invalid|HOSTED_SHARED_DOCKER_REHEARSAL/u,
+    );
+  }
+
+  assert.throws(
+    () =>
+      loadElementAcceptanceOverrides(
+        {
+          ...hostedEnvironment,
+          MATRIX_CALENDAR_LOCAL_PREBUILT_REHEARSAL: 'false',
+        },
+        ROOT,
+      ),
+    /Local prebuilt rehearsal controls are invalid/u,
+  );
+});
+
+test('restore helper ownership checks accept matching overlay and Compose labels only', () => {
+  const runId = '0123456789abcdef';
+  const projectName = `mcw-p0-${runId}`;
+  const serviceLabels = {
+    [LOCAL_REHEARSAL_LABEL]: runId,
+    'com.docker.compose.project': projectName,
+    'com.docker.compose.service': 'radicale',
+  };
+  const volumeLabels = {
+    [LOCAL_REHEARSAL_LABEL]: runId,
+    'com.docker.compose.project': projectName,
+    'com.docker.compose.volume': 'radicale-data',
+  };
+
+  assert.equal(
+    hasLocalComposeResourceOwnership(serviceLabels, {
+      runId,
+      projectName,
+      service: 'radicale',
+    }),
+    true,
+  );
+  assert.equal(
+    hasLocalComposeResourceOwnership(volumeLabels, {
+      runId,
+      projectName,
+      volume: 'radicale-data',
+    }),
+    true,
+  );
+  assert.equal(
+    hasLocalComposeResourceOwnership(
+      { ...serviceLabels, 'com.docker.compose.service': 'gateway' },
+      { runId, projectName, service: 'radicale' },
+    ),
+    false,
+  );
+  assert.equal(
+    hasLocalComposeResourceOwnership(
+      { ...volumeLabels, [LOCAL_REHEARSAL_LABEL]: 'fedcba9876543210' },
+      { runId, projectName, volume: 'radicale-data' },
+    ),
+    false,
+  );
+});
+
+test('local prebuilt controls reject ambient contexts, env files, and non-loopback ports', (t) => {
+  const runnerTemp = mkdtempSync(join(tmpdir(), 'mcw-local-prebuilt-invalid-'));
+  t.after(() => rmSync(runnerTemp, { recursive: true, force: true }));
+  const configDirectory = join(runnerTemp, 'docker-config');
+  mkdirSync(configDirectory, { mode: 0o700 });
+  const overrideFile = join(runnerTemp, 'images.override.yaml');
+  const envFile = join(runnerTemp, 'compose.env');
+  writeFileSync(overrideFile, 'services: {}\n', { mode: 0o600 });
+  writeFileSync(envFile, '\n', { mode: 0o600 });
+  const runId = 'fedcba9876543210';
+  const baseEnvironment = {
+    MATRIX_CALENDAR_LOCAL_PREBUILT_REHEARSAL: 'true',
+    ELEMENT_ACCEPTANCE_LOCAL_RUN_ID: runId,
+    COMPOSE_PROJECT_NAME: `mcw-p0-${runId}`,
+    ELEMENT_ACCEPTANCE_SKIP_ELEMENT: 'true',
+    ELEMENT_ACCEPTANCE_COMPOSE_OVERRIDE_FILES: JSON.stringify([overrideFile]),
+    MATRIX_CALENDAR_LOCAL_COMPOSE_OVERRIDE_FILE: overrideFile,
+    MATRIX_CALENDAR_LOCAL_COMPOSE_ENV_FILE: envFile,
+    ELEMENT_ACCEPTANCE_RADICALE_IMAGE:
+      'matrix-calendar-widget/radicale-openid:archive-12-1',
+    RUNNER_TEMP: runnerTemp,
+    DOCKER_HOST: `unix://${join(runnerTemp, 'engine', 'docker.sock')}`,
+    DOCKER_CONFIG: configDirectory,
+    MATRIX_CALENDAR_DEV_SYNAPSE_PORT_MAPPING: '127.0.0.1:8008:8008',
+    MATRIX_CALENDAR_DEV_RADICALE_PORT_MAPPING: '127.0.0.1:5232:5232',
+  };
+  mkdirSync(join(runnerTemp, 'engine'), { mode: 0o700 });
+
+  for (const environment of [
+    { ...baseEnvironment, DOCKER_CONTEXT: '' },
+    { ...baseEnvironment, DOCKER_HOST: undefined },
+    { ...baseEnvironment, COMPOSE_PROFILES: 'element' },
+    {
+      ...baseEnvironment,
+      DOCKER_HOST: 'unix:///var/run/docker.sock',
+    },
+    {
+      ...baseEnvironment,
+      MATRIX_CALENDAR_DEV_SYNAPSE_PORT_MAPPING: '0.0.0.0:8008:8008',
+    },
+    { ...baseEnvironment, COMPOSE_PROJECT_NAME: 'mcw-p0-other' },
+    {
+      ...baseEnvironment,
+      ELEMENT_ACCEPTANCE_SKIP_ELEMENT: 'false',
+    },
+    {
+      ...baseEnvironment,
+      ELEMENT_ACCEPTANCE_RADICALE_IMAGE:
+        'matrix-calendar-widget/radicale-openid:3.8.0.0',
+    },
+    {
+      ...baseEnvironment,
+      ELEMENT_ACCEPTANCE_RADICALE_IMAGE: undefined,
+    },
+  ]) {
+    assert.throws(
+      () => loadElementAcceptanceOverrides(environment, ROOT),
+      /Local prebuilt rehearsal controls are invalid/u,
+    );
+  }
 });
 
 test('Element skip accepts only explicit lowercase boolean values', () => {

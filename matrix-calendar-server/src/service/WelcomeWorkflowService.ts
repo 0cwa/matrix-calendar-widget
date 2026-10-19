@@ -424,7 +424,7 @@ export class WelcomeWorkflowService {
         htmls.push(
           i18next.t(
             'welcome.botIsAdmin',
-            "The bot is a moderator in the room <a href='{{originalRoomLink}}'>{{originalRoomName}}</a>. If you enter the command <code>!meeting setup</code> Matrix Calendar widget will be added to that room.",
+            "The bot is a moderator in the room <a href='{{originalRoomLink}}'>{{originalRoomName}}</a>. The legacy widget setup command is disabled. Use the calendar widget and <code>!calendar help</code> for bot commands.",
             this.i18nOptions(context),
           ),
         );

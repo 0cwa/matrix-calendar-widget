@@ -236,7 +236,14 @@ export class CommandService {
     } else if (LANG_COMMANDS.includes(commandName)) {
       await this.welcomeWorkflowService.handleLanguageChange(roomId, cmdArgs);
     } else if (SETUP_COMMANDS.includes(commandName)) {
-      await this.welcomeWorkflowService.handleAddWidgetCommand(roomId);
+      // The legacy welcome-room marker is room state and can be changed by its
+      // creator-level invitees, so it cannot authorize a write to another room.
+      await this.replyWithError(
+        roomId,
+        event,
+        'commandErrors.legacySetupDisabled',
+        {},
+      );
     } else if (STATUS_COMMANDS.includes(commandName)) {
       await this.welcomeWorkflowService.handleStatusCommand(roomId);
     } else {
@@ -262,6 +269,7 @@ export class CommandService {
      * t('commandErrors.noCommandProvided', 'No command provided, try <code>{{trigger}} help</code>')
      * t('commandErrors.generic', 'There was an error processing your command: {{message}}')
      * t('commandErrors.badCommand', 'Bad command, try <code>{{trigger}} help</code>')
+     * t('commandErrors.legacySetupDisabled', 'The legacy widget setup command is disabled. Use the calendar widget and <code>!calendar help</code> for bot commands.')
      *
      */
     // TODO: fix the types of i18next

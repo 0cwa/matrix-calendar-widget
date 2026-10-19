@@ -15,32 +15,15 @@
  */
 
 import { Box } from '@mui/material';
-import { Route, Routes } from 'react-router-dom';
-import { CockpitPanel } from './components/cockpit/CockpitPanel';
-import { MeetingsPanel } from './components/meetings/MeetingsPanel';
-import {
-  SCHEDULE_MEETING_MODAL_ROUTE,
-  ScheduleMeetingModal,
-} from './components/meetings/ScheduleMeetingModal';
-import {
-  SETUP_BREAKOUT_SESSIONS_MODAL_ROUTE,
-  SetupBreakoutSessionsModal,
-} from './components/meetings/SetupBreakoutSessionsModal';
+import { Navigate, Route, Routes } from 'react-router-dom';
+import { CalendarHome } from './components/calendar/CalendarHome';
 
 function App() {
   return (
     <Box height="100vh">
       <Routes>
-        <Route element={<MeetingsPanel />} index path="/" />
-        <Route
-          element={<ScheduleMeetingModal />}
-          path={SCHEDULE_MEETING_MODAL_ROUTE}
-        />
-        <Route
-          element={<SetupBreakoutSessionsModal />}
-          path={SETUP_BREAKOUT_SESSIONS_MODAL_ROUTE}
-        />
-        <Route element={<CockpitPanel />} path="/cockpit" />
+        <Route element={<CalendarHome />} path="/" />
+        <Route element={<Navigate replace to="/" />} path="*" />
       </Routes>
     </Box>
   );

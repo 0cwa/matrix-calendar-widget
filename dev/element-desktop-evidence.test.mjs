@@ -535,7 +535,7 @@ function stages(overrides = {}) {
 test('Desktop evidence passes with complete verified isolation and cleanup', () => {
   const summary = sanitizeDesktopStages(stages(), sourceSha);
   assert.equal(summary.status, 'passed');
-  assert.equal(summary.schemaVersion, 22);
+  assert.equal(summary.schemaVersion, 23);
   assert.equal(
     summary.cleanupDiagnostics.stopDiagnostics.initial.census
       .effectiveUidMatchCount,
@@ -630,9 +630,9 @@ test('Desktop evidence passes with complete verified isolation and cleanup', () 
   assert.equal(validDesktopSummary(summary), true);
 });
 
-test('schema 22 exposes only closed cleanup-origin enums and capped counts', () => {
+test('schema 23 exposes only closed cleanup-origin enums and capped counts', () => {
   const summary = sanitizeDesktopStages(stages(), sourceSha);
-  assert.equal(summary.schemaVersion, 22);
+  assert.equal(summary.schemaVersion, 23);
   assert.deepEqual(
     summary.cleanupDiagnostics.cleanupOriginProbe,
     emptyCleanupOriginProbe('not_required', 'no_final_processes'),
@@ -642,8 +642,31 @@ test('schema 22 exposes only closed cleanup-origin enums and capped counts', () 
     /(?:pid|argv|\/tmp|username|uid)/iu,
   );
 
+  const boundedDiagnostic = {
+    ...emptyCleanupOriginProbe(),
+    reason: 'process_snapshot_incomplete',
+    diagnosticStage: 'second_scan',
+    diagnosticReason: 'ancestor_unavailable',
+  };
+  const sanitizedDiagnostic = sanitizeCleanupOriginProbe(boundedDiagnostic);
+  assert.equal(sanitizedDiagnostic.diagnosticStage, 'second_scan');
+  assert.equal(sanitizedDiagnostic.diagnosticReason, 'ancestor_unavailable');
+  assert.doesNotMatch(
+    JSON.stringify(sanitizedDiagnostic),
+    /private-profile|secret-value/u,
+  );
+  assert.deepEqual(
+    sanitizeCleanupOriginProbe({
+      ...boundedDiagnostic,
+      diagnosticReason: 'secret process name',
+      privatePath: '/tmp/private-profile',
+      errno: 'secret-value',
+    }),
+    emptyCleanupOriginProbe(),
+  );
+
   const historicalVersion = structuredClone(summary);
-  historicalVersion.schemaVersion = 21;
+  historicalVersion.schemaVersion = 22;
   assert.equal(validDesktopSummary(historicalVersion), false);
 
   const extraProcessIdentity = {

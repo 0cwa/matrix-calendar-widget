@@ -75,6 +75,7 @@ const UID_STOP_CENSUS_WAIT_LIMITS_MS = Object.freeze({
   postTerm: 1_500,
   postKill: 900,
 });
+const UID_USER_DELETE_SETTLE_DELAY_MS = 250;
 const WORKSPACE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const POLICY_SCRIPT = resolve(
   WORKSPACE_ROOT,
@@ -2461,6 +2462,20 @@ export async function stopUidProcesses(
   return { status: diagnostics.status, diagnostics };
 }
 
+export function stopCreatedProbeUidProcesses(
+  state,
+  { accountLookup = lookupPasswdAccount, ...stopOptions } = {},
+) {
+  return stopUidProcesses(state, {
+    ...stopOptions,
+    targetMatches: () => {
+      if (state.userMayBeCreated !== true) return false;
+      const account = accountLookup(state.username);
+      return account.state === 'present' && account.uid === state.uid;
+    },
+  });
+}
+
 export async function retryLateEffectiveUidStop(
   state,
   initialStopResult,
@@ -2558,18 +2573,7 @@ export async function retryFinalUidCleanup(
     };
   }
 
-  const guardedStop =
-    stop ??
-    ((target) =>
-      stopUidProcesses(target, {
-        targetMatches: () => {
-          try {
-            return accountMatches(target) === true;
-          } catch {
-            return false;
-          }
-        },
-      }));
+  const guardedStop = stop ?? stopCreatedProbeUidProcesses;
   const retry = await retryLateEffectiveUidStop(
     state,
     initialStopResult,
@@ -2625,6 +2629,61 @@ export async function retryFinalUidCleanup(
     observation: sanitizeUidLifecycleObservation(await capture(state)),
     beforeRetryDeleteObservation: retry.observation,
     lateUidRetry: retry.lateUidRetry,
+  };
+}
+
+export async function settleUidLifecycleBeforeUserDeletion(
+  state,
+  observation,
+  {
+    capture = captureFinalUidLifecycle,
+    wait = (duration) =>
+      new Promise((resolveWait) => setTimeout(resolveWait, duration)),
+  } = {},
+) {
+  const current = sanitizeUidLifecycleObservation(observation);
+  if (
+    !isValidUidLifecycleObservation(current) ||
+    current.state !== 'observed' ||
+    current.overflow !== false ||
+    current.unreadableProcessCount !== 0 ||
+    current.uidProcessCount === 0
+  ) {
+    return current;
+  }
+
+  try {
+    await wait(UID_USER_DELETE_SETTLE_DELAY_MS);
+    return sanitizeUidLifecycleObservation(await capture(state));
+  } catch {
+    return emptyUidLifecycleObservation('unavailable');
+  }
+}
+
+export async function settleAndRetryLateEffectiveUidStop(
+  state,
+  initialStopResult,
+  initialObservation,
+  { stop = stopUidProcesses, capture = captureFinalUidLifecycle, wait } = {},
+) {
+  const settle = (observation) =>
+    settleUidLifecycleBeforeUserDeletion(state, observation, {
+      capture,
+      ...(wait === undefined ? {} : { wait }),
+    });
+  const settledObservation = await settle(initialObservation);
+  const retry = await retryLateEffectiveUidStop(
+    state,
+    initialStopResult,
+    settledObservation,
+    { stop, capture },
+  );
+  return {
+    ...retry,
+    observation:
+      retry.lateUidRetry === null
+        ? retry.observation
+        : await settle(retry.observation),
   };
 }
 
@@ -2943,15 +3002,19 @@ async function cleanupRunner(config) {
     overflow: null,
   };
   if (state !== undefined && !stateInvalid) {
-    const stopResult = await stopUidProcesses(state);
+    const stopResult = await stopCreatedProbeUidProcesses(state);
     processStatus = stopResult.status;
     stopDiagnostics = stopResult.diagnostics;
     egressObservation = captureFinalEgress(state);
     lifecycleBeforeUserdel = captureFinalUidLifecycle(state);
-    const reconciledStop = await retryLateEffectiveUidStop(
+    const reconciledStop = await settleAndRetryLateEffectiveUidStop(
       state,
       stopResult,
       lifecycleBeforeUserdel,
+      {
+        capture: captureFinalUidLifecycle,
+        stop: stopCreatedProbeUidProcesses,
+      },
     );
     processStatus = reconciledStop.stopResult.status;
     lateUidRetry = reconciledStop.lateUidRetry;

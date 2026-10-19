@@ -86,6 +86,7 @@ runs:
         node dev/element-acceptance-performance-evidence.test.mjs
         node dev/element-acceptance-error-source-map.test.mjs
         node --test dev/element-acceptance-workflow.test.mjs
+        node --test dev/element-acceptance-action-summary.test.mjs
         node --test dev/element-acceptance-setup.test.mjs
         node --test dev/validate-element-acceptance-compose.test.mjs
 
@@ -180,14 +181,27 @@ runs:
       run: node dev/element-acceptance-performance.mjs cleanup
 
     - name: Run the real Element Web member and outsider journey
+      id: web_member_outsider_journey
       shell: bash
       run: |
+        journey_started_at_ms="$(date +%s%3N)"
         printf '%s\n' '{"phase":"browser-test-suite","status":"started"}' >> "$ELEMENT_ACCEPTANCE_STAGE_FILE"
         if ! yarn workspace e2e playwright test --config playwright.element-acceptance.config.ts --grep "Element Web members share events and enforce room authorization" > "$RUNNER_TEMP/element-acceptance-playwright.log" 2>&1; then
+          journey_outcome=failure
+        else
+          journey_outcome=success
+          printf '%s\n' '{"phase":"browser-test-suite","status":"passed"}' >> "$ELEMENT_ACCEPTANCE_STAGE_FILE"
+        fi
+        journey_finished_at_ms="$(date +%s%3N)"
+        journey_elapsed_ms=$((journey_finished_at_ms - journey_started_at_ms))
+        if [[ "$journey_elapsed_ms" -lt 0 ]]; then journey_elapsed_ms=0; fi
+        printf 'ELEMENT_ACCEPTANCE_WEB_MEMBER_OUTSIDER_JOURNEY_ELAPSED_MS=%s\n' "$journey_elapsed_ms" >> "$GITHUB_ENV"
+        printf 'ELEMENT_ACCEPTANCE_PHASE_WEB_MEMBER_OUTSIDER_JOURNEY=%s\n' "$journey_outcome" >> "$GITHUB_ENV"
+        if [[ "$journey_outcome" == failure ]]; then
+          printf '%s\n' '{"phase":"browser-test-suite","status":"failed"}' >> "$ELEMENT_ACCEPTANCE_STAGE_FILE"
           echo 'Element Web acceptance journey failed; see sanitized phase summary.' >&2
           exit 1
         fi
-        printf '%s\n' '{"phase":"browser-test-suite","status":"passed"}' >> "$ELEMENT_ACCEPTANCE_STAGE_FILE"
 
     - name: Run the packaged Element Desktop shared-calendar journey
       id: desktop_journey
@@ -195,19 +209,23 @@ runs:
       run: node dev/element-desktop-journey-runner.mjs journey
 
     - name: Clean up the packaged Element Desktop journey
+      id: desktop_journey_cleanup
       if: ${{ always() && steps.desktop_journey.outcome != 'skipped' }}
       shell: bash
       run: node dev/element-desktop-journey-runner.mjs cleanup
 
     - name: Provision the synthetic reminder sender room membership
+      id: reminder_room
       shell: bash
       run: node dev/element-acceptance-setup.mjs reminder-room
 
     - name: Enable the PostgreSQL-backed reminder fixture
+      id: reminder_enable
       shell: bash
       run: node dev/element-acceptance-reminder-restore.mjs enable
 
     - name: Verify real UI reminder delivery
+      id: reminder_initial
       shell: bash
       run: |
         if ! ELEMENT_ACCEPTANCE_REMINDER_FLOW=initial yarn workspace e2e playwright test --config playwright.element-acceptance.config.ts --grep "Element Web delivers a relative room reminder" > "$RUNNER_TEMP/element-acceptance-playwright.log" 2>&1; then
@@ -218,6 +236,7 @@ runs:
         node dev/element-acceptance-reminder-restore.mjs snapshot
 
     - name: Restart the gateway and verify reminder scheduling
+      id: reminder_restart
       shell: bash
       run: |
         node dev/element-acceptance-reminder-restore.mjs restart
@@ -230,6 +249,7 @@ runs:
         node dev/element-acceptance-reminder-restore.mjs snapshot
 
     - name: Restore paired Radicale and PostgreSQL stores
+      id: reminder_restore
       shell: bash
       run: |
         node dev/element-acceptance-reminder-restore.mjs restore
@@ -240,6 +260,7 @@ runs:
         node dev/element-acceptance-reminder-restore.mjs verify-restore
 
     - name: Verify Element Web client interactions and preservation
+      id: web_client_interactions
       shell: bash
       run: |
         if ! yarn workspace e2e playwright test --config playwright.element-acceptance.config.ts --grep "Element Web preserves unsupported events and supports client interactions" > "$RUNNER_TEMP/element-acceptance-playwright.log" 2>&1; then
@@ -248,6 +269,7 @@ runs:
         fi
 
     - name: Emit sanitized acceptance summary
+      id: web_acceptance_summary
       if: always()
       shell: bash
       run: |
@@ -256,16 +278,8 @@ runs:
           "$ELEMENT_ACCEPTANCE_SOURCE_SHA" \
           > "$RUNNER_TEMP/element-acceptance-safe-summary.txt"
 
-    - name: Retain sanitized acceptance summary
-      if: always()
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-      with:
-        name: ${{ inputs.principal-mode == 'appservice' && 'element-web-acceptance-summary' || 'element-web-acceptance-normal-bot-summary' }}
-        path: ${{ runner.temp }}/element-acceptance-safe-summary.txt
-        if-no-files-found: ignore
-        retention-days: 1
-
     - name: Emit finite Desktop journey summary
+      id: desktop_journey_summary
       if: always()
       shell: bash
       run: |
@@ -282,6 +296,7 @@ runs:
         retention-days: 1
 
     - name: Sanitize Desktop startup and network-isolation evidence
+      id: desktop_startup_summary
       if: ${{ always() && steps.desktop_journey.outcome != 'skipped' }}
       shell: bash
       run: |
@@ -306,6 +321,7 @@ runs:
         retention-days: 1
 
     - name: Stop and remove the isolated stack and private evidence
+      id: acceptance_stack_cleanup
       if: always()
       shell: bash
       run: |
@@ -358,3 +374,38 @@ runs:
           echo 'Isolated acceptance cleanup failed.' >&2
           exit 1
         fi
+
+    - name: Record bounded action phase summary
+      if: always()
+      continue-on-error: true
+      env:
+        ELEMENT_ACCEPTANCE_PHASE_WEB_MEMBER_OUTSIDER_JOURNEY: ${{ steps.web_member_outsider_journey.outcome }}
+        ELEMENT_ACCEPTANCE_WEB_MEMBER_OUTSIDER_JOURNEY_ELAPSED_MS: ${{ env.ELEMENT_ACCEPTANCE_WEB_MEMBER_OUTSIDER_JOURNEY_ELAPSED_MS }}
+        ELEMENT_ACCEPTANCE_PHASE_DESKTOP_JOURNEY: ${{ steps.desktop_journey.outcome }}
+        ELEMENT_ACCEPTANCE_PHASE_DESKTOP_JOURNEY_CLEANUP: ${{ steps.desktop_journey_cleanup.outcome }}
+        ELEMENT_ACCEPTANCE_PHASE_REMINDER_ROOM: ${{ steps.reminder_room.outcome }}
+        ELEMENT_ACCEPTANCE_PHASE_REMINDER_ENABLE: ${{ steps.reminder_enable.outcome }}
+        ELEMENT_ACCEPTANCE_PHASE_REMINDER_INITIAL: ${{ steps.reminder_initial.outcome }}
+        ELEMENT_ACCEPTANCE_PHASE_REMINDER_RESTART: ${{ steps.reminder_restart.outcome }}
+        ELEMENT_ACCEPTANCE_PHASE_REMINDER_RESTORE: ${{ steps.reminder_restore.outcome }}
+        ELEMENT_ACCEPTANCE_PHASE_WEB_CLIENT_INTERACTIONS: ${{ steps.web_client_interactions.outcome }}
+        ELEMENT_ACCEPTANCE_PHASE_WEB_ACCEPTANCE_SUMMARY: ${{ steps.web_acceptance_summary.outcome }}
+        ELEMENT_ACCEPTANCE_PHASE_DESKTOP_JOURNEY_SUMMARY: ${{ steps.desktop_journey_summary.outcome }}
+        ELEMENT_ACCEPTANCE_PHASE_DESKTOP_STARTUP_SUMMARY: ${{ steps.desktop_startup_summary.outcome }}
+        ELEMENT_ACCEPTANCE_PHASE_ACCEPTANCE_STACK_CLEANUP: ${{ steps.acceptance_stack_cleanup.outcome }}
+      shell: bash
+      run: |
+        if ! node dev/element-acceptance-action-summary.mjs \
+          "$RUNNER_TEMP/element-acceptance-safe-summary.txt"; then
+          printf '%s\n' 'Action phase metadata unavailable; the diagnostic writer failed.' >> "$GITHUB_STEP_SUMMARY" || true
+          exit 1
+        fi
+
+    - name: Retain sanitized acceptance summary
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: ${{ inputs.principal-mode == 'appservice' && 'element-web-acceptance-summary' || 'element-web-acceptance-normal-bot-summary' }}
+        path: ${{ runner.temp }}/element-acceptance-safe-summary.txt
+        if-no-files-found: ignore
+        retention-days: 1

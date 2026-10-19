@@ -116,9 +116,16 @@ existing store.
 
 The backup runbook covers only the project-owned `radicale-data` and
 `server-data` volumes and recommends Restic for encrypted, deduplicated,
-off-host snapshots with 30 daily retention points. The operator must provision
-the S3-compatible repository and host-local daily systemd schedule; this
-repository ships neither the backup coordinator nor systemd units. The
+off-host snapshots, retaining up to 30 populated-calendar-day recovery
+points; missed backup days leave gaps. The operator must provision the
+S3-compatible repository and install the host-local coordinator and daily
+systemd examples;
+the repository ships the coordinator and unit templates but does not install
+or enable them. Automatic retention is off by default. The dry run previews
+which host/tag-matched snapshots are eligible for forgetting; prune scans and
+may rewrite or remove unreferenced data across the whole repository. Before
+setting `resticRetentionEnabled` to `true`, select a dedicated pilot repository
+or S3 prefix and approve repository-wide prune authority and I/O budget. The
 operator must separately dump the external reminder database in custom format
 while the calendar server is stopped and include that dump in the same Restic
 snapshot. These captures are coordinated, not one atomic transaction; isolated

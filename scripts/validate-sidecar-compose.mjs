@@ -4,9 +4,17 @@ import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
+import {
+  loadTrustedPilotManifest,
+  parsePilotImageInspection,
+  PILOT_IMAGES,
+  readPrivatePilotBinding,
+  validatePilotSidecarModel,
+} from './validate-pilot-sidecar.mjs';
 
 const require = createRequire(import.meta.url);
 const COMPOSE_FILE = 'deploy/etke-sidecar.compose.yaml';
+const PILOT_COMPOSE_FILE = 'deploy/etke-sidecar.pilot-images.compose.yaml';
 const GENERIC_FAILURE =
   'Sidecar preflight failed. Review required values in deploy/.env.local and optional server settings in deploy/.env.server; resolved values are never displayed.';
 
@@ -231,12 +239,16 @@ export function validateSidecarComposeModel(model) {
   });
 }
 
-function parseCliArgs(args) {
+export function parseSidecarCliArgs(args) {
   const { values, positionals } = parseArgs({
     args,
     options: {
       'env-file': { type: 'string' },
       'project-name': { type: 'string' },
+      'compose-override': { type: 'string' },
+      pilot: { type: 'boolean' },
+      'pilot-binding-file': { type: 'string' },
+      'pilot-manifest': { type: 'string' },
     },
     strict: true,
     allowPositionals: false,
@@ -250,10 +262,22 @@ function parseCliArgs(args) {
     fail();
   }
 
+  // Pilot inputs must be explicitly selected and supplied together. The
+  // private room selection is never inferred from the rendered deployment.
+  if (
+    (values.pilot === true &&
+      (!values['pilot-binding-file'] || !values['pilot-manifest'])) ||
+    (values.pilot !== true &&
+      (values['pilot-binding-file'] !== undefined ||
+        values['pilot-manifest'] !== undefined))
+  ) {
+    fail();
+  }
+
   return values;
 }
 
-function runCompose(args) {
+function runDocker(args) {
   const result = spawnSync('docker', args, {
     encoding: 'utf8',
     maxBuffer: 5 * 1024 * 1024,
@@ -279,19 +303,29 @@ function composePrefix(options) {
     args.push('--env-file', options['env-file']);
   }
   args.push('-f', COMPOSE_FILE);
+  if (options.pilot) args.push('-f', PILOT_COMPOSE_FILE);
+  if (options['compose-override']) args.push('-f', options['compose-override']);
   return args;
 }
 
 export function runSidecarPreflight(args = process.argv.slice(2)) {
-  const options = parseCliArgs(args);
-  validateComposeVersion(runCompose(['compose', 'version', '--short']));
+  const options = parseSidecarCliArgs(args);
+  // Both files are operator-private. The manifest hash is pinned to the
+  // accepted run; the room/calendar pair comes from the approved record.
+  const expectedBinding = options.pilot
+    ? readPrivatePilotBinding(options['pilot-binding-file'])
+    : undefined;
+  const manifestImages = options.pilot
+    ? loadTrustedPilotManifest(options['pilot-manifest'])
+    : undefined;
+  validateComposeVersion(runDocker(['compose', 'version', '--short']));
 
   const prefix = composePrefix(options);
-  runCompose([...prefix, 'config', '--quiet']);
+  runDocker([...prefix, 'config', '--quiet']);
 
   // Resolved configuration can contain credentials. Keep stdout in memory,
   // parse it, and never print, write, or attach the raw text to an error.
-  const resolvedJson = runCompose([...prefix, 'config', '--format', 'json']);
+  const resolvedJson = runDocker([...prefix, 'config', '--format', 'json']);
   let model;
   try {
     model = JSON.parse(resolvedJson);
@@ -299,6 +333,30 @@ export function runSidecarPreflight(args = process.argv.slice(2)) {
     fail();
   }
   validateSidecarComposeModel(model);
+
+  if (options.pilot) {
+    // Read IDs and platform only, never image configuration/environment.
+    // The tags are checked against the rendered model and authenticated
+    // manifest; inspect checks actual locally loaded configuration IDs.
+    const inspectedImages = {};
+    for (const image of PILOT_IMAGES) {
+      inspectedImages[image.service] = parsePilotImageInspection(
+        runDocker([
+          'image',
+          'inspect',
+          '--format',
+          '[{{json .Id}},{{json .Os}},{{json .Architecture}}]',
+          image.tag,
+        ]),
+      );
+    }
+    validatePilotSidecarModel(
+      model,
+      expectedBinding,
+      manifestImages,
+      inspectedImages,
+    );
+  }
 }
 
 const invokedPath = process.argv[1];

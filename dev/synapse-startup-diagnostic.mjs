@@ -78,6 +78,7 @@ const HEALTH_STATES = [
   'unavailable',
 ];
 const STARTUP_FAILURE_STAGES = [
+  'configuration-preflight',
   'docker-preflight',
   'curl-preflight',
   'homeserver-probe',

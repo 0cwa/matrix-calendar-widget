@@ -41,6 +41,7 @@ import {
   appendDesktopJourneyOutcome,
   appendDesktopJourneyProgress,
   appendDesktopLoginStep,
+  appendDesktopRefreshFailureWithFallback,
   classifyDesktopJourneyErrorClass,
   classifyDesktopLoginFailure,
   collectWebBEventTitleMatches,
@@ -1017,20 +1018,33 @@ test('Element Desktop room event journey', async ({ browser }) => {
       webBEventListReadObserver = undefined;
       desktopEventCreatePostObserver?.stop();
       desktopEventCreatePostObserver = undefined;
-      safeRecordPhase(
-        evidence,
-        recorded,
-        currentPhase,
-        'failed',
-        currentFailurePoint,
-        gatewayReadDiagnostic,
-        webBEditSaveDiagnostic,
-        roomNavigationDiagnostic,
-        desktopEventCreateDiagnostic,
-        currentPhase === 'desktop-a-refresh'
-          ? classifyDesktopJourneyErrorClass(error)
-          : undefined,
-      );
+      if (currentPhase === 'desktop-a-refresh') {
+        if (
+          appendDesktopRefreshFailureWithFallback({
+            ...evidence,
+            failurePoint: currentFailurePoint,
+            errorClass: classifyDesktopJourneyErrorClass(error),
+            gatewayReadDiagnostic,
+            webBEditSaveDiagnostic,
+            roomNavigationDiagnostic,
+            desktopEventCreateDiagnostic,
+          })
+        ) {
+          recorded.add(currentPhase);
+        }
+      } else {
+        safeRecordPhase(
+          evidence,
+          recorded,
+          currentPhase,
+          'failed',
+          currentFailurePoint,
+          gatewayReadDiagnostic,
+          webBEditSaveDiagnostic,
+          roomNavigationDiagnostic,
+          desktopEventCreateDiagnostic,
+        );
+      }
     }
   } finally {
     webBEventListReadObserver?.stop();

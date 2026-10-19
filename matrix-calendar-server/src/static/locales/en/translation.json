@@ -51,6 +51,7 @@
     "badCommand": "Bad command, try <code>{{trigger}} help</code>",
     "badLanguageCode": "Language code is not supported",
     "generic": "There was an error processing your command: {{message}}",
+    "legacySetupDisabled": "The legacy widget setup command is disabled. Use the calendar widget and <code>!calendar help</code> for bot commands.",
     "noCommandProvided": "No command provided, try <code>{{trigger}} help</code>",
     "noLanguageCode": "Language code is not provided, use one of these ({{availableLanguageCodes}})"
   },
@@ -58,8 +59,8 @@
     "<p>Available commands:</p>",
     "<ul>",
     "<li><code>!meeting lang &lt;en|de&gt;</code> (Change the language of the bot in this room.)</li>",
-    "<li><code>!meeting setup</code> (Adds the calendar to the room.)</li>",
     "<li><code>!meeting status</code> (Checks the ability to add the calendar.)</li>",
+    "<li><code>!calendar help</code> (Shows the calendar bot commands.)</li>",
     "</ul>"
   ],
   "meeting": {
@@ -150,7 +151,7 @@
     }
   },
   "welcome": {
-    "botIsAdmin": "The bot is a moderator in the room <a href='{{originalRoomLink}}'>{{originalRoomName}}</a>. If you enter the command <code>!meeting setup</code> Matrix Calendar widget will be added to that room.",
+    "botIsAdmin": "The bot is a moderator in the room <a href='{{originalRoomLink}}'>{{originalRoomName}}</a>. The legacy widget setup command is disabled. Use the calendar widget and <code>!calendar help</code> for bot commands.",
     "botNotAdmin": "The bot is not a moderator in the room <a href='{{originalRoomLink}}'>{{originalRoomName}}</a>.",
     "errors": {
       "meetingWidgetExists": "Can't add a new widget because it already exists.",
