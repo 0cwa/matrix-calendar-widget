@@ -15,6 +15,8 @@ export const DESKTOP_JOURNEY_PHASES = Object.freeze([
   'desktop-room-widget-read',
   'desktop-widget-origin-isolation',
   'desktop-event-create',
+  'desktop-keyboard-focus',
+  'desktop-side-panel-layout',
   'web-member-b-read',
   'web-member-b-keyboard-open',
   'web-member-b-details-escape-focus',
@@ -54,6 +56,12 @@ export const DESKTOP_JOURNEY_FAILURE_POINTS = Object.freeze([
   'event-create-post-await',
   'event-create-post-status',
   'event-create-exact-row-visible',
+  'desktop-keyboard-focus-observation',
+  'desktop-keyboard-focus-evidence',
+  'desktop-keyboard-focus-assertion',
+  'desktop-side-panel-layout-observation',
+  'desktop-side-panel-layout-evidence',
+  'desktop-side-panel-layout-assertion',
   'web-b-authentication',
   'web-b-room-navigation',
   'web-b-widget-open',
@@ -345,6 +353,20 @@ function validJourneyFailurePoint(phase, status, failurePoint) {
   }
   if (phase === 'desktop-event-create') {
     return DESKTOP_EVENT_CREATE_FAILURE_POINT_SET.has(failurePoint);
+  }
+  if (phase === 'desktop-keyboard-focus') {
+    return (
+      failurePoint === 'desktop-keyboard-focus-observation' ||
+      failurePoint === 'desktop-keyboard-focus-evidence' ||
+      failurePoint === 'desktop-keyboard-focus-assertion'
+    );
+  }
+  if (phase === 'desktop-side-panel-layout') {
+    return (
+      failurePoint === 'desktop-side-panel-layout-observation' ||
+      failurePoint === 'desktop-side-panel-layout-evidence' ||
+      failurePoint === 'desktop-side-panel-layout-assertion'
+    );
   }
   if (phase === 'web-member-b-read') {
     return WEB_B_READ_FAILURE_POINT_SET.has(failurePoint);
@@ -2178,7 +2200,7 @@ export function summarizeDesktopJourneyEvidence(
     childCompletedSuccessfully &&
     playwrightResult === 'passed';
   return {
-    schemaVersion: 12,
+    schemaVersion: 13,
     sourceSha,
     status: failed ? 'failed' : journeyEvidencePassed ? 'passed' : 'incomplete',
     desktopChildCompletion,

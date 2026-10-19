@@ -137,6 +137,31 @@ function safePath(input, expectedName, runnerTemp) {
   return resolve(input);
 }
 
+function privateAppendPath(path) {
+  let stat;
+  try {
+    stat = lstatSync(path);
+  } catch {
+    throw failure();
+  }
+  if (
+    stat.isSymbolicLink() ||
+    !stat.isFile() ||
+    stat.nlink !== 1 ||
+    (stat.mode & 0o777) !== 0o600 ||
+    (typeof process.getuid === 'function' && stat.uid !== process.getuid())
+  ) {
+    throw failure();
+  }
+  return path;
+}
+
+export function validateAcceptanceStageFilePath(input, runnerTemp) {
+  return privateAppendPath(
+    safePath(input, 'element-acceptance-stage.jsonl', runnerTemp),
+  );
+}
+
 function requiredEnvironment(name, pattern) {
   const value = process.env[name];
   if (typeof value !== 'string' || !pattern.test(value)) throw failure();
@@ -634,6 +659,7 @@ export function createJourneyChildEnvironment(
     ELEMENT_DESKTOP_JOURNEY_PLAYWRIGHT_OUTPUT: config.playwrightOutput,
     ELEMENT_ACCEPTANCE_USERS_FILE: config.usersFile,
     ELEMENT_ACCEPTANCE_DESKTOP_CREDENTIALS_FILE: config.credentialsFile,
+    ELEMENT_ACCEPTANCE_STAGE_FILE: config.acceptanceStageFile,
     ...(typeof sourceEnvironment.PLAYWRIGHT_BROWSERS_PATH === 'string'
       ? {
           PLAYWRIGHT_BROWSERS_PATH: sourceEnvironment.PLAYWRIGHT_BROWSERS_PATH,
@@ -683,6 +709,13 @@ function validateEnvironment(mode) {
           runnerTemp,
         )
       : undefined;
+  const acceptanceStageFile =
+    mode === 'journey'
+      ? validateAcceptanceStageFilePath(
+          process.env.ELEMENT_ACCEPTANCE_STAGE_FILE,
+          runnerTemp,
+        )
+      : undefined;
   const workspaceReal = resolve(workspace);
   if (
     !isAbsolute(runnerTemp) ||
@@ -701,6 +734,7 @@ function validateEnvironment(mode) {
     credentialsFile,
     playwrightOutput,
     journeyStageFile,
+    acceptanceStageFile,
     stateFile: statePath(),
     stageFile: desktopStagePath(),
   };

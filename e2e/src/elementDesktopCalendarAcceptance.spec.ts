@@ -711,28 +711,41 @@ test('Element Desktop room event journey', async ({ browser }) => {
     desktopEventCreatePostObserver = undefined;
     currentFailurePoint = undefined;
 
+    enterPhase('desktop-keyboard-focus');
+    currentFailurePoint = 'desktop-keyboard-focus-observation';
     const desktopKeyboardFocus = await observeDesktopKeyboardFocus(
       desktopPage,
       desktopFrame,
       initialTitle,
     );
+    currentFailurePoint = 'desktop-keyboard-focus-evidence';
     appendDesktopAccessibilityStage(
       'g6-desktop-keyboard-focus',
       desktopKeyboardFocus,
     );
+    currentFailurePoint = 'desktop-keyboard-focus-assertion';
+    if (!desktopKeyboardFocus.passed) {
+      throw new Error('Desktop keyboard acceptance failed');
+    }
+    recordPhase(evidence, recorded, 'desktop-keyboard-focus');
 
+    enterPhase('desktop-side-panel-layout');
+    currentFailurePoint = 'desktop-side-panel-layout-observation';
     const desktopSidePanelLayout = await observeDesktopSidePanelLayout(
       desktopPage,
       desktopFrame,
       desktopKeyboardFocus.detailsOpened,
     );
+    currentFailurePoint = 'desktop-side-panel-layout-evidence';
     appendDesktopAccessibilityStage(
       'g6-desktop-side-panel-layout',
       desktopSidePanelLayout,
     );
-    if (!desktopKeyboardFocus.passed || !desktopSidePanelLayout.passed) {
-      throw new Error('Desktop keyboard or side-panel acceptance failed');
+    currentFailurePoint = 'desktop-side-panel-layout-assertion';
+    if (!desktopSidePanelLayout.passed) {
+      throw new Error('Desktop side-panel acceptance failed');
     }
+    recordPhase(evidence, recorded, 'desktop-side-panel-layout');
 
     enterPhase('web-member-b-read');
     currentFailurePoint = 'web-b-authentication';
@@ -2174,8 +2187,12 @@ function appendDesktopAccessibilityStage(
   phase: 'g6-desktop-keyboard-focus' | 'g6-desktop-side-panel-layout',
   observation: Record<string, boolean | number | undefined>,
 ) {
-  const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
-  if (!stageFile) throw new Error('Element acceptance fixture unavailable');
+  const runnerTemp = requireAbsoluteEnvironment('RUNNER_TEMP');
+  const stageFile = requirePrivateRunnerPath(
+    'ELEMENT_ACCEPTANCE_STAGE_FILE',
+    runnerTemp,
+    'element-acceptance-stage.jsonl',
+  );
   const { passed, ...fields } = observation;
   appendFileSync(
     stageFile,
