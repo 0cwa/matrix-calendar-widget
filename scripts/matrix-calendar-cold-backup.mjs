@@ -393,6 +393,8 @@ function composeArgs(config, paths, args) {
     'compose',
     '--project-name',
     config.projectName,
+    '--project-directory',
+    paths.projectDirectory,
     '--env-file',
     paths.composeEnvFile,
     '-f',
