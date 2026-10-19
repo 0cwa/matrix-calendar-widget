@@ -30,17 +30,17 @@ import { PropsWithChildren } from 'react';
 import { CalendarRepositoryProvider } from '../../calendar';
 import { CalendarToolbar } from './CalendarToolbar';
 
-vi.mock('../meetings/MeetingsNavigation', () => ({
-  MeetingsNavigation: () => null,
+vi.mock('./CalendarNavigation', () => ({
+  CalendarNavigation: () => null,
 }));
-vi.mock('../meetings/MeetingsToolbar/MeetingsToolbarButtons', () => ({
-  MeetingsToolbarButtons: () => null,
+vi.mock('./CalendarToolbar/CalendarToolbarButtons', () => ({
+  CalendarToolbarButtons: () => null,
 }));
-vi.mock('../meetings/MeetingsToolbar/MeetingsToolbarDatePicker', () => ({
-  MeetingsToolbarDatePicker: () => null,
+vi.mock('./CalendarToolbar/CalendarToolbarDatePicker', () => ({
+  CalendarToolbarDatePicker: () => null,
 }));
-vi.mock('../meetings/MeetingsToolbar/MeetingsToolbarSearch', () => ({
-  MeetingsToolbarSearch: () => null,
+vi.mock('./CalendarToolbar/CalendarToolbarSearch', () => ({
+  CalendarToolbarSearch: () => null,
 }));
 vi.mock('./CalendarCreateDialog', () => ({ CalendarCreateDialog: () => null }));
 vi.mock('./CalendarEventEditorDialog', () => ({

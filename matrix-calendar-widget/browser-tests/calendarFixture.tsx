@@ -49,9 +49,9 @@ import { CalendarEventDetailsDialog } from '../src/components/calendar/CalendarE
 import { CalendarEventsCalendar } from '../src/components/calendar/CalendarEventsCalendar';
 import { CalendarEventsList } from '../src/components/calendar/CalendarEventsList';
 import { CalendarEventsSurface } from '../src/components/calendar/CalendarEventsSurface';
+import type { CalendarSurfaceView } from '../src/components/calendar/CalendarNavigation';
 import { CalendarToolbar } from '../src/components/calendar/CalendarToolbar';
 import { LocalizationProvider } from '../src/components/common/LocalizationProvider';
-import type { ViewType } from '../src/components/meetings/MeetingsNavigation';
 import { registerDateRangeFormatter } from '../src/dateRangeFormatter';
 import { setLocale } from '../src/lib/locale';
 
@@ -180,9 +180,9 @@ function CalendarFixture({
 }) {
   const query = new URLSearchParams(window.location.search);
   const roomMode = query.get('mode');
-  const initialView: ViewType =
+  const initialView: CalendarSurfaceView =
     query.get('view') === 'month' ? 'month' : 'list';
-  const [view, setView] = useState<ViewType>(initialView);
+  const [view, setView] = useState<CalendarSurfaceView>(initialView);
   const [selected, setSelected] = useState<CalendarEvent>();
   const largeCalendarMode = roomMode === 'large-calendar';
   const roomRepository = useMemo(
