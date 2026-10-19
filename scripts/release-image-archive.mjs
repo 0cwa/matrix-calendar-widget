@@ -23,6 +23,7 @@ export const MAX_IMAGE_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024;
 export const MAX_TOTAL_ARCHIVE_BYTES = 4 * 1024 * 1024 * 1024;
 export const MAX_NOTICE_FILE_BYTES = 1024 * 1024;
 export const MAX_TOTAL_NOTICE_BYTES = 8 * 1024 * 1024;
+export const DEFAULT_IMAGE_SET = 'all';
 
 const GIT_SHA = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -54,6 +55,10 @@ const images = [
     imageId: 'radicale.image-id',
   },
 ];
+const imagesBySet = {
+  all: images,
+  'server-only': [images[0]],
+};
 const noticeFiles = [
   { sourcePath: 'LICENSE', archivePath: 'notices/project-LICENSE' },
   { sourcePath: 'NOTICE', archivePath: 'notices/project-NOTICE' },
@@ -94,6 +99,24 @@ function hasOwnJsonField(value, field) {
 
 function isImageDigest(value) {
   return typeof value === 'string' && IMAGE_DIGEST.test(value);
+}
+
+export function validateImageSet(imageSet = DEFAULT_IMAGE_SET) {
+  if (typeof imageSet !== 'string' || !Object.hasOwn(imagesBySet, imageSet)) {
+    fail('Image set must be all or server-only.');
+  }
+  return imageSet;
+}
+
+function imagesForSet(imageSet = DEFAULT_IMAGE_SET) {
+  return imagesBySet[validateImageSet(imageSet)];
+}
+
+function imageSetFromManifest(manifest) {
+  // Existing schema-v2 manifests recorded the full image set implicitly.
+  return Object.hasOwn(manifest, 'image_set')
+    ? validateImageSet(manifest.image_set)
+    : DEFAULT_IMAGE_SET;
 }
 
 function requireValue(value, name) {
@@ -201,6 +224,7 @@ function validateContext(context) {
   requireGitSha(context.dispatchSha, 'Workflow dispatch SHA');
   requireGitSha(context.workflowSha, 'Workflow SHA');
   validatePlatform(context.platform);
+  validateImageSet(context.imageSet);
   validateNodeBase(context.nodeBase);
   if (context.repository !== REPOSITORY)
     fail(`Workflow must run in ${REPOSITORY}.`);
@@ -416,13 +440,13 @@ function validateArchiveSizes(archives) {
     fail('Image archives exceed the 4 GiB combined limit.');
 }
 
-async function archiveRecords(root) {
+async function archiveRecords(root, selectedImages) {
   const rootInfo = await lstat(root);
   if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink())
     fail('Artifact root must be a real directory.');
   const resolvedRoot = await realpath(root);
   const records = [];
-  for (const definition of images) {
+  for (const definition of selectedImages) {
     const file = childPath(root, definition.archive, 'Archive path');
     const resolvedFile = await realpath(file);
     if (!resolvedFile.startsWith(`${resolvedRoot}${path.sep}`))
@@ -616,6 +640,8 @@ export async function createManifest({
   context,
 }) {
   validateContext(context);
+  const imageSet = validateImageSet(context.imageSet);
+  const selectedImages = imagesForSet(imageSet);
   const source = verifyGitSource(
     sourceRoot,
     context.sourceSha,
@@ -624,7 +650,7 @@ export async function createManifest({
   if (git(toolingRoot, ['rev-parse', 'HEAD']).value !== context.workflowSha) {
     fail('Builder checkout does not match the trusted workflow SHA.');
   }
-  const archives = await archiveRecords(archiveRoot);
+  const archives = await archiveRecords(archiveRoot, selectedImages);
   const notices = await validateNoticeBundle(
     sourceRoot,
     source.sha,
@@ -632,7 +658,7 @@ export async function createManifest({
   );
   const runTag = `archive-${context.runId}-${context.runAttempt}`;
   const builtImages = [];
-  for (const definition of images) {
+  for (const definition of selectedImages) {
     builtImages.push(
       await imageRecord(definition, {
         sourceRoot,
@@ -664,6 +690,7 @@ export async function createManifest({
       workflow_sha256: await sha256File(path.join(toolingRoot, WORKFLOW_PATH)),
     },
     platform: context.platform,
+    image_set: imageSet,
     images: builtImages,
     notices,
   };
@@ -683,6 +710,8 @@ function validateManifest(manifest) {
     !manifest.builder
   )
     fail('Invalid image archive manifest.');
+  const imageSet = imageSetFromManifest(manifest);
+  const selectedImages = imagesForSet(imageSet);
   requireGitSha(manifest.source.sha, 'Manifest source SHA');
   requireGitSha(manifest.source.tree, 'Manifest source tree');
   requireGitSha(manifest.source.dispatch_sha, 'Manifest dispatch SHA');
@@ -711,11 +740,15 @@ function validateManifest(manifest) {
   validatePlatform(manifest.platform);
   if (
     !Array.isArray(manifest.images) ||
-    manifest.images.length !== images.length
+    manifest.images.length !== selectedImages.length
   )
-    fail('Manifest must contain all three project images.');
+    fail(
+      imageSet === DEFAULT_IMAGE_SET
+        ? 'Manifest must contain all three project images.'
+        : 'Server-only manifest must contain only the server image.',
+    );
   const archiveSizes = [];
-  for (const definition of images) {
+  for (const definition of selectedImages) {
     const image = manifest.images.find(
       (entry) => entry.name === definition.name,
     );
@@ -800,8 +833,11 @@ export async function verifyArchive(
     expectedSourceSha,
     expectedPlatform = SUPPORTED_PLATFORM,
     expectedHelperSha256,
+    expectedImageSet = DEFAULT_IMAGE_SET,
   } = {},
 ) {
+  const selectedImageSet = validateImageSet(expectedImageSet);
+  const selectedImages = imagesForSet(selectedImageSet);
   const rootInfo = await lstat(archiveRoot);
   if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink())
     fail('Artifact root must be a real directory.');
@@ -813,6 +849,9 @@ export async function verifyArchive(
     fail('Image archive manifest exceeds the 64 KiB limit.');
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
   validateManifest(manifest);
+  const manifestImageSet = imageSetFromManifest(manifest);
+  if (manifestImageSet !== selectedImageSet)
+    fail('Artifact image set does not match the expected image set.');
   if (
     expectedSourceSha &&
     manifest.source.sha !==
@@ -830,7 +869,7 @@ export async function verifyArchive(
   const root = await realpath(archiveRoot);
   const expectedFiles = new Set([
     'manifest.json',
-    ...images.map((image) => image.archive),
+    ...selectedImages.map((image) => image.archive),
     ...noticeFiles.map((notice) => notice.archivePath),
   ]);
   const archiveFiles = [];
@@ -932,6 +971,7 @@ function contextFromEnv() {
     runAttempt: process.env.RELEASE_RUN_ATTEMPT,
     serverUrl: process.env.RELEASE_SERVER_URL,
     platform: process.env.IMAGE_PLATFORM,
+    imageSet: process.env.RELEASE_IMAGE_SET,
     nodeBase: process.env.NODE_BASE_IMAGE,
   };
 }
@@ -985,6 +1025,7 @@ async function main() {
       expectedSourceSha: options['expected-source-sha'],
       expectedPlatform: options.platform ?? SUPPORTED_PLATFORM,
       expectedHelperSha256: helperHash,
+      expectedImageSet: contextFromEnv().imageSet,
     });
     if (git(toolingRoot, ['rev-parse', 'HEAD']).value !== manifest.workflow.sha)
       fail('Validator checkout does not match the manifest workflow SHA.');
@@ -994,7 +1035,7 @@ async function main() {
     )
       fail('Workflow file does not match the manifest workflow hash.');
     process.stdout.write(
-      `Verified ${manifest.images.length} archives for ${manifest.source.sha} on ${manifest.platform}.\n`,
+      `Verified ${manifest.images.length} ${manifest.image_set ?? DEFAULT_IMAGE_SET} archives for ${manifest.source.sha} on ${manifest.platform}.\n`,
     );
     return;
   }
