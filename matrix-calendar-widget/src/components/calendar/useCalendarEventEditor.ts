@@ -1078,10 +1078,19 @@ function periodDateTimeDraft(value: CalendarEventDateTime): string {
   return value.type === 'date-time' ? value.value.local : value.value;
 }
 
-function createEventUid(): string {
-  const randomId =
-    globalThis.crypto?.randomUUID?.() ??
-    `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+export function createEventUid(): string {
+  const crypto = globalThis.crypto;
+  if (typeof crypto?.randomUUID === 'function') {
+    return `${crypto.randomUUID()}@matrix-calendar-widget`;
+  }
+
+  if (typeof crypto?.getRandomValues !== 'function') {
+    throw new Error('Secure cryptographic randomness is unavailable');
+  }
+
+  const randomId = Array.from(crypto.getRandomValues(new Uint8Array(16)))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
 
   return `${randomId}@matrix-calendar-widget`;
 }

@@ -27,6 +27,7 @@ import { vi } from 'vitest';
 import { CalendarRepositoryProvider } from '../../calendar';
 import i18n from '../../i18n';
 import { CalendarEventEditorDialog } from './CalendarEventEditorDialog';
+import { createEventUid } from './useCalendarEventEditor';
 
 const calendar: Calendar = {
   id: 'team',
@@ -122,6 +123,56 @@ function createWrapper(repository: InMemoryCalendarRepository) {
 }
 
 describe('<CalendarEventEditorDialog />', () => {
+  it('uses crypto.randomUUID when available', () => {
+    const crypto = {
+      randomUUID: vi.fn(() => 'secure-uuid'),
+      getRandomValues: vi.fn(),
+    } as unknown as Crypto;
+    vi.stubGlobal('crypto', crypto);
+
+    try {
+      expect(createEventUid()).toBe('secure-uuid@matrix-calendar-widget');
+      expect(crypto.randomUUID).toHaveBeenCalledOnce();
+      expect(crypto.getRandomValues).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('uses secure random bytes when randomUUID is unavailable', () => {
+    const crypto = {
+      getRandomValues: vi.fn((bytes: Uint8Array) => {
+        bytes.set([
+          0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa,
+          0xbb, 0xcc, 0xdd, 0xee, 0xff,
+        ]);
+        return bytes;
+      }),
+    } as unknown as Crypto;
+    vi.stubGlobal('crypto', crypto);
+
+    try {
+      expect(createEventUid()).toBe(
+        '00112233445566778899aabbccddeeff@matrix-calendar-widget',
+      );
+      expect(crypto.getRandomValues).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('fails closed when secure cryptographic randomness is unavailable', () => {
+    vi.stubGlobal('crypto', undefined);
+
+    try {
+      expect(() => createEventUid()).toThrow(
+        'Secure cryptographic randomness is unavailable',
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('returns focus to the invoking control after closing', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [calendar],
