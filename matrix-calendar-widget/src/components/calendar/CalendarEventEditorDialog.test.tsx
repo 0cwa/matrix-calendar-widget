@@ -22,7 +22,7 @@ import {
 } from '@matrix-calendar-widget/calendar';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { PropsWithChildren } from 'react';
+import { PropsWithChildren, useState } from 'react';
 import { vi } from 'vitest';
 import { CalendarRepositoryProvider } from '../../calendar';
 import i18n from '../../i18n';
@@ -122,6 +122,36 @@ function createWrapper(repository: InMemoryCalendarRepository) {
 }
 
 describe('<CalendarEventEditorDialog />', () => {
+  it('returns focus to the invoking control after closing', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+    });
+
+    function EditorWithOpener() {
+      const [open, setOpen] = useState(false);
+
+      return (
+        <>
+          <button onClick={() => setOpen(true)}>Open event editor</button>
+          <CalendarEventEditorDialog
+            calendars={[calendar]}
+            onClose={() => setOpen(false)}
+            open={open}
+          />
+        </>
+      );
+    }
+
+    render(<EditorWithOpener />, { wrapper: createWrapper(repository) });
+
+    const opener = screen.getByRole('button', { name: 'Open event editor' });
+    await userEvent.click(opener);
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => expect(opener).toHaveFocus());
+  });
+
   it('creates one attachment link and exposes accessible edit controls', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [calendar],
