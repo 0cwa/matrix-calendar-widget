@@ -22,11 +22,12 @@ import {
 } from '@matrix-calendar-widget/calendar';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { PropsWithChildren } from 'react';
+import { PropsWithChildren, useState } from 'react';
 import { vi } from 'vitest';
 import { CalendarRepositoryProvider } from '../../calendar';
 import i18n from '../../i18n';
 import { CalendarEventEditorDialog } from './CalendarEventEditorDialog';
+import { createEventUid } from './useCalendarEventEditor';
 
 const calendar: Calendar = {
   id: 'team',
@@ -122,6 +123,86 @@ function createWrapper(repository: InMemoryCalendarRepository) {
 }
 
 describe('<CalendarEventEditorDialog />', () => {
+  it('uses crypto.randomUUID when available', () => {
+    const crypto = {
+      randomUUID: vi.fn(() => 'secure-uuid'),
+      getRandomValues: vi.fn(),
+    } as unknown as Crypto;
+    vi.stubGlobal('crypto', crypto);
+
+    try {
+      expect(createEventUid()).toBe('secure-uuid@matrix-calendar-widget');
+      expect(crypto.randomUUID).toHaveBeenCalledOnce();
+      expect(crypto.getRandomValues).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('uses secure random bytes when randomUUID is unavailable', () => {
+    const crypto = {
+      getRandomValues: vi.fn((bytes: Uint8Array) => {
+        bytes.set([
+          0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa,
+          0xbb, 0xcc, 0xdd, 0xee, 0xff,
+        ]);
+        return bytes;
+      }),
+    } as unknown as Crypto;
+    vi.stubGlobal('crypto', crypto);
+
+    try {
+      expect(createEventUid()).toBe(
+        '00112233445566778899aabbccddeeff@matrix-calendar-widget',
+      );
+      expect(crypto.getRandomValues).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('fails closed when secure cryptographic randomness is unavailable', () => {
+    vi.stubGlobal('crypto', undefined);
+
+    try {
+      expect(() => createEventUid()).toThrow(
+        'Secure cryptographic randomness is unavailable',
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('returns focus to the invoking control after closing', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+    });
+
+    function EditorWithOpener() {
+      const [open, setOpen] = useState(false);
+
+      return (
+        <>
+          <button onClick={() => setOpen(true)}>Open event editor</button>
+          <CalendarEventEditorDialog
+            calendars={[calendar]}
+            onClose={() => setOpen(false)}
+            open={open}
+          />
+        </>
+      );
+    }
+
+    render(<EditorWithOpener />, { wrapper: createWrapper(repository) });
+
+    const opener = screen.getByRole('button', { name: 'Open event editor' });
+    await userEvent.click(opener);
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => expect(opener).toHaveFocus());
+  });
+
   it('creates one attachment link and exposes accessible edit controls', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [calendar],
@@ -316,6 +397,7 @@ describe('<CalendarEventEditorDialog />', () => {
       calendars: [calendar],
       idFactory: () => 'created',
     });
+    const createEvent = vi.spyOn(repository, 'createEvent');
     const onClose = vi.fn();
 
     render(
@@ -335,6 +417,13 @@ describe('<CalendarEventEditorDialog />', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Create event' }));
 
     await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(createEvent).toHaveBeenCalledWith(
+      'team',
+      expect.objectContaining({
+        uid: 'created@example.test',
+        title: 'Created event',
+      }),
+    );
 
     await expect(repository.getEvent('team', 'created')).resolves.toMatchObject(
       {
@@ -2101,6 +2190,7 @@ describe('<CalendarEventEditorDialog />', () => {
       calendars: [calendar],
       events: [event],
     });
+    const updateEvent = vi.spyOn(repository, 'updateEvent');
     const onSaved = vi.fn();
 
     render(
@@ -2123,6 +2213,14 @@ describe('<CalendarEventEditorDialog />', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(updateEvent).toHaveBeenCalledWith(
+      'team',
+      'planning',
+      expect.objectContaining({
+        title: 'Updated planning',
+        description: undefined,
+      }),
+    );
 
     await expect(
       repository.getEvent('team', 'planning'),
@@ -2263,7 +2361,7 @@ describe('<CalendarEventEditorDialog />', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('disables saving for a read-only calendar', () => {
+  it('does not mutate a read-only calendar when the form is submitted', () => {
     const readOnlyCalendar: Calendar = {
       ...calendar,
       readOnly: true,
@@ -2272,6 +2370,7 @@ describe('<CalendarEventEditorDialog />', () => {
       calendars: [readOnlyCalendar],
       events: [event],
     });
+    const updateEvent = vi.spyOn(repository, 'updateEvent');
 
     render(
       <CalendarEventEditorDialog
@@ -2285,6 +2384,8 @@ describe('<CalendarEventEditorDialog />', () => {
 
     expect(screen.getByText('This calendar is read-only.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    fireEvent.submit(screen.getByRole('form', { name: 'Edit event' }));
+    expect(updateEvent).not.toHaveBeenCalled();
   });
 
   it('shows an error when an edited event no longer exists', async () => {
