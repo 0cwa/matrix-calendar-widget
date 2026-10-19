@@ -29,10 +29,13 @@ Environment=RESTIC_PASSWORD_FILE=%d/restic-password
 Environment=AWS_SHARED_CREDENTIALS_FILE=%d/s3-credentials
 Environment=RESTIC_CACHE_DIR=/var/cache/matrix-calendar-backup
 
-# If the reminder database is enabled in backup.json, also configure a
-# password-free libpq service file and load its password as a credential:
+# With reminderDatabaseEnabled=true and postgresDumpTransport omitted or set
+# to "native", configure a password-free libpq service file and load its
+# password as a credential:
 # LoadCredential=postgres-password:/secure/operator-credentials/postgres-password
 # Environment=PGSERVICEFILE=/etc/matrix-calendar/pg_service.conf
 # Environment=PGPASSFILE=%d/postgres-password
+# The optional "container-exec" transport instead requires a database role
+# that can dump over the container's local Unix socket without a password.
 
 ExecStart=/usr/local/sbin/matrix-calendar-cold-backup --config /etc/matrix-calendar/backup.json

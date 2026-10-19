@@ -683,6 +683,16 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
         local identity checks; keep it disabled until an independent isolated
         restore succeeds. It does not sweep older captures or change remote
         retention.
+  - [x] Add an opt-in `container-exec` PostgreSQL dump transport for isolated
+        database services. The default `native` transport is unchanged. The
+        container path requires exact Compose project/service labels and a
+        digest-pinned image, streams the custom dump through a Unix socket
+        without a password argument, verifies the same running container after
+        capture, and records additive transport/version metadata in the
+        checksummed capture manifest. The existing dump filename and custom
+        format remain unchanged, so prior restore steps do not require the new
+        manifest. Focused tests cover identity refusal, partial-output cleanup,
+        and preservation of the native default.
 - [x] Container images and deployment docs use fork-owned names. This covers
       repository-owned image builds and documented operator-run deployment
       boundaries, not a live etke-host deployment or recovery validation.
