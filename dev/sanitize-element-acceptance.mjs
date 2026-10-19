@@ -119,6 +119,8 @@ const PHASES = new Set([
   'g6-delete-and-refresh',
   'g6-keyboard-focus',
   'g6-side-panel-layout',
+  'g6-desktop-keyboard-focus',
+  'g6-desktop-side-panel-layout',
   'g6-browser-egress',
   'g6-resource-cleanup',
 ]);
@@ -311,6 +313,19 @@ const PHASE_BOOLEAN_FIELDS = new Map([
     ],
   ],
   [
+    'g6-desktop-keyboard-focus',
+    [
+      'desktopEventFocused',
+      'detailsOpened',
+      'detailsTabReached',
+      'editActionFocused',
+      'deleteActionFocused',
+      'closeActionFocused',
+      'escapeClosedDialog',
+      'focusReturnedToEvent',
+    ],
+  ],
+  [
     'g6-side-panel-layout',
     [
       'widgetCardVisible',
@@ -319,6 +334,18 @@ const PHASE_BOOLEAN_FIELDS = new Map([
       'hostNoHorizontalOverflow',
       'widgetNoHorizontalOverflow',
       'persistedHostFramePresent',
+    ],
+  ],
+  [
+    'g6-desktop-side-panel-layout',
+    [
+      'desktopWidgetCardVisible',
+      'desktopCreateControlReachable',
+      'desktopEventDetailsReachable',
+      'desktopHostNoHorizontalOverflow',
+      'desktopWidgetNoHorizontalOverflow',
+      'desktopPersistedHostFramePresent',
+      'desktopAppDrawerAbsent',
     ],
   ],
   ['g6-browser-egress', ['browserEgressClear']],
@@ -362,6 +389,10 @@ const G6_NUMERIC_FIELDS_BY_PHASE = new Map([
     ],
   ],
   [
+    'g6-desktop-keyboard-focus',
+    ['desktopEventTabCount', 'desktopDetailsTabCount'],
+  ],
+  [
     'g6-side-panel-layout',
     [
       'viewportWidth',
@@ -372,6 +403,17 @@ const G6_NUMERIC_FIELDS_BY_PHASE = new Map([
       'appDrawerCount',
       'managementToolbarNavCountCapped',
       'createEventButtonCountCapped',
+    ],
+  ],
+  [
+    'g6-desktop-side-panel-layout',
+    [
+      'desktopViewportWidth',
+      'desktopViewportHeight',
+      'desktopIframeWidth',
+      'desktopIframeHeight',
+      'desktopWidgetCardCount',
+      'desktopAppDrawerCount',
     ],
   ],
   ['g6-browser-egress', ['count']],
@@ -1164,6 +1206,15 @@ const ALLOWED_KEYS = new Set([
   'closeActionFocused',
   'escapeClosedDialog',
   'focusReturnedToEvent',
+  'desktopEventFocused',
+  'detailsTabReached',
+  'desktopWidgetCardVisible',
+  'desktopCreateControlReachable',
+  'desktopEventDetailsReachable',
+  'desktopHostNoHorizontalOverflow',
+  'desktopWidgetNoHorizontalOverflow',
+  'desktopPersistedHostFramePresent',
+  'desktopAppDrawerAbsent',
   'widgetCardVisible',
   'createControlReachable',
   'eventDetailsReachable',
@@ -1316,11 +1367,18 @@ function validG6Observation(record) {
       if (key.endsWith('Width') || key.endsWith('Height')) {
         return value < 1 || value > 10_000;
       }
-      if (record.phase === 'g6-side-panel-layout') {
+      if (
+        record.phase === 'g6-side-panel-layout' ||
+        record.phase === 'g6-desktop-side-panel-layout'
+      ) {
         return value < 0 || value > 2;
       }
-      if (key === 'eventActionTabCount') return value < 0 || value > 80;
-      if (key === 'detailsActionTabCount') return value < 0 || value > 14;
+      if (key === 'eventActionTabCount' || key === 'desktopEventTabCount') {
+        return value < 0 || value > 80;
+      }
+      if (key === 'detailsActionTabCount' || key === 'desktopDetailsTabCount') {
+        return value < 0 || value > 14;
+      }
       if (record.phase === 'g6-resource-cleanup') return value < 0 || value > 4;
       return value < 0 || value > 100_000;
     }) ||
@@ -1687,6 +1745,19 @@ function validG6Observation(record) {
         record.eventActionTabCount <= 80 &&
         record.detailsActionTabCount <= 14
       );
+    case 'g6-desktop-keyboard-focus':
+      return (
+        record.desktopEventFocused === true &&
+        record.detailsOpened === true &&
+        record.detailsTabReached === true &&
+        record.editActionFocused === true &&
+        record.deleteActionFocused === true &&
+        record.closeActionFocused === true &&
+        record.escapeClosedDialog === true &&
+        record.focusReturnedToEvent === true &&
+        record.desktopEventTabCount <= 80 &&
+        record.desktopDetailsTabCount <= 14
+      );
     case 'g6-side-panel-layout':
       return (
         record.viewportWidth === 1440 &&
@@ -1702,6 +1773,21 @@ function validG6Observation(record) {
         record.eventDetailsReachable === true &&
         record.hostNoHorizontalOverflow === true &&
         record.widgetNoHorizontalOverflow === true
+      );
+    case 'g6-desktop-side-panel-layout':
+      return (
+        record.desktopViewportWidth > 0 &&
+        record.desktopViewportHeight > 0 &&
+        record.desktopWidgetCardCount === 1 &&
+        record.desktopWidgetCardVisible === true &&
+        record.desktopAppDrawerAbsent === true &&
+        record.desktopPersistedHostFramePresent === true &&
+        record.desktopIframeWidth > 0 &&
+        record.desktopIframeHeight > 0 &&
+        record.desktopCreateControlReachable === true &&
+        record.desktopEventDetailsReachable === true &&
+        record.desktopHostNoHorizontalOverflow === true &&
+        record.desktopWidgetNoHorizontalOverflow === true
       );
     case 'g6-browser-egress':
       return record.count === 0;
