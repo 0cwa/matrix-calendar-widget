@@ -29,7 +29,20 @@ import App from './App';
 import { CalendarRepositoryProvider } from './calendar';
 import { LocalizationProvider } from './components/common/LocalizationProvider';
 import { mockCreateMeetingRoom } from './lib/testUtils';
-import { StoreProvider } from './store';
+
+vi.mock('./store', () => {
+  throw new Error('The calendar-only app must not load the meeting store.');
+});
+
+vi.mock('./reducer/meetingsApi', () => {
+  throw new Error('The calendar-only app must not load meeting Redux state.');
+});
+
+vi.mock('./store/acceptMeetingInvitations', () => {
+  throw new Error(
+    'The calendar-only app must not load meeting invitation side effects.',
+  );
+});
 
 const roomId = '!calendar-room:example.test';
 const personalCalendar: Calendar = {
@@ -100,12 +113,10 @@ function renderApp({
       <LocalizationProvider>
         <WidgetApiMockProvider value={api}>
           <CalendarRepositoryProvider repository={repository}>
-            <StoreProvider>
-              <MemoryRouter initialEntries={[initialPath]}>
-                <LocationProbe />
-                {children}
-              </MemoryRouter>
-            </StoreProvider>
+            <MemoryRouter initialEntries={[initialPath]}>
+              <LocationProbe />
+              {children}
+            </MemoryRouter>
           </CalendarRepositoryProvider>
         </WidgetApiMockProvider>
       </LocalizationProvider>
