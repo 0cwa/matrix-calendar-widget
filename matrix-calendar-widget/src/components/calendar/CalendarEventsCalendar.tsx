@@ -41,13 +41,13 @@ import {
   calendarEventToFullCalendarEvent,
 } from '../../calendar';
 import { CalendarViewType } from '../../lib/utils';
-import { FullCalendarThemeProvider } from '../meetings/MeetingsCalendar/FullCalendarThemeProvider';
+import { formatCalendarEventTime } from './CalendarEventDetailsDialog';
+import { FullCalendarThemeProvider } from './FullCalendar/FullCalendarThemeProvider';
 import {
   dayGridPlugin,
   interactionPlugin,
   timeGridPlugin,
-} from '../meetings/MeetingsCalendar/plugins';
-import { formatCalendarEventTime } from './CalendarEventDetailsDialog';
+} from './FullCalendar/plugins';
 
 export function CalendarEventsCalendar({
   events,
@@ -94,7 +94,7 @@ export function CalendarEventsCalendar({
     if (fullCalendar) {
       fullCalendar
         .getApi()
-        .changeView(fullcalendarViewType(view), filters.startDate);
+        .changeView(fullCalendarViewType(view), filters.startDate);
     }
   }, [filters.startDate, view]);
 
@@ -239,7 +239,7 @@ function CalendarEventCell({
   );
 }
 
-function fullcalendarViewType(view: CalendarViewType): string {
+function fullCalendarViewType(view: CalendarViewType): string {
   switch (view) {
     case 'day':
       return 'timeGridDay';

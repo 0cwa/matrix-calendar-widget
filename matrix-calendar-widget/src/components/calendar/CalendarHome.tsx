@@ -22,11 +22,11 @@ import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CalendarFilters } from '../../calendar';
 import { generateFilterRange } from '../../lib/utils';
-import type { ViewType } from '../meetings/MeetingsNavigation';
 import { CalendarEventsSurface } from './CalendarEventsSurface';
+import type { CalendarSurfaceView } from './CalendarNavigation';
 import { CalendarToolbar } from './CalendarToolbar';
 
-const viewTypes: readonly ViewType[] = [
+const viewTypes: readonly CalendarSurfaceView[] = [
   'list',
   'day',
   'workWeek',
@@ -38,8 +38,8 @@ export function CalendarHome() {
   const widgetApi = useWidgetApi();
   const { t } = useTranslation();
   const viewStorageKey = `meeting_view_${widgetApi.widgetParameters.roomId}_${widgetApi.widgetParameters.userId}`;
-  const [view, setViewInternal] = useState<ViewType>(
-    () => readLastViewType(viewStorageKey) ?? 'list',
+  const [view, setViewInternal] = useState<CalendarSurfaceView>(
+    () => readLastCalendarSurfaceView(viewStorageKey) ?? 'list',
   );
   const [filters, setFilters] = useState<CalendarFilters>({
     startDate: DateTime.now().startOf('day').toISO(),
@@ -48,10 +48,10 @@ export function CalendarHome() {
   });
 
   const setView = useCallback(
-    (newView: ViewType) => {
+    (newView: CalendarSurfaceView) => {
       const previousView = view !== 'list' ? view : undefined;
       setViewInternal(newView);
-      saveLastViewType(viewStorageKey, newView);
+      saveLastCalendarSurfaceView(viewStorageKey, newView);
 
       if (newView !== 'list') {
         setFilters((oldFilters) => ({
@@ -116,16 +116,23 @@ export function CalendarHome() {
   );
 }
 
-function readLastViewType(storageKey: string): ViewType | undefined {
+function readLastCalendarSurfaceView(
+  storageKey: string,
+): CalendarSurfaceView | undefined {
   try {
     const storedView = window.localStorage.getItem(storageKey);
-    return storedView && isViewType(storedView) ? storedView : undefined;
+    return storedView && isCalendarSurfaceView(storedView)
+      ? storedView
+      : undefined;
   } catch {
     return undefined;
   }
 }
 
-function saveLastViewType(storageKey: string, view: ViewType): void {
+function saveLastCalendarSurfaceView(
+  storageKey: string,
+  view: CalendarSurfaceView,
+): void {
   try {
     window.localStorage.setItem(storageKey, view);
   } catch {
@@ -133,6 +140,6 @@ function saveLastViewType(storageKey: string, view: ViewType): void {
   }
 }
 
-function isViewType(value: string): value is ViewType {
-  return viewTypes.includes(value as ViewType);
+function isCalendarSurfaceView(value: string): value is CalendarSurfaceView {
+  return viewTypes.includes(value as CalendarSurfaceView);
 }

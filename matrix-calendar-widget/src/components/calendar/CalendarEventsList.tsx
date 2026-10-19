@@ -27,8 +27,8 @@ import { unstable_useId as useId, visuallyHidden } from '@mui/utils';
 import { useTranslation } from 'react-i18next';
 import { groupCalendarEventsByDay } from '../../calendar';
 import { ListEmptyState } from '../common/ListEmptyState';
-import { MeetingsListGroup } from '../meetings/MeetingsList/MeetingsListGroup';
 import { formatCalendarEventTime } from './CalendarEventDetailsDialog';
+import { CalendarEventsListGroup } from './CalendarEventsList/CalendarEventsListGroup';
 
 export function CalendarEventsList({
   events,
@@ -49,7 +49,7 @@ export function CalendarEventsList({
 
       <Stack aria-labelledby={headingId} component="ul" m={0} p={0}>
         {groups.map(({ day, events: dayEvents }) => (
-          <MeetingsListGroup date={day} key={day}>
+          <CalendarEventsListGroup date={day} key={day}>
             {dayEvents.map((event) => (
               <Box
                 aria-label={event.title}
@@ -80,7 +80,7 @@ export function CalendarEventsList({
                 </Card>
               </Box>
             ))}
-          </MeetingsListGroup>
+          </CalendarEventsListGroup>
         ))}
 
         {groups.length === 0 && (
