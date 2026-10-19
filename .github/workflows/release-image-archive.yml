@@ -7,6 +7,14 @@ on:
         description: Full 40-character SHA of the reviewed application source already merged to main
         required: true
         type: string
+      image_set:
+        description: Select all project images or the server image only
+        required: true
+        type: choice
+        default: all
+        options:
+          - all
+          - server-only
       operator_rehearsal:
         description: Run the complete no-Element hosted Docker operator rehearsal before upload
         required: false
@@ -27,6 +35,7 @@ jobs:
     env:
       IMAGE_PLATFORM: linux/amd64
       RELEASE_SOURCE_SHA: ${{ inputs.source_sha }}
+      RELEASE_IMAGE_SET: ${{ inputs.image_set }}
       RELEASE_DISPATCH_SHA: ${{ github.sha }}
       RELEASE_REPOSITORY: ${{ github.repository }}
       RELEASE_WORKFLOW_REF: ${{ github.workflow_ref }}
@@ -47,10 +56,20 @@ jobs:
 
       - name: Validate the requested source SHA
         shell: bash
+        env:
+          INPUT_OPERATOR_REHEARSAL: ${{ inputs.operator_rehearsal }}
         run: |
           set -euo pipefail
           if [[ ! "$RELEASE_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
             echo 'source_sha must be a full lowercase 40-character commit SHA.' >&2
+            exit 1
+          fi
+          if [[ "$RELEASE_IMAGE_SET" != 'all' && "$RELEASE_IMAGE_SET" != 'server-only' ]]; then
+            echo 'image_set must be all or server-only.' >&2
+            exit 1
+          fi
+          if [[ "$RELEASE_IMAGE_SET" == 'server-only' && "$INPUT_OPERATOR_REHEARSAL" == 'true' ]]; then
+            echo 'operator_rehearsal requires image_set=all.' >&2
             exit 1
           fi
           if [[ "$GITHUB_REF" != 'refs/heads/main' ]]; then
@@ -118,7 +137,9 @@ jobs:
           yarn workspace @matrix-calendar-widget/calendar build
           yarn workspace @matrix-calendar-widget/ical-timezones build
           yarn workspace @matrix-calendar-widget/server build
-          yarn workspace @matrix-calendar-widget/widget build
+          if [[ "$RELEASE_IMAGE_SET" == 'all' ]]; then
+            yarn workspace @matrix-calendar-widget/widget build
+          fi
 
       - name: Set up the isolated image builder
         id: buildx
@@ -179,6 +200,7 @@ jobs:
           docker image save --output "$ARCHIVE_ROOT/images/server-linux-amd64.tar" "matrix-calendar-widget/server:$RUN_TAG"
 
       - name: Build the widget image
+        if: inputs.image_set == 'all'
         working-directory: source
         shell: bash
         run: |
@@ -194,12 +216,14 @@ jobs:
             matrix-calendar-widget
 
       - name: Save the widget image
+        if: inputs.image_set == 'all'
         working-directory: source
         run: |
           docker image inspect --format '{{.Id}}' "matrix-calendar-widget/widget:$RUN_TAG" > "$BUILD_ROOT/widget.image-id"
           docker image save --output "$ARCHIVE_ROOT/images/widget-linux-amd64.tar" "matrix-calendar-widget/widget:$RUN_TAG"
 
       - name: Test and build the project-owned Radicale image
+        if: inputs.image_set == 'all'
         working-directory: source
         shell: bash
         run: |
@@ -299,6 +323,7 @@ jobs:
             echo "Workflow SHA: $RELEASE_WORKFLOW_SHA"
             echo "Workflow run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             echo "Platform: $IMAGE_PLATFORM"
+            echo "Image set: $RELEASE_IMAGE_SET"
             echo
             echo '### Uploaded artifacts'
             echo

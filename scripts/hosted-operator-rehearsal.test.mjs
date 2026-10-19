@@ -3474,9 +3474,14 @@ test('failure operation identifiers cover every literal and generated task label
 
 test('workflow rehearsal input defaults off and executes between manifest verification and upload', () => {
   const workflow = readFileSync(workflowPath, 'utf8');
+  assert.match(workflow, /image_set:[\s\S]*?default: all[\s\S]*?server-only/u);
   assert.match(
     workflow,
     /operator_rehearsal:[\s\S]*?default: false[\s\S]*?type: boolean/u,
+  );
+  assert.match(
+    workflow,
+    /server-only' && "\$INPUT_OPERATOR_REHEARSAL" == 'true'[\s\S]*?operator_rehearsal requires image_set=all/u,
   );
 
   const verifyIndex = workflow.indexOf('release-image-archive.mjs verify');
