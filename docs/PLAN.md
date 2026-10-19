@@ -594,8 +594,8 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       establishes local rehearsal only. Issues #251 and #255 and the separate
       production target, owner-input, canary, backup, and restore gates remain
       open.
-- [ ] Keep issues #276–#278 post-pilot. Issue #275's StoreProvider/Redux
-      startup retirement was explicitly re-scoped ahead of the pilot; this
+- [ ] Issues #275 and #276 were explicitly re-scoped for bounded pre-pilot
+      source cleanup. Issue #277 remains separately gated after the pilot. This
       source cleanup does not change the frozen application candidate or pilot
       gates, and any candidate incorporating it requires fresh qualification.
 

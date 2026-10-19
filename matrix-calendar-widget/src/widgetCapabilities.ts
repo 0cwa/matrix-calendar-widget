@@ -37,7 +37,7 @@ import {
   STATE_EVENT_SPACE_PARENT,
   STATE_EVENT_WIDGETS,
 } from './lib/matrix';
-import { RoomEvents } from './reducer/meetingsApi';
+import { RoomEvents } from './reducer/meetingsApi/RoomEvents';
 
 export const widgetCapabilities = [
   WIDGET_CAPABILITY_NAVIGATE,

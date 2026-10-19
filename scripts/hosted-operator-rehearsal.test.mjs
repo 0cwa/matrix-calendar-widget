@@ -3521,7 +3521,7 @@ test('workflow rehearsal input defaults off and executes between manifest verifi
   assert.doesNotMatch(failureUpload, /\*/u);
 });
 
-test('trusted sparse checkout can load and enter the hosted rehearsal runner', (t) => {
+test('trusted sparse checkout can load its hosted tooling entry points', (t) => {
   const workflow = readFileSync(workflowPath, 'utf8');
   const lines = workflow.split(/\r?\n/u);
   const sparseCheckoutIndex = lines.findIndex((line) =>
@@ -3553,6 +3553,8 @@ test('trusted sparse checkout can load and enter the hosted rehearsal runner', (
     copyFileSync(sourcePath, destinationPath);
   }
 
+  assert.ok(sparsePaths.includes('scripts/release-image-archive.mjs'));
+
   const result = spawnSync(
     process.execPath,
     [join(toolingRoot, 'scripts/hosted-operator-rehearsal.mjs')],
@@ -3571,4 +3573,20 @@ test('trusted sparse checkout can load and enter the hosted rehearsal runner', (
     /failed at phase preflight; owned cleanup not-run/u,
   );
   assert.doesNotMatch(result.stderr, /ERR_MODULE_NOT_FOUND/u);
+
+  const archiveResult = spawnSync(
+    process.execPath,
+    [join(toolingRoot, 'scripts/release-image-archive.mjs')],
+    {
+      cwd: toolingRoot,
+      encoding: 'utf8',
+      env: {},
+    },
+  );
+  assert.equal(archiveResult.status, 1, archiveResult.stderr);
+  assert.match(
+    archiveResult.stderr,
+    /Usage: release-image-archive\.mjs prepare\|create\|verify --options/u,
+  );
+  assert.doesNotMatch(archiveResult.stderr, /ERR_MODULE_NOT_FOUND/u);
 });

@@ -10826,11 +10826,6 @@ through@^2.3.6:
   resolved "https://registry.yarnpkg.com/through/-/through-2.3.8.tgz#0dd4c9ffaabc357960b1b724115d7e0e86a2e1f5"
   integrity sha512-w89qg7PI8wAdvX60bMDP+bFoD5Dvhm9oLheFp5O4a2QF0cSBGsBX4qZmadPMvVqlLJBBci+WqGGOAPvcDeNSVg==
 
-timezones-ical-library@^1.9.1:
-  version "1.9.1"
-  resolved "https://registry.yarnpkg.com/timezones-ical-library/-/timezones-ical-library-1.9.1.tgz#36021944c3d45d809dac5ad7e71a9db07266cc47"
-  integrity sha512-OBC7oPoQi6JZn6u/2xQcFTMbe1BLjPrv+QUh5jHfYmg0QTR5HnuhwsBqHfvScNTHqTrDxqlXofXzSm2hFDC1Ow==
-
 tinybench@6.1.4:
   version "6.1.4"
   resolved "https://registry.yarnpkg.com/tinybench/-/tinybench-6.1.4.tgz#f855bb3ad1f2fe85cf624490d58bb4f4f5d30da8"

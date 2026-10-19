@@ -26,24 +26,24 @@ import {
   useCalendarRepository,
   useCalendars,
 } from '../../calendar';
-import { MeetingsNavigation, ViewType } from '../meetings/MeetingsNavigation';
-import { MeetingsToolbarButtons } from '../meetings/MeetingsToolbar/MeetingsToolbarButtons';
-import { MeetingsToolbarDatePicker } from '../meetings/MeetingsToolbar/MeetingsToolbarDatePicker';
-import { MeetingsToolbarSearch } from '../meetings/MeetingsToolbar/MeetingsToolbarSearch';
 import { CalendarColorDialog } from './CalendarColorDialog';
 import { CalendarCreateDialog } from './CalendarCreateDialog';
 import { CalendarDeleteDialog } from './CalendarDeleteDialog';
 import { CalendarDescriptionDialog } from './CalendarDescriptionDialog';
 import { CalendarDiagnosticsDialog } from './CalendarDiagnosticsDialog';
 import { CalendarEventEditorDialog } from './CalendarEventEditorDialog';
+import { CalendarNavigation, CalendarSurfaceView } from './CalendarNavigation';
 import { CalendarRenameDialog } from './CalendarRenameDialog';
+import { CalendarToolbarButtons } from './CalendarToolbar/CalendarToolbarButtons';
+import { CalendarToolbarDatePicker } from './CalendarToolbar/CalendarToolbarDatePicker';
+import { CalendarToolbarSearch } from './CalendarToolbar/CalendarToolbarSearch';
 
 type CalendarToolbarProps = {
   filters: CalendarFilters;
-  view: ViewType;
+  view: CalendarSurfaceView;
   onRangeChange: (startDate: string, endDate: string) => void;
   onSearchChange: (search: string) => void;
-  onViewChange: (view: ViewType) => void;
+  onViewChange: (view: CalendarSurfaceView) => void;
 };
 
 export function CalendarToolbar({
@@ -149,7 +149,7 @@ export function CalendarToolbar({
 
         {showToolbarButtons && (
           <Box>
-            <MeetingsToolbarButtons
+            <CalendarToolbarButtons
               endDate={filters.endDate}
               onRangeChange={onRangeChange}
               startDate={filters.startDate}
@@ -158,7 +158,7 @@ export function CalendarToolbar({
           </Box>
         )}
 
-        <MeetingsToolbarDatePicker
+        <CalendarToolbarDatePicker
           endDate={filters.endDate}
           onRangeChange={onRangeChange}
           startDate={filters.startDate}
@@ -167,13 +167,13 @@ export function CalendarToolbar({
         />
 
         <Box flex={99999999} textAlign="right">
-          <MeetingsToolbarSearch
+          <CalendarToolbarSearch
             onSearchChange={onSearchChange}
             search={filters.filterText ?? ''}
           />
         </Box>
 
-        <MeetingsNavigation
+        <CalendarNavigation
           onViewChange={onViewChange}
           sx={{ flexGrow: 1 }}
           view={view}

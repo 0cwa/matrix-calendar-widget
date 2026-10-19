@@ -41,10 +41,10 @@ import {
   visibleRangeForView,
 } from '../../calendar';
 import { PageLoader } from '../common/PageLoader';
-import { ViewType } from '../meetings/MeetingsNavigation';
 import { CalendarEventDetailsDialog } from './CalendarEventDetailsDialog';
 import { CalendarEventsCalendar } from './CalendarEventsCalendar';
 import { CalendarEventsList } from './CalendarEventsList';
+import { CalendarSurfaceView } from './CalendarNavigation';
 
 export function CalendarEventsSurface({
   filters,
@@ -53,7 +53,7 @@ export function CalendarEventsSurface({
 }: {
   filters: CalendarFilters;
   onShowMore: (date: Date) => void;
-  view: ViewType;
+  view: CalendarSurfaceView;
 }) {
   const { t } = useTranslation();
   const calendars = useCalendars();
