@@ -3992,6 +3992,7 @@ export function formatFailureDiagnostic({
   cleanupAttempted,
   failureCode,
   cleanupCheckpoint,
+  recoveryFailure,
   serviceInventory,
   serviceRunId,
   serviceProject,
@@ -4044,6 +4045,27 @@ export function formatFailureDiagnostic({
         ? cleanupCheckpoint
         : 'unknown'
       : 'not-applicable';
+  const safeRecoveryFailure = recoveryFailure
+    ? {
+        phase: SAFE_PHASES.has(recoveryFailure.phase)
+          ? recoveryFailure.phase
+          : 'runner',
+        failure_check:
+          FAILURE_CHECK_BY_CODE.get(recoveryFailure.failureCode) ?? 'unknown',
+        cleanup_checkpoint:
+          recoveryFailure.failureCode === 'inventory-postcondition-failed'
+            ? CLEANUP_EQUALITY_CHECKPOINTS.has(
+                recoveryFailure.cleanupCheckpoint,
+              )
+              ? recoveryFailure.cleanupCheckpoint
+              : 'unknown'
+            : 'not-applicable',
+      }
+    : {
+        phase: 'not-run',
+        failure_check: 'not-applicable',
+        cleanup_checkpoint: 'not-applicable',
+      };
   const safeListenerScope = {
     callsite: ['primary', 'paired-restore'].includes(listenerScope?.site)
       ? listenerScope.site
@@ -4066,7 +4088,7 @@ export function formatFailureDiagnostic({
   );
 
   return {
-    schema_version: 11,
+    schema_version: 12,
     result: 'failed',
     phase: 'hosted-docker-operator-v5',
     failed_phase: SAFE_PHASES.has(phase) ? phase : 'runner',
@@ -4076,6 +4098,7 @@ export function formatFailureDiagnostic({
     failure_operation: safeOperation,
     failure_check: safeFailureCheck,
     cleanup_checkpoint: safeCleanupCheckpoint,
+    recovery_failure: safeRecoveryFailure,
     service_roles: projectPrimaryServiceInventory(serviceInventory, {
       runId: serviceRunId,
       project: serviceProject,
@@ -4215,6 +4238,16 @@ export function writeFailureDiagnostic(runnerTemp, fields, update = false) {
         FAILURE_CLEANUP_FOREIGN_CHECKPOINTS.has(
           diagnostic.foreign_inventory_change?.checkpoint,
         );
+      const recoveryFailureUnchanged =
+        JSON.stringify(previous?.recovery_failure) ===
+        JSON.stringify(diagnostic.recovery_failure);
+      const recoveryFailureAddedDuringFailureCleanup =
+        JSON.stringify(previous?.recovery_failure) ===
+          JSON.stringify({
+            phase: 'not-run',
+            failure_check: 'not-applicable',
+            cleanup_checkpoint: 'not-applicable',
+          }) && diagnostic.recovery_failure?.phase !== 'not-run';
       if (
         ![
           'run_id',
@@ -4240,7 +4273,8 @@ export function writeFailureDiagnostic(runnerTemp, fields, update = false) {
         JSON.stringify(previous?.reminder_fixture) !==
           JSON.stringify(diagnostic.reminder_fixture) ||
         (!foreignInventoryChangeUnchanged &&
-          !foreignInventoryChangeAddedDuringFailureCleanup)
+          !foreignInventoryChangeAddedDuringFailureCleanup) ||
+        (!recoveryFailureUnchanged && !recoveryFailureAddedDuringFailureCleanup)
       ) {
         fail('receipt-publish', 'failure-diagnostic-identity-mismatch');
       }
@@ -5105,6 +5139,20 @@ async function main() {
         cleanupStatus = 'verified';
         if (localMode) localChecks.owned_cleanup = 'passed';
       } catch (cleanupError) {
+        failure.recoveryFailure = {
+          phase:
+            cleanupError instanceof RehearsalFailure
+              ? cleanupError.stage
+              : 'runner',
+          failureCode:
+            cleanupError instanceof RehearsalFailure
+              ? cleanupError.code
+              : 'unknown',
+          cleanupCheckpoint:
+            cleanupError instanceof RehearsalFailure
+              ? cleanupError.cleanupCheckpoint
+              : undefined,
+        };
         if (
           !failure.foreignInventoryChange &&
           cleanupError instanceof RehearsalFailure

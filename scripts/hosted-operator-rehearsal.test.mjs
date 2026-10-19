@@ -835,7 +835,7 @@ test('failure artifact carries only the closed gateway smoke classification', ()
     gatewayNetworkSmoke,
   });
 
-  assert.equal(diagnostic.schema_version, 11);
+  assert.equal(diagnostic.schema_version, 12);
   assert.equal(diagnostic.failed_phase, 'compose-run-gateway-smoke');
   assert.equal(diagnostic.failure_operation, 'gateway-network-smoke');
   assert.equal(diagnostic.failure_check, 'network-smoke');
@@ -1024,7 +1024,7 @@ test('failure artifact projects only the API CRUD probe enum fields', () => {
     failureCode: 'api-probe-process-failed',
     apiCrudProbe,
   });
-  assert.equal(diagnostic.schema_version, 11);
+  assert.equal(diagnostic.schema_version, 12);
   assert.equal(diagnostic.failure_check, 'api-contract');
   assert.deepEqual(diagnostic.api_crud_probe, apiCrudProbe);
 
@@ -1127,7 +1127,7 @@ test('reminder child failures retain only the finite fixture outcome and validat
         childExitCode: error.childExitCode,
         reminderFixture: error.reminderFixture,
       });
-      assert.equal(diagnostic.schema_version, 11);
+      assert.equal(diagnostic.schema_version, 12);
       assert.equal(diagnostic.failure_check, 'reminder-fixture');
       assert.equal(diagnostic.child_exit_code, 1);
       assert.deepEqual(diagnostic.reminder_fixture, error.reminderFixture);
@@ -2095,7 +2095,7 @@ test('foreign volume deltas stay gated and report bounded direction and owned mo
     failureCode: failure.code,
     foreignInventoryChange: failure.foreignInventoryChange,
   });
-  assert.equal(diagnostic.schema_version, 11);
+  assert.equal(diagnostic.schema_version, 12);
   assert.equal(diagnostic.cleanup_attempted, false);
   assert.equal(diagnostic.owned_cleanup_verified, false);
   const serialized = JSON.stringify(diagnostic);
@@ -2805,7 +2805,7 @@ test('failure diagnostic writes fixed identity and cleanup fields outside task d
     );
     assert.equal(statSync(file).mode & 0o777, 0o600);
     const initial = JSON.parse(readFileSync(file, 'utf8'));
-    assert.equal(initial.schema_version, 11);
+    assert.equal(initial.schema_version, 12);
     assert.equal(initial.failed_phase, 'fixture-setup');
     assert.equal(initial.failure_class, 'gate-failed');
     assert.equal(initial.failure_operation, 'gate');
@@ -2880,6 +2880,11 @@ test('failure diagnostic writes fixed identity and cleanup fields outside task d
     assert.equal(initial.cleanup_attempted, false);
     assert.equal(initial.owned_cleanup_verified, false);
     assert.equal(initial.foreign_inventory_change.checkpoint, 'not-applicable');
+    assert.deepEqual(initial.recovery_failure, {
+      phase: 'not-run',
+      failure_check: 'not-applicable',
+      cleanup_checkpoint: 'not-applicable',
+    });
 
     assert.equal(
       writeFailureDiagnostic(
@@ -3322,6 +3327,106 @@ test('cleanup inventory diagnostics expose only allowlisted checkpoint identifie
       cleanupCheckpoint: 'owned-volumes-after-containers',
     }).cleanup_checkpoint,
     'not-applicable',
+  );
+});
+
+test('failure diagnostics keep sanitized recovery failure separate from original failure', (t) => {
+  const recoveryFailure = {
+    phase: 'failure-cleanup',
+    failureCode: 'inventory-postcondition-failed',
+    cleanupCheckpoint: 'owned-volumes-after-containers',
+  };
+  const original = formatFailureDiagnostic({
+    phase: 'owned-cleanup',
+    failureCode: 'owned-container-remains',
+    cleanupCheckpoint: 'container-plan',
+    recoveryFailure,
+  });
+
+  assert.equal(original.failed_phase, 'owned-cleanup');
+  assert.equal(original.failure_check, 'cleanup-container');
+  assert.equal(original.cleanup_checkpoint, 'not-applicable');
+  assert.deepEqual(original.recovery_failure, {
+    phase: 'failure-cleanup',
+    failure_check: 'cleanup-inventory',
+    cleanup_checkpoint: 'owned-volumes-after-containers',
+  });
+
+  const hostile = formatFailureDiagnostic({
+    phase: 'owned-cleanup',
+    failureCode: 'owned-container-remains',
+    recoveryFailure: {
+      phase: 'private task inventory token=secret',
+      failureCode: 'raw error token=secret',
+      cleanupCheckpoint: JSON.stringify({ Id: 'private-container-id' }),
+    },
+  });
+  assert.deepEqual(hostile.recovery_failure, {
+    phase: 'runner',
+    failure_check: 'unknown',
+    cleanup_checkpoint: 'not-applicable',
+  });
+  assert.doesNotMatch(
+    JSON.stringify(hostile),
+    /secret|private-container-id|private task inventory|raw error/u,
+  );
+
+  const runnerTemp = mkdtempSync(join(tmpdir(), 'mcw-recovery-failure-'));
+  chmodSync(runnerTemp, 0o700);
+  t.after(() => rmSync(runnerTemp, { recursive: true, force: true }));
+  const fields = {
+    sourceSha,
+    workflowSha: '2'.repeat(40),
+    runId,
+    attempt: '1',
+    phase: 'owned-cleanup',
+    failureClass: 'gate-failed',
+    operation: 'gate',
+    failureCode: 'owned-container-remains',
+    cleanupStatus: 'pending',
+    cleanupAttempted: false,
+  };
+  assert.equal(writeFailureDiagnostic(runnerTemp, fields), true);
+  assert.equal(
+    writeFailureDiagnostic(
+      runnerTemp,
+      {
+        ...fields,
+        cleanupStatus: 'unverified',
+        cleanupAttempted: true,
+        recoveryFailure,
+      },
+      true,
+    ),
+    true,
+  );
+  const artifactPath = join(
+    runnerTemp,
+    'matrix-calendar-widget-operator-rehearsal-failure.json',
+  );
+  const written = JSON.parse(readFileSync(artifactPath, 'utf8'));
+  assert.equal(written.failed_phase, 'owned-cleanup');
+  assert.equal(written.failure_check, 'cleanup-container');
+  assert.deepEqual(written.recovery_failure, original.recovery_failure);
+  assert.doesNotMatch(
+    readFileSync(artifactPath, 'utf8'),
+    /secret|private-container-id|raw error/u,
+  );
+  assert.equal(
+    writeFailureDiagnostic(
+      runnerTemp,
+      {
+        ...fields,
+        cleanupStatus: 'unverified',
+        cleanupAttempted: true,
+        recoveryFailure: {
+          ...recoveryFailure,
+          cleanupCheckpoint: 'volume-plan',
+        },
+      },
+      true,
+    ),
+    false,
   );
 });
 
