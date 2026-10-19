@@ -180,6 +180,47 @@ until its placeholders and host paths are replaced:
 }
 ```
 
+When the reminder database is enabled, the coordinator keeps `native` as the
+default `postgresDumpTransport`: it uses the host's PostgreSQL client and the
+protected libpq service and password files described below. An operator may
+instead opt into `container-exec` for a database that accepts passwordless
+local-socket authentication. In that mode, add an explicit `postgresContainer`
+object with the exact Compose project and service labels, an image reference
+pinned by digest, and the database and role names used for the dump. For
+example, merge these fields into the configuration above and set
+`pgService` to `null`:
+
+```json
+{
+  "reminderDatabaseEnabled": true,
+  "pgService": null,
+  "postgresDumpTransport": "container-exec",
+  "postgresContainer": {
+    "projectName": "calendar-database",
+    "serviceName": "database",
+    "image": "postgres:<tag>@sha256:<reviewed-image-digest>",
+    "database": "<database-name>",
+    "username": "<dump-role>"
+  }
+}
+```
+
+The coordinator requires exactly one running container with those Compose
+labels, verifies its configured image reference and immutable local image ID,
+and checks that the same container remains running before and after the dump.
+It runs `pg_dump` over the container's Unix socket with a clean environment,
+`--no-password`, an explicit database and role, and `/dev/null` passfile and
+service-file paths. Inherited PostgreSQL environment settings cannot redirect
+the dump or supply credentials.
+The database's local authentication rules must permit that connection; if they
+require a password or use peer authentication incompatible with the configured
+role, retain the native transport. Both transports produce the same custom
+format dump, which the host `pg_restore --list` checks before the capture is
+accepted. The checksummed `capture-manifest.json` records whether a dump was
+included, its transport and format, and the client and validation-tool
+versions, without recording container names or database credentials. The
+manifest is additive: recovery of older captures does not require it.
+
 `resticRetentionEnabled` is an opt-in boolean and defaults to `false` when
 omitted. Its fixed `--keep-daily 30` policy keeps one recovery point for each
 of up to 30 recent populated calendar dates; missed backup days leave gaps and
@@ -210,18 +251,25 @@ The service template supplies the Restic password and S3 shared-credentials
 file with `LoadCredential=` and creates a private Restic cache directory. If
 running the coordinator outside systemd, set `RESTIC_CACHE_DIR` to an existing
 private directory. If the reminder database is enabled, set
-`reminderDatabaseEnabled` to `true`, set `pgService` to the selected libpq
-service, configure `PGSERVICEFILE` to a password-free service definition, and
-load a protected `.pgpass`-format file with `LoadCredential=` into
-`PGPASSFILE`. The coordinator rejects a selected libpq service containing a
-`password=` entry.
+`reminderDatabaseEnabled` to `true`. With the default `native` transport, set
+`pgService` to the selected libpq service, configure `PGSERVICEFILE` to a
+password-free service definition, and load a protected `.pgpass`-format file
+with `LoadCredential=` into `PGPASSFILE`. The coordinator rejects a selected
+libpq service containing a `password=` entry. The opt-in `container-exec`
+transport does not use those host-side PostgreSQL files; it requires the
+passwordless local-socket authentication described above.
 Keep an independent recovery copy of the Restic repository password outside
 the host and S3 account; the project neither generates nor copies it.
 
 Before writing a capture, the coordinator validates configuration and private
 file permissions, the Compose model, the local Docker socket, the pinned helper
-image, both project-prefixed volumes, Restic, optional PostgreSQL tools, and
-that exactly one `widget`, `server`, and `radicale` container is running. A
+image, both project-prefixed volumes, Restic, and the tools required by the
+selected PostgreSQL transport. Native mode checks the host `pg_dump`; both
+database modes check host `pg_restore`. Container-exec mode also verifies the
+exactly labeled running database container, its configured digest reference,
+its immutable local image ID, and its in-container `pg_dump` version. The
+coordinator also requires exactly one `widget`, `server`, and `radicale`
+container to be running. A
 missing credential, invalid config, missing helper image, stopped service, or
 overlapping run fails closed before service changes. It does not pull images.
 It requires all three services to be running at the beginning; it will not

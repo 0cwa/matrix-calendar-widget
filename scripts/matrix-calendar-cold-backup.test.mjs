@@ -25,6 +25,12 @@ const containerIds = {
   server: 'server1234567890abcdef',
   radicale: 'radicale1234567890abcdef',
 };
+const postgresContainerId = 'f'.repeat(64);
+const replacementPostgresContainerId = 'e'.repeat(64);
+const postgresProjectName = 'synthetic-calendar-database';
+const postgresServiceName = 'database';
+const postgresImage = `postgres:16.15-alpine3.23@sha256:${'c'.repeat(64)}`;
+const postgresImageId = `sha256:${'d'.repeat(64)}`;
 
 const captureMarkerContent = 'Cold capture verified and services resumed.\n';
 const fakeSnapshotId = 'b'.repeat(64);
@@ -33,9 +39,11 @@ const realResticTestRoot = process.env.COLD_BACKUP_TEST_RESTIC_ROOT;
 
 async function makeFixture({
   databaseEnabled = true,
+  postgresDumpTransport,
   initialRunning,
   rootDirectory,
 } = {}) {
+  const effectiveDumpTransport = postgresDumpTransport ?? 'native';
   const root =
     rootDirectory ??
     (await mkdtemp(join(tmpdir(), 'matrix-calendar-cold-backup-')));
@@ -71,7 +79,7 @@ async function makeFixture({
     AWS_SHARED_CREDENTIALS_FILE: s3CredentialsFile,
     RESTIC_CACHE_DIR: resticCacheDirectory,
   };
-  if (databaseEnabled) {
+  if (databaseEnabled && effectiveDumpTransport === 'native') {
     await writeFile(
       pgServiceFile,
       '[matrix-calendar-reminder]\nhost=db.example.invalid\ndbname=calendar\nuser=calendar\n',
@@ -96,7 +104,22 @@ async function makeFixture({
     dockerSocket: '/var/run/docker.sock',
     helperImage: `busybox:1.37.0@sha256:${'a'.repeat(64)}`,
     reminderDatabaseEnabled: databaseEnabled,
-    pgService: databaseEnabled ? 'matrix-calendar-reminder' : null,
+    pgService:
+      databaseEnabled && effectiveDumpTransport === 'native'
+        ? 'matrix-calendar-reminder'
+        : null,
+    ...(postgresDumpTransport ? { postgresDumpTransport } : {}),
+    ...(effectiveDumpTransport === 'container-exec'
+      ? {
+          postgresContainer: {
+            projectName: postgresProjectName,
+            serviceName: postgresServiceName,
+            image: postgresImage,
+            database: 'calendar_test',
+            username: 'calendar_backup',
+          },
+        }
+      : {}),
     repository: 's3:https://objects.example.invalid/calendar/beta',
     awsRegion: 'region-1',
     awsProfile: 'default',
@@ -124,6 +147,16 @@ function fakeCommands({
   failStop,
   failInspect = false,
   wrongMount = false,
+  wrongPostgresLabels = false,
+  wrongPostgresImage = false,
+  wrongPostgresImageId = false,
+  duplicatePostgresContainers = false,
+  postgresRunning = true,
+  failContainerDump = false,
+  emptyContainerDump = false,
+  changePostgresContainerAfterDump = false,
+  onContainerDump,
+  waitForContainerDumpAbort = false,
   failDump = false,
   warningDump = false,
   emptyDump = false,
@@ -147,6 +180,7 @@ function fakeCommands({
   const running = new Set(initialRunning);
   const calls = [];
   let firstStop = true;
+  let postgresContainerChanged = false;
 
   const command = async (name, args, options = {}) => {
     const call = { name, args: [...args], options };
@@ -159,6 +193,26 @@ function fakeCommands({
         State: running.has(service) ? 'running' : 'exited',
       }));
       return { status: 0, stdout: JSON.stringify(records) };
+    }
+
+    if (
+      name === 'docker' &&
+      args[0] === 'ps' &&
+      args.includes('--all') &&
+      args.some((arg) =>
+        String(arg).startsWith('label=com.docker.compose.project='),
+      )
+    ) {
+      const id = postgresContainerChanged
+        ? replacementPostgresContainerId
+        : postgresContainerId;
+      const records = [
+        { ID: id, State: postgresRunning ? 'running' : 'exited' },
+        ...(duplicatePostgresContainers
+          ? [{ ID: '1'.repeat(64), State: 'exited' }]
+          : []),
+      ];
+      return { status: 0, stdout: records.map(JSON.stringify).join('\n') };
     }
 
     if (name === 'docker' && args[0] === 'ps') {
@@ -199,6 +253,47 @@ function fakeCommands({
         return { status: 1, stdout: 'synthetic-private-inspect-output' };
       }
       const id = args.at(-1);
+      if ([postgresContainerId, replacementPostgresContainerId].includes(id)) {
+        const format = args[2];
+        if (format === '{{.Id}}') {
+          return { status: 0, stdout: `${id}\n` };
+        }
+        if (format === '{{.Config.Image}}') {
+          return {
+            status: 0,
+            stdout: `${wrongPostgresImage ? 'wrong:image' : postgresImage}\n`,
+          };
+        }
+        if (format === '{{.Image}}') {
+          const actualImageId = wrongPostgresImageId
+            ? `sha256:${'0'.repeat(64)}`
+            : postgresImageId;
+          return {
+            status: 0,
+            stdout: `${actualImageId}\n`,
+          };
+        }
+        if (format.includes('.Config.Labels')) {
+          return {
+            status: 0,
+            stdout: JSON.stringify({
+              'com.docker.compose.project': wrongPostgresLabels
+                ? 'foreign-project'
+                : postgresProjectName,
+              'com.docker.compose.service': postgresServiceName,
+            }),
+          };
+        }
+        if (format.includes('.State')) {
+          return {
+            status: 0,
+            stdout: JSON.stringify({
+              Running: postgresRunning,
+              Status: postgresRunning ? 'running' : 'exited',
+            }),
+          };
+        }
+      }
       const service = Object.keys(containerIds).find(
         (name) => containerIds[name] === id,
       );
@@ -276,12 +371,51 @@ function fakeCommands({
       return { status: 0, stdout: 'synthetic-volume-inspect' };
     }
     if (name === 'docker' && args[0] === 'image') {
-      return { status: 0, stdout: 'sha256:synthetic-helper-id' };
+      return {
+        status: 0,
+        stdout:
+          args.at(-1) === postgresImage
+            ? `${postgresImageId}\n`
+            : 'sha256:synthetic-helper-id',
+      };
+    }
+    if (
+      name === 'docker' &&
+      args[0] === 'exec' &&
+      args.includes('pg_dump') &&
+      args.includes('--version')
+    ) {
+      return { status: 0, stdout: 'pg_dump (PostgreSQL) 16.15\n' };
+    }
+    if (name === 'docker' && args[0] === 'exec' && args.includes('pg_dump')) {
+      if (options.stdoutPath) {
+        await writeFile(
+          options.stdoutPath,
+          emptyContainerDump ? '' : 'synthetic-container-pg-dump',
+          { flag: 'wx', mode: 0o600 },
+        );
+      }
+      if (onContainerDump) await onContainerDump(options);
+      if (changePostgresContainerAfterDump) postgresContainerChanged = true;
+      if (waitForContainerDumpAbort) {
+        await new Promise((resolve) => {
+          if (options.signal.aborted) {
+            resolve();
+          } else {
+            options.signal.addEventListener('abort', resolve, { once: true });
+          }
+        });
+      }
+      return {
+        status: failContainerDump || waitForContainerDumpAbort ? 1 : 0,
+        stdout: 'synthetic-container-database-diagnostic',
+        stderr: failContainerDump ? 'private container pg_dump detail' : '',
+      };
     }
     if (name === 'docker') return { status: 0, stdout: 'ok' };
 
     if (name === 'pg_dump' && args[0] === '--version') {
-      return { status: 0, stdout: 'pg_dump synthetic version' };
+      return { status: 0, stdout: 'pg_dump (PostgreSQL) 16.15\n' };
     }
     if (name === 'pg_dump') {
       if (options.stdoutPath) {
@@ -304,7 +438,10 @@ function fakeCommands({
     if (name === 'pg_restore') {
       return {
         status: args[0] === '--version' || !failDumpList ? 0 : 1,
-        stdout: 'synthetic-database-object-list',
+        stdout:
+          args[0] === '--version'
+            ? 'pg_restore (PostgreSQL) 16.15\n'
+            : 'synthetic-database-object-list',
         stderr: failDumpList ? 'synthetic-private-restore-diagnostic' : '',
       };
     }
@@ -421,6 +558,7 @@ test('captures the configured paired stores, resumes services, then uploads one 
   assert.deepEqual(files, [
     '.capture-complete',
     'SHA256SUMS',
+    'capture-manifest.json',
     'radicale-data.tar',
     'reminder-postgresql.dump',
     'server-data.tar',
@@ -437,7 +575,26 @@ test('captures the configured paired stores, resumes services, then uploads one 
   assert.match(checksums, /radicale-data\.tar/u);
   assert.match(checksums, /server-data\.tar/u);
   assert.match(checksums, /reminder-postgresql\.dump/u);
+  assert.match(checksums, /capture-manifest\.json/u);
   assert.doesNotMatch(checksums, /\.partial/u);
+  assert.deepEqual(
+    JSON.parse(
+      await readFile(
+        join(result.captureDirectory, 'capture-manifest.json'),
+        'utf8',
+      ),
+    ),
+    {
+      schemaVersion: 1,
+      postgresDump: {
+        enabled: true,
+        format: 'custom',
+        transport: 'native',
+        pgDumpVersion: 'pg_dump (PostgreSQL) 16.15',
+        pgRestoreVersion: 'pg_restore (PostgreSQL) 16.15',
+      },
+    },
+  );
 
   const resticIndex = commandIndex(
     fake.calls,
@@ -458,6 +615,16 @@ test('captures the configured paired stores, resumes services, then uploads one 
       (call) =>
         call.name === 'pg_dump' && call.args.includes('--format=custom'),
     ) < resticIndex,
+  );
+  assert.equal(
+    fake.calls.some(
+      (call) =>
+        call.name === 'docker' &&
+        call.args[0] === 'exec' &&
+        call.args.includes('pg_dump'),
+    ),
+    false,
+    'the omitted transport keeps the native default',
   );
 
   const archiveCommands = fake.calls.filter(
@@ -526,6 +693,303 @@ test('captures the configured paired stores, resumes services, then uploads one 
   assert.equal(
     fake.calls.some(
       (call) => call.name === 'restic' && ['ls', 'dump'].includes(call.args[0]),
+    ),
+    false,
+  );
+});
+
+test('container-exec streams a verified custom dump over a local socket and records its transport', async (t) => {
+  const fixture = await makeFixture({
+    postgresDumpTransport: 'container-exec',
+  });
+  t.after(fixture.cleanup);
+  const fake = fakeCommands();
+
+  const result = await runColdBackup(fixture.config, {
+    command: fake.command,
+    env: fixture.env,
+    id: () => 'container-exec-success',
+  });
+
+  const dumpCall = fake.calls.find(
+    (call) =>
+      call.name === 'docker' &&
+      call.args[0] === 'exec' &&
+      call.args.includes('pg_dump') &&
+      call.args.includes('--format=custom') &&
+      !call.args.includes('--version'),
+  );
+  assert.ok(dumpCall);
+  assert.equal(dumpCall.args.includes('--no-password'), true);
+  assert.equal(dumpCall.args.includes('--host=/var/run/postgresql'), true);
+  assert.equal(dumpCall.args.includes('--username=calendar_backup'), true);
+  assert.equal(dumpCall.args.includes('--dbname=calendar_test'), true);
+  assert.equal(dumpCall.args.includes(postgresContainerId), true);
+  assert.ok(dumpCall.args.includes('/usr/bin/env'));
+  assert.ok(dumpCall.args.includes('-i'));
+  assert.equal(dumpCall.args.includes('PGSERVICE='), false);
+  assert.equal(dumpCall.args.includes('PGPASSWORD='), false);
+  assert.deepEqual(
+    dumpCall.args.slice(
+      dumpCall.args.indexOf('-i') + 1,
+      dumpCall.args.indexOf('pg_dump'),
+    ),
+    [
+      'PATH=/usr/local/bin:/usr/bin:/bin',
+      'PGPASSFILE=/dev/null',
+      'PGSERVICEFILE=/dev/null',
+    ],
+    'only safe environment variables reach pg_dump',
+  );
+  assert.ok(
+    dumpCall.options.stdoutPath.endsWith('reminder-postgresql.dump.partial'),
+  );
+  assert.equal(dumpCall.options.env.PGPASSWORD, undefined);
+  assert.equal(dumpCall.options.env.PGPASSFILE, undefined);
+  assert.equal(dumpCall.options.env.PGSERVICE, undefined);
+  assert.equal(dumpCall.options.env.PGSERVICEFILE, undefined);
+  assert.equal(
+    dumpCall.args.some((arg) =>
+      [
+        'synthetic-db-password',
+        'synthetic-s3-key',
+        'synthetic-restic-password',
+      ].includes(arg),
+    ),
+    false,
+  );
+  assert.equal(
+    fake.calls.some(
+      (call) => call.name === 'pg_dump' && !call.args.includes('--version'),
+    ),
+    false,
+  );
+  assert.equal(
+    fake.calls.some(
+      (call) => call.name === 'pg_restore' && call.args[0] === '--list',
+    ),
+    true,
+  );
+  const manifest = JSON.parse(
+    await readFile(
+      join(result.captureDirectory, 'capture-manifest.json'),
+      'utf8',
+    ),
+  );
+  assert.deepEqual(manifest, {
+    schemaVersion: 1,
+    postgresDump: {
+      enabled: true,
+      format: 'custom',
+      transport: 'container-exec',
+      pgDumpVersion: 'pg_dump (PostgreSQL) 16.15',
+      pgRestoreVersion: 'pg_restore (PostgreSQL) 16.15',
+    },
+  });
+});
+
+test('container-exec fails closed when its target identity is ambiguous or untrusted', async (t) => {
+  const cases = [
+    {
+      name: 'duplicate labeled containers',
+      options: { duplicatePostgresContainers: true },
+    },
+    { name: 'stopped target container', options: { postgresRunning: false } },
+    { name: 'wrong Compose labels', options: { wrongPostgresLabels: true } },
+    {
+      name: 'wrong pinned image reference',
+      options: { wrongPostgresImage: true },
+    },
+    {
+      name: 'container image ID differs from the pinned local image',
+      options: { wrongPostgresImageId: true },
+    },
+  ];
+
+  for (const scenario of cases) {
+    await t.test(scenario.name, async (subtest) => {
+      const fixture = await makeFixture({
+        postgresDumpTransport: 'container-exec',
+      });
+      subtest.after(fixture.cleanup);
+      const fake = fakeCommands(scenario.options);
+
+      await assert.rejects(
+        runColdBackup(fixture.config, {
+          command: fake.command,
+          env: fixture.env,
+          id: () => 'untrusted-postgres-target',
+        }),
+        (error) =>
+          error instanceof ColdBackupFailure && error.stage === 'preflight',
+      );
+      assert.equal(
+        fake.calls.some(
+          (call) => call.name === 'docker' && call.args.includes('stop'),
+        ),
+        false,
+      );
+      assert.equal(
+        fake.calls.some(
+          (call) =>
+            call.name === 'docker' &&
+            call.args[0] === 'exec' &&
+            call.args.includes('pg_dump'),
+        ),
+        false,
+      );
+      assert.equal(
+        fake.calls.some(
+          (call) => call.name === 'restic' && call.args[0] === 'backup',
+        ),
+        false,
+      );
+      assert.deepEqual(await readdir(fixture.captureRoot), []);
+    });
+  }
+});
+
+test('container-exec removes partial dumps on command or post-dump identity failure', async (t) => {
+  const cases = [
+    { name: 'pg_dump failure', options: { failContainerDump: true } },
+    { name: 'empty pg_dump output', options: { emptyContainerDump: true } },
+    {
+      name: 'container identity changes after dump',
+      options: { changePostgresContainerAfterDump: true },
+    },
+  ];
+
+  for (const scenario of cases) {
+    await t.test(scenario.name, async (subtest) => {
+      const fixture = await makeFixture({
+        postgresDumpTransport: 'container-exec',
+      });
+      subtest.after(fixture.cleanup);
+      const fake = fakeCommands(scenario.options);
+
+      await assert.rejects(
+        runColdBackup(fixture.config, {
+          command: fake.command,
+          env: fixture.env,
+          id: () => 'rejected-container-dump',
+        }),
+        (error) => {
+          assert.doesNotMatch(
+            `${error.name} ${error.message} ${error.stage}`,
+            /synthetic-container-database-diagnostic|private container pg_dump detail/u,
+          );
+          return (
+            error instanceof ColdBackupFailure && error.stage === 'database'
+          );
+        },
+      );
+
+      const captureDirectories = (await readdir(fixture.captureRoot)).filter(
+        (name) => name !== '.matrix-calendar-cold-backup.lock',
+      );
+      assert.equal(captureDirectories.length, 1);
+      const captureDirectory = join(fixture.captureRoot, captureDirectories[0]);
+      assert.equal(
+        (await readdir(captureDirectory)).some((name) =>
+          name.endsWith('.partial'),
+        ),
+        false,
+      );
+      assert.equal(
+        fake.calls.some(
+          (call) => call.name === 'restic' && call.args[0] === 'backup',
+        ),
+        false,
+      );
+      assert.ok(
+        fake.calls.some(
+          (call) =>
+            call.name === 'docker' &&
+            call.args[0] === 'compose' &&
+            call.args.includes('start'),
+        ),
+        'services resume after dump failure',
+      );
+    });
+  }
+});
+
+test('container-exec requires explicit target config and does not accept native auth files', async (t) => {
+  const fixture = await makeFixture({
+    postgresDumpTransport: 'container-exec',
+  });
+  t.after(fixture.cleanup);
+  const invalidConfigs = [
+    { ...fixture.config, postgresContainer: undefined },
+    { ...fixture.config, pgService: 'calendar-service' },
+    {
+      ...fixture.config,
+      postgresContainer: {
+        ...fixture.config.postgresContainer,
+        password: 'synthetic-secret',
+      },
+    },
+  ];
+
+  for (const config of invalidConfigs) {
+    const fake = fakeCommands();
+    await assert.rejects(
+      runColdBackup(config, { command: fake.command, env: fixture.env }),
+      (error) =>
+        error instanceof ColdBackupFailure && error.stage === 'configuration',
+    );
+    assert.equal(fake.calls.length, 0);
+  }
+});
+
+test('container-exec removes partial output when the dump is cancelled', async (t) => {
+  const fixture = await makeFixture({
+    postgresDumpTransport: 'container-exec',
+  });
+  t.after(fixture.cleanup);
+  const controller = new AbortController();
+  let signalDumpStarted;
+  const dumpStarted = new Promise((resolveStarted) => {
+    signalDumpStarted = resolveStarted;
+  });
+  const fake = fakeCommands({
+    waitForContainerDumpAbort: true,
+    onContainerDump: signalDumpStarted,
+  });
+
+  const backup = runColdBackup(fixture.config, {
+    command: fake.command,
+    env: fixture.env,
+    signal: controller.signal,
+    id: () => 'cancel-container-dump',
+  });
+  await dumpStarted;
+  controller.abort();
+  await assert.rejects(
+    backup,
+    (error) => error instanceof ColdBackupFailure && error.stage === 'database',
+  );
+
+  const captureDirectories = (await readdir(fixture.captureRoot)).filter(
+    (name) => name !== '.matrix-calendar-cold-backup.lock',
+  );
+  assert.equal(captureDirectories.length, 1);
+  const captureDirectory = join(fixture.captureRoot, captureDirectories[0]);
+  assert.equal(
+    (await readdir(captureDirectory)).some((name) => name.endsWith('.partial')),
+    false,
+  );
+  assert.ok(
+    fake.calls.some(
+      (call) =>
+        call.name === 'docker' &&
+        call.args[0] === 'compose' &&
+        call.args.includes('start'),
+    ),
+  );
+  assert.equal(
+    fake.calls.some(
+      (call) => call.name === 'restic' && call.args[0] === 'backup',
     ),
     false,
   );
@@ -693,6 +1157,7 @@ test('opt-in cleanup preserves the marked capture when backup or snapshot proof 
     assert.deepEqual((await readdir(captureDirectory)).sort(), [
       '.capture-complete',
       'SHA256SUMS',
+      'capture-manifest.json',
       'radicale-data.tar',
       'server-data.tar',
     ]);
@@ -987,8 +1452,8 @@ test(
     assert.deepEqual(cleanupListing[0].paths, [cleanupResult.captureDirectory]);
     assert.equal(
       cleanupListing.length,
-      6,
-      'snapshot, capture directory, and four expected flat files',
+      7,
+      'snapshot, capture directory, and five expected flat files',
     );
     assert.equal(markerReadbackMatches, true);
     assert.equal(reportedResticVersion, '0.19.1');
