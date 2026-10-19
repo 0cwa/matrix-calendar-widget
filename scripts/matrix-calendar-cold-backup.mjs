@@ -1688,7 +1688,7 @@ async function capturePostgres(
           '/usr/bin/env',
           '-i',
           `PATH=${POSTGRES_CONTAINER_PATH}`,
-          'PGPASSFILE=/dev/null',
+          'PGPASSFILE=/dev/null/.pgpass',
           'PGSERVICEFILE=/dev/null',
           'pg_dump',
           '--no-password',
