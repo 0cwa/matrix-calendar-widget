@@ -24,6 +24,7 @@ const ACTION_PHASES = [
   'desktop_startup_summary',
   'acceptance_stack_cleanup',
 ];
+
 function outcomesWithDefault(outcome = 'success') {
   return Object.fromEntries(ACTION_PHASES.map((phase) => [phase, outcome]));
 }

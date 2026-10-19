@@ -2,21 +2,6 @@ import { appendFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const ACTION_PHASES = Object.freeze([
-  'desktop_journey',
-  'desktop_journey_cleanup',
-  'reminder_room',
-  'reminder_enable',
-  'reminder_initial',
-  'reminder_restart',
-  'reminder_restore',
-  'web_client_interactions',
-  'web_acceptance_summary',
-  'desktop_journey_summary',
-  'desktop_startup_summary',
-  'acceptance_stack_cleanup',
-]);
-
 const OUTCOME_ENVIRONMENT_KEYS = Object.freeze({
   desktop_journey: 'ELEMENT_ACCEPTANCE_PHASE_DESKTOP_JOURNEY',
   desktop_journey_cleanup: 'ELEMENT_ACCEPTANCE_PHASE_DESKTOP_JOURNEY_CLEANUP',
@@ -31,6 +16,8 @@ const OUTCOME_ENVIRONMENT_KEYS = Object.freeze({
   desktop_startup_summary: 'ELEMENT_ACCEPTANCE_PHASE_DESKTOP_STARTUP_SUMMARY',
   acceptance_stack_cleanup: 'ELEMENT_ACCEPTANCE_PHASE_ACCEPTANCE_STACK_CLEANUP',
 });
+
+const ACTION_PHASES = Object.freeze(Object.keys(OUTCOME_ENVIRONMENT_KEYS));
 
 const STATUS_BY_OUTCOME = Object.freeze({
   success: 'passed',
