@@ -698,6 +698,115 @@ test('captures the configured paired stores, resumes services, then uploads one 
   );
 });
 
+test('anchors Compose file paths at the configured project directory', async (t) => {
+  const composeVersion = await defaultCommand('docker', ['compose', 'version']);
+  if (composeVersion.status !== 0) {
+    t.skip('Docker Compose is unavailable.');
+    return;
+  }
+
+  const fixture = await makeFixture({ databaseEnabled: false });
+  t.after(fixture.cleanup);
+  const deployDirectory = join(fixture.config.projectDirectory, 'deploy');
+  const composeFile = join(deployDirectory, 'etke-sidecar.compose.yaml');
+  const projectRootEnvFile = join(deployDirectory, '.env.server');
+  const composeFileDirectoryEnvFile = join(
+    deployDirectory,
+    'deploy',
+    '.env.server',
+  );
+  await mkdir(join(deployDirectory, 'deploy'), { recursive: true });
+  await writeFile(
+    composeFile,
+    [
+      'services:',
+      '  server:',
+      '    image: busybox:1.37.0',
+      '    env_file:',
+      '      - ./deploy/.env.server',
+      '',
+    ].join('\n'),
+  );
+  await writeFile(projectRootEnvFile, 'SYNTHETIC_PATH_SOURCE=project-root\n');
+  await writeFile(
+    composeFileDirectoryEnvFile,
+    'SYNTHETIC_PATH_SOURCE=compose-file-directory\n',
+  );
+
+  const dockerEnv = {
+    PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+    HOME: process.env.HOME ?? '/',
+    PWD: fixture.config.projectDirectory,
+    DOCKER_HOST: `unix://${fixture.config.dockerSocket}`,
+  };
+  const dockerOptions = {
+    cwd: fixture.config.projectDirectory,
+    env: dockerEnv,
+  };
+  const oldBaseConfig = await defaultCommand(
+    'docker',
+    [
+      'compose',
+      '--project-name',
+      fixture.config.projectName,
+      '--env-file',
+      fixture.composeEnvFile,
+      '-f',
+      composeFile,
+      'config',
+      '--format',
+      'json',
+    ],
+    dockerOptions,
+  );
+  assert.equal(oldBaseConfig.status, 0, oldBaseConfig.stderr);
+  assert.equal(
+    JSON.parse(oldBaseConfig.stdout).services.server.environment
+      .SYNTHETIC_PATH_SOURCE,
+    'compose-file-directory',
+  );
+
+  const fake = fakeCommands({ databaseEnabled: false });
+  let anchoredConfig;
+  let anchoredConfigArgs;
+  const command = async (name, args, options) => {
+    if (
+      name === 'docker' &&
+      args[0] === 'compose' &&
+      args.includes('config') &&
+      args.includes('--quiet')
+    ) {
+      anchoredConfigArgs = [...args];
+      const jsonArgs = args.filter((argument) => argument !== '--quiet');
+      jsonArgs.push('--format', 'json');
+      anchoredConfig = await defaultCommand(name, jsonArgs, options);
+      return anchoredConfig;
+    }
+    return fake.command(name, args, options);
+  };
+  await runColdBackup(fixture.config, {
+    command,
+    env: fixture.env,
+    now: () => new Date('2026-10-12T02:03:04.000Z'),
+    id: () => 'project-directory-path-test',
+  });
+
+  assert.equal(anchoredConfig.status, 0, anchoredConfig.stderr);
+  const projectDirectoryIndex = anchoredConfigArgs.indexOf(
+    '--project-directory',
+  );
+  assert.ok(projectDirectoryIndex >= 0);
+  assert.equal(
+    anchoredConfigArgs[projectDirectoryIndex + 1],
+    fixture.config.projectDirectory,
+  );
+  assert.equal(
+    JSON.parse(anchoredConfig.stdout).services.server.environment
+      .SYNTHETIC_PATH_SOURCE,
+    'project-root',
+  );
+});
+
 test('container-exec streams a verified custom dump over a local socket and records its transport', async (t) => {
   const fixture = await makeFixture({
     postgresDumpTransport: 'container-exec',
