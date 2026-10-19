@@ -23,6 +23,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { mock, resetCalls } from 'ts-mockito';
 import { IAppConfiguration } from '../../src/IAppConfiguration';
+import { MatrixEndpoint } from '../../src/MatrixEndpoint';
 import { MatrixAuthMiddleware } from '../../src/middleware/MatrixAuthMiddleware';
 import { MATRIX_OPENID_CREDENTIAL_CONTEXT } from '../../src/model/IMatrixOpenIdCredential';
 import { createAppConfig } from '../util/MockUtils';
@@ -35,6 +36,8 @@ describe('test relevant functionality of MatrixAuthMiddleware', () => {
     fetch.resetMocks();
     fetch.enableMocks();
     resetCalls(clientMock);
+    appConfig.homeserver_url = 'https://matrix.example.org';
+    appConfig.matrix_openid_userinfo_origin = undefined;
   });
 
   test('production module registers MatrixAuthMiddleware for bootstrap', () => {
@@ -70,7 +73,6 @@ describe('test relevant functionality of MatrixAuthMiddleware', () => {
   });
 
   test('MX-Identity valid authorization-header', async () => {
-    appConfig.homeserver_url = 'abc';
     const matrixAuth = new MatrixAuthMiddleware(appConfig);
     const auth = `MX-Identity ${base64url(
       '{"state":"allowed","original_request_id":"widgetapi-163.....28529","access_token":"gaRTYVTSFO-----","token_type":"Bearer","matrix_server_name":"server","expires_in":3600,"expirationDate":"2021-10-11T08:47:11.551Z"}',
@@ -85,6 +87,10 @@ describe('test relevant functionality of MatrixAuthMiddleware', () => {
     const result = await matrixAuth.extractUserContext(mockRequest);
 
     expect(result?.userId).toEqual('@user:server');
+    expect(fetch).toHaveBeenCalledWith(
+      `https://matrix.example.org${MatrixEndpoint.USER_INFO}?access_token=gaRTYVTSFO-----`,
+      { redirect: 'error' },
+    );
     expect(
       (mockRequest as Request & Record<string, unknown>)[
         MATRIX_OPENID_CREDENTIAL_CONTEXT
@@ -93,6 +99,82 @@ describe('test relevant functionality of MatrixAuthMiddleware', () => {
       accessToken: 'gaRTYVTSFO-----',
       matrixServerName: 'server',
     });
+  });
+
+  test('preserves the existing homeserver URL construction when unset', async () => {
+    appConfig.homeserver_url = 'https://matrix.example.org/prefix';
+    const matrixAuth = new MatrixAuthMiddleware(appConfig);
+    const auth = `MX-Identity ${base64url(
+      JSON.stringify({
+        access_token: 'valid-token',
+        matrix_server_name: 'server',
+      }),
+    )}`;
+    const mockRequest = {
+      headers: { authorization: auth },
+    } as Request;
+    fetch.mockResponseOnce(JSON.stringify({ sub: '@user:server' }));
+
+    await expect(
+      matrixAuth.extractUserContext(mockRequest),
+    ).resolves.toMatchObject({
+      userId: '@user:server',
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      `https://matrix.example.org/prefix${MatrixEndpoint.USER_INFO}?access_token=valid-token`,
+      { redirect: 'error' },
+    );
+  });
+
+  test('uses the configured origin only for the fixed OpenID userinfo path', async () => {
+    appConfig.matrix_openid_userinfo_origin = 'https://openid.example.org/';
+    const matrixAuth = new MatrixAuthMiddleware(appConfig);
+    const auth = `MX-Identity ${base64url(
+      JSON.stringify({
+        access_token: 'valid-token',
+        matrix_server_name: 'server',
+      }),
+    )}`;
+    const mockRequest = {
+      headers: { authorization: auth },
+    } as Request;
+    fetch.mockResponseOnce(JSON.stringify({ sub: '@user:server' }));
+
+    await expect(
+      matrixAuth.extractUserContext(mockRequest),
+    ).resolves.toMatchObject({
+      userId: '@user:server',
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      `https://openid.example.org${MatrixEndpoint.USER_INFO}?access_token=valid-token`,
+      { redirect: 'error' },
+    );
+  });
+
+  test('fails closed when OpenID userinfo fetch refuses a redirect', async () => {
+    appConfig.matrix_openid_userinfo_origin = 'https://openid.example.org';
+    const matrixAuth = new MatrixAuthMiddleware(appConfig);
+    const auth = `MX-Identity ${base64url(
+      JSON.stringify({
+        access_token: 'redirect-sentinel',
+        matrix_server_name: 'server',
+      }),
+    )}`;
+    const mockRequest = {
+      headers: { authorization: auth },
+    } as Request;
+    fetch.mockRejectOnce(new TypeError('redirect refused'));
+
+    await expect(matrixAuth.extractUserContext(mockRequest)).rejects.toThrow(
+      'Unable to verify Matrix identity',
+    );
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledWith(
+      `https://openid.example.org${MatrixEndpoint.USER_INFO}?access_token=redirect-sentinel`,
+      { redirect: 'error' },
+    );
   });
 
   test('MX-Identity invalid authorization-header for example not base64Url', async () => {
@@ -193,6 +275,7 @@ describe('test relevant functionality of MatrixAuthMiddleware', () => {
   });
 
   test('Bearer authorization-header', async () => {
+    appConfig.matrix_openid_userinfo_origin = 'https://openid.example.org';
     const matrixAuth = new MatrixAuthMiddleware(appConfig);
     const auth = 'Bearer syt_bWlraGFpbA_PyWOkXWDjmWqFSOYGBiI_2aBYTR';
     const mockRequest = {
@@ -205,6 +288,15 @@ describe('test relevant functionality of MatrixAuthMiddleware', () => {
     const result = await matrixAuth.extractUserContext(mockRequest);
 
     expect(result?.userId).toEqual('@user');
+    expect(fetch).toHaveBeenCalledWith(
+      `${appConfig.homeserver_url}${MatrixEndpoint.WHO_AM_I}`,
+      {
+        headers: {
+          Authorization: auth,
+          'Content-Type': 'application/json',
+        },
+      },
+    );
     expect(
       (mockRequest as Request & Record<string, unknown>)[
         MATRIX_OPENID_CREDENTIAL_CONTEXT

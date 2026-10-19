@@ -106,7 +106,16 @@ canonical calendar store.
    widget access, the gateway passes the same request-scoped OpenID proof it
    has validated for the actor, using ADR009's tagged payload and the actor's
    Matrix localpart. The adapter verifies the proof subject independently.
-   Do not mint a different user's proof or infer a user from a room event.
+   The gateway's userinfo request uses the fixed
+   `/_matrix/federation/v1/openid/userinfo` path on `HOMESERVER_URL` by
+   default. An optional operator-only `MATRIX_OPENID_USERINFO_URL` setting
+   may select a different origin for that gateway request; it accepts an
+   origin only, requires HTTPS except HTTP on loopback for isolated local
+   tests, and does not change bearer Client-Server API requests or Matrix
+   server-name equality checks. The URL path is fixed and redirects are
+   refused because the proof is carried in the query string. An unset or empty
+   setting preserves the existing `HOMESERVER_URL` request construction. Do
+   not mint a different user's proof or infer a user from a room event.
 5. **Use a dedicated appservice-owned principal for room calendars under M6.** For a
    room-target operation, the gateway authenticates the widget actor with its
    validated OpenID proof or accepts the bot actor only from an authenticated
@@ -210,6 +219,11 @@ supported Auth interface and does not add a new proxy identity protocol.
   require a future ADR.
 - The widget gateway and owned Radicale backend use tagged OpenID proofs only;
   no external auth package or dual-backend composition is part of the image.
+- The widget gateway may send its OpenID userinfo request to an explicit,
+  origin-only operator endpoint. Its path remains fixed, redirects are refused,
+  bearer Client-Server requests keep using `HOMESERVER_URL`, and omitting the
+  setting preserves the existing userinfo request target. Radicale continues
+  to verify tagged proofs against its separately configured Matrix homeserver.
 - The etke-managed production path is not verified by this decision. If the
   actual host cannot replace the Radicale image while preserving its
   configuration, network, service lifecycle, and `/data` volume, room access
@@ -250,6 +264,10 @@ supported Auth interface and does not add a new proxy identity protocol.
 - Tests prove that tagged personal OpenID proofs are accepted only for their
   exact Matrix subject and that untagged/other password credentials are
   rejected before any homeserver request.
+- Gateway tests prove the optional userinfo setting accepts only a secure
+  origin (with a loopback HTTP exception for isolated tests), keeps the path
+  fixed, refuses redirects, preserves the legacy unset target, and leaves
+  bearer Client-Server requests on `HOMESERVER_URL`.
 - M2 issue #45's real-container contract covers same-user enumeration,
   invalid-identity rejection, and nonmember denial before CalDAV I/O. A
   focused mocked `CalendarGatewayMembershipGuard` test directly covers a

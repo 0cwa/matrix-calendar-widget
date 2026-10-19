@@ -39,6 +39,9 @@ This is the executable plan for the initial fork. Agents should keep checkboxes 
 - [x] Add gateway API module to the inherited bot/server deployable.
 - [x] Implement widget Matrix OpenID request/exchange.
 - [x] Validate Matrix identity server-side.
+- [x] Keep OpenID userinfo on `HOMESERVER_URL` by default, with an optional
+      validated fixed origin for this request only. Refuse redirects because
+      the proof is sent in the query (ADR024).
 - [x] Resolve room membership and authorization context.
 - [x] Implement CalDAV service discovery and calendar enumeration against Radicale (#44/#49/#55/#56).
 - [x] Define the server-side Radicale credential/delegation strategy without handling user Matrix passwords (ADR009 / #54).

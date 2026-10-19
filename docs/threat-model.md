@@ -81,13 +81,19 @@ so the whole server is not OpenID-only. See
 
 ### Gateway to Matrix homeserver
 
-The gateway selects `HOMESERVER_URL` from server configuration; a request
-cannot choose the verification host
-([configuration.ts](../matrix-calendar-server/src/configuration.ts)). OpenID
-user-info requests put the short-lived `access_token` in the query string,
-then call `fetch` without a caller-selected origin
+The gateway uses `HOMESERVER_URL` for Matrix Client-Server requests and as the
+default origin for OpenID userinfo verification. Operators may set
+`MATRIX_OPENID_USERINFO_URL` to a fixed origin for that verification request
+only; the setting rejects paths, queries, fragments, and credentials, and
+permits HTTP only on loopback
+([configuration.ts](../matrix-calendar-server/src/configuration.ts)). The
+Matrix userinfo path is fixed in the gateway, and request fields cannot select
+the verification origin. Userinfo requests carry the short-lived
+`access_token` in the query string and refuse redirects
 ([MatrixAuthMiddleware.ts#L133-L154](../matrix-calendar-server/src/middleware/MatrixAuthMiddleware.ts#L133-L154)).
-Membership and power lookups use the server's Matrix client.
+Apply query-token redaction to the verification origin's logs and every proxy
+or access-log boundary on that route. Membership and power lookups use the
+server's Matrix client.
 
 ### Gateway to personal CalDAV
 

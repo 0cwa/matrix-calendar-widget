@@ -51,6 +51,13 @@ These environment variables apply to the bot container:
 # the base url of the matrix homeserver
 HOMESERVER_URL=https://synapse.example.com
 
+# optional - fixed origin used only for widget OpenID userinfo verification
+# The endpoint path is fixed by the server. HTTPS is required except for
+# loopback HTTP in isolated local tests; do not include a path, query, or
+# fragment. When unset or empty, the existing HOMESERVER_URL behavior remains.
+# It does not change bearer Client-Server requests or Matrix identity checks.
+# MATRIX_OPENID_USERINFO_URL=https://synapse.example.com
+
 # optional at startup; required by the authenticated calendar discovery endpoint
 # the base URL of the Radicale/CalDAV service
 RADICALE_URL=https://calendar.example.com

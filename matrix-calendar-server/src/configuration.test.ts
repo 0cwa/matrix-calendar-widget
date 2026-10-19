@@ -611,3 +611,62 @@ describe('room calendar principal mode configuration', () => {
     );
   });
 });
+
+describe('Matrix OpenID userinfo origin configuration', () => {
+  const variable = 'MATRIX_OPENID_USERINFO_URL';
+  const originalValue = process.env[variable];
+
+  afterEach(() => {
+    if (originalValue === undefined) {
+      delete process.env[variable];
+    } else {
+      process.env[variable] = originalValue;
+    }
+  });
+
+  it('is optional and loads the explicit operator origin', () => {
+    delete process.env[variable];
+    expect(
+      configuration().config.matrix_openid_userinfo_origin,
+    ).toBeUndefined();
+
+    process.env[variable] = 'https://openid.example.org';
+    expect(configuration().config.matrix_openid_userinfo_origin).toBe(
+      'https://openid.example.org',
+    );
+
+    process.env[variable] = '';
+    expect(
+      configuration().config.matrix_openid_userinfo_origin,
+    ).toBeUndefined();
+  });
+
+  it('accepts HTTPS origins and loopback HTTP origins for isolated tests', () => {
+    const schema = ValidationSchema.extract(variable);
+    for (const value of [
+      'https://openid.example.org',
+      'https://openid.example.org/',
+      'http://localhost:8008',
+      'http://127.0.0.1:8008',
+      'http://[::1]:8008',
+    ]) {
+      expect(schema.validate(value).error).toBeUndefined();
+    }
+  });
+
+  it('rejects insecure remote URLs and values that are not origins', () => {
+    const schema = ValidationSchema.extract(variable);
+    for (const value of [
+      'http://openid.example.org',
+      'ftp://openid.example.org',
+      'file:///tmp/openid',
+      'https://user:password@openid.example.org',
+      'https://@openid.example.org',
+      'https://openid.example.org/_matrix/federation/v1/openid/userinfo',
+      'https://openid.example.org?access_token=proof',
+      'https://openid.example.org#fragment',
+    ]) {
+      expect(schema.validate(value).error).toBeDefined();
+    }
+  });
+});
