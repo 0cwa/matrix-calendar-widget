@@ -835,7 +835,7 @@ test('failure artifact carries only the closed gateway smoke classification', ()
     gatewayNetworkSmoke,
   });
 
-  assert.equal(diagnostic.schema_version, 10);
+  assert.equal(diagnostic.schema_version, 11);
   assert.equal(diagnostic.failed_phase, 'compose-run-gateway-smoke');
   assert.equal(diagnostic.failure_operation, 'gateway-network-smoke');
   assert.equal(diagnostic.failure_check, 'network-smoke');
@@ -1024,7 +1024,7 @@ test('failure artifact projects only the API CRUD probe enum fields', () => {
     failureCode: 'api-probe-process-failed',
     apiCrudProbe,
   });
-  assert.equal(diagnostic.schema_version, 10);
+  assert.equal(diagnostic.schema_version, 11);
   assert.equal(diagnostic.failure_check, 'api-contract');
   assert.deepEqual(diagnostic.api_crud_probe, apiCrudProbe);
 
@@ -1127,7 +1127,7 @@ test('reminder child failures retain only the finite fixture outcome and validat
         childExitCode: error.childExitCode,
         reminderFixture: error.reminderFixture,
       });
-      assert.equal(diagnostic.schema_version, 10);
+      assert.equal(diagnostic.schema_version, 11);
       assert.equal(diagnostic.failure_check, 'reminder-fixture');
       assert.equal(diagnostic.child_exit_code, 1);
       assert.deepEqual(diagnostic.reminder_fixture, error.reminderFixture);
@@ -2095,7 +2095,7 @@ test('foreign volume deltas stay gated and report bounded direction and owned mo
     failureCode: failure.code,
     foreignInventoryChange: failure.foreignInventoryChange,
   });
-  assert.equal(diagnostic.schema_version, 10);
+  assert.equal(diagnostic.schema_version, 11);
   assert.equal(diagnostic.cleanup_attempted, false);
   assert.equal(diagnostic.owned_cleanup_verified, false);
   const serialized = JSON.stringify(diagnostic);
@@ -2685,6 +2685,33 @@ process.stdout.write(output);
   assert.ok(removeContainer >= 0 && removeContainer < removeVolume);
   assert.ok(removeVolume < removeNetwork);
 
+  const mismatchedPlan = runCleanup(false);
+  const privateVolumeName = `${project}_private-inventory-value`;
+  assert.throws(
+    () =>
+      removeOwnedResources({
+        plan: {
+          ...mismatchedPlan.plan,
+          volumes: [
+            ...mismatchedPlan.plan.volumes,
+            { ...volume, Name: privateVolumeName },
+          ],
+        },
+        context,
+        baseline,
+        runId,
+        project,
+        prefix: 'success',
+      }),
+    (error) => {
+      assert.equal(error.stage, 'success-cleanup');
+      assert.equal(error.code, 'inventory-postcondition-failed');
+      assert.equal(error.cleanupCheckpoint, 'owned-volumes-after-containers');
+      assert.doesNotMatch(JSON.stringify(error), /private-inventory-value/u);
+      return true;
+    },
+  );
+
   const foreign = runCleanup(true);
   assert.throws(
     () =>
@@ -2778,7 +2805,7 @@ test('failure diagnostic writes fixed identity and cleanup fields outside task d
     );
     assert.equal(statSync(file).mode & 0o777, 0o600);
     const initial = JSON.parse(readFileSync(file, 'utf8'));
-    assert.equal(initial.schema_version, 10);
+    assert.equal(initial.schema_version, 11);
     assert.equal(initial.failed_phase, 'fixture-setup');
     assert.equal(initial.failure_class, 'gate-failed');
     assert.equal(initial.failure_operation, 'gate');
@@ -3259,6 +3286,43 @@ test('cleanup failure diagnostics retain the fixed check and safe phase only', (
   assert.equal(hostile.failure_operation, 'cleanup-assertion');
   assert.equal(hostile.failure_check, 'unknown');
   assert.doesNotMatch(JSON.stringify(hostile), /synthetic-private-value/u);
+});
+
+test('cleanup inventory diagnostics expose only allowlisted checkpoint identifiers', () => {
+  const fields = {
+    phase: 'success-cleanup',
+    failureClass: 'gate-failed',
+    operation: failureOperationForStage('success-cleanup'),
+    failureCode: 'inventory-postcondition-failed',
+  };
+  const expected = formatFailureDiagnostic({
+    ...fields,
+    cleanupCheckpoint: 'owned-volumes-after-containers',
+  });
+  assert.equal(expected.failure_check, 'cleanup-inventory');
+  assert.equal(expected.cleanup_checkpoint, 'owned-volumes-after-containers');
+
+  const privateInventory = {
+    containers: [{ Id: 'private-container-id' }],
+    volumes: [{ Name: 'private-volume-name' }],
+  };
+  const hostile = formatFailureDiagnostic({
+    ...fields,
+    cleanupCheckpoint: JSON.stringify(privateInventory),
+  });
+  assert.equal(hostile.cleanup_checkpoint, 'unknown');
+  assert.doesNotMatch(
+    JSON.stringify(hostile),
+    /private-container-id|private-volume-name/u,
+  );
+  assert.equal(
+    formatFailureDiagnostic({
+      phase: 'service-inventory',
+      failureCode: 'service-state-mismatch',
+      cleanupCheckpoint: 'owned-volumes-after-containers',
+    }).cleanup_checkpoint,
+    'not-applicable',
+  );
 });
 
 test('startup failure markers accept only one source-formatted closed marker matching child status', () => {
