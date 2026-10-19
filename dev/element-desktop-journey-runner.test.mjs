@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import {
   appendFileSync,
+  chmodSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -35,6 +36,7 @@ import {
   settleUidLifecycleBeforeUserDeletion,
   stopCreatedProbeUidProcesses,
   stopUidProcesses,
+  validateAcceptanceStageFilePath,
   validateDefaultPolicyPort,
   validateJourneyPolicyPorts,
 } from './element-desktop-journey-runner.mjs';
@@ -257,6 +259,37 @@ function censusChild({
   });
   return child;
 }
+
+test('validates the fixed private acceptance stage path', () => {
+  withJourneyTempDirectory((runnerTemp) => {
+    const stageFile = join(runnerTemp, 'element-acceptance-stage.jsonl');
+    writeFileSync(stageFile, '', { mode: 0o600 });
+    chmodSync(stageFile, 0o600);
+    assert.equal(
+      validateAcceptanceStageFilePath(stageFile, runnerTemp),
+      stageFile,
+    );
+
+    assert.throws(
+      () =>
+        validateAcceptanceStageFilePath(
+          join(runnerTemp, 'different-stage.jsonl'),
+          runnerTemp,
+        ),
+      /Desktop journey runner failed/u,
+    );
+
+    const symlinkTarget = join(runnerTemp, 'stage-target.jsonl');
+    writeFileSync(symlinkTarget, '', { mode: 0o600 });
+    chmodSync(symlinkTarget, 0o600);
+    rmSync(stageFile);
+    symlinkSync(symlinkTarget, stageFile);
+    assert.throws(
+      () => validateAcceptanceStageFilePath(stageFile, runnerTemp),
+      /Desktop journey runner failed/u,
+    );
+  });
+});
 
 test('classifies the real Desktop child return without retaining raw fields', () => {
   assert.deepEqual(
@@ -2193,11 +2226,13 @@ test('passes only fixed Desktop journey paths and excludes fixture secrets', () 
       PATH: '/usr/local/bin:/usr/bin:/bin',
       MATRIX_APPLICATION_SERVICE_TOKEN: 'private-service-token',
       MATRIX_CALENDAR_DEV_PASSWORD: 'private-homeserver-password',
+      ELEMENT_ACCEPTANCE_STAGE_FILE: '/tmp/untrusted-stage.jsonl',
       PLAYWRIGHT_BROWSERS_PATH: '/home/runner/.cache/ms-playwright',
     },
     {
       runnerTemp: '/tmp/runner',
       workspace: '/home/runner/work/repo/repo',
+      acceptanceStageFile: '/tmp/runner/element-acceptance-stage.jsonl',
       journeyStageFile: '/tmp/runner/journey.jsonl',
       playwrightOutput: '/tmp/runner/playwright-output',
       usersFile: '/tmp/runner/users.json',
@@ -2209,6 +2244,7 @@ test('passes only fixed Desktop journey paths and excludes fixture secrets', () 
   assert.deepEqual(Object.keys(environment).sort(), [
     'CI',
     'ELEMENT_ACCEPTANCE_DESKTOP_CREDENTIALS_FILE',
+    'ELEMENT_ACCEPTANCE_STAGE_FILE',
     'ELEMENT_ACCEPTANCE_USERS_FILE',
     'ELEMENT_DESKTOP_CDP_PORT',
     'ELEMENT_DESKTOP_JOURNEY_PLAYWRIGHT_OUTPUT',
@@ -2223,6 +2259,14 @@ test('passes only fixed Desktop journey paths and excludes fixture secrets', () 
   ]);
   assert.equal(
     JSON.stringify(environment).includes('private-service-token'),
+    false,
+  );
+  assert.equal(
+    environment.ELEMENT_ACCEPTANCE_STAGE_FILE,
+    '/tmp/runner/element-acceptance-stage.jsonl',
+  );
+  assert.equal(
+    environment.ELEMENT_ACCEPTANCE_STAGE_FILE.includes('untrusted'),
     false,
   );
   assert.equal(

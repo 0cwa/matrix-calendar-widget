@@ -4,6 +4,8 @@ export type DesktopJourneyPhase =
   | 'desktop-room-widget-read'
   | 'desktop-widget-origin-isolation'
   | 'desktop-event-create'
+  | 'desktop-keyboard-focus'
+  | 'desktop-side-panel-layout'
   | 'web-member-b-read'
   | 'web-member-b-keyboard-open'
   | 'web-member-b-details-escape-focus'
@@ -73,10 +75,19 @@ export type DesktopEventCreateFailurePoint =
   | 'event-create-post-status'
   | 'event-create-exact-row-visible';
 
+export type DesktopAccessibilityFailurePoint =
+  | 'desktop-keyboard-focus-observation'
+  | 'desktop-keyboard-focus-evidence'
+  | 'desktop-keyboard-focus-assertion'
+  | 'desktop-side-panel-layout-observation'
+  | 'desktop-side-panel-layout-evidence'
+  | 'desktop-side-panel-layout-assertion';
+
 export type DesktopJourneyFailurePoint =
   | DesktopRoomWidgetFailurePoint
   | 'origin-isolation'
   | DesktopEventCreateFailurePoint
+  | DesktopAccessibilityFailurePoint
   | WebMemberBReadFailurePoint
   | WebMemberBEditSaveFailurePoint
   | DesktopARefreshFailurePoint;
@@ -93,6 +104,20 @@ export type DesktopJourneyFailurePointObservation =
   | {
       phase: 'desktop-event-create';
       point: DesktopEventCreateFailurePoint;
+    }
+  | {
+      phase: 'desktop-keyboard-focus';
+      point: Extract<
+        DesktopAccessibilityFailurePoint,
+        `desktop-keyboard-focus-${string}`
+      >;
+    }
+  | {
+      phase: 'desktop-side-panel-layout';
+      point: Extract<
+        DesktopAccessibilityFailurePoint,
+        `desktop-side-panel-layout-${string}`
+      >;
     }
   | {
       phase: 'web-member-b-read';
@@ -318,7 +343,7 @@ export type DesktopJourneyFailureObservation =
   | null;
 
 export type DesktopJourneySummary = {
-  schemaVersion: 12;
+  schemaVersion: 13;
   sourceSha: string | null;
   status: 'passed' | 'failed' | 'incomplete';
   desktopChildCompletion: DesktopChildCompletion;
