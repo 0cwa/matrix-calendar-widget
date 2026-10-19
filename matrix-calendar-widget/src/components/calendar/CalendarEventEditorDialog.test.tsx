@@ -316,6 +316,7 @@ describe('<CalendarEventEditorDialog />', () => {
       calendars: [calendar],
       idFactory: () => 'created',
     });
+    const createEvent = vi.spyOn(repository, 'createEvent');
     const onClose = vi.fn();
 
     render(
@@ -335,6 +336,13 @@ describe('<CalendarEventEditorDialog />', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Create event' }));
 
     await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(createEvent).toHaveBeenCalledWith(
+      'team',
+      expect.objectContaining({
+        uid: 'created@example.test',
+        title: 'Created event',
+      }),
+    );
 
     await expect(repository.getEvent('team', 'created')).resolves.toMatchObject(
       {
@@ -2101,6 +2109,7 @@ describe('<CalendarEventEditorDialog />', () => {
       calendars: [calendar],
       events: [event],
     });
+    const updateEvent = vi.spyOn(repository, 'updateEvent');
     const onSaved = vi.fn();
 
     render(
@@ -2123,6 +2132,14 @@ describe('<CalendarEventEditorDialog />', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(updateEvent).toHaveBeenCalledWith(
+      'team',
+      'planning',
+      expect.objectContaining({
+        title: 'Updated planning',
+        description: undefined,
+      }),
+    );
 
     await expect(
       repository.getEvent('team', 'planning'),
@@ -2263,7 +2280,7 @@ describe('<CalendarEventEditorDialog />', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('disables saving for a read-only calendar', () => {
+  it('does not mutate a read-only calendar when the form is submitted', () => {
     const readOnlyCalendar: Calendar = {
       ...calendar,
       readOnly: true,
@@ -2272,6 +2289,7 @@ describe('<CalendarEventEditorDialog />', () => {
       calendars: [readOnlyCalendar],
       events: [event],
     });
+    const updateEvent = vi.spyOn(repository, 'updateEvent');
 
     render(
       <CalendarEventEditorDialog
@@ -2285,6 +2303,8 @@ describe('<CalendarEventEditorDialog />', () => {
 
     expect(screen.getByText('This calendar is read-only.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    fireEvent.submit(screen.getByRole('form', { name: 'Edit event' }));
+    expect(updateEvent).not.toHaveBeenCalled();
   });
 
   it('shows an error when an edited event no longer exists', async () => {
