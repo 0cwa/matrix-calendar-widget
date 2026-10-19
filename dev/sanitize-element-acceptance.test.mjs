@@ -4292,7 +4292,7 @@ test('sanitizes Desktop keyboard and side-panel acceptance evidence', () => {
     desktopAppDrawerAbsent: true,
     desktopViewportWidth: 1280,
     desktopViewportHeight: 720,
-    desktopIframeWidth: 360,
+    desktopIframeWidth: 319,
     desktopIframeHeight: 640,
     desktopWidgetCardCount: 1,
     desktopAppDrawerCount: 1,
@@ -4307,7 +4307,7 @@ test('sanitizes Desktop keyboard and side-panel acceptance evidence', () => {
   );
   assert.match(
     summary,
-    /phase=g6-desktop-side-panel-layout status=passed desktop_widget_card_visible=true desktop_create_control_reachable=true desktop_event_details_reachable=true desktop_host_no_horizontal_overflow=true desktop_widget_no_horizontal_overflow=true desktop_persisted_host_frame_present=true desktop_app_drawer_absent=true desktop_viewport_width=1280 desktop_viewport_height=720 desktop_iframe_width=360 desktop_iframe_height=640 desktop_widget_card_count=1 desktop_app_drawer_count=1/u,
+    /phase=g6-desktop-side-panel-layout status=passed desktop_widget_card_visible=true desktop_create_control_reachable=true desktop_event_details_reachable=true desktop_host_no_horizontal_overflow=true desktop_widget_no_horizontal_overflow=true desktop_persisted_host_frame_present=true desktop_app_drawer_absent=true desktop_viewport_width=1280 desktop_viewport_height=720 desktop_iframe_width=319 desktop_iframe_height=640 desktop_widget_card_count=1 desktop_app_drawer_count=1/u,
   );
   assert.doesNotMatch(summary, /private|token|https?:|Matrix Calendar/iu);
 
@@ -4317,6 +4317,8 @@ test('sanitizes Desktop keyboard and side-panel acceptance evidence', () => {
     { ...sidePanel, desktopIframeUrl: 'https://private.example/widget' },
     { ...sidePanel, desktopAppDrawerAbsent: false },
     { ...sidePanel, desktopIframeWidth: 0 },
+    { ...sidePanel, desktopViewportWidth: 0 },
+    { ...sidePanel, desktopViewportHeight: 0 },
   ]) {
     assert.throws(
       () => sanitizeElementAcceptance(JSON.stringify(invalid), sourceSha),

@@ -75,6 +75,7 @@ import {
   type WebBEditSaveFailureDiagnostic,
   type WebBEventListReadDiagnostic,
 } from '../../dev/element-desktop-journey.mjs';
+import { resolveDesktopViewportSize } from '../../dev/element-desktop-viewport.mjs';
 import { ElementWebPage, getMainRoomListLocator } from './pages/elementWebPage';
 
 type FixtureUser = {
@@ -2124,7 +2125,20 @@ async function observeDesktopSidePanelLayout(
     (await iframe.count().catch(() => 0)) === 1 &&
     (await iframe.isVisible().catch(() => false));
   const iframeBox = await iframe.boundingBox().catch(() => null);
-  const viewport = page.viewportSize();
+  const configuredViewport = page.viewportSize();
+  const browserViewport =
+    configuredViewport === null
+      ? await page
+          .evaluate(() => ({
+            width: window.innerWidth,
+            height: window.innerHeight,
+          }))
+          .catch(() => null)
+      : null;
+  const viewport = resolveDesktopViewportSize(
+    configuredViewport,
+    browserViewport,
+  );
   const hostNoHorizontalOverflow = await page
     .evaluate(
       () =>
