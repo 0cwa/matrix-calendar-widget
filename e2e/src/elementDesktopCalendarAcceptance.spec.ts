@@ -27,7 +27,7 @@ import {
   type Response,
 } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
-import { lstatSync, readFileSync } from 'node:fs';
+import { appendFileSync, lstatSync, readFileSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import {
   compareEventTimingWithRoomRange,
@@ -710,6 +710,29 @@ test('Element Desktop room event journey', async ({ browser }) => {
     desktopEventCreatePostObserver.stop();
     desktopEventCreatePostObserver = undefined;
     currentFailurePoint = undefined;
+
+    const desktopKeyboardFocus = await observeDesktopKeyboardFocus(
+      desktopPage,
+      desktopFrame,
+      initialTitle,
+    );
+    appendDesktopAccessibilityStage(
+      'g6-desktop-keyboard-focus',
+      desktopKeyboardFocus,
+    );
+
+    const desktopSidePanelLayout = await observeDesktopSidePanelLayout(
+      desktopPage,
+      desktopFrame,
+      desktopKeyboardFocus.detailsOpened,
+    );
+    appendDesktopAccessibilityStage(
+      'g6-desktop-side-panel-layout',
+      desktopSidePanelLayout,
+    );
+    if (!desktopKeyboardFocus.passed || !desktopSidePanelLayout.passed) {
+      throw new Error('Desktop keyboard or side-panel acceptance failed');
+    }
 
     enterPhase('web-member-b-read');
     currentFailurePoint = 'web-b-authentication';
@@ -1957,6 +1980,212 @@ async function tabToEventButton(page: Page, eventButton: Locator) {
     }
   }
   throw new Error('Keyboard navigation did not reach the event');
+}
+
+async function observeDesktopKeyboardFocus(
+  page: Page,
+  frame: FrameLocator,
+  title: string,
+) {
+  const eventButton = frame
+    .getByRole('listitem', { name: title, exact: true })
+    .getByRole('button');
+  await eventButton.waitFor({ state: 'visible' });
+
+  let desktopEventFocused = false;
+  let desktopEventTabCount = 0;
+  while (!desktopEventFocused && desktopEventTabCount < 80) {
+    await page.keyboard.press('Tab');
+    desktopEventTabCount += 1;
+    desktopEventFocused = await eventButton
+      .evaluate((element) => element === element.ownerDocument.activeElement)
+      .catch(() => false);
+  }
+  if (desktopEventFocused) await page.keyboard.press('Enter');
+
+  const detailsDialog = frame.getByRole('dialog').last();
+  const detailsOpened = await detailsDialog
+    .waitFor({ state: 'visible', timeout: 8_000 })
+    .then(() => true)
+    .catch(() => false);
+  const editButton = detailsDialog.getByRole('button', {
+    name: 'Edit',
+    exact: true,
+  });
+  const deleteButton = detailsDialog.getByRole('button', {
+    name: 'Delete',
+    exact: true,
+  });
+  const closeButton = detailsDialog.getByRole('button', {
+    name: 'Close',
+    exact: true,
+  });
+
+  let desktopDetailsTabCount = 0;
+  let editActionFocused = await editButton
+    .evaluate((element) => element === element.ownerDocument.activeElement)
+    .catch(() => false);
+  while (!editActionFocused && detailsOpened && desktopDetailsTabCount < 12) {
+    await page.keyboard.press('Tab');
+    desktopDetailsTabCount += 1;
+    editActionFocused = await editButton
+      .evaluate((element) => element === element.ownerDocument.activeElement)
+      .catch(() => false);
+  }
+  const detailsTabReached =
+    detailsOpened &&
+    (await detailsDialog
+      .evaluate((dialog) => dialog.contains(dialog.ownerDocument.activeElement))
+      .catch(() => false));
+
+  let deleteActionFocused = false;
+  let closeActionFocused = false;
+  let escapeClosedDialog = false;
+  let focusReturnedToEvent = false;
+  if (editActionFocused) {
+    await page.keyboard.press('Tab');
+    desktopDetailsTabCount += 1;
+    deleteActionFocused = await deleteButton
+      .evaluate((element) => element === element.ownerDocument.activeElement)
+      .catch(() => false);
+    await page.keyboard.press('Tab');
+    desktopDetailsTabCount += 1;
+    closeActionFocused = await closeButton
+      .evaluate((element) => element === element.ownerDocument.activeElement)
+      .catch(() => false);
+    await page.keyboard.press('Escape');
+    escapeClosedDialog = await detailsDialog
+      .waitFor({ state: 'hidden', timeout: 5_000 })
+      .then(() => true)
+      .catch(() => false);
+    try {
+      await expect(eventButton).toBeFocused({ timeout: 5_000 });
+      focusReturnedToEvent = true;
+    } catch {
+      focusReturnedToEvent = false;
+    }
+  }
+
+  return {
+    passed:
+      desktopEventFocused &&
+      detailsOpened &&
+      detailsTabReached &&
+      editActionFocused &&
+      deleteActionFocused &&
+      closeActionFocused &&
+      escapeClosedDialog &&
+      focusReturnedToEvent,
+    desktopEventFocused,
+    detailsOpened,
+    detailsTabReached,
+    editActionFocused,
+    deleteActionFocused,
+    closeActionFocused,
+    escapeClosedDialog,
+    focusReturnedToEvent,
+    desktopEventTabCount,
+    desktopDetailsTabCount,
+  };
+}
+
+async function observeDesktopSidePanelLayout(
+  page: Page,
+  frame: FrameLocator,
+  eventDetailsReachable: boolean,
+) {
+  const widgetCard = page.locator('.mx_WidgetCard');
+  const widgetCardCount = Math.min(await widgetCard.count().catch(() => 0), 2);
+  const widgetCardVisible = await widgetCard
+    .first()
+    .isVisible()
+    .catch(() => false);
+  const appDrawer = page.locator('.mx_AppsDrawer');
+  const appDrawerCount = Math.min(await appDrawer.count().catch(() => 0), 2);
+  const desktopAppDrawerAbsent = !(await appDrawer
+    .first()
+    .isVisible()
+    .catch(() => false));
+  const iframe = page.locator('iframe[title="Matrix Calendar"]');
+  const persistedHostFramePresent =
+    (await iframe.count().catch(() => 0)) === 1 &&
+    (await iframe.isVisible().catch(() => false));
+  const iframeBox = await iframe.boundingBox().catch(() => null);
+  const viewport = page.viewportSize();
+  const hostNoHorizontalOverflow = await page
+    .evaluate(
+      () =>
+        document.documentElement.scrollWidth <=
+        document.documentElement.clientWidth,
+    )
+    .catch(() => false);
+  const widgetNoHorizontalOverflow = await frame
+    .locator('html')
+    .evaluate((element) => element.scrollWidth <= element.clientWidth)
+    .catch(() => false);
+  const createControlReachable = await frame
+    .getByRole('button', { name: 'Create event', exact: true })
+    .isVisible()
+    .catch(() => false);
+  const iframeWidth = iframeBox ? Math.round(iframeBox.width) : undefined;
+  const iframeHeight = iframeBox ? Math.round(iframeBox.height) : undefined;
+  const passed =
+    viewport !== null &&
+    viewport.width > 0 &&
+    viewport.height > 0 &&
+    widgetCardCount === 1 &&
+    widgetCardVisible &&
+    desktopAppDrawerAbsent &&
+    persistedHostFramePresent &&
+    iframeWidth !== undefined &&
+    iframeWidth > 0 &&
+    iframeHeight !== undefined &&
+    iframeHeight > 0 &&
+    createControlReachable &&
+    eventDetailsReachable &&
+    hostNoHorizontalOverflow &&
+    widgetNoHorizontalOverflow;
+
+  return {
+    passed,
+    desktopWidgetCardVisible: widgetCardVisible,
+    desktopCreateControlReachable: createControlReachable,
+    desktopEventDetailsReachable: eventDetailsReachable,
+    desktopHostNoHorizontalOverflow: hostNoHorizontalOverflow,
+    desktopWidgetNoHorizontalOverflow: widgetNoHorizontalOverflow,
+    desktopPersistedHostFramePresent: persistedHostFramePresent,
+    desktopAppDrawerAbsent,
+    ...(viewport
+      ? {
+          desktopViewportWidth: viewport.width,
+          desktopViewportHeight: viewport.height,
+        }
+      : {}),
+    ...(iframeWidth === undefined ? {} : { desktopIframeWidth: iframeWidth }),
+    ...(iframeHeight === undefined
+      ? {}
+      : { desktopIframeHeight: iframeHeight }),
+    desktopWidgetCardCount: widgetCardCount,
+    desktopAppDrawerCount: appDrawerCount,
+  };
+}
+
+function appendDesktopAccessibilityStage(
+  phase: 'g6-desktop-keyboard-focus' | 'g6-desktop-side-panel-layout',
+  observation: Record<string, boolean | number | undefined>,
+) {
+  const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
+  if (!stageFile) throw new Error('Element acceptance fixture unavailable');
+  const { passed, ...fields } = observation;
+  appendFileSync(
+    stageFile,
+    `${JSON.stringify({
+      phase,
+      status: passed ? 'passed' : 'failed',
+      ...fields,
+    })}\n`,
+    { encoding: 'utf8', mode: 0o600 },
+  );
 }
 
 function matchesGatewayUrl(rawUrl: string, fixture: Fixture) {
