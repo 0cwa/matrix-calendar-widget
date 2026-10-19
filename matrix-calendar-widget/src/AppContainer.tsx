@@ -35,7 +35,6 @@ import {
 import { resolveCalendarGatewayConfig } from './calendar/resolveCalendarGatewayConfig';
 import { LocalizationProvider } from './components/common/LocalizationProvider';
 import { PageLoader } from './components/common/PageLoader';
-import { StoreProvider } from './store';
 
 function AppContainer({
   calendarRepository,
@@ -76,9 +75,7 @@ function AppContainer({
             }}
           >
             <CalendarRepositoryProvider repository={repository}>
-              <StoreProvider>
-                <App />
-              </StoreProvider>
+              <App />
             </CalendarRepositoryProvider>
           </MuiWidgetApiProvider>
         </LocalizationProvider>

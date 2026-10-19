@@ -591,8 +591,10 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       establishes local rehearsal only. Issues #251 and #255 and the separate
       production target, owner-input, canary, backup, and restore gates remain
       open.
-- [ ] Keep issues #275–#278 post-pilot. In particular, defer the #275
-      StoreProvider/Redux startup retirement until after the pilot.
+- [ ] Keep issues #276–#278 post-pilot. Issue #275's StoreProvider/Redux
+      startup retirement was explicitly re-scoped ahead of the pilot; this
+      source cleanup does not change the frozen application candidate or pilot
+      gates, and any candidate incorporating it requires fresh qualification.
 
 - [x] Wire a separate Chromium calendar-component fixture at 320, 390, 768, and
       1280 CSS pixels, with measured overflow, keyboard focus, and axe checks.
