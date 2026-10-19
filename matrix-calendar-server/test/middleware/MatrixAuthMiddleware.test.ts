@@ -128,8 +128,7 @@ describe('test relevant functionality of MatrixAuthMiddleware', () => {
   });
 
   test('uses the configured origin only for the fixed OpenID userinfo path', async () => {
-    appConfig.matrix_openid_userinfo_origin =
-      'https://openid.example.org/';
+    appConfig.matrix_openid_userinfo_origin = 'https://openid.example.org/';
     const matrixAuth = new MatrixAuthMiddleware(appConfig);
     const auth = `MX-Identity ${base64url(
       JSON.stringify({
@@ -290,7 +289,7 @@ describe('test relevant functionality of MatrixAuthMiddleware', () => {
 
     expect(result?.userId).toEqual('@user');
     expect(fetch).toHaveBeenCalledWith(
-      'https://matrix.example.org/_matrix/client/v3/account/whoami',
+      `${appConfig.homeserver_url}${MatrixEndpoint.WHO_AM_I}`,
       {
         headers: {
           Authorization: auth,

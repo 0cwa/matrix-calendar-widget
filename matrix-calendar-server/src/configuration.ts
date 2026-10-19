@@ -40,10 +40,10 @@ const isLoopbackAddress = (hostname: string): boolean => {
   return normalizedHostname === '::1';
 };
 
-const validateOpenIdUserInfoOrigin = (
-  value: string,
-  helpers: Joi.CustomHelpers,
-): string => {
+const validateOpenIdUserInfoOrigin: Joi.CustomValidator<string> = (
+  value,
+  helpers,
+) => {
   const match = value.match(/^https?:\/\/([^/?#]+)\/?$/i);
   if (value !== value.trim() || !match || match[1].includes('@')) {
     return helpers.error('any.invalid');

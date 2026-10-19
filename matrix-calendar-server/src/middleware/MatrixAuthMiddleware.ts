@@ -135,8 +135,7 @@ export class MatrixAuthMiddleware implements NestMiddleware {
     const userInfoBaseUrl = userInfoOrigin
       ? userInfoOrigin.replace(/\/$/, '')
       : this.appConfig.homeserver_url;
-    const fetchUrl =
-      `${userInfoBaseUrl}${MatrixEndpoint.USER_INFO}?access_token=${access_token}`;
+    const fetchUrl = `${userInfoBaseUrl}${MatrixEndpoint.USER_INFO}?access_token=${access_token}`;
     let response;
     try {
       response = await fetch(fetchUrl, { redirect: 'error' });
