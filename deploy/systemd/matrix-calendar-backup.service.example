@@ -25,8 +25,8 @@ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 
 LoadCredential=restic-password:/secure/operator-credentials/restic-password
 LoadCredential=s3-credentials:/secure/operator-credentials/s3-credentials
-Environment=RESTIC_PASSWORD_FILE=%d/restic-password
-Environment=AWS_SHARED_CREDENTIALS_FILE=%d/s3-credentials
+# The coordinator derives these file paths from CREDENTIALS_DIRECTORY and the
+# credential IDs above. systemd v249 does not support %d in Environment=.
 Environment=RESTIC_CACHE_DIR=/var/cache/matrix-calendar-backup
 
 # With reminderDatabaseEnabled=true and postgresDumpTransport omitted or set
@@ -34,7 +34,8 @@ Environment=RESTIC_CACHE_DIR=/var/cache/matrix-calendar-backup
 # password as a credential:
 # LoadCredential=postgres-password:/secure/operator-credentials/postgres-password
 # Environment=PGSERVICEFILE=/etc/matrix-calendar/pg_service.conf
-# Environment=PGPASSFILE=%d/postgres-password
+# The coordinator does not derive PGPASSFILE from CREDENTIALS_DIRECTORY;
+# configure a systemd-compatible explicit path for native PostgreSQL auth.
 # The optional "container-exec" transport instead requires a database role
 # that can dump over the container's local Unix socket without a password.
 
