@@ -38,7 +38,7 @@ describe('HealthCheckController', () => {
   it('reports process liveness without contacting the homeserver', async () => {
     const fetchSpy = jest.spyOn(globalThis, 'fetch');
 
-    await expect(controller.liveness()).resolves.toBe('Healthy');
+    expect(controller.liveness()).toBe('Healthy');
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -57,7 +57,7 @@ describe('HealthCheckController', () => {
       .mockRejectedValue(new Error('homeserver unavailable'));
 
     await expect(controller.health()).rejects.toThrow();
-    await expect(controller.liveness()).resolves.toBe('Healthy');
+    expect(controller.liveness()).toBe('Healthy');
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
