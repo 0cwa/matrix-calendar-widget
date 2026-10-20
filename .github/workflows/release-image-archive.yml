@@ -143,7 +143,7 @@ jobs:
 
       - name: Set up the isolated image builder
         id: buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
           name: matrix-calendar-widget-release-${{ github.run_id }}-${{ github.run_attempt }}
           driver: docker-container
@@ -261,7 +261,7 @@ jobs:
 
       - name: Upload the sanitized operator rehearsal failure summary
         if: ${{ failure() && inputs.operator_rehearsal && steps.operator_rehearsal.outcome == 'failure' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: matrix-calendar-widget-operator-rehearsal-failure-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/matrix-calendar-widget-operator-rehearsal-failure.json
@@ -272,7 +272,7 @@ jobs:
 
       - name: Upload immutable per-run image archive
         id: upload
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: matrix-calendar-widget-images-${{ github.run_id }}-${{ github.run_attempt }}
           path: release-images
@@ -283,7 +283,7 @@ jobs:
 
       - name: Upload the small per-run provenance manifest
         id: provenance
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: matrix-calendar-widget-provenance-${{ github.run_id }}-${{ github.run_attempt }}
           path: release-images/manifest.json
