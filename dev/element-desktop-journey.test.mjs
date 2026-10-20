@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import {
   appendFileSync,
   chmodSync,
@@ -12,6 +13,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import ElementDesktopAcceptanceResultReporter from '../e2e/src/elementDesktopAcceptanceResultReporter.mjs';
 import {
@@ -400,7 +402,7 @@ test('keeps journey evidence within finite phases and statuses', () => {
     });
 
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 17);
+    assert.equal(summary.schemaVersion, 18);
     assert.equal(summary.status, 'incomplete');
     assert.equal(summary.loginStep, 'complete');
     assert.equal(summary.loginEntry, 'password_form_present');
@@ -479,7 +481,7 @@ test('records only the source-bound Playwright result and child completion', () 
       runnerTemp,
       expectedSourceSha: sourceSha,
     });
-    assert.equal(summary.schemaVersion, 17);
+    assert.equal(summary.schemaVersion, 18);
     assert.equal(summary.sourceSha, sourceSha);
     assert.equal(summary.status, 'incomplete');
     assert.equal(summary.playwrightResult, 'timed_out');
@@ -859,7 +861,7 @@ test('reports bounded Desktop accessibility failure phases', () => {
       });
 
       const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-      assert.equal(summary.schemaVersion, 17);
+      assert.equal(summary.schemaVersion, 18);
       assert.equal(summary.cases[phase], 'failed');
       assert.deepEqual(summary.failurePoint, { phase, point: failurePoint });
       assert.equal(summary.status, 'failed');
@@ -945,7 +947,7 @@ test('records closed Desktop create observations without event or URL data', () 
       /private room|private title|private-event-id|response body|request URL/u,
     );
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 17);
+    assert.equal(summary.schemaVersion, 18);
     assert.deepEqual(summary.failurePoint, {
       phase: 'desktop-event-create',
       point: 'event-create-exact-row-visible',
@@ -1085,7 +1087,7 @@ test('records room-navigation evidence only at its closed failure boundary', () 
       roomNavigationDiagnostic: diagnostic,
     });
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 17);
+    assert.equal(summary.schemaVersion, 18);
     assert.deepEqual(summary.roomNavigationDiagnostic, diagnostic);
     assert.equal(summary.roomsReadyDiagnostic, null);
     assert.deepEqual(
@@ -1952,7 +1954,7 @@ test('requires ordered Desktop refresh progress before a complete pass', () => {
       runnerTemp,
       expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
     });
-    assert.equal(summary.schemaVersion, 17);
+    assert.equal(summary.schemaVersion, 18);
     assert.equal(summary.status, 'passed');
     assert.equal(summary.cases['desktop-a-refresh'], 'passed');
     assert.equal(summary.failureObservation, null);
@@ -3254,4 +3256,51 @@ test('rejects duplicate or private-shaped evidence rows', () => {
       ),
     /Invalid Desktop journey input/u,
   );
+});
+
+test('emits a sanitized unavailable summary when evidence cannot be parsed', () => {
+  withTempDirectory((runnerTemp) => {
+    const filePath = join(
+      runnerTemp,
+      'element-desktop-journey-stage.jsonl',
+    );
+    const privateSentinel = 'private-evidence-sentinel';
+    writeFileSync(
+      filePath,
+      `${JSON.stringify({ type: 'invalid', privateValue: privateSentinel })}\n`,
+      { mode: 0o600 },
+    );
+
+    const scriptPath = fileURLToPath(
+      new URL('./element-desktop-journey.mjs', import.meta.url),
+    );
+    const result = spawnSync(
+      process.execPath,
+      [scriptPath, 'summary'],
+      {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          RUNNER_TEMP: runnerTemp,
+          ELEMENT_DESKTOP_JOURNEY_STAGE_FILE: filePath,
+          ELEMENT_DESKTOP_SOURCE_SHA: DESKTOP_REFRESH_SOURCE_SHA,
+        },
+      },
+    );
+
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 1);
+    assert.equal(result.signal, null);
+    assert.match(result.stderr, /Desktop journey evidence is unavailable\./u);
+    assert.doesNotMatch(result.stdout, new RegExp(privateSentinel, 'u'));
+    assert.doesNotMatch(result.stderr, new RegExp(privateSentinel, 'u'));
+
+    const summary = JSON.parse(result.stdout);
+    assert.equal(summary.schemaVersion, 18);
+    assert.equal(summary.sourceSha, DESKTOP_REFRESH_SOURCE_SHA);
+    assert.equal(summary.status, 'unavailable');
+    assert.equal(summary.desktopChildCompletion.outcome, 'unknown');
+    assert.equal(summary.desktopChildCompletion.timedOut, null);
+    assert.equal(summary.cases['desktop-a-refresh'], 'not_run');
+  });
 });

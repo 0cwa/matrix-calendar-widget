@@ -2466,7 +2466,7 @@ export function summarizeDesktopJourneyEvidence(
     childCompletedSuccessfully &&
     playwrightResult === 'passed';
   return {
-    schemaVersion: 17,
+    schemaVersion: 18,
     sourceSha,
     status: failed ? 'failed' : journeyEvidencePassed ? 'passed' : 'incomplete',
     desktopChildCompletion,
@@ -2483,6 +2483,34 @@ export function summarizeDesktopJourneyEvidence(
     webBEditSaveDiagnostic,
     desktopRefreshRoomNavigationDiagnostic,
     cases,
+  };
+}
+
+function unavailableDesktopJourneySummary(sourceSha) {
+  return {
+    schemaVersion: 18,
+    sourceSha,
+    status: 'unavailable',
+    desktopChildCompletion: {
+      outcome: 'unknown',
+      exitStatus: null,
+      timedOut: null,
+    },
+    playwrightResult: 'unknown',
+    loginStep: 'not_observed',
+    loginEntry: 'not_observed',
+    loginDiagnostic: null,
+    roomsReadyDiagnostic: null,
+    failurePoint: null,
+    failureObservation: null,
+    gatewayReadDiagnostic: null,
+    roomNavigationDiagnostic: null,
+    desktopEventCreateDiagnostic: null,
+    webBEditSaveDiagnostic: null,
+    desktopRefreshRoomNavigationDiagnostic: null,
+    cases: Object.fromEntries(
+      DESKTOP_JOURNEY_PHASES.map((phase) => [phase, 'not_run']),
+    ),
   };
 }
 
@@ -2523,6 +2551,17 @@ if (
     process.stdout.write(`${JSON.stringify(summary)}\n`);
   } catch {
     process.stderr.write('Desktop journey evidence is unavailable.\n');
+    const expectedSourceSha = process.env.ELEMENT_DESKTOP_SOURCE_SHA;
+    process.stdout.write(
+      `${JSON.stringify(
+        unavailableDesktopJourneySummary(
+          typeof expectedSourceSha === 'string' &&
+            SOURCE_SHA_PATTERN.test(expectedSourceSha)
+            ? expectedSourceSha
+            : null,
+        ),
+      )}\n`,
+    );
     process.exitCode = 1;
   }
 }

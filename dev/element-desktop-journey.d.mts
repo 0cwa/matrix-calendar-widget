@@ -395,10 +395,10 @@ export type DesktopJourneyFailureObservation =
   | null;
 
 export type DesktopJourneySummary = {
-  schemaVersion: 17;
+  schemaVersion: 18;
   sourceSha: string | null;
-  status: 'passed' | 'failed' | 'incomplete';
-  desktopChildCompletion: DesktopChildCompletion;
+  status: 'passed' | 'failed' | 'incomplete' | 'unavailable';
+  desktopChildCompletion: DesktopChildCompletionSummary;
   playwrightResult: DesktopPlaywrightResult;
   loginStep: DesktopLoginStep;
   loginEntry: DesktopLoginEntry;
@@ -413,6 +413,14 @@ export type DesktopJourneySummary = {
   desktopRefreshRoomNavigationDiagnostic: DesktopRefreshRoomNavigationDiagnostic | null;
   cases: Record<DesktopJourneyPhase, DesktopJourneyOutcome | 'not_run'>;
 };
+
+export type DesktopChildCompletionSummary =
+  | DesktopChildCompletion
+  | {
+      outcome: 'unknown';
+      exitStatus: null;
+      timedOut: null;
+    };
 
 export type DesktopChildCompletion = {
   outcome: 'exited' | 'signaled' | 'spawn_error' | 'timeout' | 'unknown';
