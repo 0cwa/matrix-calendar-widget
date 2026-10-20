@@ -40,17 +40,41 @@ const describeWithDatabase =
   bindingDatabaseUrl && reminderDatabaseUrl ? describe : describe.skip;
 const databaseName = 'matrix_calendar_coexistence_test';
 
-function requireExplicitDisposableDatabaseUrl(databaseUrl: string): void {
+function parseExplicitDisposableDatabaseUrl(databaseUrl: string): URL {
   const parsed = new URL(databaseUrl);
   if (
     !['localhost', '127.0.0.1'].includes(parsed.hostname) ||
     parsed.pathname.slice(1) !== databaseName ||
-    decodeURIComponent(parsed.username) !== 'matrix_calendar_app'
+    decodeURIComponent(parsed.username) !== 'matrix_calendar_app' ||
+    parsed.search !== '' ||
+    parsed.hash !== '' ||
+    !/^\d{1,5}$/u.test(parsed.port) ||
+    Number(parsed.port) < 1 ||
+    Number(parsed.port) > 65535
   ) {
     throw new Error(
-      `The coexistence contract requires a loopback URL for ${databaseName} and matrix_calendar_app`,
+      `The coexistence contract requires a query-free loopback URL for ${databaseName} and matrix_calendar_app`,
     );
   }
+  return parsed;
+}
+
+function withValidatedDatabaseUrls<T>(
+  bindingUrl: string,
+  reminderUrl: string,
+  useUrls: (bindingUrl: string, reminderUrl: string) => T,
+): T {
+  const binding = parseExplicitDisposableDatabaseUrl(bindingUrl);
+  const reminder = parseExplicitDisposableDatabaseUrl(reminderUrl);
+  if (
+    binding.hostname !== reminder.hostname ||
+    binding.port !== reminder.port
+  ) {
+    throw new Error(
+      'The coexistence contract requires both store URLs to use one PostgreSQL endpoint',
+    );
+  }
+  return useUrls(bindingUrl, reminderUrl);
 }
 
 function createTestPostgresClient(
@@ -165,8 +189,8 @@ async function runPostgresTool(
   const child = spawn(command, args, {
     env: {
       ...process.env,
-      PGHOST: '127.0.0.1',
-      PGPORT: '5432',
+      PGHOST: database.hostname,
+      PGPORT: database.port,
       PGUSER: decodeURIComponent(database.username),
       PGDATABASE: database.pathname.slice(1),
       PGPASSWORD: password,
@@ -213,16 +237,19 @@ describeWithDatabase('shared PostgreSQL binding and reminder database', () => {
   let initialized = false;
 
   beforeAll(async () => {
-    requireExplicitDisposableDatabaseUrl(bindingDatabaseUrl as string);
-    requireExplicitDisposableDatabaseUrl(reminderDatabaseUrl as string);
-    bindingSql = createTestPostgresClient(
+    const clients = withValidatedDatabaseUrls(
       bindingDatabaseUrl as string,
-      bindingDatabaseTlsMode,
-    );
-    reminderSql = createTestPostgresClient(
       reminderDatabaseUrl as string,
-      reminderDatabaseTlsMode,
+      (bindingUrl, reminderUrl) => ({
+        binding: createTestPostgresClient(bindingUrl, bindingDatabaseTlsMode),
+        reminder: createTestPostgresClient(
+          reminderUrl,
+          reminderDatabaseTlsMode,
+        ),
+      }),
     );
+    bindingSql = clients.binding;
+    reminderSql = clients.reminder;
     await requireIsolatedTestDatabase(bindingSql);
     await requireIsolatedTestDatabase(reminderSql);
     initialized = true;
@@ -327,5 +354,33 @@ describeWithDatabase('shared PostgreSQL binding and reminder database', () => {
     } finally {
       rmSync(tempDirectory, { recursive: true, force: true });
     }
+  });
+});
+
+describe('PostgreSQL coexistence URL guard', () => {
+  it('rejects endpoint overrides before creating clients or resetting schemas', () => {
+    const loopbackUrl =
+      'postgresql://matrix_calendar_app:synthetic@127.0.0.1:5432/matrix_calendar_coexistence_test';
+    const createClientsOrResetSchemas = jest.fn();
+
+    expect(() =>
+      withValidatedDatabaseUrls(
+        `${loopbackUrl}?host=remote.example.test`,
+        loopbackUrl,
+        createClientsOrResetSchemas,
+      ),
+    ).toThrow('query-free loopback URL');
+    expect(createClientsOrResetSchemas).not.toHaveBeenCalled();
+  });
+
+  it('rejects store URLs that use different loopback ports', () => {
+    const bindingUrl =
+      'postgresql://matrix_calendar_app:synthetic@127.0.0.1:5432/matrix_calendar_coexistence_test';
+    const reminderUrl =
+      'postgresql://matrix_calendar_app:synthetic@127.0.0.1:5433/matrix_calendar_coexistence_test';
+
+    expect(() =>
+      withValidatedDatabaseUrls(bindingUrl, reminderUrl, jest.fn()),
+    ).toThrow('one PostgreSQL endpoint');
   });
 });

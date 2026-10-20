@@ -220,7 +220,7 @@ jobs:
           #!/bin/sh
           set -eu
           : "\$\{MCW_PG_CONTAINER_ID:?}"
-          exec docker exec -i -e PGHOST -e PGPORT -e PGUSER -e PGDATABASE -e PGPASSWORD "\$MCW_PG_CONTAINER_ID" $tool "\$@"
+          exec docker exec -i -e PGHOST=127.0.0.1 -e PGPORT=5432 -e PGUSER -e PGDATABASE -e PGPASSWORD "\$MCW_PG_CONTAINER_ID" $tool "\$@"
           EOF
             chmod 700 "$RUNNER_TEMP/mcw-$tool"
             echo "MATRIX_CALENDAR_$(echo "$tool" | tr '[:lower:]' '[:upper:]')_BINARY=$RUNNER_TEMP/mcw-$tool" >> "$GITHUB_ENV"
