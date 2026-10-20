@@ -15,9 +15,12 @@
  */
 
 import { UserID } from 'matrix-bot-sdk';
-import { cancelDavResponse, readBoundedDavResponse } from '../caldav/BoundedDavResponse';
-import { IMatrixOpenIdCredential } from '../model/IMatrixOpenIdCredential';
+import {
+  cancelDavResponse,
+  readBoundedDavResponse,
+} from '../caldav/BoundedDavResponse';
 import type { IAppConfiguration } from '../IAppConfiguration';
+import { IMatrixOpenIdCredential } from '../model/IMatrixOpenIdCredential';
 import type {
   RoomCalendarPrincipalIdentity,
   RoomCalendarPrincipalIdentityProvider,
@@ -63,7 +66,9 @@ export class MatrixRoomCalendarPrincipalOpenIdProofProvider implements RoomCalen
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
-  async request(signal?: AbortSignal): Promise<RoomCalendarPrincipalOpenIdProof> {
+  async request(
+    signal?: AbortSignal,
+  ): Promise<RoomCalendarPrincipalOpenIdProof> {
     if (signal?.aborted) throw abortError();
 
     const { identity, serviceToken } = await this.resolvePrincipal();
@@ -87,9 +92,7 @@ export class MatrixRoomCalendarPrincipalOpenIdProofProvider implements RoomCalen
             'Content-Type': 'application/json',
           },
           body: JSON.stringify(
-            identity.mode === 'appservice'
-              ? { user_id: identity.userId }
-              : {},
+            identity.mode === 'appservice' ? { user_id: identity.userId } : {},
           ),
           redirect: 'error',
           signal: responseSignal,

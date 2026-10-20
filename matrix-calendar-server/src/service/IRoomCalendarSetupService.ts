@@ -44,7 +44,5 @@ export type RoomCalendarSetupResult = Readonly<{
  * collection and widget state key; command callers cannot supply either.
  */
 export interface RoomCalendarSetupService {
-  setup(
-    request: RoomCalendarSetupRequest,
-  ): Promise<RoomCalendarSetupResult>;
+  setup(request: RoomCalendarSetupRequest): Promise<RoomCalendarSetupResult>;
 }

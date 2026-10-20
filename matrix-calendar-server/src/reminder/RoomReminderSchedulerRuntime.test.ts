@@ -15,11 +15,11 @@
  */
 
 import { IAppConfiguration } from '../IAppConfiguration';
-import { resolveRoomCalendarBinding } from '../service/RoomCalendarBindingResolver';
-import { DisabledRoomCalendarBindingStore } from '../service/DisabledRoomCalendarBindingStore';
 import type { RoomCalendarBinding } from '../model/IRoomCalendarBinding';
+import { DisabledRoomCalendarBindingStore } from '../service/DisabledRoomCalendarBindingStore';
 import type { RoomCalendarBindingRegistry } from '../service/IRoomCalendarBindingRegistry';
 import { RoomCalendarBindingRegistryAdapter } from '../service/RoomCalendarBindingRegistryAdapter';
+import { resolveRoomCalendarBinding } from '../service/RoomCalendarBindingResolver';
 import type {
   RoomCalendarPrincipalIdentity,
   RoomCalendarPrincipalIdentityProvider,
@@ -127,15 +127,11 @@ describe('ConfiguredReminderSchedulerRuntimeSource', () => {
   it('resolves the bot account without application-service credentials', async () => {
     const provider = identityProvider(botAccountIdentity);
     const appConfig = configuration({
-        room_calendar_principal_mode: 'bot-account',
-        application_service_token: undefined,
-        application_service_user_id: undefined,
-      });
-    const source = createRuntimeSource(
-      appConfig,
-      store(true),
-      provider,
-    );
+      room_calendar_principal_mode: 'bot-account',
+      application_service_token: undefined,
+      application_service_user_id: undefined,
+    });
+    const source = createRuntimeSource(appConfig, store(true), provider);
 
     const result = await source.getCurrentConfiguration(
       new AbortController().signal,
@@ -242,20 +238,14 @@ describe('ConfiguredReminderSchedulerRuntimeSource', () => {
       notifyIdentityStarted = resolve;
     });
     const provider: RoomCalendarPrincipalIdentityProvider = {
-      resolve: jest.fn(
-        () => {
-          notifyIdentityStarted();
-          return new Promise<RoomCalendarPrincipalIdentity>((resolve) => {
-            resolveIdentity = resolve;
-          });
-        },
-      ),
+      resolve: jest.fn(() => {
+        notifyIdentityStarted();
+        return new Promise<RoomCalendarPrincipalIdentity>((resolve) => {
+          resolveIdentity = resolve;
+        });
+      }),
     };
-    const source = createRuntimeSource(
-      configuration(),
-      store(true),
-      provider,
-    );
+    const source = createRuntimeSource(configuration(), store(true), provider);
     const controller = new AbortController();
     const result = source.getCurrentConfiguration(controller.signal);
 

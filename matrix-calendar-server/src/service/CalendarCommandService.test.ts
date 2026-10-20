@@ -22,8 +22,6 @@ import {
 } from '@matrix-calendar-widget/calendar';
 import { createAppConfig } from '../../test/util/MockUtils';
 import { IMatrixOpenIdCredential } from '../model/IMatrixOpenIdCredential';
-import type { RoomCalendarBindingRegistry } from './IRoomCalendarBindingRegistry';
-import { resolveRoomCalendarBinding } from './RoomCalendarBindingResolver';
 import {
   CalendarCommandErrorKey,
   CalendarCommandEventAccess,
@@ -31,6 +29,8 @@ import {
   CalendarCommandService,
   CalendarCommandTranslation,
 } from './CalendarCommandService';
+import type { RoomCalendarBindingRegistry } from './IRoomCalendarBindingRegistry';
+import { resolveRoomCalendarBinding } from './RoomCalendarBindingResolver';
 import { RoomCalendarTarget } from './RoomCalendarCalDavAccess';
 
 const ROOM_ID = '!room:example.org';

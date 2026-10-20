@@ -328,9 +328,7 @@ export function createRoomReminderModuleProviders(): FactoryProvider[] {
 function hasSupportedBindings(bindings: unknown): boolean {
   try {
     const validated = validateRoomCalendarBindings(bindings);
-    return (
-      validated.length <= ROOM_REMINDER_SCHEDULER_LIMITS.maxBindingsPerRun
-    );
+    return validated.length <= ROOM_REMINDER_SCHEDULER_LIMITS.maxBindingsPerRun;
   } catch {
     return false;
   }

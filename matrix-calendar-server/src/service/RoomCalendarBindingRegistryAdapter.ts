@@ -20,12 +20,12 @@ import {
   RoomCalendarBindingRecord,
   RoomCalendarBindingStore,
 } from '../model/IRoomCalendarBindingStore';
+import { RoomCalendarBindingRegistry } from './IRoomCalendarBindingRegistry';
 import { isMatrixUserId } from './MatrixIdentifiers';
 import {
   resolveRoomCalendarBinding,
   validateRoomCalendarBindings,
 } from './RoomCalendarBindingResolver';
-import { RoomCalendarBindingRegistry } from './IRoomCalendarBindingRegistry';
 
 export type RoomCalendarBindingRegistryErrorCode =
   | 'invalid_stored_record'
@@ -50,7 +50,9 @@ function isValidDate(value: unknown): value is Date {
   return value instanceof Date && Number.isFinite(value.getTime());
 }
 
-function validateRecord(record: RoomCalendarBindingRecord): RoomCalendarBinding {
+function validateRecord(
+  record: RoomCalendarBindingRecord,
+): RoomCalendarBinding {
   if (
     record === null ||
     typeof record !== 'object' ||
@@ -73,9 +75,7 @@ function validateRecord(record: RoomCalendarBindingRecord): RoomCalendarBinding 
 }
 
 /** Async resolver over immutable operator bindings and durable room bindings. */
-export class RoomCalendarBindingRegistryAdapter
-  implements RoomCalendarBindingRegistry
-{
+export class RoomCalendarBindingRegistryAdapter implements RoomCalendarBindingRegistry {
   private readonly staticBindings: readonly RoomCalendarBinding[];
 
   constructor(
@@ -115,9 +115,7 @@ export class RoomCalendarBindingRegistryAdapter
 
     const readyDynamicBindings = records
       .filter(({ status }) => status === 'ready')
-      .map(({ roomId, calendarId }) =>
-        Object.freeze({ roomId, calendarId }),
-      );
+      .map(({ roomId, calendarId }) => Object.freeze({ roomId, calendarId }));
     return Object.freeze([...this.staticBindings, ...readyDynamicBindings]);
   }
 

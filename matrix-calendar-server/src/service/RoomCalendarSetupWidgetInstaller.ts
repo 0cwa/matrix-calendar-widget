@@ -16,11 +16,11 @@
 
 import type { MatrixClient } from 'matrix-bot-sdk';
 import { isDeepStrictEqual } from 'node:util';
-import type { IWidgetContent } from '../model/IWidgetContent';
+import type { WidgetClient } from '../client/WidgetClient';
 import type { RoomCalendarBinding } from '../model/IRoomCalendarBinding';
+import type { IWidgetContent } from '../model/IWidgetContent';
 import { StateEventName } from '../model/StateEventName';
 import { WidgetType } from '../model/WidgetType';
-import type { WidgetClient } from '../client/WidgetClient';
 import type {
   RoomCalendarSetupWidgetPort,
   RoomCalendarSetupWidgetPreflightOutcome,
@@ -78,9 +78,7 @@ type ExistingWidgetState = {
  * Adds only the calendar widget state entry; shared Element layout state is
  * untouched. Existing trusted calendar entries are preserved in place.
  */
-export class RoomCalendarSetupWidgetInstaller
-  implements RoomCalendarSetupWidgetPort
-{
+export class RoomCalendarSetupWidgetInstaller implements RoomCalendarSetupWidgetPort {
   private readonly configuredLocation: URL | undefined;
   private readonly configuredUrlHasCredentials: boolean;
   private readonly newWidgetUrl: string | undefined;
@@ -92,9 +90,8 @@ export class RoomCalendarSetupWidgetInstaller
     configuredWidgetUrl: string,
   ) {
     this.configuredLocation = parseSafeHttpUrl(configuredWidgetUrl);
-    this.configuredUrlHasCredentials = hasCredentialMaterialInWidgetUrl(
-      configuredWidgetUrl,
-    );
+    this.configuredUrlHasCredentials =
+      hasCredentialMaterialInWidgetUrl(configuredWidgetUrl);
     this.newWidgetUrl = buildNewWidgetUrl(
       configuredWidgetUrl,
       this.configuredLocation,
@@ -164,9 +161,8 @@ export class RoomCalendarSetupWidgetInstaller
     if (state === 'conflict') return 'conflict';
     if (!this.newWidgetUrl) return 'unavailable';
 
-    const content = await this.widgetClient.getMeetingWidgetEventContentAsync(
-      stateKey,
-    );
+    const content =
+      await this.widgetClient.getMeetingWidgetEventContentAsync(stateKey);
     if (!isRecord(content)) {
       throw new Error('Calendar widget content is unavailable');
     }
@@ -326,10 +322,7 @@ export class RoomCalendarSetupWidgetInstaller
     const gatewayParameters = getParameters(parameters, GATEWAY_URL_PARAMETER);
     if (gatewayParameters.length !== 1) return false;
     const gatewayUrl = parseSafeGatewayUrl(gatewayParameters[0].value);
-    if (
-      !gatewayUrl ||
-      !isSafeForWidgetOrigin(gatewayUrl, url)
-    ) {
+    if (!gatewayUrl || !isSafeForWidgetOrigin(gatewayUrl, url)) {
       return false;
     }
     if (
@@ -359,9 +352,9 @@ export class RoomCalendarSetupWidgetInstaller
   private matchesConfiguredOriginAndPath(url: URL | undefined): boolean {
     return Boolean(
       url &&
-        this.configuredLocation &&
-        url.origin === this.configuredLocation.origin &&
-        url.pathname === this.configuredLocation.pathname,
+      this.configuredLocation &&
+      url.origin === this.configuredLocation.origin &&
+      url.pathname === this.configuredLocation.pathname,
     );
   }
 }
@@ -395,7 +388,11 @@ function buildNewWidgetUrl(
   if (roomParameters.length > 1) return undefined;
   if (
     roomParameters.length === 1 &&
-    !isCanonicalMacroParameter(roomParameters[0], ROOM_ID_PARAMETER, ROOM_ID_MACRO)
+    !isCanonicalMacroParameter(
+      roomParameters[0],
+      ROOM_ID_PARAMETER,
+      ROOM_ID_MACRO,
+    )
   ) {
     return undefined;
   }
@@ -415,22 +412,28 @@ function buildNewWidgetUrl(
 
   return roomParameters.length === 1
     ? configuredUrl
-    : appendWidgetParameter(configuredUrl, `${ROOM_ID_PARAMETER}=${ROOM_ID_MACRO}`);
+    : appendWidgetParameter(
+        configuredUrl,
+        `${ROOM_ID_PARAMETER}=${ROOM_ID_MACRO}`,
+      );
 }
 
 function appendWidgetParameter(url: string, parameter: string): string {
   const fragmentIndex = url.indexOf('#');
-  const beforeFragment = fragmentIndex === -1 ? url : url.slice(0, fragmentIndex);
+  const beforeFragment =
+    fragmentIndex === -1 ? url : url.slice(0, fragmentIndex);
   const fragment = fragmentIndex === -1 ? '' : url.slice(fragmentIndex);
 
   if (fragment.includes('?')) {
-    const separator = fragment.endsWith('?') || fragment.endsWith('&') ? '' : '&';
+    const separator =
+      fragment.endsWith('?') || fragment.endsWith('&') ? '' : '&';
     return `${beforeFragment}${fragment}${separator}${parameter}`;
   }
 
   const queryIndex = beforeFragment.indexOf('?');
   if (queryIndex === -1) return `${beforeFragment}?${parameter}${fragment}`;
-  const separator = beforeFragment.endsWith('?') || beforeFragment.endsWith('&') ? '' : '&';
+  const separator =
+    beforeFragment.endsWith('?') || beforeFragment.endsWith('&') ? '' : '&';
   return `${beforeFragment}${separator}${parameter}${fragment}`;
 }
 
@@ -621,7 +624,10 @@ function isSafeForWidgetOrigin(gatewayUrl: URL, widgetUrl: URL): boolean {
 }
 
 function sameBackendUrl(left: URL, right: URL): boolean {
-  return left.origin === right.origin && left.pathname.replace(/\/$/u, '') === right.pathname.replace(/\/$/u, '');
+  return (
+    left.origin === right.origin &&
+    left.pathname.replace(/\/$/u, '') === right.pathname.replace(/\/$/u, '')
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

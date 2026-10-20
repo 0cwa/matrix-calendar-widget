@@ -20,9 +20,9 @@ import configuration, {
   ValidationSchema,
 } from './configuration';
 import {
+  getPostgresDatabaseTlsOptions,
   getReminderDatabaseTlsOptions,
   parseReminderDatabaseTlsMode,
-  getPostgresDatabaseTlsOptions,
 } from './reminder/ReminderDatabaseConnection';
 
 describe('reminder database configuration', () => {
@@ -580,17 +580,16 @@ describe('room calendar setup and binding database configuration', () => {
   it('uses verified TLS for binding URLs and permits plaintext only by override', () => {
     const databaseUrl =
       'postgresql://bindings:secret@db.example.test:5432/matrix_calendar_bindings';
-    expect(
-      getPostgresDatabaseTlsOptions('verify-full', databaseUrl),
-    ).toEqual({ ssl: 'verify-full' });
+    expect(getPostgresDatabaseTlsOptions('verify-full', databaseUrl)).toEqual({
+      ssl: 'verify-full',
+    });
     expect(
       getPostgresDatabaseTlsOptions('trusted-private-network', databaseUrl),
     ).toEqual({ ssl: false });
   });
 
   it('parses exact Matrix server names, including ports and bracketed IPv6', () => {
-    const value =
-      'example.org, example.net:8448,127.0.0.1,[2001:db8::1]:8448';
+    const value = 'example.org, example.net:8448,127.0.0.1,[2001:db8::1]:8448';
     process.env.ROOM_CALENDAR_SETUP_ALLOWED_ACTOR_SERVER_NAMES = value;
 
     expect(
@@ -618,7 +617,9 @@ describe('room calendar setup and binding database configuration', () => {
       'https://example.org',
     ]) {
       expect(schema.validate(value).error).toBeDefined();
-      expect(() => parseRoomCalendarSetupAllowedActorServerNames(value)).toThrow();
+      expect(() =>
+        parseRoomCalendarSetupAllowedActorServerNames(value),
+      ).toThrow();
     }
   });
 });

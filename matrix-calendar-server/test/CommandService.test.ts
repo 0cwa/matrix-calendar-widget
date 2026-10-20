@@ -226,7 +226,14 @@ describe('test CommandService', () => {
       roomId: ROOM_ID,
       actorUserId: event.sender,
     });
-    verify(calendarCommandServiceMock.execute(anyString(), anyString(), anyString(), anything())).never();
+    verify(
+      calendarCommandServiceMock.execute(
+        anyString(),
+        anyString(),
+        anyString(),
+        anything(),
+      ),
+    ).never();
     expect(captureCalendarMessage().body).toContain('ready');
     expect(captureCalendarMessage()['m.mentions']).toEqual({});
   });

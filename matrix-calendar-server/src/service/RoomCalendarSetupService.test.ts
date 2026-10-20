@@ -22,13 +22,13 @@ import type {
   RoomCalendarBindingStore,
 } from '../model/IRoomCalendarBindingStore';
 import type { RoomCalendarBindingRegistry } from './IRoomCalendarBindingRegistry';
-import { MatrixRoomCalendarSetupService } from './RoomCalendarSetupService';
 import type {
   RoomCalendarSetupAuthorizationPort,
   RoomCalendarSetupCalDavPort,
   RoomCalendarSetupMatrixPreconditionsPort,
   RoomCalendarSetupWidgetPort,
 } from './RoomCalendarSetupPorts';
+import { MatrixRoomCalendarSetupService } from './RoomCalendarSetupService';
 
 const ROOM_ID = '!moderated:matrix.org';
 const ACTOR_ID = '@moderator:matrix.org';
@@ -78,11 +78,7 @@ function makeHarness(options?: {
   record?: RoomCalendarBindingRecord;
   caldavOutcome?: 'created' | 'existing' | 'missing' | 'conflict';
   caldavFailure?: boolean;
-  widgetOutcome?:
-    | 'installed'
-    | 'already-present'
-    | 'conflict'
-    | 'unavailable';
+  widgetOutcome?: 'installed' | 'already-present' | 'conflict' | 'unavailable';
   widgetPreflightOutcome?: 'ready' | 'conflict' | 'unavailable';
   widgetFailure?: boolean;
   manager?: boolean;
@@ -153,9 +149,7 @@ function makeHarness(options?: {
   const caldav: RoomCalendarSetupCalDavPort = {
     reconcile: options?.caldavFailure
       ? jest.fn().mockRejectedValue(new Error('CalDAV home mismatch'))
-      : jest
-          .fn()
-          .mockResolvedValue(options?.caldavOutcome ?? 'created'),
+      : jest.fn().mockResolvedValue(options?.caldavOutcome ?? 'created'),
   };
   const installWidget = jest.fn();
   if (options?.widgetFailure) {
@@ -302,10 +296,7 @@ describe('MatrixRoomCalendarSetupService', () => {
   });
 
   test.each([
-    [
-      'encrypted room',
-      async () => ({ algorithm: 'm.megolm.v1.aes-sha2' }),
-    ],
+    ['encrypted room', async () => ({ algorithm: 'm.megolm.v1.aes-sha2' })],
     [
       'unknown encryption state',
       async () => {
@@ -315,22 +306,28 @@ describe('MatrixRoomCalendarSetupService', () => {
     [
       'non-404 M_NOT_FOUND response',
       async () => {
-        throw new MatrixError({ errcode: 'M_NOT_FOUND', error: 'missing' }, 500);
+        throw new MatrixError(
+          { errcode: 'M_NOT_FOUND', error: 'missing' },
+          500,
+        );
       },
     ],
-  ])('%s is unsupported before any persistence or provisioning', async (_name, lookup) => {
-    const harness = makeHarness({ encryptionLookup: lookup });
+  ])(
+    '%s is unsupported before any persistence or provisioning',
+    async (_name, lookup) => {
+      const harness = makeHarness({ encryptionLookup: lookup });
 
-    await expect(harness.service.setup(setupRequest)).resolves.toEqual({
-      status: 'unsupported-room',
-    });
+      await expect(harness.service.setup(setupRequest)).resolves.toEqual({
+        status: 'unsupported-room',
+      });
 
-    expect(harness.matrixClient.getJoinedRoomMembers).not.toHaveBeenCalled();
-    expect(harness.registry.getSnapshot).not.toHaveBeenCalled();
-    expect(harness.bindingStore.reserve).not.toHaveBeenCalled();
-    expect(harness.caldav.reconcile).not.toHaveBeenCalled();
-    expect(harness.widget.install).not.toHaveBeenCalled();
-  });
+      expect(harness.matrixClient.getJoinedRoomMembers).not.toHaveBeenCalled();
+      expect(harness.registry.getSnapshot).not.toHaveBeenCalled();
+      expect(harness.bindingStore.reserve).not.toHaveBeenCalled();
+      expect(harness.caldav.reconcile).not.toHaveBeenCalled();
+      expect(harness.widget.install).not.toHaveBeenCalled();
+    },
+  );
 
   test('accepts the exact trusted custom Matrix 404/M_NOT_FOUND tuple', async () => {
     const harness = makeHarness({
@@ -389,6 +386,75 @@ describe('MatrixRoomCalendarSetupService', () => {
     expect(harness.registry.getSnapshot).not.toHaveBeenCalled();
     expect(harness.bindingStore.reserve).not.toHaveBeenCalled();
     expect(harness.caldav.reconcile).not.toHaveBeenCalled();
+  });
+
+  test('accepts legacy string power levels in room version 9', async () => {
+    const harness = makeHarness({
+      powerLevels: {
+        events_default: '0',
+        state_default: '50',
+        users: { [BOT_ID]: '100' },
+      },
+      roomState: [
+        {
+          type: 'm.room.create',
+          state_key: '',
+          sender: ACTOR_ID,
+          content: { room_version: '9' },
+        },
+      ],
+    });
+
+    await expect(harness.service.setup(setupRequest)).resolves.toEqual({
+      status: 'created',
+    });
+    expect(harness.registry.getSnapshot).toHaveBeenCalledTimes(1);
+  });
+
+  test('truncates fractional power levels in room version 9', async () => {
+    const harness = makeHarness({
+      powerLevels: {
+        events_default: 50.9,
+        state_default: 50.1,
+        users: { [BOT_ID]: 50.9 },
+      },
+      roomState: [
+        {
+          type: 'm.room.create',
+          state_key: '',
+          sender: ACTOR_ID,
+          content: { room_version: '9' },
+        },
+      ],
+    });
+
+    await expect(harness.service.setup(setupRequest)).resolves.toEqual({
+      status: 'created',
+    });
+  });
+
+  test('rejects legacy string power levels in room version 10', async () => {
+    const harness = makeHarness({
+      powerLevels: {
+        events_default: 0,
+        state_default: 50,
+        users: { [BOT_ID]: '100' },
+      },
+      roomState: [
+        {
+          type: 'm.room.create',
+          state_key: '',
+          sender: ACTOR_ID,
+          content: { room_version: '10' },
+        },
+      ],
+    });
+
+    await expect(harness.service.setup(setupRequest)).resolves.toEqual({
+      status: 'bot-not-ready',
+    });
+    expect(harness.registry.getSnapshot).not.toHaveBeenCalled();
+    expect(harness.bindingStore.reserve).not.toHaveBeenCalled();
   });
 
   test('a verified room-v12 bot creator has the effective power to write setup events', async () => {

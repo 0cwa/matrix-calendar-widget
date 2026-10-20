@@ -34,20 +34,6 @@
     "!calendar setup (Wenn aktiviert: Moderator:innen eines erlaubten Matrix-Servers mit Kalenderverwaltungsrecht können den Raum einrichten. Lade zuerst den Kalender-Bot ein.)",
     "Kalendertermin-Befehle benötigen einen serverseitig konfigurierten Raumkalender. Das Erstellen und Löschen von Terminen benötigen zusätzlich die serverseitige Schreibfreigabe und aktuelle Schreibrechte im Raum. Die Einrichtung ist ein separater, serverseitig freigegebener Befehl für berechtigte Moderator:innen. Für weitere Kalenderfunktionen nutze das Matrix Calendar Widget in Clients, die Widgets unterstützen."
   ],
-  "calendarSetupStatus": {
-    "already-ready": "Der Raumkalender und das Widget sind bereits eingerichtet.",
-    "bot-not-ready": "Lade zuerst den Kalender-Bot in diesen Raum ein und erlaube ihm, Nachrichten zu senden.",
-    "capacity-reached": "Der Server hat die Grenze für Raumkalender erreicht. Kontaktiere eine Administration.",
-    "conflict": "Der Raumkalender oder das Widget steht im Konflikt mit vorhandenem Raumzustand. Kontaktiere eine Administration.",
-    "created": "Der Raumkalender ist bereit und das Widget wurde hinzugefügt.",
-    "disabled": "Die Einrichtung von Raumkalendern ist auf diesem Server deaktiviert.",
-    "not-authorized": "Nur ein Raummitglied eines erlaubten Matrix-Servers mit Kalenderverwaltungsrecht kann diesen Raum einrichten.",
-    "pending": "Die Kalendersammlung ist reserviert, konnte aber noch nicht verifiziert werden. Führe später erneut !calendar setup aus.",
-    "unavailable": "Die Einrichtung des Raumkalenders ist vorübergehend nicht verfügbar. Versuche es später erneut.",
-    "unsupported-room": "Die Raumeinrichtung ist nur möglich, wenn der Raum nachweislich unverschlüsselt ist.",
-    "widget-pending": "Der Kalender ist bereit, aber das Widget konnte nicht hinzugefügt werden. Führe später erneut !calendar setup aus.",
-    "widget-power-required": "Der Kalender-Bot benötigt die Berechtigung, das Kalender-Widget in diesem Raum hinzuzufügen."
-  },
   "calendarCommandReplies": {
     "descriptionLabel": "Beschreibung",
     "eventCreated": "Termin {{resourceId}} wurde erstellt.",
@@ -61,6 +47,20 @@
     "upcoming": "Bevorstehende Termine der nächsten 30 Tage:",
     "upcomingPartial": "Einige Termine konnten nicht angezeigt werden. Prüfe alle Ergebnisse im Kalender-Widget.",
     "whenLabel": "Wann"
+  },
+  "calendarSetupStatus": {
+    "already-ready": "Der Raumkalender und das Widget sind bereits eingerichtet.",
+    "bot-not-ready": "Lade zuerst den Kalender-Bot in diesen Raum ein und erlaube ihm, Nachrichten zu senden.",
+    "capacity-reached": "Der Server hat die Grenze für Raumkalender erreicht. Kontaktiere eine Administration.",
+    "conflict": "Der Raumkalender oder das Widget steht im Konflikt mit vorhandenem Raumzustand. Kontaktiere eine Administration.",
+    "created": "Der Raumkalender ist bereit und das Widget wurde hinzugefügt.",
+    "disabled": "Die Einrichtung von Raumkalendern ist auf diesem Server deaktiviert.",
+    "not-authorized": "Nur ein Raummitglied eines erlaubten Matrix-Servers mit Kalenderverwaltungsrecht kann diesen Raum einrichten.",
+    "pending": "Die Kalendersammlung ist reserviert, konnte aber noch nicht verifiziert werden. Führe später erneut !calendar setup aus.",
+    "unavailable": "Die Einrichtung des Raumkalenders ist vorübergehend nicht verfügbar. Versuche es später erneut.",
+    "unsupported-room": "Die Raumeinrichtung ist nur möglich, wenn der Raum nachweislich unverschlüsselt ist.",
+    "widget-pending": "Der Kalender ist bereit, aber das Widget konnte nicht hinzugefügt werden. Führe später erneut !calendar setup aus.",
+    "widget-power-required": "Der Kalender-Bot benötigt die Berechtigung, das Kalender-Widget in diesem Raum hinzuzufügen."
   },
   "commandErrors": {
     "badCommand": "Der Hilfe-Befehl ist leider nicht richtig. Schreibe <code>{{trigger}} help</code>",

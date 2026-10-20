@@ -28,8 +28,8 @@ import {
   RoomCalendarTarget,
   parseRoomCalendarServiceUserId,
 } from './RoomCalendarCalDavAccess';
-import { MatrixRoomCalendarPrincipalOpenIdProofProvider } from './RoomCalendarPrincipalOpenIdProofProvider';
 import type { RoomCalendarPrincipalIdentityProvider } from './RoomCalendarPrincipalIdentity';
+import { MatrixRoomCalendarPrincipalOpenIdProofProvider } from './RoomCalendarPrincipalOpenIdProofProvider';
 
 const roomId = '!team:example.test';
 const calendarId = 'team-calendar';
@@ -95,11 +95,7 @@ function createAccess(
     identityProvider,
     options.fetchImpl ?? (fetch as unknown as typeof globalThis.fetch),
   );
-  return new RoomCalendarCalDavAccess(
-    config,
-    bindingRegistry,
-    proofProvider,
-  );
+  return new RoomCalendarCalDavAccess(config, bindingRegistry, proofProvider);
 }
 
 describe('RoomCalendarCalDavAccess', () => {
@@ -192,7 +188,9 @@ describe('RoomCalendarCalDavAccess', () => {
   });
 
   it('fails closed without proof I/O when the current binding read fails', async () => {
-    const resolve = jest.fn().mockRejectedValue(new Error('private database detail'));
+    const resolve = jest
+      .fn()
+      .mockRejectedValue(new Error('private database detail'));
     const access = createAccess(configuration(), {
       bindingRegistry: {
         getSnapshot: async () => [],
@@ -212,10 +210,10 @@ describe('RoomCalendarCalDavAccess', () => {
   it('does not resolve an appservice principal when gates are off and AS config is absent', async () => {
     const resolve = jest.fn();
     const config = configuration({
-        room_calendar_access_enabled: false,
-        application_service_token: undefined,
-        application_service_user_id: undefined,
-      });
+      room_calendar_access_enabled: false,
+      application_service_token: undefined,
+      application_service_user_id: undefined,
+    });
     const access = createAccess(config, {
       identityProvider: { resolve },
     });

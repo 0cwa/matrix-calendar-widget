@@ -101,7 +101,9 @@ export function parseRoomCalendarSetupAllowedActorServerNames(
 
   const serverNames = value.split(',').map((serverName) => serverName.trim());
   if (
-    serverNames.some((serverName) => !isValidRoomCalendarSetupServerName(serverName)) ||
+    serverNames.some(
+      (serverName) => !isValidRoomCalendarSetupServerName(serverName),
+    ) ||
     new Set(serverNames).size !== serverNames.length
   ) {
     throw new Error(
@@ -170,8 +172,9 @@ function createConfiguration() {
       process.env.MATRIX_CALENDAR_BINDING_DATABASE_URL,
     ),
     room_calendar_binding_database_tls_mode: (process.env
-      .MATRIX_CALENDAR_BINDING_DATABASE_TLS_MODE ??
-      'verify-full') as 'verify-full' | 'trusted-private-network',
+      .MATRIX_CALENDAR_BINDING_DATABASE_TLS_MODE ?? 'verify-full') as
+      | 'verify-full'
+      | 'trusted-private-network',
     room_calendar_setup_enabled: toBoolean(
       process.env.ROOM_CALENDAR_SETUP_ENABLED,
       false,

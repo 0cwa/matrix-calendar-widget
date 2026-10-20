@@ -223,7 +223,8 @@ export class RoomReminderConfigurationService {
       {
         authenticatedActorUserId: actorUserId,
         roomId,
-        resolveBinding: (signal) => bindingRegistry.resolve(roomId, undefined, signal),
+        resolveBinding: (signal) =>
+          bindingRegistry.resolve(roomId, undefined, signal),
       },
       this.matrixState,
     );

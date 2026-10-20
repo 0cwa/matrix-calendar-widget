@@ -45,14 +45,14 @@ import {
   CalendarCommandTranslation,
 } from '../../src/service/CalendarCommandService';
 import { ConfiguredRoomCalendarPrincipalIdentityProvider } from '../../src/service/ConfiguredRoomCalendarPrincipalIdentityProvider';
+import { DisabledRoomCalendarBindingStore } from '../../src/service/DisabledRoomCalendarBindingStore';
+import type { RoomCalendarBindingRegistry } from '../../src/service/IRoomCalendarBindingRegistry';
 import { MatrixCalendarAuthorizationFactory } from '../../src/service/MatrixCalendarAuthorization';
+import { RoomCalendarBindingRegistryAdapter } from '../../src/service/RoomCalendarBindingRegistryAdapter';
 import { RoomCalendarCalDavAccess } from '../../src/service/RoomCalendarCalDavAccess';
 import { RoomCalendarEventOperations } from '../../src/service/RoomCalendarEventOperations';
-import type { RoomCalendarBindingRegistry } from '../../src/service/IRoomCalendarBindingRegistry';
-import { DisabledRoomCalendarBindingStore } from '../../src/service/DisabledRoomCalendarBindingStore';
-import { RoomCalendarBindingRegistryAdapter } from '../../src/service/RoomCalendarBindingRegistryAdapter';
-import { MatrixRoomCalendarPrincipalOpenIdProofProvider } from '../../src/service/RoomCalendarPrincipalOpenIdProofProvider';
 import type { RoomCalendarPrincipalIdentityProvider } from '../../src/service/RoomCalendarPrincipalIdentity';
+import { MatrixRoomCalendarPrincipalOpenIdProofProvider } from '../../src/service/RoomCalendarPrincipalOpenIdProofProvider';
 import {
   MatrixApplicationServiceFixtureError,
   obtainMatrixApplicationServiceFixtureUserToken,
@@ -753,7 +753,8 @@ const matrixClient = {
       useFactory: getRoomPrincipalIdentityProvider,
     },
     {
-      provide: ModuleProviderToken.ROOM_CALENDAR_PRINCIPAL_OPENID_PROOF_PROVIDER,
+      provide:
+        ModuleProviderToken.ROOM_CALENDAR_PRINCIPAL_OPENID_PROOF_PROVIDER,
       useFactory: () =>
         new MatrixRoomCalendarPrincipalOpenIdProofProvider(
           testConfiguration,

@@ -107,7 +107,6 @@ export class ConfiguredReminderSchedulerRuntimeSource implements ReminderSchedul
       reminderStoreEnabled,
     };
   }
-
 }
 
 /**

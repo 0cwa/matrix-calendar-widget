@@ -45,9 +45,9 @@ import { MatrixAuthGuard } from '../guard/MatrixAuthGuard';
 import { MatrixRoomMembershipGuard } from '../guard/MatrixRoomMembershipGuard';
 import { IMatrixOpenIdCredential } from '../model/IMatrixOpenIdCredential';
 import { IUserContext } from '../model/IUserContext';
+import type { RoomCalendarBindingRegistry } from '../service/IRoomCalendarBindingRegistry';
 import { MatrixCalendarAuthorizationFactory } from '../service/MatrixCalendarAuthorization';
 import { resolveRoomCalendarBinding } from '../service/RoomCalendarBindingResolver';
-import type { RoomCalendarBindingRegistry } from '../service/IRoomCalendarBindingRegistry';
 import {
   RoomCalendarAccessMode,
   RoomCalendarCalDavAccess,

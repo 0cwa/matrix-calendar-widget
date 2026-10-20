@@ -30,7 +30,6 @@ import { randomUUID } from 'node:crypto';
 import { CalDavEventTransportError } from '../caldav/CalDavEventClient';
 import { IAppConfiguration } from '../IAppConfiguration';
 import { RoomCalendarBinding } from '../model/IRoomCalendarBinding';
-import type { RoomCalendarBindingRegistry } from './IRoomCalendarBindingRegistry';
 import {
   CalendarCommandEventLabels,
   formatCalendarEventDetails,
@@ -45,6 +44,7 @@ import {
   isWholeEventResourceDeletable,
   parseCalendarCommand,
 } from './CalendarCommandParser';
+import type { RoomCalendarBindingRegistry } from './IRoomCalendarBindingRegistry';
 import {
   RoomCalendarCalDavPrincipal,
   RoomCalendarTarget,

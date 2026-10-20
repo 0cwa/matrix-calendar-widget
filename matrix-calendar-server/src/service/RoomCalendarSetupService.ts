@@ -15,25 +15,28 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import type { RoomCalendarBinding } from '../model/IRoomCalendarBinding';
 import type {
   RoomCalendarBindingRecord,
   RoomCalendarBindingReservationResult,
   RoomCalendarBindingStore,
 } from '../model/IRoomCalendarBindingStore';
-import type { RoomCalendarBinding } from '../model/IRoomCalendarBinding';
 import type { RoomCalendarBindingRegistry } from './IRoomCalendarBindingRegistry';
-import { parseRoomCalendarServiceUserId } from './RoomCalendarCalDavAccess';
-import { isMatrixRoomV12Creator } from './MatrixCalendarAuthorization';
-import { isMatrixServerName } from './MatrixIdentifiers';
 import type {
   RoomCalendarSetupRequest,
   RoomCalendarSetupResult,
   RoomCalendarSetupService,
 } from './IRoomCalendarSetupService';
 import {
+  isMatrixRoomV12Creator,
+  normalizeMatrixPowerLevel,
+} from './MatrixCalendarAuthorization';
+import { isMatrixServerName } from './MatrixIdentifiers';
+import {
   isRoomConfirmedUnencrypted,
   isTrustedMatrixMissingStateError,
 } from './MatrixRoomEncryptionState';
+import { parseRoomCalendarServiceUserId } from './RoomCalendarCalDavAccess';
 import type {
   RoomCalendarSetupAuthorizationPort,
   RoomCalendarSetupCalDavMode,
@@ -165,10 +168,7 @@ export class MatrixRoomCalendarSetupService implements RoomCalendarSetupService 
         return { status: 'capacity-reached' };
       case 'reserved':
       case 'existing':
-        return this.finishReservation(
-          request.roomId,
-          reservation,
-        );
+        return this.finishReservation(request.roomId, reservation);
     }
   }
 
@@ -218,7 +218,9 @@ export class MatrixRoomCalendarSetupService implements RoomCalendarSetupService 
       return { status: dynamicPending ? 'pending' : 'widget-pending' };
     }
 
-    let caldavOutcome: Awaited<ReturnType<RoomCalendarSetupCalDavPort['reconcile']>>;
+    let caldavOutcome: Awaited<
+      ReturnType<RoomCalendarSetupCalDavPort['reconcile']>
+    >;
     try {
       caldavOutcome = await this.caldav.reconcile(binding, mode);
     } catch {
@@ -247,7 +249,9 @@ export class MatrixRoomCalendarSetupService implements RoomCalendarSetupService 
       }
     }
 
-    let widgetOutcome: Awaited<ReturnType<RoomCalendarSetupWidgetPort['install']>>;
+    let widgetOutcome: Awaited<
+      ReturnType<RoomCalendarSetupWidgetPort['install']>
+    >;
     try {
       widgetOutcome = await this.widget.install(binding);
     } catch {
@@ -287,25 +291,25 @@ export class MatrixRoomCalendarSetupService implements RoomCalendarSetupService 
       powerLevels = undefined;
     }
 
+    const roomVersion = await getMatrixRoomVersion(this.matrixClient, roomId);
+
     const canSendMessages = canSendMatrixEvent(
       powerLevels,
       this.botUserId,
       'm.room.message',
       false,
+      roomVersion,
     );
     const canWriteWidgets = canSendMatrixEvent(
       powerLevels,
       this.botUserId,
       'im.vector.modular.widgets',
       true,
+      roomVersion,
     );
     if (!canSendMessages || !canWriteWidgets) {
       if (
-        await isMatrixRoomV12Creator(
-          this.matrixClient,
-          this.botUserId,
-          roomId,
-        )
+        await isMatrixRoomV12Creator(this.matrixClient, this.botUserId, roomId)
       ) {
         return undefined;
       }
@@ -359,9 +363,7 @@ function sameBinding(
   left: RoomCalendarBinding | undefined,
   right: RoomCalendarBinding,
 ): boolean {
-  return (
-    left?.roomId === right.roomId && left.calendarId === right.calendarId
-  );
+  return left?.roomId === right.roomId && left.calendarId === right.calendarId;
 }
 
 function isGeneratedCalendarId(value: string): boolean {
@@ -373,6 +375,7 @@ function canSendMatrixEvent(
   userId: string,
   eventType: string,
   isState: boolean,
+  roomVersion: string | undefined,
 ): boolean {
   if (value === undefined) {
     return isState ? 0 >= 50 : true;
@@ -382,20 +385,22 @@ function canSendMatrixEvent(
   const users = getOptionalRecord(value.users);
   if (value.users !== undefined && !users) return false;
   const explicitUserPower = users?.[userId];
-  const userDefault = getLevel(value.users_default, 0);
+  const userDefault = getLevel(value.users_default, 0, roomVersion);
   const userPower =
     explicitUserPower === undefined
       ? userDefault
-      : getLevel(explicitUserPower, undefined);
+      : getLevel(explicitUserPower, undefined, roomVersion);
 
   const events = getOptionalRecord(value.events);
   if (value.events !== undefined && !events) return false;
   const eventPower = events?.[eventType];
   const defaultValue = isState
-    ? getLevel(value.state_default, 50)
-    : getLevel(value.events_default, 0);
+    ? getLevel(value.state_default, 50, roomVersion)
+    : getLevel(value.events_default, 0, roomVersion);
   const requiredPower =
-    eventPower === undefined ? defaultValue : getLevel(eventPower, undefined);
+    eventPower === undefined
+      ? defaultValue
+      : getLevel(eventPower, undefined, roomVersion);
 
   return (
     userPower !== undefined &&
@@ -404,10 +409,45 @@ function canSendMatrixEvent(
   );
 }
 
-function getLevel(value: unknown, fallback: number | undefined): number | undefined {
+function getLevel(
+  value: unknown,
+  fallback: number | undefined,
+  roomVersion: string | undefined,
+): number | undefined {
   if (value === undefined) return fallback;
-  return typeof value === 'number' && Number.isSafeInteger(value)
-    ? value
+  return normalizeMatrixPowerLevel(value, roomVersion);
+}
+
+async function getMatrixRoomVersion(
+  matrixClient: RoomCalendarSetupMatrixPreconditionsPort,
+  roomId: string,
+): Promise<string | undefined> {
+  let state: unknown;
+  try {
+    state = await matrixClient.getRoomState(roomId);
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(state)) return undefined;
+
+  const createEvents = state.filter(
+    (event: unknown) => isRecord(event) && event.type === 'm.room.create',
+  );
+  if (createEvents.length !== 1) return undefined;
+
+  const createEvent = createEvents[0];
+  if (
+    !isRecord(createEvent) ||
+    createEvent.state_key !== '' ||
+    !isRecord(createEvent.content)
+  ) {
+    return undefined;
+  }
+
+  const version = createEvent.content.room_version;
+  if (version === undefined) return '1';
+  return typeof version === 'string' && version.length > 0
+    ? version
     : undefined;
 }
 

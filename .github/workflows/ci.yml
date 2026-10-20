@@ -195,12 +195,19 @@ jobs:
           docker exec "$container_id" psql --username reminder_bootstrap --dbname postgres --set ON_ERROR_STOP=1 --command "REVOKE CONNECT ON DATABASE postgres FROM PUBLIC;"
           docker exec "$container_id" psql --username reminder_bootstrap --dbname postgres --set ON_ERROR_STOP=1 --command "REVOKE CONNECT ON DATABASE template1 FROM PUBLIC;"
           docker exec "$container_id" psql --username reminder_bootstrap --dbname postgres --set ON_ERROR_STOP=1 --command "CREATE DATABASE matrix_calendar_test OWNER matrix_calendar_app;"
+          docker exec "$container_id" psql --username reminder_bootstrap --dbname postgres --set ON_ERROR_STOP=1 --command "CREATE DATABASE matrix_calendar_binding_test OWNER matrix_calendar_app;"
 
       - name: Test PostgreSQL reminder store
         env:
           MATRIX_CALENDAR_REMINDER_DATABASE_URL: postgresql://matrix_calendar_app:matrix_calendar_test_password@localhost:5432/matrix_calendar_test
           MATRIX_CALENDAR_REMINDER_DATABASE_TLS_MODE: trusted-private-network
         run: yarn workspace @matrix-calendar-widget/server test:postgres-contract
+
+      - name: Test PostgreSQL room calendar binding store
+        env:
+          MATRIX_CALENDAR_BINDING_DATABASE_URL: postgresql://matrix_calendar_app:matrix_calendar_test_password@localhost:5432/matrix_calendar_binding_test
+          MATRIX_CALENDAR_BINDING_DATABASE_TLS_MODE: trusted-private-network
+        run: yarn workspace @matrix-calendar-widget/server test:postgres-binding-contract
 
       - name: Build server
         run: yarn workspace @matrix-calendar-widget/server build

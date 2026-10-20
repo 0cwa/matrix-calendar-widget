@@ -26,11 +26,11 @@ import { ModuleProviderToken } from '../ModuleProviderToken';
 import { IMatrixOpenIdCredential } from '../model/IMatrixOpenIdCredential';
 import { RoomCalendarBinding } from '../model/IRoomCalendarBinding';
 import type { RoomCalendarBindingRegistry } from './IRoomCalendarBindingRegistry';
+import type { RoomCalendarPrincipalIdentity } from './RoomCalendarPrincipalIdentity';
 import {
   RoomCalendarPrincipalOpenIdProofUnavailableError,
   type RoomCalendarPrincipalOpenIdProofPort,
 } from './RoomCalendarPrincipalOpenIdProofProvider';
-import type { RoomCalendarPrincipalIdentity } from './RoomCalendarPrincipalIdentity';
 
 export interface RoomCalendarTarget {
   readonly roomId: string;
@@ -132,7 +132,8 @@ export class RoomCalendarCalDavAccess {
 
     let binding: RoomCalendarBinding;
     try {
-      if (!this.bindingRegistry) throw new Error('Room calendar registry missing');
+      if (!this.bindingRegistry)
+        throw new Error('Room calendar registry missing');
       binding = await this.bindingRegistry.resolve(
         target.roomId,
         target.calendarId,
@@ -172,11 +173,16 @@ export class RoomCalendarCalDavAccess {
     const proofProvider = this.proofProvider;
     if (!proofProvider) throw this.disabledError();
 
-    let proof: Awaited<ReturnType<RoomCalendarPrincipalOpenIdProofPort['request']>>;
+    let proof: Awaited<
+      ReturnType<RoomCalendarPrincipalOpenIdProofPort['request']>
+    >;
     try {
       proof = await proofProvider.request(signal);
     } catch (error) {
-      if (signal?.aborted || (error instanceof Error && error.name === 'AbortError')) {
+      if (
+        signal?.aborted ||
+        (error instanceof Error && error.name === 'AbortError')
+      ) {
         throw error;
       }
       if (error instanceof RoomCalendarPrincipalOpenIdProofUnavailableError) {

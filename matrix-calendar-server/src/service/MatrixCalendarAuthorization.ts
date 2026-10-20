@@ -32,6 +32,40 @@ export const MATRIX_CALENDAR_EVENT_WRITE_POLICY =
 export const MATRIX_CALENDAR_MANAGE_POLICY =
   'io.github.0cwa.matrix-calendar.manage';
 
+/**
+ * Room versions 1–9 retain deprecated string and float encodings for power
+ * levels. Version 10 and later require integers, so legacy encodings are
+ * accepted only when the current room version is known to be 1–9.
+ */
+export function normalizeMatrixPowerLevel(
+  value: unknown,
+  roomVersion: string | undefined,
+): number | undefined {
+  if (typeof value === 'number' && Number.isSafeInteger(value)) {
+    return value;
+  }
+
+  if (roomVersion === undefined || !/^[1-9]$/u.test(roomVersion)) {
+    return undefined;
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!/^[+-]?[0-9]+$/u.test(trimmed)) {
+      return undefined;
+    }
+    const parsed = Number(trimmed);
+    return Number.isSafeInteger(parsed) ? parsed : undefined;
+  }
+
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return undefined;
+  }
+
+  const truncated = Math.trunc(value);
+  return Number.isSafeInteger(truncated) ? truncated : undefined;
+}
+
 type PowerLevelsLookup =
   | { kind: 'present'; content: PowerLevelsEventContent }
   | { kind: 'absent' }
@@ -132,11 +166,7 @@ class MatrixRoomCalendarAuthorization implements CalendarAuthorization {
       return true;
     }
 
-    return isMatrixRoomV12Creator(
-      this.matrixClient,
-      this.userId,
-      this.roomId,
-    );
+    return isMatrixRoomV12Creator(this.matrixClient, this.userId, this.roomId);
   }
 
   private async getPowerLevels(): Promise<PowerLevelsLookup> {

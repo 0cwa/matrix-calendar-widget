@@ -20,6 +20,8 @@ import { appendFileSync } from 'node:fs';
 import { IAppConfiguration } from '../../src/IAppConfiguration';
 import { CalDavEventClient } from '../../src/caldav/CalDavEventClient';
 import { MatrixOpenIdCalDavCredentialProviderFactory } from '../../src/caldav/MatrixOpenIdCalDavCredentialProviderFactory';
+import type { RoomCalendarBinding } from '../../src/model/IRoomCalendarBinding';
+import type { RoomCalendarBindingStore } from '../../src/model/IRoomCalendarBindingStore';
 import { CanonicalRoomReminderSchedulerSource } from '../../src/reminder/CanonicalRoomReminderSchedulerSource';
 import { MatrixAppServiceReminderTransport } from '../../src/reminder/MatrixAppServiceReminderTransport';
 import { buildRoomMentionMessage } from '../../src/reminder/RoomMentionMessage';
@@ -32,17 +34,15 @@ import {
   createReminderDeliveryKey,
   RoomReminderConfiguration,
 } from '../../src/reminder/RoomReminderStore';
-import type { RoomCalendarBinding } from '../../src/model/IRoomCalendarBinding';
-import type { RoomCalendarBindingStore } from '../../src/model/IRoomCalendarBindingStore';
 import { DisabledRoomCalendarBindingStore } from '../../src/service/DisabledRoomCalendarBindingStore';
 import type { RoomCalendarBindingRegistry } from '../../src/service/IRoomCalendarBindingRegistry';
 import { RoomCalendarBindingRegistryAdapter } from '../../src/service/RoomCalendarBindingRegistryAdapter';
 import { RoomCalendarCalDavAccess } from '../../src/service/RoomCalendarCalDavAccess';
-import { MatrixRoomCalendarPrincipalOpenIdProofProvider } from '../../src/service/RoomCalendarPrincipalOpenIdProofProvider';
 import type {
   RoomCalendarPrincipalIdentity,
   RoomCalendarPrincipalIdentityProvider,
 } from '../../src/service/RoomCalendarPrincipalIdentity';
+import { MatrixRoomCalendarPrincipalOpenIdProofProvider } from '../../src/service/RoomCalendarPrincipalOpenIdProofProvider';
 import { InMemoryRoomReminderStore } from '../util/InMemoryRoomReminderStore';
 import {
   MatrixApplicationServiceFixtureError,
@@ -206,11 +206,12 @@ describeContract(
               new DisabledRoomCalendarBindingStore(),
             ).resolve(targetRoomId, targetCalendarId, signal),
         };
-        const proofProvider = new MatrixRoomCalendarPrincipalOpenIdProofProvider(
-          testConfiguration,
-          principalIdentityProvider,
-          recordOpenIdCredentialRequest,
-        );
+        const proofProvider =
+          new MatrixRoomCalendarPrincipalOpenIdProofProvider(
+            testConfiguration,
+            principalIdentityProvider,
+            recordOpenIdCredentialRequest,
+          );
         access = new RoomCalendarCalDavAccess(
           testConfiguration,
           bindingRegistry,

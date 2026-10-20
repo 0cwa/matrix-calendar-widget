@@ -15,7 +15,10 @@
  */
 
 import { RoomCalendarBinding } from '../model/IRoomCalendarBinding';
-import { MATRIX_CALENDAR_MANAGE_POLICY } from '../service/MatrixCalendarAuthorization';
+import {
+  MATRIX_CALENDAR_MANAGE_POLICY,
+  normalizeMatrixPowerLevel,
+} from '../service/MatrixCalendarAuthorization';
 import { resolveRoomCalendarBinding } from '../service/RoomCalendarBindingResolver';
 import type { RoomCalendarPrincipalIdentity } from '../service/RoomCalendarPrincipalIdentity';
 
@@ -261,46 +264,6 @@ function getRoomVersion(
     : state.getRoomVersion(roomId, signal);
 }
 
-/**
- * Room versions 1–9 retain deprecated string and float encodings for power
- * levels. Version 10 and later require integers. Since the injected state port
- * supplies the room version, tolerate legacy encodings only for those versions.
- */
-function normalizePowerLevel(
-  value: unknown,
-  roomVersion: string | undefined,
-): number | undefined {
-  if (typeof value === 'number' && Number.isSafeInteger(value)) {
-    return value;
-  }
-
-  if (!supportsLegacyPowerLevelEncoding(roomVersion)) {
-    return undefined;
-  }
-
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if (!/^[+-]?[0-9]+$/.test(trimmed)) {
-      return undefined;
-    }
-    const parsed = Number(trimmed);
-    return Number.isSafeInteger(parsed) ? parsed : undefined;
-  }
-
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    return undefined;
-  }
-
-  const truncated = Math.trunc(value);
-  return Number.isSafeInteger(truncated) ? truncated : undefined;
-}
-
-function supportsLegacyPowerLevelEncoding(
-  roomVersion: string | undefined,
-): boolean {
-  return roomVersion !== undefined && /^[1-9]$/.test(roomVersion);
-}
-
 /** Undefined means absent and may use the fallback; malformed is denied. */
 function effectivePowerLevel(
   value: unknown,
@@ -309,10 +272,10 @@ function effectivePowerLevel(
   roomVersion: string | undefined,
 ): number | undefined {
   if (value !== undefined) {
-    return normalizePowerLevel(value, roomVersion);
+    return normalizeMatrixPowerLevel(value, roomVersion);
   }
   if (fallback !== undefined) {
-    return normalizePowerLevel(fallback, roomVersion);
+    return normalizeMatrixPowerLevel(fallback, roomVersion);
   }
   return defaultValue;
 }

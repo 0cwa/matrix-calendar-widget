@@ -19,7 +19,9 @@ import { ForbiddenException } from '@nestjs/common';
 import fetch from 'jest-fetch-mock';
 import { IAppConfiguration } from '../IAppConfiguration';
 import { MatrixOpenIdCalDavCredentialProviderFactory } from '../caldav/MatrixOpenIdCalDavCredentialProviderFactory';
+import { DisabledRoomCalendarBindingStore } from '../service/DisabledRoomCalendarBindingStore';
 import { MatrixCalendarAuthorizationFactory } from '../service/MatrixCalendarAuthorization';
+import { RoomCalendarBindingRegistryAdapter } from '../service/RoomCalendarBindingRegistryAdapter';
 import { RoomCalendarCalDavAccess } from '../service/RoomCalendarCalDavAccess';
 import { CalendarGatewayController } from './CalendarGatewayController';
 
@@ -146,12 +148,10 @@ describe('room calendar event listing', () => {
       status: 207,
       headers: { 'Content-Length': '100' },
     });
-    const controller = new CalendarGatewayController(
-      { ...configuration, caldav_max_event_response_bytes: 10 },
-      authorizationFactory,
-      new MatrixOpenIdCalDavCredentialProviderFactory(),
-      roomAccess,
-    );
+    const controller = createController({
+      ...configuration,
+      caldav_max_event_response_bytes: 10,
+    });
 
     await expect(
       controller.listEvents(
@@ -191,12 +191,20 @@ describe('room calendar event listing', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  function createController(): CalendarGatewayController {
+  function createController(
+    config: IAppConfiguration = configuration,
+  ): CalendarGatewayController {
     return new CalendarGatewayController(
-      configuration,
+      config,
       authorizationFactory,
       new MatrixOpenIdCalDavCredentialProviderFactory(),
       roomAccess,
+      undefined,
+      undefined,
+      new RoomCalendarBindingRegistryAdapter(
+        config.room_calendar_bindings,
+        new DisabledRoomCalendarBindingStore(),
+      ),
     );
   }
 });

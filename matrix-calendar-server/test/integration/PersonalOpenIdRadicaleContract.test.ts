@@ -41,7 +41,9 @@ import { CalendarGatewayController } from '../../src/controller/CalendarGatewayC
 import { MatrixAuthGuard } from '../../src/guard/MatrixAuthGuard';
 import { MatrixRoomMembershipGuard } from '../../src/guard/MatrixRoomMembershipGuard';
 import { MatrixAuthMiddleware } from '../../src/middleware/MatrixAuthMiddleware';
+import { DisabledRoomCalendarBindingStore } from '../../src/service/DisabledRoomCalendarBindingStore';
 import { MatrixCalendarAuthorizationFactory } from '../../src/service/MatrixCalendarAuthorization';
+import { RoomCalendarBindingRegistryAdapter } from '../../src/service/RoomCalendarBindingRegistryAdapter';
 import { RoomCalendarCalDavAccess } from '../../src/service/RoomCalendarCalDavAccess';
 const describeContract =
   process.env.CALDAV_CONTRACT === '1' ? describe : describe.skip;
@@ -204,6 +206,13 @@ const matrixClient = {
     {
       provide: ModuleProviderToken.ROOM_CALENDAR_CALDAV_ACCESS,
       useClass: RoomCalendarCalDavAccess,
+    },
+    {
+      provide: ModuleProviderToken.ROOM_CALENDAR_BINDING_REGISTRY,
+      useValue: new RoomCalendarBindingRegistryAdapter(
+        [],
+        new DisabledRoomCalendarBindingStore(),
+      ),
     },
     MatrixAuthMiddleware,
     MatrixAuthGuard,

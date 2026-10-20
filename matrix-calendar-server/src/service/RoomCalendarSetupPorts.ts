@@ -69,5 +69,7 @@ export interface RoomCalendarSetupWidgetPort {
     roomId: string,
     calendarId?: string,
   ): Promise<RoomCalendarSetupWidgetPreflightOutcome>;
-  install(binding: RoomCalendarBinding): Promise<RoomCalendarSetupWidgetOutcome>;
+  install(
+    binding: RoomCalendarBinding,
+  ): Promise<RoomCalendarSetupWidgetOutcome>;
 }

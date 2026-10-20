@@ -14,9 +14,7 @@
  * limitations under the License.
  */
 
-import {
-  RoomCalendarBinding,
-} from '../model/IRoomCalendarBinding';
+import { RoomCalendarBinding } from '../model/IRoomCalendarBinding';
 import {
   RoomCalendarBindingRecord,
   RoomCalendarBindingReservation,
@@ -33,9 +31,7 @@ export class RoomCalendarBindingStoreDisabledError extends Error {
 }
 
 /** Static-only fallback. It never stores dynamic bindings in process memory. */
-export class DisabledRoomCalendarBindingStore
-  implements RoomCalendarBindingStore
-{
+export class DisabledRoomCalendarBindingStore implements RoomCalendarBindingStore {
   readonly enabled = false;
 
   async listAll(): Promise<readonly RoomCalendarBindingRecord[]> {

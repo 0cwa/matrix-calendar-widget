@@ -66,7 +66,8 @@ const latestBindingStoreMigrationVersion = Math.max(
 );
 
 function toDate(value: Date | string): Date | undefined {
-  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  const date =
+    value instanceof Date ? new Date(value.getTime()) : new Date(value);
   return Number.isFinite(date.getTime()) ? date : undefined;
 }
 
@@ -108,9 +109,7 @@ function validateRecordDate(value: Date, name: string): Date {
   return new Date(value.getTime());
 }
 
-function validateReservation(
-  reservation: RoomCalendarBindingReservation,
-): {
+function validateReservation(reservation: RoomCalendarBindingReservation): {
   binding: RoomCalendarBinding;
   staticBindings: readonly RoomCalendarBinding[];
   createdBy: string;
@@ -143,9 +142,7 @@ function staticConflict(
 }
 
 /** PostgreSQL adapter for append-only dynamic room/calendar bindings. */
-export class PostgresRoomCalendarBindingStore
-  implements RoomCalendarBindingStore
-{
+export class PostgresRoomCalendarBindingStore implements RoomCalendarBindingStore {
   readonly enabled = true;
 
   constructor(private readonly sql: Sql) {}
@@ -256,8 +253,7 @@ export class PostgresRoomCalendarBindingStore
       }
 
       if (
-        configuredCount >=
-        ROOM_CALENDAR_BINDING_LIMITS.maxConfiguredBindings
+        configuredCount >= ROOM_CALENDAR_BINDING_LIMITS.maxConfiguredBindings
       ) {
         return { kind: 'capacity-reached' };
       }

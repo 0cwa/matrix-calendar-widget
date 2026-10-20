@@ -225,10 +225,7 @@ describe('RoomCalendarSetupWidgetInstaller', () => {
   });
 
   test.each([
-    [
-      'query access token',
-      `${CANONICAL_URL}&access_token=private-value`,
-    ],
+    ['query access token', `${CANONICAL_URL}&access_token=private-value`],
     [
       'case-insensitive fragment password',
       `${CANONICAL_URL}&PaSsWoRd=private-value`,
@@ -255,16 +252,19 @@ describe('RoomCalendarSetupWidgetInstaller', () => {
       'nested gateway API key query',
       `https://widget.example.test/calendar#/?meetings_bot_base_url=${encodeURIComponent('https://api.example.test/v1?api_key=private-value')}&matrix_room_id=$matrix_room_id`,
     ],
-  ])('%s is rejected before reading or writing Matrix state', async (_name, url) => {
-    const { installer, matrixClient } = makeInstaller([], url);
+  ])(
+    '%s is rejected before reading or writing Matrix state',
+    async (_name, url) => {
+      const { installer, matrixClient } = makeInstaller([], url);
 
-    await expect(installer.preflight(ROOM_ID)).resolves.toBe('unavailable');
-    await expect(
-      installer.install({ roomId: ROOM_ID, calendarId: CALENDAR_ID }),
-    ).resolves.toBe('unavailable');
-    expect(matrixClient.getRoomState).not.toHaveBeenCalled();
-    expect(matrixClient.sendStateEvent).not.toHaveBeenCalled();
-  });
+      await expect(installer.preflight(ROOM_ID)).resolves.toBe('unavailable');
+      await expect(
+        installer.install({ roomId: ROOM_ID, calendarId: CALENDAR_ID }),
+      ).resolves.toBe('unavailable');
+      expect(matrixClient.getRoomState).not.toHaveBeenCalled();
+      expect(matrixClient.sendStateEvent).not.toHaveBeenCalled();
+    },
+  );
 
   test('does not reuse a current widget with a credential query parameter', async () => {
     const existing = widgetEvent(
@@ -277,7 +277,9 @@ describe('RoomCalendarSetupWidgetInstaller', () => {
       installer.install({ roomId: ROOM_ID, calendarId: CALENDAR_ID }),
     ).resolves.toBe('conflict');
     expect(matrixClient.sendStateEvent).not.toHaveBeenCalled();
-    expect(widgetClient.getMeetingWidgetEventContentAsync).not.toHaveBeenCalled();
+    expect(
+      widgetClient.getMeetingWidgetEventContentAsync,
+    ).not.toHaveBeenCalled();
   });
 
   test('does not reuse a pilot widget with a credential fragment parameter', async () => {
@@ -290,7 +292,9 @@ describe('RoomCalendarSetupWidgetInstaller', () => {
       installer.install({ roomId: ROOM_ID, calendarId: CALENDAR_ID }),
     ).resolves.toBe('conflict');
     expect(matrixClient.sendStateEvent).not.toHaveBeenCalled();
-    expect(widgetClient.getMeetingWidgetEventContentAsync).not.toHaveBeenCalled();
+    expect(
+      widgetClient.getMeetingWidgetEventContentAsync,
+    ).not.toHaveBeenCalled();
   });
 
   test.each([
@@ -335,7 +339,9 @@ describe('RoomCalendarSetupWidgetInstaller', () => {
     ).resolves.toBe('already-present');
 
     expect(matrixClient.sendStateEvent).not.toHaveBeenCalled();
-    expect(widgetClient.getMeetingWidgetEventContentAsync).not.toHaveBeenCalled();
+    expect(
+      widgetClient.getMeetingWidgetEventContentAsync,
+    ).not.toHaveBeenCalled();
   });
 
   test('reuses a matching current widget under its existing widget ID', async () => {
@@ -349,7 +355,9 @@ describe('RoomCalendarSetupWidgetInstaller', () => {
     ).resolves.toBe('already-present');
 
     expect(matrixClient.sendStateEvent).not.toHaveBeenCalled();
-    expect(widgetClient.getMeetingWidgetEventContentAsync).not.toHaveBeenCalled();
+    expect(
+      widgetClient.getMeetingWidgetEventContentAsync,
+    ).not.toHaveBeenCalled();
   });
 
   test('accepts a current widget whose state_key is its only widget identity', async () => {
@@ -373,7 +381,9 @@ describe('RoomCalendarSetupWidgetInstaller', () => {
     ).resolves.toBe('already-present');
 
     expect(matrixClient.sendStateEvent).not.toHaveBeenCalled();
-    expect(widgetClient.getMeetingWidgetEventContentAsync).not.toHaveBeenCalled();
+    expect(
+      widgetClient.getMeetingWidgetEventContentAsync,
+    ).not.toHaveBeenCalled();
     expect(legacy.content).toMatchObject({
       creator: BOT_ID,
       type: 'custom',
@@ -451,7 +461,9 @@ describe('RoomCalendarSetupWidgetInstaller', () => {
         installer.install({ roomId: ROOM_ID, calendarId: CALENDAR_ID }),
       ).resolves.toBe('conflict');
       expect(matrixClient.sendStateEvent).not.toHaveBeenCalled();
-      expect(widgetClient.getMeetingWidgetEventContentAsync).not.toHaveBeenCalled();
+      expect(
+        widgetClient.getMeetingWidgetEventContentAsync,
+      ).not.toHaveBeenCalled();
     },
   );
 
@@ -464,7 +476,9 @@ describe('RoomCalendarSetupWidgetInstaller', () => {
       installer.install({ roomId: ROOM_ID, calendarId: CALENDAR_ID }),
     ).resolves.toBe('conflict');
     expect(matrixClient.sendStateEvent).not.toHaveBeenCalled();
-    expect(widgetClient.getMeetingWidgetEventContentAsync).not.toHaveBeenCalled();
+    expect(
+      widgetClient.getMeetingWidgetEventContentAsync,
+    ).not.toHaveBeenCalled();
   });
 
   test('preserves a state key that becomes occupied while the widget payload is built', async () => {

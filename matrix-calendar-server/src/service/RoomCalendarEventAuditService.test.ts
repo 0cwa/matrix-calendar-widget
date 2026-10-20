@@ -16,8 +16,8 @@
 
 import { MatrixClient, MatrixError } from 'matrix-bot-sdk';
 import { RoomCalendarBinding } from '../model/IRoomCalendarBinding';
-import { resolveRoomCalendarBinding } from './RoomCalendarBindingResolver';
 import type { RoomCalendarBindingRegistry } from './IRoomCalendarBindingRegistry';
+import { resolveRoomCalendarBinding } from './RoomCalendarBindingResolver';
 import {
   RoomCalendarEventAuditContext,
   RoomCalendarEventAuditService,
@@ -99,7 +99,9 @@ describe('RoomCalendarEventAuditService', () => {
   });
 
   it('does nothing by default and performs no Matrix lookups', async () => {
-    await createService({ bindingRegistry: bindingRegistryFor(bindings) }).record(context);
+    await createService({
+      bindingRegistry: bindingRegistryFor(bindings),
+    }).record(context);
 
     expect(client.getUserId).not.toHaveBeenCalled();
     expect(client.getJoinedRoomMembers).not.toHaveBeenCalled();
@@ -293,7 +295,9 @@ describe('RoomCalendarEventAuditService', () => {
   it('fails closed if the room binding has changed', async () => {
     await createService({
       enabled: true,
-      bindingRegistry: bindingRegistryFor([{ roomId, calendarId: 'other-calendar' }]),
+      bindingRegistry: bindingRegistryFor([
+        { roomId, calendarId: 'other-calendar' },
+      ]),
     }).record(context);
 
     expect(client.getJoinedRoomMembers).not.toHaveBeenCalled();

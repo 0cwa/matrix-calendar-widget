@@ -20,9 +20,9 @@ import {
   ROOM_CALENDAR_BINDING_LIMITS,
   RoomCalendarBindingReservation,
 } from '../model/IRoomCalendarBindingStore';
-import { PostgresRoomCalendarBindingStore } from './PostgresRoomCalendarBindingStore';
-import { getPostgresDatabaseTlsOptions } from '../reminder/ReminderDatabaseConnection';
 import type { PostgresDatabaseTlsMode } from '../reminder/ReminderDatabaseConnection';
+import { getPostgresDatabaseTlsOptions } from '../reminder/ReminderDatabaseConnection';
+import { PostgresRoomCalendarBindingStore } from './PostgresRoomCalendarBindingStore';
 
 const databaseUrl = process.env.MATRIX_CALENDAR_BINDING_DATABASE_URL;
 function parseBindingDatabaseTlsMode(
@@ -200,7 +200,9 @@ describeWithDatabase('PostgresRoomCalendarBindingStore integration', () => {
     if (
       existingRows.length > ROOM_CALENDAR_BINDING_LIMITS.maxConfiguredBindings
     ) {
-      throw new Error('The isolated binding test database is already over capacity');
+      throw new Error(
+        'The isolated binding test database is already over capacity',
+      );
     }
     const staticAtCapacity = Array.from(
       {
@@ -254,11 +256,14 @@ describeWithDatabase('PostgresRoomCalendarBindingStore integration', () => {
     ).resolves.toEqual({ kind: 'static-conflict' });
 
     const persisted = newBinding();
-    const reusedCalendar = { ...newBinding(), calendarId: persisted.calendarId };
+    const reusedCalendar = {
+      ...newBinding(),
+      calendarId: persisted.calendarId,
+    };
     createdRoomIds.push(persisted.roomId);
-    await expect(store.reserve(newReservation(persisted))).resolves.toMatchObject(
-      { kind: 'reserved' },
-    );
+    await expect(
+      store.reserve(newReservation(persisted)),
+    ).resolves.toMatchObject({ kind: 'reserved' });
     await expect(
       store.reserve(newReservation(reusedCalendar)),
     ).resolves.toEqual({ kind: 'collection-conflict' });
@@ -271,9 +276,13 @@ describeWithDatabase('PostgresRoomCalendarBindingStore integration', () => {
       existingRows.length -
       1;
     if (staticCount < 0) {
-      throw new Error('The isolated binding test database is already at capacity');
+      throw new Error(
+        'The isolated binding test database is already at capacity',
+      );
     }
-    const staticBindings = Array.from({ length: staticCount }, () => newBinding());
+    const staticBindings = Array.from({ length: staticCount }, () =>
+      newBinding(),
+    );
     const atCapacity = newBinding();
     const beyondCapacity = newBinding();
     createdRoomIds.push(atCapacity.roomId);

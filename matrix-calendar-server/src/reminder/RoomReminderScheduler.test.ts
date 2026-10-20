@@ -429,10 +429,7 @@ describe('RoomReminderScheduler', () => {
       'listDueCandidates',
     );
     const existingConfig = configuration('existing-room');
-    const existingCandidate = candidate(
-      existingConfig,
-      '20261002T100000Z',
-    );
+    const existingCandidate = candidate(existingConfig, '20261002T100000Z');
     const newBinding = {
       roomId: '!new-team:example.org',
       calendarId: 'new-team-calendar',

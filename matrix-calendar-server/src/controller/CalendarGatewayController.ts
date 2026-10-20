@@ -83,9 +83,9 @@ import { MatrixRoomMembershipGuard } from '../guard/MatrixRoomMembershipGuard';
 import { IMatrixOpenIdCredential } from '../model/IMatrixOpenIdCredential';
 import { IUserContext } from '../model/IUserContext';
 import { calendarResourceIdFromHref } from '../service/CalendarCommandParser';
+import type { RoomCalendarBindingRegistry } from '../service/IRoomCalendarBindingRegistry';
 import { MatrixCalendarAuthorizationFactory } from '../service/MatrixCalendarAuthorization';
 import { RoomCalendarBindingError } from '../service/RoomCalendarBindingResolver';
-import type { RoomCalendarBindingRegistry } from '../service/IRoomCalendarBindingRegistry';
 import {
   RoomCalendarCalDavAccess,
   RoomCalendarTarget,

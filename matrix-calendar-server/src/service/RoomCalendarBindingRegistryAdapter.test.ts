@@ -78,9 +78,7 @@ describe('RoomCalendarBindingRegistryAdapter', () => {
     );
 
     await expect(registry.getSnapshot()).resolves.toEqual(staticBindings);
-    await expect(
-      registry.resolve(staticBindings[32].roomId),
-    ).resolves.toEqual(
+    await expect(registry.resolve(staticBindings[32].roomId)).resolves.toEqual(
       staticBindings[32],
     );
 
@@ -142,11 +140,7 @@ describe('RoomCalendarBindingRegistryAdapter', () => {
       roomId: '!static:example.test',
       calendarId: 'static-calendar',
     };
-    const ready = record(
-      '!ready:example.test',
-      'ready-calendar',
-      'ready',
-    );
+    const ready = record('!ready:example.test', 'ready-calendar', 'ready');
     const pending = record(
       '!pending:example.test',
       'pending-calendar',
@@ -195,11 +189,7 @@ describe('RoomCalendarBindingRegistryAdapter', () => {
       roomId: '!shared:example.test',
       calendarId: 'static-calendar',
     };
-    const dynamic = record(
-      '!shared:example.test',
-      'dynamic-calendar',
-      'ready',
-    );
+    const dynamic = record('!shared:example.test', 'dynamic-calendar', 'ready');
     const registry = new RoomCalendarBindingRegistryAdapter(
       [staticBinding],
       new TestRoomCalendarBindingStore([dynamic]),
@@ -215,11 +205,7 @@ describe('RoomCalendarBindingRegistryAdapter', () => {
       roomId: '!static:example.test',
       calendarId: 'shared-calendar',
     };
-    const dynamic = record(
-      '!dynamic:example.test',
-      'shared-calendar',
-      'ready',
-    );
+    const dynamic = record('!dynamic:example.test', 'shared-calendar', 'ready');
     const registry = new RoomCalendarBindingRegistryAdapter(
       [staticBinding],
       new TestRoomCalendarBindingStore([dynamic]),

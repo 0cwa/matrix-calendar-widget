@@ -38,7 +38,9 @@ import { NET_NORDECK_CONTEXT } from '../../src/decorator/IParamExtractor';
 import { MatrixAuthGuard } from '../../src/guard/MatrixAuthGuard';
 import { MatrixRoomMembershipGuard } from '../../src/guard/MatrixRoomMembershipGuard';
 import { IUserContext } from '../../src/model/IUserContext';
+import { DisabledRoomCalendarBindingStore } from '../../src/service/DisabledRoomCalendarBindingStore';
 import { MatrixCalendarAuthorizationFactory } from '../../src/service/MatrixCalendarAuthorization';
+import { RoomCalendarBindingRegistryAdapter } from '../../src/service/RoomCalendarBindingRegistryAdapter';
 import { RoomCalendarCalDavAccess } from '../../src/service/RoomCalendarCalDavAccess';
 
 const describeContract =
@@ -128,6 +130,13 @@ const radicaleBaseUrl = process.env.CALDAV_BASE_URL ?? 'http://localhost:5232/';
     {
       provide: ModuleProviderToken.ROOM_CALENDAR_CALDAV_ACCESS,
       useClass: RoomCalendarCalDavAccess,
+    },
+    {
+      provide: ModuleProviderToken.ROOM_CALENDAR_BINDING_REGISTRY,
+      useValue: new RoomCalendarBindingRegistryAdapter(
+        [],
+        new DisabledRoomCalendarBindingStore(),
+      ),
     },
     {
       provide: MatrixOpenIdCalDavCredentialProviderFactory,

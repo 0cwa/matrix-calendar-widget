@@ -17,10 +17,7 @@
 import { MatrixClient, MatrixError } from 'matrix-bot-sdk';
 import { Matrix404Error } from '../error/Matrix404Error';
 
-export type MatrixRoomStateLookupPort = Pick<
-  MatrixClient,
-  'getRoomStateEvent'
->;
+export type MatrixRoomStateLookupPort = Pick<MatrixClient, 'getRoomStateEvent'>;
 
 /**
  * Only the trusted Matrix 404/M_NOT_FOUND pair proves that a state event is
