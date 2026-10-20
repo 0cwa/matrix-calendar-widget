@@ -29,6 +29,8 @@ import {
   CalendarCommandService,
   CalendarCommandTranslation,
 } from './CalendarCommandService';
+import type { RoomCalendarBindingRegistry } from './IRoomCalendarBindingRegistry';
+import { resolveRoomCalendarBinding } from './RoomCalendarBindingResolver';
 import { RoomCalendarTarget } from './RoomCalendarCalDavAccess';
 
 const ROOM_ID = '!room:example.org';
@@ -148,7 +150,16 @@ describe('CalendarCommandService', () => {
       authorizationFactory,
       { forAuthorizedTarget },
       operations,
+      bindingRegistryFor(config.room_calendar_bindings),
     );
+
+  const bindingRegistryFor = (
+    bindings: typeof baseConfig.room_calendar_bindings,
+  ): RoomCalendarBindingRegistry => ({
+    getSnapshot: async () => bindings,
+    resolve: async (roomId, calendarId) =>
+      resolveRoomCalendarBinding(bindings, roomId, calendarId),
+  });
 
   beforeEach(() => {
     order = [];

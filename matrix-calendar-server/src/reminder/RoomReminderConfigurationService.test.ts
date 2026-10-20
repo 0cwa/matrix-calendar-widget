@@ -19,6 +19,8 @@ import path from 'path';
 import { IAppConfiguration } from '../IAppConfiguration';
 import { IMatrixOpenIdCredential } from '../model/IMatrixOpenIdCredential';
 import { RoomCalendarBinding } from '../model/IRoomCalendarBinding';
+import type { RoomCalendarBindingRegistry } from '../service/IRoomCalendarBindingRegistry';
+import { resolveRoomCalendarBinding } from '../service/RoomCalendarBindingResolver';
 import {
   RoomCalendarCalDavAccess,
   RoomCalendarCalDavPrincipal,
@@ -59,6 +61,7 @@ describe('RoomReminderConfigurationService', () => {
   let forAuthorizedTarget: jest.Mock;
   let getEventResource: jest.Mock;
   let service: RoomReminderConfigurationService;
+  let bindingRegistry: RoomCalendarBindingRegistry;
 
   beforeEach(() => {
     configuration = {
@@ -67,6 +70,15 @@ describe('RoomReminderConfigurationService', () => {
       room_calendar_principal_mode: 'appservice',
       room_calendar_bindings: [{ roomId, calendarId } as RoomCalendarBinding],
     } as unknown as IAppConfiguration;
+    bindingRegistry = {
+      getSnapshot: async () => configuration.room_calendar_bindings,
+      resolve: async (requestedRoomId, requestedCalendarId) =>
+        resolveRoomCalendarBinding(
+          configuration.room_calendar_bindings,
+          requestedRoomId,
+          requestedCalendarId,
+        ),
+    };
 
     listConfigurationPage = jest.fn().mockResolvedValue([]);
     upsertConfiguration = jest.fn().mockResolvedValue(undefined);
@@ -113,6 +125,7 @@ describe('RoomReminderConfigurationService', () => {
       matrixState,
       { forAuthorizedTarget } as unknown as RoomCalendarCalDavAccess,
       { getEventResource } as unknown as RoomCalendarEventOperations,
+      bindingRegistry,
     );
   });
 

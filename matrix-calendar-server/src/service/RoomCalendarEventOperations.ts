@@ -43,8 +43,7 @@ import {
 } from '../caldav/ICalendarEventCodec';
 import { MatrixOpenIdCalDavCredentialProvider } from '../caldav/MatrixOpenIdCalDavCredentialProvider';
 import { IMatrixOpenIdCredential } from '../model/IMatrixOpenIdCredential';
-import { RoomCalendarBinding } from '../model/IRoomCalendarBinding';
-import { resolveRoomCalendarBinding } from './RoomCalendarBindingResolver';
+import type { RoomCalendarBindingRegistry } from './IRoomCalendarBindingRegistry';
 import {
   isSafeRoomCalendarServiceUserLocalpart,
   RoomCalendarTarget,
@@ -102,7 +101,7 @@ export interface RoomCalendarEventOperationOptions {
   readonly eventWritesEnabled?: boolean;
   readonly maxResponseBytes?: number;
   readonly radicaleBaseUrl?: string;
-  readonly roomCalendarBindings?: readonly RoomCalendarBinding[];
+  readonly bindingRegistry?: RoomCalendarBindingRegistry;
   readonly principalIdentityProvider?: RoomCalendarPrincipalIdentityProvider;
 }
 
@@ -315,11 +314,17 @@ export class RoomCalendarEventOperations {
   private async validateAccess(
     access: AuthorizedRoomCalendarEventAccess,
   ): Promise<ValidatedRoomCalendarEventAccess> {
-    const scope = validateAccessShape(
-      access,
-      this.options.roomCalendarBindings,
-      this.options.radicaleBaseUrl,
-    );
+    const target = access?.target;
+    const bindingRegistry = this.options.bindingRegistry;
+    if (!bindingRegistry || !target) {
+      throw new RoomCalendarEventOperationError('invalid-room-access');
+    }
+    try {
+      await bindingRegistry.resolve(target.roomId, target.calendarId);
+    } catch {
+      throw new RoomCalendarEventOperationError('invalid-room-access');
+    }
+    const scope = validateAccessShape(access, this.options.radicaleBaseUrl);
     const identityProvider = this.options.principalIdentityProvider;
     if (!identityProvider) {
       throw new RoomCalendarEventOperationError('invalid-room-access');
@@ -363,7 +368,6 @@ interface ValidatedRoomCalendarEventAccess {
 
 function validateAccessShape(
   access: AuthorizedRoomCalendarEventAccess,
-  roomCalendarBindings: readonly RoomCalendarBinding[] | undefined,
   radicaleBaseUrl: string | undefined,
 ): ValidatedRoomCalendarEventAccess {
   const { target, servicePrincipal } = access ?? {};
@@ -374,16 +378,6 @@ function validateAccessShape(
     typeof target.roomId !== 'string' ||
     typeof target.calendarId !== 'string'
   ) {
-    throw new RoomCalendarEventOperationError('invalid-room-access');
-  }
-
-  try {
-    resolveRoomCalendarBinding(
-      roomCalendarBindings,
-      target.roomId,
-      target.calendarId,
-    );
-  } catch {
     throw new RoomCalendarEventOperationError('invalid-room-access');
   }
 

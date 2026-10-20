@@ -20,6 +20,8 @@ import { appendFileSync } from 'node:fs';
 import { IAppConfiguration } from '../../src/IAppConfiguration';
 import { CalDavEventClient } from '../../src/caldav/CalDavEventClient';
 import { MatrixOpenIdCalDavCredentialProviderFactory } from '../../src/caldav/MatrixOpenIdCalDavCredentialProviderFactory';
+import type { RoomCalendarBinding } from '../../src/model/IRoomCalendarBinding';
+import type { RoomCalendarBindingStore } from '../../src/model/IRoomCalendarBindingStore';
 import { CanonicalRoomReminderSchedulerSource } from '../../src/reminder/CanonicalRoomReminderSchedulerSource';
 import { MatrixAppServiceReminderTransport } from '../../src/reminder/MatrixAppServiceReminderTransport';
 import { buildRoomMentionMessage } from '../../src/reminder/RoomMentionMessage';
@@ -32,11 +34,15 @@ import {
   createReminderDeliveryKey,
   RoomReminderConfiguration,
 } from '../../src/reminder/RoomReminderStore';
+import { DisabledRoomCalendarBindingStore } from '../../src/service/DisabledRoomCalendarBindingStore';
+import type { RoomCalendarBindingRegistry } from '../../src/service/IRoomCalendarBindingRegistry';
+import { RoomCalendarBindingRegistryAdapter } from '../../src/service/RoomCalendarBindingRegistryAdapter';
 import { RoomCalendarCalDavAccess } from '../../src/service/RoomCalendarCalDavAccess';
 import type {
   RoomCalendarPrincipalIdentity,
   RoomCalendarPrincipalIdentityProvider,
 } from '../../src/service/RoomCalendarPrincipalIdentity';
+import { MatrixRoomCalendarPrincipalOpenIdProofProvider } from '../../src/service/RoomCalendarPrincipalOpenIdProofProvider';
 import { InMemoryRoomReminderStore } from '../util/InMemoryRoomReminderStore';
 import {
   MatrixApplicationServiceFixtureError,
@@ -123,6 +129,8 @@ let scanNow: Date;
 let configuration: RoomReminderConfiguration;
 let store: InMemoryRoomReminderStore;
 let access: RoomCalendarCalDavAccess;
+let bindingRegistry: RoomCalendarBindingRegistry;
+let activeRoomBindings: readonly RoomCalendarBinding[] = [];
 let credentialFactory: MatrixOpenIdCalDavCredentialProviderFactory;
 let canonicalSource: CanonicalRoomReminderSchedulerSource;
 let matrixTransport: MatrixAppServiceReminderTransport;
@@ -185,10 +193,29 @@ describeContract(
         markReminderSetupStage('configure-calendar-target');
         const binding = { roomId, calendarId };
         testConfiguration.room_calendar_bindings = [binding];
+        activeRoomBindings = [binding];
+        bindingRegistry = {
+          getSnapshot: (signal) =>
+            new RoomCalendarBindingRegistryAdapter(
+              activeRoomBindings,
+              new DisabledRoomCalendarBindingStore(),
+            ).getSnapshot(signal),
+          resolve: (targetRoomId, targetCalendarId, signal) =>
+            new RoomCalendarBindingRegistryAdapter(
+              activeRoomBindings,
+              new DisabledRoomCalendarBindingStore(),
+            ).resolve(targetRoomId, targetCalendarId, signal),
+        };
+        const proofProvider =
+          new MatrixRoomCalendarPrincipalOpenIdProofProvider(
+            testConfiguration,
+            principalIdentityProvider,
+            recordOpenIdCredentialRequest,
+          );
         access = new RoomCalendarCalDavAccess(
           testConfiguration,
-          recordOpenIdCredentialRequest,
-          principalIdentityProvider,
+          bindingRegistry,
+          proofProvider,
         );
         credentialFactory = new MatrixOpenIdCalDavCredentialProviderFactory();
         markReminderSetupStage('mint-service-proof');
@@ -244,6 +271,7 @@ describeContract(
           testConfiguration,
           store,
           principalIdentityProvider,
+          bindingRegistry,
         );
         canonicalSource = new CanonicalRoomReminderSchedulerSource(
           testConfiguration,
@@ -279,7 +307,7 @@ describeContract(
     }, 30_000);
 
     beforeEach(() => {
-      testConfiguration.room_calendar_bindings = [{ roomId, calendarId }];
+      activeRoomBindings = [{ roomId, calendarId }];
       uidReportCount = 0;
       uidQueryIncludedExpectedValue = false;
       openIdRequestCount = 0;
@@ -386,9 +414,8 @@ describeContract(
         calendarId: `${calendarId}-different`,
       };
 
-      // A binding that changed before the scheduler snapshots runtime config
-      // selects no saved settings for the old collection.
-      testConfiguration.room_calendar_bindings = [changedBinding];
+      // A changed current registry view must stop enumeration of old settings.
+      activeRoomBindings = [changedBinding];
       const emptyScan = await createScheduler().runOnce();
 
       expect(emptyScan.configurationsVisited).toBe(0);
@@ -398,15 +425,15 @@ describeContract(
       expect(openIdRequestCount).toBe(0);
       expect(uidReportCount).toBe(0);
 
-      // A binding changed only after the old setting page was discovered is
-      // rejected by the canonical CalDAV access check, before proof or REPORT.
-      testConfiguration.room_calendar_bindings = [currentBinding];
+      // Simulate a registry changing after a stored setting page was read.
+      // Access must resolve the exact current binding again before OpenID or REPORT.
+      activeRoomBindings = [currentBinding];
       const listConfigurationPage = store.listConfigurationPage.bind(store);
       const pageSpy = jest
         .spyOn(store, 'listConfigurationPage')
         .mockImplementation(async (...args) => {
           const page = await listConfigurationPage(...args);
-          testConfiguration.room_calendar_bindings = [changedBinding];
+          activeRoomBindings = [changedBinding];
           return page;
         });
       try {
@@ -422,7 +449,44 @@ describeContract(
         expect(uidReportCount).toBe(0);
       } finally {
         pageSpy.mockRestore();
-        testConfiguration.room_calendar_bindings = [currentBinding];
+        activeRoomBindings = [currentBinding];
+      }
+    }, 30_000);
+
+    it('fails closed on binding-store read failure before UID REPORT', async () => {
+      const previousRuntime = runtime;
+      const failingStore: RoomCalendarBindingStore = {
+        enabled: true,
+        listAll: async () => {
+          throw new Error('synthetic binding-store failure');
+        },
+        reserve: async () => {
+          throw new Error('synthetic binding-store failure');
+        },
+        markReady: async () => {
+          throw new Error('synthetic binding-store failure');
+        },
+      };
+      runtime = new ConfiguredReminderSchedulerRuntimeSource(
+        testConfiguration,
+        store,
+        principalIdentityProvider,
+        new RoomCalendarBindingRegistryAdapter(
+          [{ roomId, calendarId }],
+          failingStore,
+        ),
+      );
+      try {
+        const report = await createScheduler().runOnce();
+
+        expect(report.configurationsVisited).toBe(0);
+        expect(report.candidatePagesRead).toBe(0);
+        expect(report.deliveryClaimAttempts).toBe(0);
+        expect(report.deliveriesSent).toBe(0);
+        expect(openIdRequestCount).toBe(0);
+        expect(uidReportCount).toBe(0);
+      } finally {
+        runtime = previousRuntime;
       }
     }, 30_000);
 

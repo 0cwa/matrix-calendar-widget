@@ -25,11 +25,12 @@ import { IAppConfiguration } from '../IAppConfiguration';
 import { ModuleProviderToken } from '../ModuleProviderToken';
 import { IMatrixOpenIdCredential } from '../model/IMatrixOpenIdCredential';
 import { RoomCalendarBinding } from '../model/IRoomCalendarBinding';
-import { resolveRoomCalendarBinding } from './RoomCalendarBindingResolver';
-import type {
-  RoomCalendarPrincipalIdentity,
-  RoomCalendarPrincipalIdentityProvider,
-} from './RoomCalendarPrincipalIdentity';
+import type { RoomCalendarBindingRegistry } from './IRoomCalendarBindingRegistry';
+import type { RoomCalendarPrincipalIdentity } from './RoomCalendarPrincipalIdentity';
+import {
+  RoomCalendarPrincipalOpenIdProofUnavailableError,
+  type RoomCalendarPrincipalOpenIdProofPort,
+} from './RoomCalendarPrincipalOpenIdProofProvider';
 
 export interface RoomCalendarTarget {
   readonly roomId: string;
@@ -90,21 +91,17 @@ export function parseRoomCalendarServiceUserId(
  */
 @Injectable()
 export class RoomCalendarCalDavAccess {
-  private readonly fetchImpl: typeof fetch;
-
   constructor(
     @Optional()
     @Inject(ModuleProviderToken.APP_CONFIGURATION)
     private readonly appConfig?: IAppConfiguration,
     @Optional()
-    @Inject(ModuleProviderToken.NATIVE_FETCH)
-    fetchImpl?: typeof fetch,
+    @Inject(ModuleProviderToken.ROOM_CALENDAR_BINDING_REGISTRY)
+    private readonly bindingRegistry?: RoomCalendarBindingRegistry,
     @Optional()
-    @Inject(ModuleProviderToken.ROOM_CALENDAR_PRINCIPAL_IDENTITY)
-    private readonly principalIdentityProvider?: RoomCalendarPrincipalIdentityProvider,
-  ) {
-    this.fetchImpl = fetchImpl ?? fetch;
-  }
+    @Inject(ModuleProviderToken.ROOM_CALENDAR_PRINCIPAL_OPENID_PROOF_PROVIDER)
+    private readonly proofProvider?: RoomCalendarPrincipalOpenIdProofPort,
+  ) {}
 
   assertDisabled(_target: RoomCalendarTarget): never {
     throw this.disabledError();
@@ -129,18 +126,21 @@ export class RoomCalendarCalDavAccess {
       throw this.disabledError();
     }
 
-    if (target.principal.kind !== 'service') {
+    if (target?.principal?.kind !== 'service') {
       throw this.disabledError();
     }
 
     let binding: RoomCalendarBinding;
     try {
-      binding = resolveRoomCalendarBinding(
-        config.room_calendar_bindings,
+      if (!this.bindingRegistry)
+        throw new Error('Room calendar registry missing');
+      binding = await this.bindingRegistry.resolve(
         target.roomId,
         target.calendarId,
+        signal,
       );
     } catch {
+      if (signal?.aborted) throw abortError();
       throw this.disabledError();
     }
 
@@ -149,12 +149,18 @@ export class RoomCalendarCalDavAccess {
     if (!radicaleUrl) {
       throw this.disabledError();
     }
+    assertSafeRadicaleBaseUrl(radicaleUrl);
 
     if (principalMode === 'appservice') {
+      const configuredPrincipal = config.application_service_user_id
+        ? parseRoomCalendarServiceUserId(config.application_service_user_id)
+        : undefined;
       if (
-        !config.application_service_user_id ||
-        !config.application_service_token ||
-        !parseRoomCalendarServiceUserId(config.application_service_user_id)
+        !configuredPrincipal ||
+        !isSafeRoomCalendarServiceUserLocalpart(
+          configuredPrincipal.localpart,
+        ) ||
+        !config.application_service_token
       ) {
         throw this.disabledError();
       }
@@ -164,122 +170,53 @@ export class RoomCalendarCalDavAccess {
       throw this.disabledError();
     }
 
-    const identityProvider = this.principalIdentityProvider;
-    if (!identityProvider) throw this.disabledError();
+    const proofProvider = this.proofProvider;
+    if (!proofProvider) throw this.disabledError();
 
-    let identity: RoomCalendarPrincipalIdentity;
+    let proof: Awaited<
+      ReturnType<RoomCalendarPrincipalOpenIdProofPort['request']>
+    >;
     try {
-      identity = await identityProvider.resolve();
-    } catch {
+      proof = await proofProvider.request(signal);
+    } catch (error) {
+      if (
+        signal?.aborted ||
+        (error instanceof Error && error.name === 'AbortError')
+      ) {
+        throw error;
+      }
+      if (error instanceof RoomCalendarPrincipalOpenIdProofUnavailableError) {
+        throw this.authorizationUnavailableError();
+      }
       throw this.authorizationUnavailableError();
     }
 
-    const serviceUserId = identity.userId;
-    const serviceToken =
-      principalMode === 'appservice'
-        ? config.application_service_token
-        : config.access_token;
+    if (proof === null || typeof proof !== 'object') {
+      throw this.authorizationUnavailableError();
+    }
+    const parsedUserId = parseRoomCalendarServiceUserId(proof.userId);
     if (
-      identity.mode !== principalMode ||
-      !serviceToken ||
+      !parsedUserId ||
+      proof.identity?.mode !== principalMode ||
+      proof.identity.userId !== proof.userId ||
       (principalMode === 'appservice' &&
-        identity.userId !== config.application_service_user_id)
+        proof.userId !== config.application_service_user_id) ||
+      !isValidProofCredential(proof.credential, parsedUserId.serverName)
     ) {
       throw this.authorizationUnavailableError();
     }
-
-    const parsedUserId = parseRoomCalendarServiceUserId(serviceUserId);
-    if (!parsedUserId) {
-      throw this.authorizationUnavailableError();
-    }
-    const { localpart, serverName } = parsedUserId;
 
     const calendarUrl = roomCalendarCollectionUrl(
       radicaleUrl,
-      localpart,
+      parsedUserId.localpart,
       binding.calendarId,
     );
-    const credential = await this.requestOpenIdCredential(
-      serviceUserId,
-      serviceToken,
-      serverName,
-      config.homeserver_url,
-      signal,
-    );
-
-    return { identity, userId: serviceUserId, calendarUrl, credential };
-  }
-
-  private async requestOpenIdCredential(
-    userId: string,
-    serviceToken: string,
-    serverName: string,
-    homeserverUrl: string,
-    signal?: AbortSignal,
-  ): Promise<IMatrixOpenIdCredential> {
-    if (signal?.aborted) throw abortError();
-    let response: Response;
-    try {
-      response = await this.fetchImpl(
-        `${homeserverUrl.replace(/\/$/, '')}/_matrix/client/v3/user/${encodeURIComponent(userId)}/openid/request_token`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${serviceToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(
-            this.appConfig?.room_calendar_principal_mode === 'appservice'
-              ? { user_id: userId }
-              : {},
-          ),
-          redirect: 'error',
-          signal: signal
-            ? AbortSignal.any([signal, AbortSignal.timeout(10_000)])
-            : AbortSignal.timeout(10_000),
-        },
-      );
-    } catch {
-      if (signal?.aborted) throw abortError();
-      throw this.authorizationUnavailableError();
-    }
-
-    if (!response.ok) {
-      await cancelResponseBody(response);
-      throw this.authorizationUnavailableError();
-    }
-
-    let result: unknown;
-    try {
-      result = await readJsonResponse(
-        response,
-        16 * 1024,
-        signal
-          ? AbortSignal.any([signal, AbortSignal.timeout(10_000)])
-          : AbortSignal.timeout(10_000),
-      );
-    } catch {
-      if (signal?.aborted) throw abortError();
-      throw this.authorizationUnavailableError();
-    }
-
-    if (result === null || typeof result !== 'object') {
-      throw this.authorizationUnavailableError();
-    }
-
-    const credential = result as Record<string, unknown>;
-    const accessToken = credential.access_token;
-    if (
-      typeof accessToken !== 'string' ||
-      accessToken.length === 0 ||
-      credential.matrix_server_name !== serverName
-    ) {
-      throw this.authorizationUnavailableError();
-    }
 
     return {
-      accessToken,
-      matrixServerName: serverName,
+      identity: proof.identity,
+      userId: proof.userId,
+      calendarUrl,
+      credential: proof.credential,
     };
   }
 
@@ -302,122 +239,35 @@ function abortError(): Error {
   return new DOMException('The operation was aborted', 'AbortError');
 }
 
-async function readJsonResponse(
-  response: Response,
-  maxBytes: number,
-  signal: AbortSignal,
-): Promise<unknown> {
-  const contentLength = response.headers.get('Content-Length');
-  if (
-    contentLength !== null &&
-    /^\d+$/.test(contentLength) &&
-    BigInt(contentLength) > BigInt(maxBytes)
-  ) {
-    await cancelResponseBody(response);
-    throw new Error('proof response too large');
-  }
-  const body = response.body as
-    | (AsyncIterable<Uint8Array> & {
-        cancel?: () => Promise<void>;
-        destroy?: () => unknown;
-        getReader?: () => ReadableStreamDefaultReader<Uint8Array>;
-      })
-    | null;
-  if (!body) throw new Error('proof response missing body');
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  if (typeof body === 'string' || body instanceof Uint8Array) {
-    const bytes =
-      typeof body === 'string' ? new TextEncoder().encode(body) : body;
-    if (bytes.byteLength > maxBytes)
-      throw new Error('proof response too large');
-    if (signal.aborted) throw abortError();
-    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
-  }
-  const reader = body.getReader?.();
-  try {
-    if (reader) {
-      while (true) {
-        const { done, value } = await readWithAbort(reader.read(), signal);
-        if (done) break;
-        size += value.byteLength;
-        if (size > maxBytes) throw new Error('proof response too large');
-        chunks.push(value);
-      }
-    } else if (body[Symbol.asyncIterator]) {
-      for await (const value of body) {
-        if (signal.aborted) throw abortError();
-        size += value.byteLength;
-        if (size > maxBytes) throw new Error('proof response too large');
-        chunks.push(value);
-      }
-    } else {
-      throw new Error('proof response stream unavailable');
-    }
-  } catch (error) {
-    try {
-      if (reader) {
-        await reader.cancel();
-      } else if (body.cancel) {
-        await body.cancel();
-      } else {
-        body.destroy?.();
-      }
-    } catch {
-      // Fetch abort or a consumed body may already have closed the stream.
-    }
-    throw error;
-  } finally {
-    try {
-      reader?.releaseLock();
-    } catch {
-      // Ignore a reader that the failed stream did not release cleanly.
-    }
-  }
-  if (signal.aborted) throw abortError();
-  const bytes = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+function isValidProofCredential(
+  credential: IMatrixOpenIdCredential | undefined,
+  serverName: string,
+): credential is IMatrixOpenIdCredential {
+  return (
+    credential !== undefined &&
+    typeof credential.accessToken === 'string' &&
+    credential.accessToken.length > 0 &&
+    credential.matrixServerName === serverName
+  );
 }
 
-async function readWithAbort<T>(
-  work: Promise<T>,
-  signal: AbortSignal,
-): Promise<T> {
-  if (signal.aborted) throw abortError();
-  let onAbort: (() => void) | undefined;
+function assertSafeRadicaleBaseUrl(radicaleUrl: string): void {
   try {
-    return await Promise.race([
-      work,
-      new Promise<never>((_resolve, reject) => {
-        onAbort = () => reject(abortError());
-        signal.addEventListener('abort', onAbort, { once: true });
-      }),
-    ]);
-  } finally {
-    if (onAbort) signal.removeEventListener('abort', onAbort);
-  }
-}
-
-async function cancelResponseBody(response: Response): Promise<void> {
-  try {
-    const body = response.body as
-      | (AsyncIterable<Uint8Array> & {
-          cancel?: () => Promise<void>;
-          destroy?: () => unknown;
-        })
-      | null;
-    if (body?.cancel) {
-      await body.cancel();
-    } else {
-      body?.destroy?.();
+    const base = new URL(radicaleUrl);
+    if (
+      (base.protocol !== 'http:' && base.protocol !== 'https:') ||
+      base.username ||
+      base.password ||
+      base.search ||
+      base.hash
+    ) {
+      throw new Error('invalid Radicale base URL');
     }
   } catch {
-    // The response is discarded and no body text belongs in errors.
+    throw new ServiceUnavailableException({
+      code: 'room-calendar-caldav-disabled',
+      message: 'Room calendar CalDAV access is not enabled',
+    });
   }
 }
 

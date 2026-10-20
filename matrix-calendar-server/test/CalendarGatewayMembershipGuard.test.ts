@@ -38,7 +38,9 @@ import { NET_NORDECK_CONTEXT } from '../src/decorator/IParamExtractor';
 import { MatrixAuthGuard } from '../src/guard/MatrixAuthGuard';
 import { MatrixRoomMembershipGuard } from '../src/guard/MatrixRoomMembershipGuard';
 import { IUserContext } from '../src/model/IUserContext';
+import { DisabledRoomCalendarBindingStore } from '../src/service/DisabledRoomCalendarBindingStore';
 import { MatrixCalendarAuthorizationFactory } from '../src/service/MatrixCalendarAuthorization';
+import { RoomCalendarBindingRegistryAdapter } from '../src/service/RoomCalendarBindingRegistryAdapter';
 import { RoomCalendarCalDavAccess } from '../src/service/RoomCalendarCalDavAccess';
 
 const roomId = '!membership-guard:localhost';
@@ -99,6 +101,13 @@ const testConfiguration = {
     {
       provide: MatrixOpenIdCalDavCredentialProviderFactory,
       useValue: credentialProviderFactory,
+    },
+    {
+      provide: ModuleProviderToken.ROOM_CALENDAR_BINDING_REGISTRY,
+      useValue: new RoomCalendarBindingRegistryAdapter(
+        [],
+        new DisabledRoomCalendarBindingStore(),
+      ),
     },
     {
       provide: ModuleProviderToken.ROOM_CALENDAR_CALDAV_ACCESS,

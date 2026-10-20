@@ -16,7 +16,7 @@
 
 import { OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { IAppConfiguration } from '../IAppConfiguration';
-import { validateRoomCalendarBindings } from '../service/RoomCalendarBindingResolver';
+import type { RoomCalendarBindingRegistry } from '../service/IRoomCalendarBindingRegistry';
 import type {
   RoomCalendarPrincipalIdentity,
   RoomCalendarPrincipalIdentityProvider,
@@ -37,6 +37,7 @@ export class ConfiguredReminderSchedulerRuntimeSource implements ReminderSchedul
     private readonly appConfig: IAppConfiguration,
     private readonly store: RoomReminderStore,
     private readonly principalIdentityProvider: RoomCalendarPrincipalIdentityProvider,
+    private readonly bindingRegistry: RoomCalendarBindingRegistry,
   ) {}
 
   async getCurrentConfiguration(
@@ -70,11 +71,11 @@ export class ConfiguredReminderSchedulerRuntimeSource implements ReminderSchedul
       | undefined;
     if (configured) {
       try {
-        const validated = validateRoomCalendarBindings(
-          this.appConfig.room_calendar_bindings,
+        const validated = await resolveWithAbort(
+          this.bindingRegistry.getSnapshot(signal),
+          signal,
         );
         if (
-          validated.length > 0 &&
           validated.length <= ROOM_REMINDER_SCHEDULER_LIMITS.maxBindingsPerRun
         ) {
           const identity = await resolveWithAbort(
@@ -185,14 +186,9 @@ export class RoomReminderSchedulerLifecycle
       ) {
         return false;
       }
-      const bindings = validateRoomCalendarBindings(
-        this.appConfig.room_calendar_bindings,
-      );
       return (
-        bindings.length > 0 &&
-        bindings.length <= ROOM_REMINDER_SCHEDULER_LIMITS.maxBindingsPerRun &&
-        (this.appConfig.room_calendar_principal_mode === 'bot-account' ||
-          typeof this.appConfig.application_service_user_id === 'string')
+        this.appConfig.room_calendar_principal_mode === 'bot-account' ||
+        typeof this.appConfig.application_service_user_id === 'string'
       );
     } catch {
       return false;

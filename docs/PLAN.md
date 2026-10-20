@@ -376,7 +376,9 @@ DST regression or recurrence-editing criteria above.
       personal, room-write, nonmember, and cross-room contracts pass (PR #193).
 - [x] Route the primary widget through personal and configured room calendars.
       Capabilities are presentation hints; every backend operation rechecks
-      authorization. Collection lifecycle and bindings remain operator-managed.
+      authorization. Static bindings and collection lifecycle remain
+      operator-managed; ADR043 adds a separate, default-off moderator setup
+      path for verified dynamic room bindings.
 - [x] Store bounded per-alarm room-mention intent as Matrix sidecar metadata.
       Settings and alarm-options APIs require current actor/action/binding and
       known unencrypted room state before source/store access (ADR028/ADR033).
@@ -499,8 +501,10 @@ Do not infer addresses from Matrix membership.
 
 **Exit:** repository v1 supports configured room event management and durable
 room-wide reminders in the default appservice mode and the optional bot-account
-mode. Actual Matrix-client and operator deployment acceptance remain separate;
-collection lifecycle and bindings stay operator-managed.
+mode. Actual Matrix-client and operator deployment acceptance remain separate.
+Static bindings and collection lifecycle stay operator-managed; ADR043's
+separately gated moderator setup can add a verified dynamic binding for an
+unbound room.
 
 ## M7 — Non-widget fallback
 
@@ -990,12 +994,22 @@ bounded contract above while broader M4/M5/M8 work remains open.
 
 ## User feedback follow-up — room onboarding and bot command acceptance
 
-Clarify how a team calendar becomes available in each Matrix room and how to
-use the command fallback. Room bindings remain server-configured; the widget
-should explain an unavailable team calendar and direct users to a room moderator
-or calendar administrator. Bot guidance should cover the selected room
-principal, command permissions, encryption/send prerequisites, and bounded
-command limits without implying that inviting the bot creates a calendar.
+ADR043 accepts a bounded `!calendar setup` flow. Static bindings remain
+operator-configured; for an unbound room, the flow may reserve one durable
+binding and create one verified VEVENT collection when the operator enables
+setup and configures its independent binding database. The widget should still
+explain unavailable calendars and direct users to a moderator or administrator.
+Bot guidance should cover the selected room principal, command permissions,
+encryption/send prerequisites, and bounded command limits without implying
+that inviting the bot alone creates a calendar. Setup must not enable ordinary
+room access, event writes, or reminders.
+
+- [x] Accept ADR043 and implement the default-off command, durable binding
+      store/registry, CalDAV reconciliation, widget installation, and shared
+      binding resolution in the gateway, commands, event operations, and
+      reminder paths. Bounded local formatting, lint, typecheck, translation,
+      test, and workspace-build checks pass; exact suite counts and the still-
+      pending hosted/real-service gates are recorded in `docs/STATUS.md`.
 
 - [ ] Validate the empty-room guidance for unconfigured and configured rooms,
       and test multiple distinct room bindings while preserving cross-room
@@ -1005,9 +1019,12 @@ command limits without implying that inviting the bot creates a calendar.
       unencrypted-room state request returns the expected Matrix 404.
 - [ ] Keep membership, power, binding, encryption, and default-off checks in
       the server path; UI guidance and documentation do not grant access.
-- [ ] Qualify the integrated source with focused and full CI, then run the
-      configured-room Element Web/Desktop acceptance before recording a new
-      application candidate.
+- [x] Qualify the integrated source with focused tests and the complete local
+      canonical check sequence. `docs/STATUS.md` records the passed local checks
+      and exact counts.
+- [ ] Pass hosted CI, including the isolated PostgreSQL binding and real
+      Synapse/Radicale contracts, then run configured-room Element Web/Desktop
+      acceptance before recording a new application candidate.
 
 ## Working rule
 

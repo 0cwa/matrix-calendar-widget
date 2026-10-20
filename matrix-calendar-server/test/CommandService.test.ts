@@ -33,6 +33,7 @@ import { IRoomEvent } from '../src/matrix/event/IRoomEvent';
 import { StateEventName } from '../src/model/StateEventName';
 import { CalendarCommandService } from '../src/service/CalendarCommandService';
 import { CommandService, SETUP_COMMANDS } from '../src/service/CommandService';
+import type { RoomCalendarSetupService } from '../src/service/IRoomCalendarSetupService';
 import { WelcomeWorkflowService } from '../src/service/WelcomeWorkflowService';
 import { createAppConfig } from './util/MockUtils';
 
@@ -181,6 +182,8 @@ describe('test CommandService', () => {
     expect(txt).toMatch(/Verfügbare Befehle:/);
     expect(txt).not.toContain('!meeting setup');
     expect(txt).toContain('!calendar help');
+    expect(txt).toContain('!calendar setup');
+    expect(txt).toContain('Lade zuerst den Kalender-Bot ein.');
   });
 
   test('calendar help directs widget-capable clients to the widget', async () => {
@@ -198,6 +201,62 @@ describe('test CommandService', () => {
     expect(txt).not.toContain('<li>');
     expect(txt).toContain('!calendar event <resource-id>');
     expect(captureCalendarMessage().formatted_body).toBeUndefined();
+    expect(captureCalendarMessage()['m.mentions']).toEqual({});
+  });
+
+  test('calendar setup sends only room and sender to the setup service and replies with a localized safe status', async () => {
+    makeRoomPrivate();
+    const setupRunner: RoomCalendarSetupService = {
+      setup: jest.fn().mockResolvedValue({ status: 'created' }),
+    };
+    const service = new CommandService(
+      instance(matrixClientMock),
+      instance(welcomeWorkflowService),
+      appConfig,
+      appRuntimeContext,
+      calendarCommandService,
+      setupRunner,
+    );
+    const event = createEvent();
+    event.content.body = '!calendar setup';
+
+    await service.handleRoomMessage(ROOM_ID, event);
+
+    expect(setupRunner.setup).toHaveBeenCalledWith({
+      roomId: ROOM_ID,
+      actorUserId: event.sender,
+    });
+    verify(
+      calendarCommandServiceMock.execute(
+        anyString(),
+        anyString(),
+        anyString(),
+        anything(),
+      ),
+    ).never();
+    expect(captureCalendarMessage().body).toContain('ready');
+    expect(captureCalendarMessage()['m.mentions']).toEqual({});
+  });
+
+  test('calendar setup rejects every argument without invoking the setup service', async () => {
+    makeRoomPrivate();
+    const setupRunner: RoomCalendarSetupService = {
+      setup: jest.fn().mockResolvedValue({ status: 'created' }),
+    };
+    const service = new CommandService(
+      instance(matrixClientMock),
+      instance(welcomeWorkflowService),
+      appConfig,
+      appRuntimeContext,
+      calendarCommandService,
+      setupRunner,
+    );
+    const event = createEvent();
+    event.content.body = '!calendar setup !another:matrix.org';
+
+    await service.handleRoomMessage(ROOM_ID, event);
+
+    expect(setupRunner.setup).not.toHaveBeenCalled();
     expect(captureCalendarMessage()['m.mentions']).toEqual({});
   });
 

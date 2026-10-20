@@ -914,6 +914,11 @@ test('Element Desktop room event journey', async ({ browser }) => {
     });
     const roomNavigationStartedAt = Date.now();
     desktopRefreshRoomNavigationClickStartedAt = roomNavigationStartedAt;
+    const roomNavigationClick = desktopElement.navigateToRoomOrInvitation(
+      fixture.roomName,
+    );
+    desktopRefreshRoomNavigationDiagnostic.clickAttempted = true;
+    desktopRefreshRoomNavigationDiagnostic.elapsedBucket = 'not_completed';
     desktopRefreshRoomNavigationDiagnostic.progressTimeline.push({
       stage: 'click_started',
       roomListItemCountCapped:
@@ -924,8 +929,12 @@ test('Element Desktop room event journey', async ({ browser }) => {
         Date.now() - roomNavigationStartedAt,
       ),
     });
-    const roomNavigationClick = desktopElement.navigateToRoomOrInvitation(
-      fixture.roomName,
+    safeRecordDesktopJourneyProgress(
+      evidence,
+      'started',
+      'desktop-a-refresh',
+      'desktop-refresh-room-navigation',
+      desktopRefreshRoomNavigationDiagnostic,
     );
     await roomNavigationClick;
     const roomNavigationClickElapsedBucket = desktopRefreshElapsedBucket(
@@ -2872,7 +2881,7 @@ function readFixture(filePath: string): Fixture {
 
 function safeRecordDesktopJourneyProgress(
   evidence: { filePath: string; runnerTemp: string },
-  event: 'begin' | 'point' | 'complete',
+  event: 'begin' | 'point' | 'started' | 'complete',
   phase: 'desktop-a-refresh',
   failurePoint?: DesktopARefreshFailurePoint,
   desktopRefreshRoomNavigationDiagnostic?: DesktopRefreshRoomNavigationDiagnostic,
@@ -2931,9 +2940,9 @@ async function observeDesktopRefreshRoomNavigation(
   return {
     roomListItemCountCapped,
     fixtureRoomTargetVisible,
-    clickAttempted: true,
+    clickAttempted: false,
     clickCompleted: false,
-    elapsedBucket: 'not_completed',
+    elapsedBucket: 'not_started',
     progressTimeline: [
       {
         stage: 'target_observed',

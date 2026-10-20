@@ -18,6 +18,7 @@ import { FactoryProvider } from '@nestjs/common';
 import { MatrixOpenIdCalDavCredentialProviderFactory } from '../caldav/MatrixOpenIdCalDavCredentialProviderFactory';
 import { IAppConfiguration } from '../IAppConfiguration';
 import { ModuleProviderToken } from '../ModuleProviderToken';
+import type { RoomCalendarBindingRegistry } from '../service/IRoomCalendarBindingRegistry';
 import { validateRoomCalendarBindings } from '../service/RoomCalendarBindingResolver';
 import { RoomCalendarCalDavAccess } from '../service/RoomCalendarCalDavAccess';
 import { RoomCalendarEventOperations } from '../service/RoomCalendarEventOperations';
@@ -199,16 +200,19 @@ export function createRoomReminderModuleProviders(): FactoryProvider[] {
         appConfig: IAppConfiguration,
         store: RoomReminderStore,
         principalIdentityProvider: RoomCalendarPrincipalIdentityProvider,
+        bindingRegistry: RoomCalendarBindingRegistry,
       ) =>
         new ConfiguredReminderSchedulerRuntimeSource(
           appConfig,
           store,
           principalIdentityProvider,
+          bindingRegistry,
         ),
       inject: [
         ModuleProviderToken.APP_CONFIGURATION,
         ModuleProviderToken.ROOM_REMINDER_STORE,
         ModuleProviderToken.ROOM_CALENDAR_PRINCIPAL_IDENTITY,
+        ModuleProviderToken.ROOM_CALENDAR_BINDING_REGISTRY,
       ],
     },
     {
@@ -293,6 +297,7 @@ export function createRoomReminderModuleProviders(): FactoryProvider[] {
         matrix: RoomReminderMatrixPorts,
         roomCalendarAccess: RoomCalendarCalDavAccess,
         eventResources: RoomCalendarEventOperations,
+        bindingRegistry: RoomCalendarBindingRegistry,
       ) =>
         new RoomReminderConfigurationService(
           appConfig,
@@ -300,6 +305,7 @@ export function createRoomReminderModuleProviders(): FactoryProvider[] {
           matrix,
           roomCalendarAccess,
           eventResources,
+          bindingRegistry,
         ),
       inject: [
         ModuleProviderToken.APP_CONFIGURATION,
@@ -307,6 +313,7 @@ export function createRoomReminderModuleProviders(): FactoryProvider[] {
         ModuleProviderToken.ROOM_REMINDER_MATRIX_PORTS,
         ModuleProviderToken.ROOM_CALENDAR_CALDAV_ACCESS,
         RoomCalendarEventOperations,
+        ModuleProviderToken.ROOM_CALENDAR_BINDING_REGISTRY,
       ],
     },
     {
@@ -321,10 +328,7 @@ export function createRoomReminderModuleProviders(): FactoryProvider[] {
 function hasSupportedBindings(bindings: unknown): boolean {
   try {
     const validated = validateRoomCalendarBindings(bindings);
-    return (
-      validated.length > 0 &&
-      validated.length <= ROOM_REMINDER_SCHEDULER_LIMITS.maxBindingsPerRun
-    );
+    return validated.length <= ROOM_REMINDER_SCHEDULER_LIMITS.maxBindingsPerRun;
   } catch {
     return false;
   }

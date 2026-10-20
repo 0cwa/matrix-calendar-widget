@@ -31,7 +31,8 @@
     "!calendar event <resource-id> [--tz IANA] (Show one event. Use the resource ID shown by upcoming.)",
     "!calendar create <YYYY-MM-DDTHH:mm> <YYYY-MM-DDTHH:mm> \"<title>\" [--description \"<text>\"] [--tz IANA] (Create a single event using local wall times; quote the title and optional description. UTC is the default timezone. Ambiguous or nonexistent daylight-saving times are rejected.)",
     "!calendar delete <resource-id> (Delete the whole event series; cancel is an alias. Requires room event-write permission.)",
-    "Commands require a server-configured room calendar. Creates and deletes also require the server write gate and current room event-write permission. For other calendar management, use the Matrix Calendar widget in clients that support widgets."
+    "!calendar setup (When enabled: moderators from an allowed Matrix server with calendar-manage permission can set up this room. Invite the calendar bot first.)",
+    "Event commands require a server-configured room calendar. Event creation and deletion also require the server write gate and current room event-write permission. Setup is a separate server-gated command for eligible moderators. For other calendar management, use the Matrix Calendar widget in clients that support widgets."
   ],
   "calendarCommandReplies": {
     "descriptionLabel": "Description",
@@ -47,6 +48,20 @@
     "upcomingPartial": "Some events could not be shown. Review the calendar widget for complete results.",
     "whenLabel": "When"
   },
+  "calendarSetupStatus": {
+    "already-ready": "The room calendar and widget are already set up.",
+    "bot-not-ready": "Invite the calendar bot to this room first and make sure it can send messages.",
+    "capacity-reached": "The server has reached its room calendar limit. Contact an administrator.",
+    "conflict": "The room calendar or widget conflicts with existing room state. Contact an administrator.",
+    "created": "The room calendar is ready and the widget was added.",
+    "disabled": "Room calendar setup is disabled on this server.",
+    "not-authorized": "Only a room member from an allowed Matrix server with calendar-manage permission can set up this room.",
+    "pending": "The calendar collection is reserved but could not yet be verified. Run !calendar setup again later.",
+    "unavailable": "Room calendar setup is temporarily unavailable. Try again later.",
+    "unsupported-room": "Room setup is available only when the room is confirmed to be unencrypted.",
+    "widget-pending": "The calendar is ready, but its widget could not be added. Run !calendar setup again later.",
+    "widget-power-required": "The calendar bot needs permission to add the calendar widget in this room."
+  },
   "commandErrors": {
     "badCommand": "Bad command, try <code>{{trigger}} help</code>",
     "badLanguageCode": "Language code is not supported",
@@ -61,6 +76,7 @@
     "<li><code>!meeting lang &lt;en|de&gt;</code> (Change the language of the bot in this room.)</li>",
     "<li><code>!meeting status</code> (Checks the ability to add the calendar.)</li>",
     "<li><code>!calendar help</code> (Shows the calendar bot commands.)</li>",
+    "<li><code>!calendar setup</code> (When enabled, eligible moderators can set up this room. Invite the calendar bot first.)</li>",
     "</ul>"
   ],
   "meeting": {
