@@ -274,11 +274,21 @@ const DESKTOP_REFRESH_ROOM_NAVIGATION_DIAGNOSTIC_KEYS = Object.freeze(
     'clickCompleted',
     'elapsedBucket',
     'fixtureRoomTargetVisible',
+    'progressTimeline',
     'roomListItemCountCapped',
   ].sort(),
 );
 const DESKTOP_REFRESH_ROOM_NAVIGATION_ELAPSED_BUCKETS = new Set([
   'not_completed',
+  'under_1s',
+  '1_to_5s',
+  '5_to_15s',
+  '15_to_30s',
+  '30s_or_more',
+  'unknown',
+]);
+const DESKTOP_REFRESH_ROOM_NAVIGATION_TIMELINE_ELAPSED_BUCKETS = new Set([
+  'not_started',
   'under_1s',
   '1_to_5s',
   '5_to_15s',
@@ -313,6 +323,7 @@ const MAX_CREDENTIAL_BYTES = 2_048;
 const MAX_EVIDENCE_BYTES = 16_384;
 const MAX_DIAGNOSTIC_ROW_BYTES = 256;
 const MAX_PROGRESS_ROW_BYTES = 512;
+const MAX_REFRESH_ROOM_NAVIGATION_ROW_BYTES = 1_024;
 const MAX_PROGRESS_ROWS = DESKTOP_A_REFRESH_FAILURE_POINTS.length * 2 + 1;
 const MAX_EVIDENCE_ROWS = DESKTOP_JOURNEY_PHASES.length + MAX_PROGRESS_ROWS + 5;
 const SOURCE_SHA_PATTERN = /^[0-9a-f]{40}$/u;
@@ -1068,6 +1079,11 @@ function validRoomNavigationClickProgress(value, failurePoint) {
 }
 
 function validDesktopRefreshRoomNavigationDiagnostic(value, event) {
+  const expectedStages = {
+    point: ['target_observed'],
+    complete: ['target_observed', 'click_started', 'click_resolved'],
+    failed: ['target_observed', 'click_started', 'click_failed'],
+  }[event];
   return (
     value !== null &&
     typeof value === 'object' &&
@@ -1078,10 +1094,35 @@ function validDesktopRefreshRoomNavigationDiagnostic(value, event) {
     [null, true, false].includes(value.fixtureRoomTargetVisible) &&
     value.clickAttempted === true &&
     value.clickCompleted === (event === 'complete') &&
-    DESKTOP_REFRESH_ROOM_NAVIGATION_ELAPSED_BUCKETS.has(value.elapsedBucket) &&
     (event === 'point'
       ? value.elapsedBucket === 'not_completed'
-      : value.elapsedBucket !== 'not_completed')
+      : DESKTOP_REFRESH_ROOM_NAVIGATION_ELAPSED_BUCKETS.has(
+          value.elapsedBucket,
+        ) && value.elapsedBucket !== 'not_completed') &&
+    Array.isArray(value.progressTimeline) &&
+    value.progressTimeline.length === expectedStages?.length &&
+    value.progressTimeline.every((sample, index) => {
+      const stage = expectedStages[index];
+      return (
+        sample !== null &&
+        typeof sample === 'object' &&
+        !Array.isArray(sample) &&
+        Object.keys(sample).sort().join(',') ===
+          'elapsedBucket,fixtureRoomTargetVisible,roomListItemCountCapped,stage' &&
+        sample.stage === stage &&
+        [null, 0, 1, 2].includes(sample.roomListItemCountCapped) &&
+        [null, true, false].includes(sample.fixtureRoomTargetVisible) &&
+        (stage === 'target_observed'
+          ? sample.elapsedBucket === 'not_started'
+          : DESKTOP_REFRESH_ROOM_NAVIGATION_TIMELINE_ELAPSED_BUCKETS.has(
+              sample.elapsedBucket,
+            ))
+      );
+    }) &&
+    (event !== 'complete' ||
+      value.progressTimeline.at(-1).elapsedBucket === value.elapsedBucket) &&
+    (event !== 'failed' ||
+      value.progressTimeline.at(-1).elapsedBucket === value.elapsedBucket)
   );
 }
 
@@ -1590,7 +1631,7 @@ function parseEvidence(input, expectedSourceSha = null) {
         !validSourceSha ||
         Buffer.byteLength(row) >
           (hasRefreshRoomNavigationDiagnostic
-            ? MAX_PROGRESS_ROW_BYTES
+            ? MAX_REFRESH_ROOM_NAVIGATION_ROW_BYTES
             : MAX_DIAGNOSTIC_ROW_BYTES) ||
         desktopChildCompletionCount > 0 ||
         playwrightResultCount > 0 ||
@@ -1762,6 +1803,10 @@ function parseEvidence(input, expectedSourceSha = null) {
       value,
       'desktopEventCreateDiagnostic',
     );
+    const hasRefreshRoomNavigationDiagnostic = Object.hasOwn(
+      value,
+      'desktopRefreshRoomNavigationDiagnostic',
+    );
     if (
       (phaseKeys !== 'phase,status' &&
         phaseKeys !== 'failurePoint,phase,status' &&
@@ -1769,6 +1814,8 @@ function parseEvidence(input, expectedSourceSha = null) {
         phaseKeys !== 'failurePoint,phase,roomNavigationDiagnostic,status' &&
         phaseKeys !== 'failurePoint,phase,status,webBEditSaveDiagnostic' &&
         phaseKeys !== 'errorClass,failurePoint,phase,status' &&
+        phaseKeys !==
+          'desktopRefreshRoomNavigationDiagnostic,errorClass,failurePoint,phase,status' &&
         phaseKeys !==
           'desktopEventCreateDiagnostic,failurePoint,phase,status') ||
       !PHASE_SET.has(value.phase) ||
@@ -1784,6 +1831,16 @@ function parseEvidence(input, expectedSourceSha = null) {
         (value.phase !== 'desktop-a-refresh' ||
           value.status !== 'failed' ||
           !DESKTOP_JOURNEY_ERROR_CLASS_SET.has(value.errorClass))) ||
+      (hasRefreshRoomNavigationDiagnostic &&
+        (value.phase !== 'desktop-a-refresh' ||
+          value.status !== 'failed' ||
+          value.failurePoint !== 'desktop-refresh-room-navigation' ||
+          desktopRefreshProgress?.failurePoint !==
+            'desktop-refresh-room-navigation' ||
+          !validDesktopRefreshRoomNavigationDiagnostic(
+            value.desktopRefreshRoomNavigationDiagnostic,
+            'failed',
+          ))) ||
       (value.phase === 'desktop-a-refresh' &&
         (desktopRefreshProgress === null ||
           desktopRefreshProgress.phase !== value.phase ||
@@ -1869,6 +1926,10 @@ function parseEvidence(input, expectedSourceSha = null) {
     }
     if (hasDesktopEventCreateDiagnostic) {
       desktopEventCreateDiagnostic = value.desktopEventCreateDiagnostic;
+    }
+    if (hasRefreshRoomNavigationDiagnostic) {
+      desktopRefreshRoomNavigationDiagnostic =
+        value.desktopRefreshRoomNavigationDiagnostic;
     }
     if (hasWebBEditSaveDiagnostic) {
       webBEditSaveDiagnostic = value.webBEditSaveDiagnostic;
@@ -2039,7 +2100,7 @@ export function appendDesktopJourneyProgress({
     maxRowBytes:
       desktopRefreshRoomNavigationDiagnostic === undefined
         ? MAX_DIAGNOSTIC_ROW_BYTES
-        : MAX_PROGRESS_ROW_BYTES,
+        : MAX_REFRESH_ROOM_NAVIGATION_ROW_BYTES,
     reserveBytes:
       MAX_PLAYWRIGHT_RESULT_ROW_BYTES + MAX_CHILD_COMPLETION_ROW_BYTES,
   });
@@ -2055,6 +2116,7 @@ export function appendDesktopJourneyOutcome({
   roomNavigationDiagnostic,
   desktopEventCreateDiagnostic,
   webBEditSaveDiagnostic,
+  desktopRefreshRoomNavigationDiagnostic,
   errorClass,
 }) {
   const path = privateRunnerPath(filePath, runnerTemp, JOURNEY_EVIDENCE_NAME);
@@ -2109,7 +2171,16 @@ export function appendDesktopJourneyOutcome({
         status !== 'failed' ||
         failurePoint === undefined ||
         !WEB_B_EDIT_SAVE_FAILURE_POINT_SET.has(failurePoint) ||
-        !validWebBEditSaveDiagnostic(webBEditSaveDiagnostic, failurePoint)))
+        !validWebBEditSaveDiagnostic(webBEditSaveDiagnostic, failurePoint))) ||
+    (desktopRefreshRoomNavigationDiagnostic !== undefined &&
+      (phase !== 'desktop-a-refresh' ||
+        status !== 'failed' ||
+        failurePoint !== 'desktop-refresh-room-navigation' ||
+        parsed.desktopRefreshProgress?.failurePoint !== failurePoint ||
+        !validDesktopRefreshRoomNavigationDiagnostic(
+          desktopRefreshRoomNavigationDiagnostic,
+          'failed',
+        )))
   ) {
     invalidInput();
   }
@@ -2152,6 +2223,9 @@ export function appendDesktopJourneyOutcome({
         ...(webBEditSaveDiagnostic === undefined
           ? {}
           : { webBEditSaveDiagnostic }),
+        ...(desktopRefreshRoomNavigationDiagnostic === undefined
+          ? {}
+          : { desktopRefreshRoomNavigationDiagnostic }),
         ...(errorClass === undefined ? {} : { errorClass }),
       })}\n`,
       {
@@ -2174,6 +2248,7 @@ export function appendDesktopRefreshFailureWithFallback({
   roomNavigationDiagnostic,
   desktopEventCreateDiagnostic,
   webBEditSaveDiagnostic,
+  desktopRefreshRoomNavigationDiagnostic,
 }) {
   const minimal = {
     filePath,
@@ -2193,6 +2268,9 @@ export function appendDesktopRefreshFailureWithFallback({
       ? {}
       : { desktopEventCreateDiagnostic }),
     ...(webBEditSaveDiagnostic === undefined ? {} : { webBEditSaveDiagnostic }),
+    ...(desktopRefreshRoomNavigationDiagnostic === undefined
+      ? {}
+      : { desktopRefreshRoomNavigationDiagnostic }),
   };
   try {
     appendDesktopJourneyOutcome(withOptionalDiagnostics);
@@ -2353,7 +2431,7 @@ export function summarizeDesktopJourneyEvidence(
     childCompletedSuccessfully &&
     playwrightResult === 'passed';
   return {
-    schemaVersion: 15,
+    schemaVersion: 16,
     sourceSha,
     status: failed ? 'failed' : journeyEvidencePassed ? 'passed' : 'incomplete',
     desktopChildCompletion,

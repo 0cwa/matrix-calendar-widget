@@ -479,6 +479,10 @@ test('Element Desktop room event journey', async ({ browser }) => {
   let roomNavigationClickProgress =
     unavailableDesktopRoomNavigationClickProgress();
   let roomNavigationClickStartedAt: number | undefined;
+  let desktopRefreshRoomNavigationDiagnostic:
+    | DesktopRefreshRoomNavigationDiagnostic
+    | undefined;
+  let desktopRefreshRoomNavigationClickStartedAt: number | undefined;
   let roomsReadyIdentity: { memberAId: string; roomId: string } | undefined;
   const recorded = new Set<DesktopJourneyPhase>();
   const contexts: BrowserContext[] = [];
@@ -903,23 +907,43 @@ test('Element Desktop room event journey', async ({ browser }) => {
     enterDesktopRefreshFailurePoint('desktop-refresh-rooms-list');
     await desktopElement.waitForRoomsList(60_000);
     completeDesktopRefreshFailurePoint('desktop-refresh-rooms-list');
-    const refreshRoomNavigationObservation =
+    desktopRefreshRoomNavigationDiagnostic =
       await observeDesktopRefreshRoomNavigation(desktopPage, fixture.roomName);
     enterDesktopRefreshFailurePoint('desktop-refresh-room-navigation', {
-      ...refreshRoomNavigationObservation,
-      clickAttempted: true,
-      clickCompleted: false,
-      elapsedBucket: 'not_completed',
+      ...desktopRefreshRoomNavigationDiagnostic,
     });
     const roomNavigationStartedAt = Date.now();
-    await desktopElement.navigateToRoomOrInvitation(fixture.roomName);
-    completeDesktopRefreshFailurePoint('desktop-refresh-room-navigation', {
-      ...refreshRoomNavigationObservation,
-      clickAttempted: true,
-      clickCompleted: true,
+    desktopRefreshRoomNavigationClickStartedAt = roomNavigationStartedAt;
+    desktopRefreshRoomNavigationDiagnostic.progressTimeline.push({
+      stage: 'click_started',
+      roomListItemCountCapped:
+        desktopRefreshRoomNavigationDiagnostic.roomListItemCountCapped,
+      fixtureRoomTargetVisible:
+        desktopRefreshRoomNavigationDiagnostic.fixtureRoomTargetVisible,
       elapsedBucket: desktopRefreshElapsedBucket(
         Date.now() - roomNavigationStartedAt,
       ),
+    });
+    const roomNavigationClick = desktopElement.navigateToRoomOrInvitation(
+      fixture.roomName,
+    );
+    await roomNavigationClick;
+    const roomNavigationClickElapsedBucket = desktopRefreshElapsedBucket(
+      Date.now() - roomNavigationStartedAt,
+    );
+    desktopRefreshRoomNavigationDiagnostic.clickCompleted = true;
+    desktopRefreshRoomNavigationDiagnostic.elapsedBucket =
+      roomNavigationClickElapsedBucket;
+    desktopRefreshRoomNavigationDiagnostic.progressTimeline.push({
+      stage: 'click_resolved',
+      roomListItemCountCapped:
+        desktopRefreshRoomNavigationDiagnostic.roomListItemCountCapped,
+      fixtureRoomTargetVisible:
+        desktopRefreshRoomNavigationDiagnostic.fixtureRoomTargetVisible,
+      elapsedBucket: roomNavigationClickElapsedBucket,
+    });
+    completeDesktopRefreshFailurePoint('desktop-refresh-room-navigation', {
+      ...desktopRefreshRoomNavigationDiagnostic,
     });
     enterDesktopRefreshFailurePoint('desktop-refresh-room-id');
     if (desktopElement.getCurrentRoomId() !== fixture.teamRoomId) {
@@ -1103,6 +1127,26 @@ test('Element Desktop room event journey', async ({ browser }) => {
       desktopEventCreatePostObserver = undefined;
       if (currentPhase === 'desktop-a-refresh') {
         if (
+          currentFailurePoint === 'desktop-refresh-room-navigation' &&
+          desktopRefreshRoomNavigationDiagnostic !== undefined &&
+          desktopRefreshRoomNavigationClickStartedAt !== undefined &&
+          desktopRefreshRoomNavigationDiagnostic.progressTimeline.at(-1)
+            ?.stage === 'click_started'
+        ) {
+          const elapsedBucket = desktopRefreshElapsedBucket(
+            Date.now() - desktopRefreshRoomNavigationClickStartedAt,
+          );
+          desktopRefreshRoomNavigationDiagnostic.elapsedBucket = elapsedBucket;
+          desktopRefreshRoomNavigationDiagnostic.progressTimeline.push({
+            stage: 'click_failed',
+            roomListItemCountCapped:
+              desktopRefreshRoomNavigationDiagnostic.roomListItemCountCapped,
+            fixtureRoomTargetVisible:
+              desktopRefreshRoomNavigationDiagnostic.fixtureRoomTargetVisible,
+            elapsedBucket,
+          });
+        }
+        if (
           appendDesktopRefreshFailureWithFallback({
             ...evidence,
             failurePoint: currentFailurePoint,
@@ -1111,6 +1155,12 @@ test('Element Desktop room event journey', async ({ browser }) => {
             webBEditSaveDiagnostic,
             roomNavigationDiagnostic,
             desktopEventCreateDiagnostic,
+            desktopRefreshRoomNavigationDiagnostic:
+              currentFailurePoint === 'desktop-refresh-room-navigation' &&
+              desktopRefreshRoomNavigationDiagnostic?.progressTimeline.at(-1)
+                ?.stage === 'click_failed'
+                ? desktopRefreshRoomNavigationDiagnostic
+                : undefined,
           })
         ) {
           recorded.add(currentPhase);
@@ -2848,12 +2898,7 @@ function safeRecordDesktopJourneyProgress(
 async function observeDesktopRefreshRoomNavigation(
   page: Page,
   roomName: string,
-): Promise<
-  Pick<
-    DesktopRefreshRoomNavigationDiagnostic,
-    'roomListItemCountCapped' | 'fixtureRoomTargetVisible'
-  >
-> {
+): Promise<DesktopRefreshRoomNavigationDiagnostic> {
   let roomListItemCountCapped: 0 | 1 | 2 | null = null;
   let fixtureRoomTargetVisible: boolean | null = null;
   try {
@@ -2883,7 +2928,21 @@ async function observeDesktopRefreshRoomNavigation(
   } catch {
     // Never include the fixture room name or Playwright error in evidence.
   }
-  return { roomListItemCountCapped, fixtureRoomTargetVisible };
+  return {
+    roomListItemCountCapped,
+    fixtureRoomTargetVisible,
+    clickAttempted: true,
+    clickCompleted: false,
+    elapsedBucket: 'not_completed',
+    progressTimeline: [
+      {
+        stage: 'target_observed',
+        roomListItemCountCapped,
+        fixtureRoomTargetVisible,
+        elapsedBucket: 'not_started',
+      },
+    ],
+  };
 }
 
 function desktopRefreshElapsedBucket(elapsedMs: number) {
