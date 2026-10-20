@@ -52,7 +52,7 @@ The source-bound image archive workflow offers an optional `operator_rehearsal` 
 
 ## Development
 
-Node.js 22 and Yarn 1.22 are recommended.
+The development and test toolchain requires Node.js >=22.12.0 and Yarn 1.22.x. The server's production runtime requirement remains declared separately in its package manifest.
 
 ```bash
 corepack enable
