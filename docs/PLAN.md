@@ -1014,6 +1014,11 @@ encryption/send prerequisites, and bounded command limits without implying
 that inviting the bot alone creates a calendar. Setup must not enable ordinary
 room access, event writes, or reminders.
 
+- [x] Refine `!calendar help` with localized command groups, parser-valid
+      examples, and concise room/setup prerequisites. The reply includes Matrix
+      custom HTML and a readable plain-text fallback; human pilot-room
+      acceptance remains a separate open item below.
+
 - [x] Accept ADR043 and implement the default-off command, durable binding
       store/registry, CalDAV reconciliation, widget installation, and shared
       binding resolution in the gateway, commands, event operations, and

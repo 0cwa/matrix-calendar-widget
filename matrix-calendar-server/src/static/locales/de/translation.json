@@ -24,16 +24,68 @@
     "unsafe": "Diese Kalenderressource kann nicht sicher geändert werden.",
     "writesDisabled": "Das Erstellen und Löschen von Kalenderterminen ist auf diesem Server nicht aktiviert."
   },
-  "calendarCommandHelp": [
-    "Raumkalender-Befehle (sofern der Server sie für diesen Raum aktiviert hat):",
-    "!calendar help (Diese Hilfe anzeigen.)",
-    "!calendar upcoming [count] [--tz IANA] (Bis zu 10 Termine der nächsten 30 Tage anzeigen; Standard: 5. Zeitzone standardmäßig UTC.)",
-    "!calendar event <resource-id> [--tz IANA] (Einen Termin anzeigen. Die Ressourcen-ID wird von upcoming angezeigt.)",
-    "!calendar create <YYYY-MM-DDTHH:mm> <YYYY-MM-DDTHH:mm> \"<title>\" [--description \"<text>\"] [--tz IANA] (Einen einzelnen Termin mit lokaler Uhrzeit erstellen; Titel und optionale Beschreibung in Anführungszeichen setzen. Standardzeitzone ist UTC. Nicht existierende oder doppeldeutige Uhrzeiten bei der Zeitumstellung werden abgelehnt.)",
-    "!calendar delete <resource-id> (Den gesamten Termin samt Serie löschen; cancel ist ein Alias. Erfordert Schreibrechte für Kalendertermine im Raum.)",
-    "!calendar setup (Wenn aktiviert: Moderator:innen eines erlaubten Matrix-Servers mit Kalenderverwaltungsrecht können den Raum einrichten. Lade zuerst den Kalender-Bot ein.)",
-    "Kalendertermin-Befehle benötigen einen serverseitig konfigurierten Raumkalender. Das Erstellen und Löschen von Terminen benötigen zusätzlich die serverseitige Schreibfreigabe und aktuelle Schreibrechte im Raum. Die Einrichtung ist ein separater, serverseitig freigegebener Befehl für berechtigte Moderator:innen. Für weitere Kalenderfunktionen nutze das Matrix Calendar Widget in Clients, die Widgets unterstützen."
-  ],
+  "calendarCommandHelp": {
+    "title": "Befehle für den Raumkalender",
+    "intro": "Nutze diese Befehle in einem Raum, in dem Kalenderbefehle freigegeben sind.",
+    "exampleLabel": "Beispiel",
+    "sections": [
+      {
+        "title": "Hilfe",
+        "commands": [
+          {
+            "syntax": "!calendar help",
+            "description": "Diese Befehlsübersicht anzeigen."
+          }
+        ]
+      },
+      {
+        "title": "Termine finden und anzeigen",
+        "commands": [
+          {
+            "syntax": "!calendar upcoming [count] [--tz IANA]",
+            "description": "Termine der nächsten 30 Tage anzeigen. Standard: 5, höchstens 10. Zeiten gelten standardmäßig in UTC.",
+            "example": "!calendar upcoming 3 --tz Europe/Stockholm"
+          },
+          {
+            "syntax": "!calendar event <resource-id> [--tz IANA]",
+            "description": "Einen Termin mit der .ics-Ressourcen-ID aus !calendar upcoming anzeigen.",
+            "example": "!calendar event team-planning.ics --tz Europe/Stockholm"
+          }
+        ]
+      },
+      {
+        "title": "Termine erstellen und löschen",
+        "commands": [
+          {
+            "syntax": "!calendar create <YYYY-MM-DDTHH:mm> <YYYY-MM-DDTHH:mm> \"<title>\" [--description \"<text>\"] [--tz IANA]",
+            "description": "Einen einzelnen Termin erstellen. Titel und optionale Beschreibung in Anführungszeichen setzen. Standardmäßig gilt UTC.",
+            "example": "!calendar create 2026-10-22T10:00 2026-10-22T11:00 \"Planung\" --description \"Wöchentliche Planung\" --tz Europe/Stockholm"
+          },
+          {
+            "syntax": "!calendar delete <resource-id>",
+            "description": "Einen unterstützten Termin samt vollständiger Wiederholungsserie löschen. !calendar cancel ist ein Alias.",
+            "example": "!calendar delete team-planning.ics"
+          }
+        ]
+      },
+      {
+        "title": "Diesen Raum einrichten",
+        "commands": [
+          {
+            "syntax": "!calendar setup",
+            "description": "Diesen Raumkalender einrichten und das Widget hinzufügen."
+          }
+        ]
+      }
+    ],
+    "requirementsHeading": "Zugriff und Einrichtung",
+    "requirements": [
+      "Termine lesen: Der Server muss den Kalenderzugriff freigeben und einen Kalender mit diesem Raum verknüpfen. Du musst aktuell Raummitglied sein.",
+      "Termine erstellen oder löschen: Zusätzlich müssen Schreibzugriffe freigegeben sein und du brauchst die aktuelle Schreibberechtigung im Raum.",
+      "Raumeinrichtung: Sie muss separat auf dem Server freigegeben sein. Du musst ein Raummitglied mit Kalenderverwaltungsrecht von einem erlaubten Matrix-Server sein. Lade zuerst den Bot ein; er muss Nachrichten senden und Widgets hinzufügen können. Der Raum muss nachweislich unverschlüsselt sein.",
+      "Für weitere Kalenderverwaltung nutze das Matrix Calendar Widget, sofern dein Client Widgets unterstützt."
+    ]
+  },
   "calendarCommandReplies": {
     "descriptionLabel": "Beschreibung",
     "eventCreated": "Termin {{resourceId}} wurde erstellt.",

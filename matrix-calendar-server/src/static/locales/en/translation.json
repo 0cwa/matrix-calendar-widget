@@ -24,16 +24,68 @@
     "unsafe": "This calendar resource cannot be changed safely.",
     "writesDisabled": "Calendar event creation and deletion are not enabled on this server."
   },
-  "calendarCommandHelp": [
-    "Room calendar commands (when enabled by the server for this room):",
-    "!calendar help (Show this help.)",
-    "!calendar upcoming [count] [--tz IANA] (Show up to 10 events in the next 30 days; default 5. Times default to UTC.)",
-    "!calendar event <resource-id> [--tz IANA] (Show one event. Use the resource ID shown by upcoming.)",
-    "!calendar create <YYYY-MM-DDTHH:mm> <YYYY-MM-DDTHH:mm> \"<title>\" [--description \"<text>\"] [--tz IANA] (Create a single event using local wall times; quote the title and optional description. UTC is the default timezone. Ambiguous or nonexistent daylight-saving times are rejected.)",
-    "!calendar delete <resource-id> (Delete the whole event series; cancel is an alias. Requires room event-write permission.)",
-    "!calendar setup (When enabled: moderators from an allowed Matrix server with calendar-manage permission can set up this room. Invite the calendar bot first.)",
-    "Event commands require a server-configured room calendar. Event creation and deletion also require the server write gate and current room event-write permission. Setup is a separate server-gated command for eligible moderators. For other calendar management, use the Matrix Calendar widget in clients that support widgets."
-  ],
+  "calendarCommandHelp": {
+    "title": "Room calendar commands",
+    "intro": "Use these commands in a room where calendar commands are enabled.",
+    "exampleLabel": "Example",
+    "sections": [
+      {
+        "title": "Help",
+        "commands": [
+          {
+            "syntax": "!calendar help",
+            "description": "Show this command list."
+          }
+        ]
+      },
+      {
+        "title": "Find and read events",
+        "commands": [
+          {
+            "syntax": "!calendar upcoming [count] [--tz IANA]",
+            "description": "List events in the next 30 days. Default: 5; maximum: 10. Times default to UTC.",
+            "example": "!calendar upcoming 3 --tz Europe/Stockholm"
+          },
+          {
+            "syntax": "!calendar event <resource-id> [--tz IANA]",
+            "description": "Show one event using the .ics resource ID from !calendar upcoming.",
+            "example": "!calendar event team-planning.ics --tz Europe/Stockholm"
+          }
+        ]
+      },
+      {
+        "title": "Create and delete events",
+        "commands": [
+          {
+            "syntax": "!calendar create <YYYY-MM-DDTHH:mm> <YYYY-MM-DDTHH:mm> \"<title>\" [--description \"<text>\"] [--tz IANA]",
+            "description": "Create one timed event. Quote the title and optional description. The timezone defaults to UTC.",
+            "example": "!calendar create 2026-10-22T10:00 2026-10-22T11:00 \"Planning\" --description \"Weekly planning\" --tz Europe/Stockholm"
+          },
+          {
+            "syntax": "!calendar delete <resource-id>",
+            "description": "Delete a supported event resource and its full recurrence series. !calendar cancel is an alias.",
+            "example": "!calendar delete team-planning.ics"
+          }
+        ]
+      },
+      {
+        "title": "Set up this room",
+        "commands": [
+          {
+            "syntax": "!calendar setup",
+            "description": "Set up this room calendar and add its widget."
+          }
+        ]
+      }
+    ],
+    "requirementsHeading": "Access and setup",
+    "requirements": [
+      "Read events: calendar access must be enabled, a calendar must be bound to this room, and you must be a current room member.",
+      "Create or delete events: the server must also enable event writes, and you need the room's current event-write permission.",
+      "Room setup is separate and must be enabled by the server. The caller must be a joined member with calendar-manage permission from an allowed Matrix server. Invite the bot first; it needs permission to send messages and add widgets. The room must be confirmed unencrypted.",
+      "For other calendar management, use the Matrix Calendar widget if your client supports widgets."
+    ]
+  },
   "calendarCommandReplies": {
     "descriptionLabel": "Description",
     "eventCreated": "Created event {{resourceId}}.",

@@ -26,13 +26,17 @@ async function main() {
 
   const help = i18next.t('calendarCommandHelp', {
     lng: 'en',
-    joinArrays: '\n',
+    returnObjects: true,
   });
 
-  assert.equal(typeof help, 'string');
-  assert.match(help, /Room calendar commands/);
-  assert.match(help, /!calendar setup/);
-  assert.notEqual(help, 'calendarCommandHelp');
+  assert.equal(typeof help, 'object');
+  assert.equal(help.title, 'Room calendar commands');
+  assert.ok(Array.isArray(help.sections));
+  assert.ok(
+    help.sections.some((section) =>
+      section.commands.some((command) => command.syntax === '!calendar setup'),
+    ),
+  );
   console.log('Built English calendar help translation loaded successfully.');
 }
 
