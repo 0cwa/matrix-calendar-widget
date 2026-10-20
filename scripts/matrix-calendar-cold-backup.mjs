@@ -393,6 +393,8 @@ function composeArgs(config, paths, args) {
     'compose',
     '--project-name',
     config.projectName,
+    '--project-directory',
+    paths.projectDirectory,
     '--env-file',
     paths.composeEnvFile,
     '-f',
@@ -1686,7 +1688,7 @@ async function capturePostgres(
           '/usr/bin/env',
           '-i',
           `PATH=${POSTGRES_CONTAINER_PATH}`,
-          'PGPASSFILE=/dev/null',
+          'PGPASSFILE=/dev/null/.pgpass',
           'PGSERVICEFILE=/dev/null',
           'pg_dump',
           '--no-password',
@@ -1904,9 +1906,23 @@ async function releaseLock(lockHandle, lockPath) {
 }
 
 function runtimeEnvironment(env = process.env) {
+  const credentialsDirectory =
+    typeof env.CREDENTIALS_DIRECTORY === 'string' &&
+    env.CREDENTIALS_DIRECTORY.length > 0
+      ? env.CREDENTIALS_DIRECTORY
+      : undefined;
+
   return {
-    RESTIC_PASSWORD_FILE: env.RESTIC_PASSWORD_FILE,
-    AWS_SHARED_CREDENTIALS_FILE: env.AWS_SHARED_CREDENTIALS_FILE,
+    RESTIC_PASSWORD_FILE:
+      env.RESTIC_PASSWORD_FILE ??
+      (credentialsDirectory
+        ? join(credentialsDirectory, 'restic-password')
+        : undefined),
+    AWS_SHARED_CREDENTIALS_FILE:
+      env.AWS_SHARED_CREDENTIALS_FILE ??
+      (credentialsDirectory
+        ? join(credentialsDirectory, 's3-credentials')
+        : undefined),
     RESTIC_CACHE_DIR: env.RESTIC_CACHE_DIR,
     PGSERVICEFILE: env.PGSERVICEFILE,
     PGPASSFILE: env.PGPASSFILE,
