@@ -175,6 +175,7 @@
     "loadError": "Kalendertermine konnten nicht geladen werden.",
     "mixedCompatibilityNotice": "Mindestens ein Kalender unterstützt weitere Elementtypen. Das Widget zeigt und bearbeitet ausschließlich VEVENT-Termine.",
     "partialAvailability": "Einige Kalender oder Termine konnten nicht geladen werden. Verfügbare Kalender werden weiterhin angezeigt.",
+    "roomCalendarUnavailable": "Für diesen Raum ist kein Teamkalender verfügbar. Bitte frag einen Raum-Moderator oder Kalenderadministrator, ob die Einrichtung geprüft werden kann.",
     "roomReminder": {
       "action": "Raum benachrichtigen",
       "close": "Raumerinnerung schließen",
