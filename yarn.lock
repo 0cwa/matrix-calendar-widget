@@ -9221,7 +9221,7 @@ postcss@^8.3.11, postcss@^8.4.48, postcss@^8.4.49, postcss@^8.5.6:
     picocolors "^1.1.1"
     source-map-js "^1.2.2"
 
-postgres@3.4.9:
+postgres@3.4.9, postgres@^3.4.1:
   version "3.4.9"
   resolved "https://registry.yarnpkg.com/postgres/-/postgres-3.4.9.tgz#8e9a49cecb1b0e7d67a607f32a53ed54b3055271"
   integrity sha512-GD3qdB0x1z9xgFI6cdRD6xu2Sp2WCOEoe3mtnyB5Ee0XrrL5Pe+e4CCnJrRMnL1zYtRDZmQQVbvOttLnKDLnaw==
