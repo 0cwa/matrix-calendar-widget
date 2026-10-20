@@ -6886,10 +6886,10 @@ i18next-cli@^1.50.3:
     react-i18next "^16.5.8"
     yaml "^2.8.2"
 
-i18next-fs-backend@^2.6.7:
-  version "2.6.7"
-  resolved "https://registry.yarnpkg.com/i18next-fs-backend/-/i18next-fs-backend-2.6.7.tgz#4cb4aba9d165748bb6b2f19ed0892061a98c1c81"
-  integrity sha512-nN2TIycyR/d+OVuLm1ugPyOlMprqPRnQ7QktBgn44F3H8l7TeTH4ffHJ7nUsd4QVJfetWW7/VZ3s+4g7FoAZUA==
+i18next-fs-backend@^2.6.9:
+  version "2.6.9"
+  resolved "https://registry.yarnpkg.com/i18next-fs-backend/-/i18next-fs-backend-2.6.9.tgz#42f6d8f182e2ab2c3b5289dd615b4dd8cd663efa"
+  integrity sha512-YZ5PQUV9xnAeh45CCSQW095wYDWZEwKse/1wr3m0z0Mij5zoCFMs67Q3M+w/9un8fUruubMR4DzETnDGH85heQ==
 
 i18next-http-backend@^3.0.6:
   version "3.0.6"
