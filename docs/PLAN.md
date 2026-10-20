@@ -607,10 +607,11 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       establishes local rehearsal only. Issue #255 is closed after completion
       of its public evidence ledger. Issue #251 and the separate production
       target, owner-input, canary, backup, and restore gates remain open.
-- [ ] Issues #275 and #276 were explicitly re-scoped for bounded pre-pilot
-      source cleanup. Issue #277 remains separately gated after the pilot. This
-      source cleanup does not change the frozen application candidate or pilot
-      gates, and any candidate incorporating it requires fresh qualification.
+- [x] Complete the bounded pre-pilot source cleanup for issues #275 and #276,
+      as explicitly re-scoped. Issue #277 remains separately gated after the
+      pilot. This cleanup does not change the frozen application candidate or
+      pilot gates; any candidate incorporating these source changes requires
+      fresh source-bound qualification.
 
 - [x] Wire a separate Chromium calendar-component fixture at 320, 390, 768, and
       1280 CSS pixels, with measured overflow, keyboard focus, and axe checks.
@@ -1014,12 +1015,22 @@ room access, event writes, or reminders.
       test, and workspace-build checks pass; exact suite counts and the still-
       pending hosted/real-service gates are recorded in `docs/STATUS.md`.
 
+- [x] Exercise normal-bot command delivery through real Matrix sync on a
+      synthetic Synapse/Radicale fixture. The bot autojoins an invitation,
+      replies to `!calendar help` and the first `!calendar setup` event, creates
+      a ready binding/widget with verified OpenID/CalDAV access, and refuses a
+      joined member without calendar-manage power before setup side effects.
+      Repeated setup is verified by a direct service call, not a second command
+      event or an `already-ready` reply. This is automated source-contract
+      evidence; it does not establish a human pilot-room, Element/browser, or
+      production/operator acceptance.
 - [ ] Validate the empty-room guidance for unconfigured and configured rooms,
       and test multiple distinct room bindings while preserving cross-room
       authorization.
-- [ ] Verify `!calendar help` and supported calendar commands in the pilot
-      room through the normal bot account, including a safe reply when the
-      unencrypted-room state request returns the expected Matrix 404.
+- [ ] Verify `!calendar help` and supported calendar commands in a human-
+      accepted pilot room through the normal bot account, including a safe
+      reply when the unencrypted-room state request returns the expected
+      Matrix 404.
 - [ ] Keep membership, power, binding, encryption, and default-off checks in
       the server path; UI guidance and documentation do not grant access.
 - [x] Qualify the integrated source with focused tests and the complete local

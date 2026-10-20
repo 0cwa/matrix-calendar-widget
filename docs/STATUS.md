@@ -48,11 +48,20 @@ and full normal-bot Element Web/Desktop acceptance. The separate appservice
 Element Web run failed in G6 member-B room context: Element stayed in
 `SYNCING` without a room heading before the bounded wait ended. Its cause is
 unknown; appservice browser certification remains deferred for the controlled
-pilot. The moderator setup contract calls the production setup service
-directly, so it does not establish Matrix sync delivery for `!calendar setup`
-or browser acceptance of the new setup flow. This qualification is source-only
-and does not establish deployment or pilot readiness. The current doc-only
-integration candidate still requires fresh checks on its exact source.
+pilot. The local normal-bot contract now drives actual Matrix sync through the
+production MatrixServer, CommandController, and CommandService implementations
+inside a test Nest microservice against a synthetic Synapse/Radicale fixture.
+The bot autojoins an invited room, replies to real `!calendar help` and first
+`!calendar setup` events, and refuses setup from a joined member without
+calendar-manage power before binding, widget, OpenID, or CalDAV effects. The
+repeat-setup assertion calls the service directly; a second command event and
+its `already-ready` reply are not covered. The test module supplies constructed
+services and does not verify the deployed AppModule provider graph. This is
+automated source-contract evidence only; it does not establish Element/browser
+behavior, human pilot-room acceptance, a production host, or operator
+deployment readiness. The 14-test local contract and focused format/lint checks
+pass for this source; hosted checks and human/browser acceptance remain separate
+gates.
 
 These changes are outside the frozen application candidate above and require
 fresh source qualification.
