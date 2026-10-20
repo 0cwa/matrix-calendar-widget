@@ -384,7 +384,7 @@ test('keeps journey evidence within finite phases and statuses', () => {
     });
 
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 15);
+    assert.equal(summary.schemaVersion, 16);
     assert.equal(summary.status, 'incomplete');
     assert.equal(summary.loginStep, 'complete');
     assert.equal(summary.loginEntry, 'password_form_present');
@@ -463,7 +463,7 @@ test('records only the source-bound Playwright result and child completion', () 
       runnerTemp,
       expectedSourceSha: sourceSha,
     });
-    assert.equal(summary.schemaVersion, 15);
+    assert.equal(summary.schemaVersion, 16);
     assert.equal(summary.sourceSha, sourceSha);
     assert.equal(summary.status, 'incomplete');
     assert.equal(summary.playwrightResult, 'timed_out');
@@ -843,7 +843,7 @@ test('reports bounded Desktop accessibility failure phases', () => {
       });
 
       const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-      assert.equal(summary.schemaVersion, 15);
+      assert.equal(summary.schemaVersion, 16);
       assert.equal(summary.cases[phase], 'failed');
       assert.deepEqual(summary.failurePoint, { phase, point: failurePoint });
       assert.equal(summary.status, 'failed');
@@ -929,7 +929,7 @@ test('records closed Desktop create observations without event or URL data', () 
       /private room|private title|private-event-id|response body|request URL/u,
     );
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 15);
+    assert.equal(summary.schemaVersion, 16);
     assert.deepEqual(summary.failurePoint, {
       phase: 'desktop-event-create',
       point: 'event-create-exact-row-visible',
@@ -1069,7 +1069,7 @@ test('records room-navigation evidence only at its closed failure boundary', () 
       roomNavigationDiagnostic: diagnostic,
     });
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 15);
+    assert.equal(summary.schemaVersion, 16);
     assert.deepEqual(summary.roomNavigationDiagnostic, diagnostic);
     assert.equal(summary.roomsReadyDiagnostic, null);
     assert.deepEqual(
@@ -1936,7 +1936,7 @@ test('requires ordered Desktop refresh progress before a complete pass', () => {
       runnerTemp,
       expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
     });
-    assert.equal(summary.schemaVersion, 15);
+    assert.equal(summary.schemaVersion, 16);
     assert.equal(summary.status, 'passed');
     assert.equal(summary.cases['desktop-a-refresh'], 'passed');
     assert.equal(summary.failureObservation, null);
@@ -1954,11 +1954,34 @@ test('records bounded Desktop refresh room-navigation progress', () => {
     clickAttempted: true,
     clickCompleted: false,
     elapsedBucket: 'not_completed',
+    progressTimeline: [
+      {
+        stage: 'target_observed',
+        roomListItemCountCapped: 2,
+        fixtureRoomTargetVisible: true,
+        elapsedBucket: 'not_started',
+      },
+    ],
   };
   const afterClick = {
     ...beforeClick,
     clickCompleted: true,
     elapsedBucket: '1_to_5s',
+    progressTimeline: [
+      ...beforeClick.progressTimeline,
+      {
+        stage: 'click_started',
+        roomListItemCountCapped: 2,
+        fixtureRoomTargetVisible: true,
+        elapsedBucket: 'under_1s',
+      },
+      {
+        stage: 'click_resolved',
+        roomListItemCountCapped: 2,
+        fixtureRoomTargetVisible: true,
+        elapsedBucket: '1_to_5s',
+      },
+    ],
   };
   withTempDirectory((runnerTemp) => {
     const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
@@ -2060,6 +2083,31 @@ test('records bounded Desktop refresh room-navigation progress', () => {
     { ...beforeClick, elapsedBucket: 1_237 },
     { ...beforeClick, clickAttempted: false },
     { ...afterClick, clickCompleted: false },
+    {
+      ...beforeClick,
+      progressTimeline: [
+        ...beforeClick.progressTimeline,
+        {
+          stage: 'click_started',
+          roomListItemCountCapped: 2,
+          fixtureRoomTargetVisible: true,
+          elapsedBucket: 'under_1s',
+        },
+      ],
+    },
+    {
+      ...afterClick,
+      progressTimeline: afterClick.progressTimeline.map((sample, index) =>
+        index === 1 ? { ...sample, roomName: 'private room name' } : sample,
+      ),
+    },
+    {
+      ...afterClick,
+      progressTimeline: [
+        ...afterClick.progressTimeline,
+        afterClick.progressTimeline.at(-1),
+      ],
+    },
   ]) {
     assert.throws(
       () =>
@@ -2081,11 +2129,26 @@ test('rejects malformed room-navigation diagnostics while parsing evidence', () 
     clickAttempted: true,
     clickCompleted: false,
     elapsedBucket: 'not_completed',
+    progressTimeline: [
+      {
+        stage: 'target_observed',
+        roomListItemCountCapped: 2,
+        fixtureRoomTargetVisible: true,
+        elapsedBucket: 'not_started',
+      },
+    ],
   };
 
   for (const malformedDiagnostic of [
     { ...diagnostic, unexpectedKey: true },
     { ...diagnostic, roomListItemCountCapped: 3 },
+    {
+      ...diagnostic,
+      progressTimeline: [
+        ...diagnostic.progressTimeline,
+        { stage: 'click_started', roomName: 'private room name' },
+      ],
+    },
   ]) {
     withTempDirectory((runnerTemp) => {
       const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
@@ -2128,6 +2191,102 @@ test('rejects malformed room-navigation diagnostics while parsing evidence', () 
       );
     });
   }
+});
+
+test('records only bounded failed refresh room-navigation progress', () => {
+  const failedDiagnostic = {
+    roomListItemCountCapped: 1,
+    fixtureRoomTargetVisible: true,
+    clickAttempted: true,
+    clickCompleted: false,
+    elapsedBucket: '5_to_15s',
+    progressTimeline: [
+      {
+        stage: 'target_observed',
+        roomListItemCountCapped: 1,
+        fixtureRoomTargetVisible: true,
+        elapsedBucket: 'not_started',
+      },
+      {
+        stage: 'click_started',
+        roomListItemCountCapped: 1,
+        fixtureRoomTargetVisible: true,
+        elapsedBucket: 'under_1s',
+      },
+      {
+        stage: 'click_failed',
+        roomListItemCountCapped: 1,
+        fixtureRoomTargetVisible: true,
+        elapsedBucket: '5_to_15s',
+      },
+    ],
+  };
+  withTempDirectory((runnerTemp) => {
+    const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
+    initializeDesktopJourneyEvidence({ filePath, runnerTemp });
+    appendDesktopRefreshPrefix(filePath, runnerTemp);
+    appendDesktopRefreshBegin(filePath, runnerTemp);
+    for (const failurePoint of DESKTOP_A_REFRESH_FAILURE_POINTS.slice(
+      0,
+      DESKTOP_A_REFRESH_FAILURE_POINTS.indexOf(
+        'desktop-refresh-room-navigation',
+      ),
+    )) {
+      appendDesktopRefreshPoint(filePath, runnerTemp, failurePoint);
+      appendDesktopRefreshComplete(filePath, runnerTemp, failurePoint);
+    }
+    appendDesktopRefreshPoint(
+      filePath,
+      runnerTemp,
+      'desktop-refresh-room-navigation',
+      {
+        ...failedDiagnostic,
+        elapsedBucket: 'not_completed',
+        progressTimeline: failedDiagnostic.progressTimeline.slice(0, 1),
+      },
+    );
+    assert.equal(
+      appendDesktopRefreshFailureWithFallback({
+        filePath,
+        runnerTemp,
+        failurePoint: 'desktop-refresh-room-navigation',
+        errorClass: 'timeout',
+        desktopRefreshRoomNavigationDiagnostic: failedDiagnostic,
+      }),
+      true,
+    );
+    appendDesktopPlaywrightResult({
+      filePath,
+      runnerTemp,
+      sourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+      status: 'failed',
+    });
+    appendDesktopChildCompletion({
+      filePath,
+      runnerTemp,
+      sourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+      completion: { outcome: 'exited', exitStatus: 1, timedOut: false },
+    });
+
+    const summary = readDesktopJourneyEvidence({
+      filePath,
+      runnerTemp,
+      expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+    });
+    assert.equal(summary.status, 'failed');
+    assert.equal(
+      summary.failureObservation.failurePoint,
+      'desktop-refresh-room-navigation',
+    );
+    assert.deepEqual(
+      summary.desktopRefreshRoomNavigationDiagnostic,
+      failedDiagnostic,
+    );
+    assert.doesNotMatch(
+      readFileSync(filePath, 'utf8'),
+      /room-name|room-id|private|token|raw error/iu,
+    );
+  });
 });
 
 test('classifies caught Desktop refresh errors without persisting error text', () => {
