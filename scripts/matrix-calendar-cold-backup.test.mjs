@@ -153,6 +153,7 @@ function fakeCommands({
   duplicatePostgresContainers = false,
   postgresRunning = true,
   failContainerDump = false,
+  containerDumpStderr = '',
   emptyContainerDump = false,
   changePostgresContainerAfterDump = false,
   onContainerDump,
@@ -409,7 +410,9 @@ function fakeCommands({
       return {
         status: failContainerDump || waitForContainerDumpAbort ? 1 : 0,
         stdout: 'synthetic-container-database-diagnostic',
-        stderr: failContainerDump ? 'private container pg_dump detail' : '',
+        stderr: failContainerDump
+          ? 'private container pg_dump detail'
+          : containerDumpStderr,
       };
     }
     if (name === 'docker') return { status: 0, stdout: 'ok' };
@@ -845,7 +848,7 @@ test('container-exec streams a verified custom dump over a local socket and reco
     ),
     [
       'PATH=/usr/local/bin:/usr/bin:/bin',
-      'PGPASSFILE=/dev/null',
+      'PGPASSFILE=/dev/null/.pgpass',
       'PGSERVICEFILE=/dev/null',
     ],
     'only safe environment variables reach pg_dump',
@@ -958,9 +961,16 @@ test('container-exec fails closed when its target identity is ambiguous or untru
   }
 });
 
-test('container-exec removes partial dumps on command or post-dump identity failure', async (t) => {
+test('container-exec removes partial dumps on command warning or post-dump identity failure', async (t) => {
   const cases = [
     { name: 'pg_dump failure', options: { failContainerDump: true } },
+    {
+      name: 'successful pg_dump with libpq passfile warning',
+      options: {
+        containerDumpStderr:
+          'WARNING: password file "/dev/null" is not a plain file\n',
+      },
+    },
     { name: 'empty pg_dump output', options: { emptyContainerDump: true } },
     {
       name: 'container identity changes after dump',
@@ -1982,6 +1992,100 @@ test('a second process loses the exclusive lock without starting a second captur
   await first;
 });
 
+test('uses systemd-loaded credential paths when explicit Restic paths are absent', async (t) => {
+  const fixture = await makeFixture({ databaseEnabled: false });
+  t.after(fixture.cleanup);
+  const fake = fakeCommands({ databaseEnabled: false });
+  const credentialsDirectory = join(fixture.root, 'credentials');
+
+  await runColdBackup(fixture.config, {
+    command: fake.command,
+    env: {
+      CREDENTIALS_DIRECTORY: credentialsDirectory,
+      RESTIC_CACHE_DIR: fixture.env.RESTIC_CACHE_DIR,
+    },
+    id: () => 'systemd-credentials-fallback',
+  });
+
+  const resticCall = fake.calls.find(
+    (call) => call.name === 'restic' && call.args[0] === 'backup',
+  );
+  assert.equal(
+    resticCall.options.env.RESTIC_PASSWORD_FILE,
+    join(credentialsDirectory, 'restic-password'),
+  );
+  assert.equal(
+    resticCall.options.env.AWS_SHARED_CREDENTIALS_FILE,
+    join(credentialsDirectory, 's3-credentials'),
+  );
+  assert.equal(resticCall.options.env.CREDENTIALS_DIRECTORY, undefined);
+});
+
+test('explicit credential paths take precedence and empty explicit paths fail closed', async (t) => {
+  const fixture = await makeFixture({ databaseEnabled: false });
+  t.after(fixture.cleanup);
+  const unusedCredentialsDirectory = join(fixture.root, 'unused-credentials');
+  await mkdir(unusedCredentialsDirectory, { mode: 0o700 });
+
+  const explicit = fakeCommands({ databaseEnabled: false });
+  await runColdBackup(fixture.config, {
+    command: explicit.command,
+    env: {
+      ...fixture.env,
+      CREDENTIALS_DIRECTORY: unusedCredentialsDirectory,
+    },
+    id: () => 'explicit-credential-paths',
+  });
+  const resticCall = explicit.calls.find(
+    (call) => call.name === 'restic' && call.args[0] === 'backup',
+  );
+  assert.equal(
+    resticCall.options.env.RESTIC_PASSWORD_FILE,
+    fixture.env.RESTIC_PASSWORD_FILE,
+  );
+  assert.equal(
+    resticCall.options.env.AWS_SHARED_CREDENTIALS_FILE,
+    fixture.env.AWS_SHARED_CREDENTIALS_FILE,
+  );
+
+  for (const explicitPathName of [
+    'RESTIC_PASSWORD_FILE',
+    'AWS_SHARED_CREDENTIALS_FILE',
+  ]) {
+    const emptyExplicitPath = fakeCommands({ databaseEnabled: false });
+    await assert.rejects(
+      runColdBackup(fixture.config, {
+        command: emptyExplicitPath.command,
+        env: {
+          ...fixture.env,
+          [explicitPathName]: '',
+          CREDENTIALS_DIRECTORY: join(fixture.root, 'credentials'),
+        },
+      }),
+      (error) =>
+        error instanceof ColdBackupFailure && error.stage === 'preflight',
+    );
+    assert.equal(emptyExplicitPath.calls.length, 0);
+  }
+});
+
+test('missing explicit and systemd credential paths fail before commands or capture writes', async (t) => {
+  const fixture = await makeFixture({ databaseEnabled: false });
+  t.after(fixture.cleanup);
+  const fake = fakeCommands({ databaseEnabled: false });
+
+  await assert.rejects(
+    runColdBackup(fixture.config, {
+      command: fake.command,
+      env: { RESTIC_CACHE_DIR: fixture.env.RESTIC_CACHE_DIR },
+    }),
+    (error) =>
+      error instanceof ColdBackupFailure && error.stage === 'preflight',
+  );
+  assert.equal(fake.calls.length, 0);
+  assert.deepEqual(await readdir(fixture.captureRoot), []);
+});
+
 test('preflight refuses missing configuration, a stopped service, and child failures without leaking diagnostics', async (t) => {
   const fixture = await makeFixture({ databaseEnabled: false });
   t.after(fixture.cleanup);
@@ -2173,8 +2277,12 @@ test('systemd examples use runtime credentials and a daily timer without enablin
 
   assert.match(service, /LoadCredential=restic-password:/u);
   assert.match(service, /LoadCredential=s3-credentials:/u);
-  assert.match(service, /RESTIC_PASSWORD_FILE=%d\/restic-password/u);
-  assert.match(service, /AWS_SHARED_CREDENTIALS_FILE=%d\/s3-credentials/u);
+  assert.match(service, /CREDENTIALS_DIRECTORY/u);
+  assert.doesNotMatch(service, /%d\//u);
+  assert.doesNotMatch(
+    service,
+    /^Environment=(?:RESTIC_PASSWORD_FILE|AWS_SHARED_CREDENTIALS_FILE)=/mu,
+  );
   assert.match(
     service,
     /RESTIC_CACHE_DIR=\/var\/cache\/matrix-calendar-backup/u,
