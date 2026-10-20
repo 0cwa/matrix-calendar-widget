@@ -1021,12 +1021,22 @@ room access, event writes, or reminders.
       test, and workspace-build checks pass; exact suite counts and the still-
       pending hosted/real-service gates are recorded in `docs/STATUS.md`.
 
+- [x] Exercise normal-bot command delivery through real Matrix sync on a
+      synthetic Synapse/Radicale fixture. The bot autojoins an invitation,
+      replies to `!calendar help` and the first `!calendar setup` event, creates
+      a ready binding/widget with verified OpenID/CalDAV access, and refuses a
+      joined member without calendar-manage power before setup side effects.
+      Repeated setup is verified by a direct service call, not a second command
+      event or an `already-ready` reply. This is automated source-contract
+      evidence; it does not establish a human pilot-room, Element/browser, or
+      production/operator acceptance.
 - [ ] Validate the empty-room guidance for unconfigured and configured rooms,
       and test multiple distinct room bindings while preserving cross-room
       authorization.
-- [ ] Verify `!calendar help` and supported calendar commands in the pilot
-      room through the normal bot account, including a safe reply when the
-      unencrypted-room state request returns the expected Matrix 404.
+- [ ] Verify `!calendar help` and supported calendar commands in a human-
+      accepted pilot room through the normal bot account, including a safe
+      reply when the unencrypted-room state request returns the expected
+      Matrix 404.
 - [ ] Keep membership, power, binding, encryption, and default-off checks in
       the server path; UI guidance and documentation do not grant access.
 - [x] Qualify the integrated source with focused tests and the complete local
