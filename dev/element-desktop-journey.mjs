@@ -377,9 +377,8 @@ const MAX_UNCAUGHT_ERROR_ROW_BYTES = Buffer.byteLength(
     type: 'desktop-uncaught-error',
     sourceSha: 'f'.repeat(40),
     phase: 'desktop-a-refresh',
-    failurePoint: DESKTOP_A_REFRESH_FAILURE_POINTS.reduce(
-      (longest, current) =>
-        current.length > longest.length ? current : longest,
+    failurePoint: DESKTOP_A_REFRESH_FAILURE_POINTS.reduce((longest, current) =>
+      current.length > longest.length ? current : longest,
     ),
     errorClass: 'assertion',
   })}\n`,
