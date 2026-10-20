@@ -196,6 +196,7 @@ jobs:
           docker exec "$container_id" psql --username reminder_bootstrap --dbname postgres --set ON_ERROR_STOP=1 --command "REVOKE CONNECT ON DATABASE template1 FROM PUBLIC;"
           docker exec "$container_id" psql --username reminder_bootstrap --dbname postgres --set ON_ERROR_STOP=1 --command "CREATE DATABASE matrix_calendar_test OWNER matrix_calendar_app;"
           docker exec "$container_id" psql --username reminder_bootstrap --dbname postgres --set ON_ERROR_STOP=1 --command "CREATE DATABASE matrix_calendar_binding_test OWNER matrix_calendar_app;"
+          docker exec "$container_id" psql --username reminder_bootstrap --dbname postgres --set ON_ERROR_STOP=1 --command "CREATE DATABASE matrix_calendar_coexistence_test OWNER matrix_calendar_app;"
 
       - name: Test PostgreSQL reminder store
         env:
@@ -208,6 +209,31 @@ jobs:
           MATRIX_CALENDAR_BINDING_DATABASE_URL: postgresql://matrix_calendar_app:matrix_calendar_test_password@localhost:5432/matrix_calendar_binding_test
           MATRIX_CALENDAR_BINDING_DATABASE_TLS_MODE: trusted-private-network
         run: yarn workspace @matrix-calendar-widget/server test:postgres-binding-contract
+
+      - name: Prepare PostgreSQL dump tool wrappers
+        run: |
+          container_id="$(docker ps --filter 'ancestor=postgres:16.15-alpine3.23' --format '{{.ID}}')"
+          test -n "$container_id"
+          test "$(printf '%s\n' "$container_id" | wc -l)" -eq 1
+          for tool in pg_dump pg_restore; do
+            cat > "$RUNNER_TEMP/mcw-$tool" <<EOF
+          #!/bin/sh
+          set -eu
+          : "\$\{MCW_PG_CONTAINER_ID:?}"
+          exec docker exec -i -e PGHOST=127.0.0.1 -e PGPORT=5432 -e PGUSER -e PGDATABASE -e PGPASSWORD "\$MCW_PG_CONTAINER_ID" $tool "\$@"
+          EOF
+            chmod 700 "$RUNNER_TEMP/mcw-$tool"
+            echo "MATRIX_CALENDAR_$(echo "$tool" | tr '[:lower:]' '[:upper:]')_BINARY=$RUNNER_TEMP/mcw-$tool" >> "$GITHUB_ENV"
+          done
+          echo "MCW_PG_CONTAINER_ID=$container_id" >> "$GITHUB_ENV"
+
+      - name: Test shared PostgreSQL binding and reminder database
+        env:
+          MATRIX_CALENDAR_BINDING_DATABASE_URL: postgresql://matrix_calendar_app:matrix_calendar_test_password@localhost:5432/matrix_calendar_coexistence_test
+          MATRIX_CALENDAR_BINDING_DATABASE_TLS_MODE: trusted-private-network
+          MATRIX_CALENDAR_REMINDER_DATABASE_URL: postgresql://matrix_calendar_app:matrix_calendar_test_password@localhost:5432/matrix_calendar_coexistence_test
+          MATRIX_CALENDAR_REMINDER_DATABASE_TLS_MODE: trusted-private-network
+        run: yarn workspace @matrix-calendar-widget/server test:postgres-coexistence-contract
 
       - name: Build server
         run: yarn workspace @matrix-calendar-widget/server build

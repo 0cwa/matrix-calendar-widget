@@ -2041,6 +2041,14 @@ test('records bounded Desktop refresh room-navigation progress', () => {
       ),
       true,
     );
+    assert.throws(
+      () =>
+        appendDesktopRefreshStarted(filePath, runnerTemp, {
+          ...startedClick,
+          elapsedBucket: 'not_started',
+        }),
+      /Invalid Desktop journey input/u,
+    );
     assert.equal(
       appendDesktopRefreshStarted(filePath, runnerTemp, startedClick),
       true,

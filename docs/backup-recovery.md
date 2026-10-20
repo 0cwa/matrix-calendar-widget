@@ -351,12 +351,21 @@ Never copy PostgreSQL's live data directory. Do not include the database URL, a
 password file, Matrix tokens, or resolved Compose configuration in the capture
 directory.
 
-While all writers remain stopped, capture the optional reminder database before
-archiving the volumes. Set `REMINDER_DB_BACKUP_ENABLED` explicitly to `true`
-when `MATRIX_CALENDAR_REMINDER_DATABASE_URL` is configured, and to `false` only
-when the reminder database is not configured. The private libpq service named
-by `PG_SERVICE` must resolve the database connection without putting a URL or
-password in this shell, command line, or log:
+While all writers remain stopped, capture the app-owned PostgreSQL database
+before archiving the volumes. Set `REMINDER_DB_BACKUP_ENABLED` explicitly to
+`true` when either the reminder or binding store is configured and this dump is
+to include its database; set it to `false` only when neither store is configured.
+The private libpq service named by `PG_SERVICE` must resolve the app-owned
+database containing the configured store state, without putting a URL or
+password in this shell, command line, or log. For a binding-only installation,
+point `PG_SERVICE` at the binding database and enable this dump explicitly.
+
+The binding and reminder stores may share one PostgreSQL database. In that
+case, one configured dump includes both owned schemas. This procedure captures
+the database selected by `PG_SERVICE`; configuring either URL does not make the
+database appear in a capture automatically. If the stores use different
+databases, capture each database with a separate protected dump and restore
+procedure before relying on both stores.
 
 ```bash
 case "$REMINDER_DB_BACKUP_ENABLED" in

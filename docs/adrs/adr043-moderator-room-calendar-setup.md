@@ -65,9 +65,12 @@ the calendar widget entry without replacing layout state.
    defaults to `false`. Store room bindings through the optional,
    app-owned PostgreSQL connection `MATRIX_CALENDAR_BINDING_DATABASE_URL`,
    independent of `MATRIX_CALENDAR_REMINDER_DATABASE_URL` and the reminder
-   adapter. The binding URL may use the same PostgreSQL cluster, but must use
-   an application-owned database and least-privilege role, never Synapse's
-   database or credentials. Verify PostgreSQL TLS fully by default; allow
+   adapter. The two settings and adapters remain independently optional and
+   may point to the same app-owned PostgreSQL database. They retain separate
+   schemas (`matrix_calendar_bindings` and `matrix_calendar`) and migration
+   ownership; configuring one store never enables or falls back to the other.
+   Either URL must use an application-owned database and least-privilege role,
+   never Synapse's database or credentials. Verify PostgreSQL TLS fully by default; allow
    plaintext only when the operator explicitly sets
    `MATRIX_CALENDAR_BINDING_DATABASE_TLS_MODE=trusted-private-network`, with
    the same narrow meaning as ADR021. The default is `verify-full`.

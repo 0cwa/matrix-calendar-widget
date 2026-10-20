@@ -918,6 +918,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
       fixture.roomName,
     );
     desktopRefreshRoomNavigationDiagnostic.clickAttempted = true;
+    desktopRefreshRoomNavigationDiagnostic.elapsedBucket = 'not_completed';
     desktopRefreshRoomNavigationDiagnostic.progressTimeline.push({
       stage: 'click_started',
       roomListItemCountCapped:
