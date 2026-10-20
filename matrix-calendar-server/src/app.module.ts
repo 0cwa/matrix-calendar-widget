@@ -16,9 +16,6 @@
 
 import { FactoryProvider, Logger, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import i18next from 'i18next';
-import i18nextFsBackend from 'i18next-fs-backend';
-import i18nextMiddleware from 'i18next-http-middleware';
 import {
   ICryptoStorageProvider,
   IStorageProvider,
@@ -49,9 +46,9 @@ import { RoomReminderAlarmOptionsController } from './controller/RoomReminderAla
 import { RoomReminderConfigurationController } from './controller/RoomReminderConfigurationController';
 import { WelcomeWorkflowController } from './controller/WelcomeWorkflowController';
 import { WidgetController } from './controller/WidgetController';
-import { registerDateRangeFormatter } from './dateRangeFormatter';
 import { EventContentRenderer } from './EventContentRenderer';
 import { LegacyMeetingDisabledGuard } from './guard/LegacyMeetingDisabledGuard';
+import { initializeI18next } from './i18n';
 import { IAppConfiguration } from './IAppConfiguration';
 import { RoomMatrixEventsReader } from './io/RoomMatrixEventsReader';
 import { WidgetLayoutConfigReader } from './io/WidgetLayoutConfigReader';
@@ -331,25 +328,8 @@ const appRuntimeContextFactory: FactoryProvider<Promise<AppRuntimeContext>> = {
 
 const i18nFactory: FactoryProvider<void> = {
   provide: ModuleProviderToken.I18N,
-  useFactory: (appRuntimeContext: AppRuntimeContext): void => {
-    i18next
-      .use(i18nextFsBackend)
-      .use(i18nextMiddleware.LanguageDetector)
-      .init({
-        fallbackLng: 'en',
-        backend: {
-          loadPath: `${__dirname}/static/locales/{{lng}}/{{ns}}.json`,
-        },
-        debug: false,
-        saveMissing: true,
-        detection: {
-          order: ['header', 'querystring', 'cookie'],
-          caches: ['cookie'],
-        },
-        preload: appRuntimeContext.supportedLngs,
-      });
-    registerDateRangeFormatter(i18next);
-  },
+  useFactory: (appRuntimeContext: AppRuntimeContext): Promise<void> =>
+    initializeI18next(appRuntimeContext.supportedLngs),
   inject: [AppRuntimeContext],
 };
 
