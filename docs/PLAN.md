@@ -1007,7 +1007,9 @@ room access, event writes, or reminders.
 - [x] Accept ADR043 and implement the default-off command, durable binding
       store/registry, CalDAV reconciliation, widget installation, and shared
       binding resolution in the gateway, commands, event operations, and
-      reminder paths. Final integrated checks remain pending in `docs/STATUS.md`.
+      reminder paths. Bounded local formatting, lint, typecheck, translation,
+      test, and workspace-build checks pass; exact suite counts and the still-
+      pending hosted/real-service gates are recorded in `docs/STATUS.md`.
 
 - [ ] Validate the empty-room guidance for unconfigured and configured rooms,
       and test multiple distinct room bindings while preserving cross-room
@@ -1017,9 +1019,12 @@ room access, event writes, or reminders.
       unencrypted-room state request returns the expected Matrix 404.
 - [ ] Keep membership, power, binding, encryption, and default-off checks in
       the server path; UI guidance and documentation do not grant access.
-- [ ] Qualify the integrated source with focused and full CI, then run the
-      configured-room Element Web/Desktop acceptance before recording a new
-      application candidate.
+- [x] Qualify the integrated source with focused tests and the complete local
+      canonical check sequence. `docs/STATUS.md` records the passed local checks
+      and exact counts.
+- [ ] Pass hosted CI, including the isolated PostgreSQL binding and real
+      Synapse/Radicale contracts, then run configured-room Element Web/Desktop
+      acceptance before recording a new application candidate.
 
 ## Working rule
 

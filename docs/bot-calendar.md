@@ -42,15 +42,15 @@ room calendar reads, event writes, or reminders. Those retain their separate
 server gates and room permission checks. Reminder delivery also has its own
 sender membership and power requirements.
 
-| Setup reply | What to check |
-| --- | --- |
-| Setup is disabled or unavailable | Ask the server operator to check the setup gate, binding store, and widget URL. |
-| Not authorized | Confirm the sender is joined, has calendar-manage permission, and is from an allowed Matrix server. |
-| Bot not ready or widget power required | Invite the bot and grant the room power needed to send messages and write widget state. |
-| Unsupported room | Setup supports only a room confirmed to be unencrypted. |
-| Pending | Retry `!calendar setup` later; a pending collection is not available to calendar consumers. |
-| Widget pending | The verified calendar remains available under the ordinary access gates; retry setup to add the widget. |
-| Conflict or capacity reached | Ask an administrator to inspect the existing room/widget state or configured binding limit. |
+| Setup reply                            | What to check                                                                                           |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Setup is disabled or unavailable       | Ask the server operator to check the setup gate, binding store, and widget URL.                         |
+| Not authorized                         | Confirm the sender is joined, has calendar-manage permission, and is from an allowed Matrix server.     |
+| Bot not ready or widget power required | Invite the bot and grant the room power needed to send messages and write widget state.                 |
+| Unsupported room                       | Setup supports only a room confirmed to be unencrypted.                                                 |
+| Pending                                | Retry `!calendar setup` later; a pending collection is not available to calendar consumers.             |
+| Widget pending                         | The verified calendar remains available under the ordinary access gates; retry setup to add the widget. |
+| Conflict or capacity reached           | Ask an administrator to inspect the existing room/widget state or configured binding limit.             |
 
 | Command                                                                         | Behavior                                                                      |
 | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |

@@ -96,18 +96,18 @@ Per-user bot calendars remain deferred.
 
 ## Source-of-truth boundaries
 
-| Concern                        | Canonical store                                                     |
-| ------------------------------ | ------------------------------------------------------------------- |
-| calendar collection            | CalDAV/Radicale                                                     |
-| VEVENT fields                  | iCalendar object in Radicale                                        |
-| UID, SEQUENCE, recurrence      | iCalendar object                                                    |
-| organizer/attendees            | iCalendar object                                                    |
-| VALARM                         | iCalendar object                                                    |
-| calendar display properties    | CalDAV properties where supported                                   |
+| Concern                        | Canonical store                                                                   |
+| ------------------------------ | --------------------------------------------------------------------------------- |
+| calendar collection            | CalDAV/Radicale                                                                   |
+| VEVENT fields                  | iCalendar object in Radicale                                                      |
+| UID, SEQUENCE, recurrence      | iCalendar object                                                                  |
+| organizer/attendees            | iCalendar object                                                                  |
+| VALARM                         | iCalendar object                                                                  |
+| calendar display properties    | CalDAV properties where supported                                                 |
 | Matrix room ↔ calendar binding | static server configuration plus optional app-owned binding store (ADR015/ADR043) |
-| Matrix reminder configuration  | gateway sidecar state, separate from iCalendar                      |
-| reminder delivery history      | app-owned PostgreSQL store when enabled                             |
-| Matrix permissions             | room state plus configured gateway policy for room-owned operations |
+| Matrix reminder configuration  | gateway sidecar state, separate from iCalendar                                    |
+| reminder delivery history      | app-owned PostgreSQL store when enabled                                           |
+| Matrix permissions             | room state plus configured gateway policy for room-owned operations               |
 
 ## Collection profile
 

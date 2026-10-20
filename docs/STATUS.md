@@ -32,11 +32,15 @@ setup, command, authorization, and configuration suites, and the gateway,
 event, and reminder unit suites. The scheduler cancellation test waits for
 identity resolution to start before aborting; its focused scheduler rerun
 passed. The dedicated PostgreSQL binding contract passed six tests on its
-recorded source hashes; a rerun against this final integrated tree remains
-pending. Full CI, real Synapse/Radicale contracts, independent review, and
-configured-room Element acceptance also remain pending. These changes are
-outside the frozen application candidate above and require fresh source
-qualification.
+recorded source hashes; it has not been rerun against this integrated source.
+The complete local check sequence now passes: formatting, lint, TypeScript,
+translations, the 22 calendar suites (372 tests), timezone tests (5 tests),
+widget tests (784 passed and 3 todo), and server tests (95 suites and 1,568
+tests passed; 7 suites and 40 tests skipped). The workspace build also passes.
+The isolated PostgreSQL binding contract, hosted CI, real Synapse/Radicale
+contracts, independent review, and configured-room Element acceptance remain
+pending for this source. These changes are outside the frozen application
+candidate above and require fresh source qualification.
 
 ### Frozen application candidate and operator gate
 

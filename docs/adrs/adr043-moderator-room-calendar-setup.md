@@ -149,12 +149,12 @@ the calendar widget entry without replacing layout state.
     present it must equal the state key. An optional `matrix_widget_id` URL
     parameter must be the existing state key or the raw `$matrix_widget_id`
     macro, with no duplicates or conflicting values. Reuse the existing full
-   payload and URL without rewriting them; never identify a widget by its name
-   alone. A current or legacy widget URL with credential-bearing parameters or
-   URL user information is not eligible for reuse. If the deterministic state
-   key is occupied by different content or a same-endpoint lookalike fails
-   identity or room checks, return a conflict and preserve all state. Recheck
-   the stable key after payload generation and
+    payload and URL without rewriting them; never identify a widget by its name
+    alone. A current or legacy widget URL with credential-bearing parameters or
+    URL user information is not eligible for reuse. If the deterministic state
+    key is occupied by different content or a same-endpoint lookalike fails
+    identity or room checks, return a conflict and preserve all state. Recheck
+    the stable key after payload generation and
     immediately before the write, then read back the exact payload before
     reporting success. Matrix state writes do not support conditional
     compare-and-set, so a concurrent write between the final read and write can
