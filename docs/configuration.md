@@ -88,7 +88,10 @@ RADICALE_URL=https://calendar.example.com
 
 # Optional app-owned PostgreSQL store for dynamic room bindings. Keep the
 # setup feature gate off until the database role, TLS mode, and migrations are
-# ready. The store is independent of reminder storage.
+# ready. Binding and reminder URLs are independent and may point to the same
+# app-owned database; their adapters own separate schemas. Omitting either URL
+# disables only that store, with no fallback between stores. If they point to
+# different databases, ensure both are covered by backup and recovery.
 # MATRIX_CALENDAR_BINDING_DATABASE_URL=<application-owned-postgres-url>
 # MATRIX_CALENDAR_BINDING_DATABASE_TLS_MODE=verify-full
 
@@ -152,7 +155,8 @@ MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_MAX_KEYS=10000
 # one quota; tune the request limit or add an upstream per-client limit.
 
 # optional - enables durable Matrix reminder state in an app-owned PostgreSQL database
-# use a database and least-privilege role dedicated to Matrix Calendar; never use Synapse's database
+# use a database and least-privilege role for Matrix Calendar; never use Synapse's database
+# this can share a database with MATRIX_CALENDAR_BINDING_DATABASE_URL; each store owns its schema
 # migrations run at server startup; omit this setting to keep reminders disabled
 # supply this URL through deployment secret management and do not log it
 MATRIX_CALENDAR_REMINDER_DATABASE_URL='postgresql://matrix_calendar:password@postgres.example.com:5432/matrix_calendar'
