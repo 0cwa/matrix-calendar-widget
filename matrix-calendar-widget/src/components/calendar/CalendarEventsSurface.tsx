@@ -171,6 +171,18 @@ export function CalendarEventsSurface({
 
   return (
     <>
+      {!calendars.roomCapabilities &&
+        !calendars.partialAvailability &&
+        !events.partialAvailability && (
+          <Box px={1} pb={1}>
+            <Alert role="status" severity="info">
+              {t(
+                'calendarEvents.roomCalendarUnavailable',
+                'A team calendar isn’t available in this room. Ask a room moderator or calendar administrator to check setup.',
+              )}
+            </Alert>
+          </Box>
+        )}
       {(calendars.partialAvailability || events.partialAvailability) && (
         <Box px={1} pb={1}>
           <Alert severity="warning">

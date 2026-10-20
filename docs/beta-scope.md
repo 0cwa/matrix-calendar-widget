@@ -22,11 +22,12 @@ layout are deferred and are not beta pass criteria.
 The selected deployment shape uses the project-owned Radicale image with its
 own independent calendar store, plus a separate application-owned PostgreSQL
 database for Matrix reminder state. PostgreSQL is not Synapse's database.
-Room calendars and bindings are operator-provisioned. The baseline does not
-reuse, attach, import, copy, migrate, or modify an existing Radicale data
-directory. If an operator chooses to reuse an existing service or store,
-image replacement, data-path compatibility, preservation, backup, restore,
-and rollback become additional acceptance work under
+For this pilot, the room calendar and its binding must already be configured
+as part of deployment setup; inviting the bot or adding the widget does not
+create that binding. The baseline does not reuse, attach, import, copy, migrate,
+or modify an existing Radicale data directory. Reusing an existing service or
+store would require additional image, data-path, preservation, backup, restore,
+and rollback checks under
 [ADR037](./adrs/adr037-independent-radicale-store-for-controlled-beta.md) and
 [ADR024](./adrs/adr024-in-repo-radicale-openid-auth.md).
 
