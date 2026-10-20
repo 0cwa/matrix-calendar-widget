@@ -576,9 +576,12 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       dedicated backup account are prepared; private runtime configuration
       remains pending. Pilot services remain unstarted. Protected credential
       staging, final operator recording, live calendar/room canary validation,
-      first real paired backup, isolated gateway restore, disable/rollback,
-      and daily activation
-      remain pending. Issue #255 is closed after completion of the public
+      a fresh encrypted snapshot and isolated restore that include the exact
+      allowlisted deployment restore inputs, disable/rollback, and daily
+      activation remain pending. The earlier meaningful restore predates room
+      setup and does not cover the newly required host inputs. The daily timer
+      remains disabled until the new coverage gate passes and fresh trusted
+      approval is obtained. Issue #255 is closed after completion of the public
       candidate evidence ledger; issue #251 remains open. No wider rollout or
       publication is authorized.
 - [x] Add an explicit `--profile local-microsandbox --manifest PATH` authoring

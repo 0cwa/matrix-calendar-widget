@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import {
   access,
   lstat,
@@ -42,6 +43,7 @@ async function makeFixture({
   postgresDumpTransport,
   initialRunning,
   rootDirectory,
+  restoreInputs = [],
 } = {}) {
   const effectiveDumpTransport = postgresDumpTransport ?? 'native';
   const root =
@@ -125,6 +127,7 @@ async function makeFixture({
     awsProfile: 'default',
     resticHost: 'matrix-calendar-sidecar',
     resticTags: ['matrix-calendar-sidecar', 'cold-paired-store'],
+    ...(restoreInputs.length > 0 ? { restoreInputs } : {}),
   };
 
   return {
@@ -171,6 +174,7 @@ function fakeCommands({
   resticListingStatus = 0,
   resticSnapshotOverride = {},
   resticNodeTransform,
+  resticDumpOverrides = {},
   resticMarkerStatus = 0,
   resticMarkerOutput = captureMarkerContent,
   resticRetentionStatus = 0,
@@ -501,7 +505,35 @@ function fakeCommands({
       return { status: resticListingStatus, stdout: output };
     }
     if (name === 'restic' && args[0] === 'dump') {
-      return { status: resticMarkerStatus, stdout: resticMarkerOutput };
+      const path = args.at(-1);
+      if (path.endsWith('/.capture-complete')) {
+        return { status: resticMarkerStatus, stdout: resticMarkerOutput };
+      }
+      if (Object.hasOwn(resticDumpOverrides, path.split('/').at(-1))) {
+        if (options.stdoutPath) {
+          await writeFile(
+            options.stdoutPath,
+            resticDumpOverrides[path.split('/').at(-1)],
+            { flag: 'wx', mode: 0o600 },
+          );
+          return { status: resticMarkerStatus, stdout: '' };
+        }
+        return {
+          status: resticMarkerStatus,
+          stdout: resticDumpOverrides[path.split('/').at(-1)],
+        };
+      }
+      if (options.stdoutPath) {
+        await writeFile(options.stdoutPath, await readFile(path), {
+          flag: 'wx',
+          mode: 0o600,
+        });
+        return { status: resticMarkerStatus, stdout: '' };
+      }
+      return {
+        status: resticMarkerStatus,
+        stdout: await readFile(path, 'utf8'),
+      };
     }
     if (name === 'restic' && args[0] === 'forget') {
       return {
@@ -698,6 +730,168 @@ test('captures the configured paired stores, resumes services, then uploads one 
       (call) => call.name === 'restic' && ['ls', 'dump'].includes(call.args[0]),
     ),
     false,
+  );
+});
+
+test('captures large binary restore inputs under flat names and verifies their encrypted snapshot readback', async (t) => {
+  const fixture = await makeFixture();
+  t.after(fixture.cleanup);
+  const sourcePath = join(fixture.root, 'deployment-input.env');
+  const inputContents = Buffer.alloc(1024 * 1024 + 64, 0xff);
+  await writeFile(sourcePath, inputContents, { mode: 0o600 });
+  fixture.config.restoreInputs = [{ name: 'binding-env', path: sourcePath }];
+  let uploadedFiles;
+  const fake = fakeCommands({
+    onResticBackup: async (captureDirectory) => {
+      uploadedFiles = await readdir(captureDirectory);
+      const manifest = JSON.parse(
+        await readFile(join(captureDirectory, 'capture-manifest.json'), 'utf8'),
+      );
+      assert.deepEqual(manifest.restoreInputs, [
+        {
+          name: 'binding-env',
+          sourcePath,
+          archiveName: 'restore-input-0000.bin',
+          mode: 0o600,
+          sourceUid: process.getuid?.() ?? 0,
+          sourceGid: process.getgid?.() ?? 0,
+          size: inputContents.length,
+          sha256: createHash('sha256').update(inputContents).digest('hex'),
+        },
+      ]);
+      const checksums = await readFile(
+        join(captureDirectory, 'SHA256SUMS'),
+        'utf8',
+      );
+      assert.match(checksums, /  restore-input-0000\.bin\n/u);
+    },
+  });
+
+  const result = await runColdBackup(fixture.config, {
+    command: fake.command,
+    env: fixture.env,
+    now: () => new Date('2026-10-12T02:03:04.000Z'),
+    id: () => 'synthetic-restore-input-run',
+  });
+
+  assert.equal(result.captureDirectoryRemoved, undefined);
+  assert.ok(uploadedFiles.includes('restore-input-0000.bin'));
+  await access(result.captureDirectory);
+  assert.ok(
+    fake.calls.some(
+      (call) =>
+        call.name === 'restic' &&
+        call.args[0] === 'dump' &&
+        call.args.at(-1).endsWith('/restore-input-0000.bin'),
+    ),
+  );
+});
+
+test('restore-input sources must exist as safe allowlisted files before service shutdown', async (t) => {
+  const fixture = await makeFixture({ databaseEnabled: false });
+  t.after(fixture.cleanup);
+  const fake = fakeCommands({ databaseEnabled: false });
+  fixture.config.restoreInputs = [
+    { name: 'missing', path: join(fixture.root, 'missing.env') },
+  ];
+
+  await assert.rejects(
+    runColdBackup(fixture.config, { command: fake.command, env: fixture.env }),
+    (error) =>
+      error instanceof ColdBackupFailure && error.stage === 'preflight',
+  );
+  assert.equal(
+    fake.calls.some((call) => call.args.includes('stop')),
+    false,
+  );
+  assert.deepEqual(await readdir(fixture.captureRoot), []);
+});
+
+test('restore-input symlinks fail preflight without exposing their targets', async (t) => {
+  const fixture = await makeFixture({ databaseEnabled: false });
+  t.after(fixture.cleanup);
+  const targetPath = join(fixture.root, 'private-target.env');
+  const linkPath = join(fixture.root, 'restore-input.env');
+  await writeFile(targetPath, 'BINDING=synthetic\n', { mode: 0o600 });
+  await symlink(targetPath, linkPath);
+  fixture.config.restoreInputs = [{ name: 'binding', path: linkPath }];
+  const fake = fakeCommands({ databaseEnabled: false });
+
+  await assert.rejects(
+    runColdBackup(fixture.config, { command: fake.command, env: fixture.env }),
+    (error) =>
+      error instanceof ColdBackupFailure && error.stage === 'preflight',
+  );
+  assert.equal(
+    fake.calls.some((call) => call.args.includes('stop')),
+    false,
+  );
+  assert.deepEqual(await readdir(fixture.captureRoot), []);
+});
+
+test('restore-input drift during upload fails verification and preserves the capture', async (t) => {
+  const fixture = await makeFixture({ databaseEnabled: false });
+  t.after(fixture.cleanup);
+  const sourcePath = join(fixture.root, 'deployment-input.yaml');
+  await writeFile(sourcePath, 'VALUE=before\n', { mode: 0o600 });
+  fixture.config.restoreInputs = [{ name: 'deployment', path: sourcePath }];
+  const fake = fakeCommands({
+    databaseEnabled: false,
+    onResticBackup: async () => {
+      await writeFile(sourcePath, 'VALUE=changed\n', { mode: 0o600 });
+    },
+  });
+
+  await assert.rejects(
+    runColdBackup(fixture.config, {
+      command: fake.command,
+      env: fixture.env,
+      id: () => 'changed-restore-input',
+    }),
+    (error) =>
+      error instanceof ColdBackupFailure && error.stage === 'verification',
+  );
+  const captures = await readdir(fixture.captureRoot);
+  const captureDirectory = captures.find(
+    (name) => name !== '.matrix-calendar-cold-backup.lock',
+  );
+  assert.ok(captureDirectory);
+  assert.ok(
+    (await readdir(join(fixture.captureRoot, captureDirectory))).includes(
+      '.capture-complete',
+    ),
+  );
+});
+
+test('Restic readback rejects a restore-input byte mismatch without deleting the capture', async (t) => {
+  const fixture = await makeFixture({ databaseEnabled: false });
+  t.after(fixture.cleanup);
+  const sourcePath = join(fixture.root, 'deployment-input.env');
+  await writeFile(sourcePath, 'BINDING=expected\n', { mode: 0o600 });
+  fixture.config.restoreInputs = [{ name: 'binding', path: sourcePath }];
+  fixture.config.cleanupSuccessfulCapture = true;
+  const fake = fakeCommands({
+    databaseEnabled: false,
+    resticDumpOverrides: { 'restore-input-0000.bin': 'BINDING=other\n' },
+  });
+
+  await assert.rejects(
+    runColdBackup(fixture.config, {
+      command: fake.command,
+      env: fixture.env,
+      id: () => 'bad-restore-input-readback',
+    }),
+    (error) =>
+      error instanceof ColdBackupFailure && error.stage === 'verification',
+  );
+  const captureDirectory = (await readdir(fixture.captureRoot)).find(
+    (name) => name !== '.matrix-calendar-cold-backup.lock',
+  );
+  assert.ok(captureDirectory);
+  assert.ok(
+    (await readdir(join(fixture.captureRoot, captureDirectory))).includes(
+      '.capture-complete',
+    ),
   );
 });
 
@@ -1177,7 +1371,7 @@ test('opt-in cleanup removes only the current capture after Restic reads it back
   );
   assert.deepEqual(
     readbackCalls.map((call) => call.args[0]),
-    ['ls', 'dump'],
+    ['ls', 'dump', 'dump'],
   );
   assert.deepEqual(readbackCalls[0].args, [
     'ls',

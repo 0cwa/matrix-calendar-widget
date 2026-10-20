@@ -2,7 +2,12 @@
 
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { closeSync, createReadStream, openSync } from 'node:fs';
+import {
+  closeSync,
+  createReadStream,
+  constants as fsConstants,
+  openSync,
+} from 'node:fs';
 import {
   access,
   lstat,
@@ -27,6 +32,10 @@ const VOLUME_SUFFIXES = ['radicale-data', 'server-data'];
 const ARCHIVE_NAMES = ['radicale-data.tar', 'server-data.tar'];
 const DUMP_NAME = 'reminder-postgresql.dump';
 const DUMP_PARTIAL_NAME = `${DUMP_NAME}.partial`;
+const RESTORE_INPUT_PREFIX = 'restore-input-';
+const MAX_RESTORE_INPUTS = 32;
+const MAX_RESTORE_INPUT_BYTES = 4 * 1024 * 1024;
+const MAX_RESTORE_INPUT_TOTAL_BYTES = 16 * 1024 * 1024;
 const CAPTURE_MANIFEST_NAME = 'capture-manifest.json';
 const CHECKSUM_NAME = 'SHA256SUMS';
 const CAPTURE_MARKER_NAME = '.capture-complete';
@@ -62,11 +71,13 @@ const CONFIG_KEYS = new Set([
   'resticTags',
   'resticRetentionEnabled',
   'cleanupSuccessfulCapture',
+  'restoreInputs',
 ]);
 
 const SAFE_TAG = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/u;
 const SAFE_PROJECT = /^[a-z0-9][a-z0-9_-]{0,62}$/u;
 const SAFE_SERVICE = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$/u;
+const SAFE_RESTORE_INPUT_NAME = /^[a-z0-9][a-z0-9_-]{0,62}$/u;
 const SAFE_REGION = /^[a-z0-9][a-z0-9-]{0,62}$/u;
 const SAFE_IMAGE = /^[a-z0-9][a-z0-9./:_-]*@sha256:[a-f0-9]{64}$/u;
 const SAFE_DATABASE_NAME = /^[A-Za-z_][A-Za-z0-9_.-]{0,62}$/u;
@@ -216,6 +227,34 @@ function validateConfig(config) {
     fail('configuration');
   }
 
+  const restoreInputs = config.restoreInputs ?? [];
+  if (
+    !Array.isArray(restoreInputs) ||
+    restoreInputs.length > MAX_RESTORE_INPUTS
+  ) {
+    fail('configuration');
+  }
+  const restoreInputNames = new Set();
+  const restoreInputPaths = new Set();
+  for (const input of restoreInputs) {
+    if (
+      !isRecord(input) ||
+      Object.keys(input).some((key) => !['name', 'path'].includes(key)) ||
+      typeof input.name !== 'string' ||
+      !SAFE_RESTORE_INPUT_NAME.test(input.name) ||
+      typeof input.path !== 'string' ||
+      !isSafePath(input.path) ||
+      resolve(input.path) !== input.path ||
+      restoreInputNames.has(input.name) ||
+      restoreInputPaths.has(input.path)
+    ) {
+      fail('configuration');
+    }
+    restoreInputNames.add(input.name);
+    restoreInputPaths.add(input.path);
+  }
+  config.restoreInputs = restoreInputs;
+
   return config;
 }
 
@@ -326,6 +365,32 @@ async function validateConfigFiles(config, runtimeEnv) {
   }
 
   await requirePrivateRegularFile(config.composeEnvFile, 'preflight');
+
+  let restoreInputBytes = 0;
+  for (const input of config.restoreInputs) {
+    await requireNoSymlinkAncestors(input.path, 'preflight');
+    let info;
+    try {
+      info = await lstat(input.path, { bigint: true });
+    } catch {
+      fail('preflight');
+    }
+    if (
+      !info.isFile() ||
+      info.nlink !== 1n ||
+      (typeof process.getuid === 'function' &&
+        process.getuid() !== 0 &&
+        info.uid !== BigInt(process.getuid())) ||
+      (info.mode & 0o022n) !== 0n ||
+      (info.mode & 0o400n) === 0n ||
+      info.size === 0n ||
+      info.size > BigInt(MAX_RESTORE_INPUT_BYTES) ||
+      restoreInputBytes + Number(info.size) > MAX_RESTORE_INPUT_TOTAL_BYTES
+    ) {
+      fail('preflight');
+    }
+    restoreInputBytes += Number(info.size);
+  }
 
   if (
     config.reminderDatabaseEnabled &&
@@ -1435,10 +1500,11 @@ function sameCaptureProof(left, right, expectedNames) {
   });
 }
 
-function captureFileNames(hasDatabase) {
+function captureFileNames(hasDatabase, restoreInputs = []) {
   return [
     ...ARCHIVE_NAMES,
     ...(hasDatabase ? [DUMP_NAME] : []),
+    ...restoreInputs.map((input) => input.archiveName),
     CAPTURE_MANIFEST_NAME,
     CHECKSUM_NAME,
     CAPTURE_MARKER_NAME,
@@ -1461,6 +1527,72 @@ function resticSnapshotId(backupOutput) {
     fail('verification');
   }
   return summary.snapshot_id;
+}
+
+function restoreInputsFromManifest(contents) {
+  let manifest;
+  try {
+    manifest = JSON.parse(contents);
+  } catch {
+    fail('verification');
+  }
+  if (!isRecord(manifest) || manifest.schemaVersion !== 1) {
+    fail('verification');
+  }
+  const inputs = manifest.restoreInputs ?? [];
+  if (!Array.isArray(inputs) || inputs.length > MAX_RESTORE_INPUTS) {
+    fail('verification');
+  }
+  let totalBytes = 0;
+  const names = new Set();
+  const paths = new Set();
+  for (let index = 0; index < inputs.length; index += 1) {
+    const input = inputs[index];
+    const expectedArchiveName = `${RESTORE_INPUT_PREFIX}${String(index).padStart(4, '0')}.bin`;
+    if (
+      !isRecord(input) ||
+      Object.keys(input).some(
+        (key) =>
+          ![
+            'name',
+            'sourcePath',
+            'archiveName',
+            'mode',
+            'sourceUid',
+            'sourceGid',
+            'size',
+            'sha256',
+          ].includes(key),
+      ) ||
+      typeof input.name !== 'string' ||
+      !SAFE_RESTORE_INPUT_NAME.test(input.name) ||
+      typeof input.sourcePath !== 'string' ||
+      !isSafePath(input.sourcePath) ||
+      resolve(input.sourcePath) !== input.sourcePath ||
+      input.archiveName !== expectedArchiveName ||
+      !Number.isInteger(input.mode) ||
+      input.mode < 0 ||
+      input.mode > 0o777 ||
+      !Number.isSafeInteger(input.sourceUid) ||
+      input.sourceUid < 0 ||
+      !Number.isSafeInteger(input.sourceGid) ||
+      input.sourceGid < 0 ||
+      !Number.isSafeInteger(input.size) ||
+      input.size < 1 ||
+      input.size > MAX_RESTORE_INPUT_BYTES ||
+      typeof input.sha256 !== 'string' ||
+      !/^[a-f0-9]{64}$/u.test(input.sha256) ||
+      names.has(input.name) ||
+      paths.has(input.sourcePath) ||
+      totalBytes + input.size > MAX_RESTORE_INPUT_TOTAL_BYTES
+    ) {
+      fail('verification');
+    }
+    names.add(input.name);
+    paths.add(input.sourcePath);
+    totalBytes += input.size;
+  }
+  return inputs;
 }
 
 function verifyResticListing(
@@ -1563,6 +1695,59 @@ async function verifyResticSnapshot(
     'verification',
   );
   if (marker !== CAPTURE_MARKER_CONTENT) fail('verification');
+
+  let manifestContents;
+  try {
+    manifestContents = await readFile(
+      join(captureDirectory, CAPTURE_MANIFEST_NAME),
+      'utf8',
+    );
+  } catch {
+    fail('verification');
+  }
+  const archivedManifest = await runCommand(
+    deps,
+    'restic',
+    ['dump', snapshotId, join(captureDirectory, CAPTURE_MANIFEST_NAME)],
+    commandOptions,
+    'verification',
+  );
+  if (archivedManifest !== manifestContents) fail('verification');
+  const restoreInputs = restoreInputsFromManifest(manifestContents);
+  await verifyRestoreInputSources(restoreInputs);
+  for (const input of restoreInputs) {
+    const readbackPath = join(
+      captureDirectory,
+      `.${input.archiveName}.${randomUUID()}.partial`,
+    );
+    try {
+      await runCommand(
+        deps,
+        'restic',
+        ['dump', snapshotId, join(captureDirectory, input.archiveName)],
+        { ...commandOptions, stdoutPath: readbackPath },
+        'verification',
+      );
+      const info = await lstat(readbackPath, { bigint: true });
+      if (
+        !info.isFile() ||
+        info.nlink !== 1n ||
+        (info.mode & 0o077n) !== 0n ||
+        info.size !== BigInt(input.size) ||
+        (typeof process.getuid === 'function' &&
+          info.uid !== BigInt(process.getuid())) ||
+        (await hashFile(readbackPath, 'verification')) !== input.sha256
+      ) {
+        fail('verification');
+      }
+    } finally {
+      try {
+        await unlink(readbackPath);
+      } catch (error) {
+        if (error?.code !== 'ENOENT') fail('verification');
+      }
+    }
+  }
 }
 
 async function removeVerifiedCapture(
@@ -1840,10 +2025,132 @@ async function captureArchive(
   }
 }
 
-async function writeCaptureManifest(captureDirectory, postgresDump) {
+function hashBytes(bytes) {
+  return createHash('sha256').update(bytes).digest('hex');
+}
+
+async function captureRestoreInputs(config, captureDirectory) {
+  const captured = [];
+  let totalBytes = 0;
+  for (let index = 0; index < config.restoreInputs.length; index += 1) {
+    const input = config.restoreInputs[index];
+    const source = await readRestoreInputSource(input.path, 'capture');
+    const size = source.contents.length;
+    if (totalBytes + size > MAX_RESTORE_INPUT_TOTAL_BYTES) fail('capture');
+    const archiveName = `${RESTORE_INPUT_PREFIX}${String(index).padStart(4, '0')}.bin`;
+    const destination = join(captureDirectory, archiveName);
+    await writeFile(destination, source.contents, { flag: 'wx', mode: 0o600 });
+    const copyInfo = await lstat(destination, { bigint: true });
+    const sha256 = hashBytes(source.contents);
+    if (
+      !copyInfo.isFile() ||
+      copyInfo.nlink !== 1n ||
+      (copyInfo.mode & 0o077n) !== 0n ||
+      copyInfo.size !== BigInt(size) ||
+      hashBytes(await readFile(destination)) !== sha256
+    ) {
+      fail('capture');
+    }
+    totalBytes += size;
+    captured.push({
+      name: input.name,
+      sourcePath: input.path,
+      archiveName,
+      mode: source.mode,
+      sourceUid: source.uid,
+      sourceGid: source.gid,
+      size,
+      sha256,
+    });
+  }
+  return captured;
+}
+
+async function readRestoreInputSource(path, stage) {
+  await requireNoSymlinkAncestors(path, stage);
+  let handle;
+  try {
+    handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    const before = await handle.stat({ bigint: true });
+    const pathInfo = await lstat(path, { bigint: true });
+    if (
+      !before.isFile() ||
+      pathInfo.isSymbolicLink() ||
+      !sameFileIdentity(fileIdentity(before), fileIdentity(pathInfo)) ||
+      before.nlink !== 1n ||
+      (typeof process.getuid === 'function' &&
+        process.getuid() !== 0 &&
+        before.uid !== BigInt(process.getuid())) ||
+      (before.mode & 0o022n) !== 0n ||
+      (before.mode & 0o400n) === 0n ||
+      before.size === 0n ||
+      before.size > BigInt(MAX_RESTORE_INPUT_BYTES)
+    ) {
+      fail(stage);
+    }
+    const buffer = Buffer.alloc(MAX_RESTORE_INPUT_BYTES + 1);
+    let bytesRead = 0;
+    while (bytesRead < buffer.length) {
+      const result = await handle.read(
+        buffer,
+        bytesRead,
+        buffer.length - bytesRead,
+        bytesRead,
+      );
+      if (result.bytesRead === 0) break;
+      bytesRead += result.bytesRead;
+    }
+    const after = await handle.stat({ bigint: true });
+    const currentPathInfo = await lstat(path, { bigint: true });
+    if (
+      !sameFileIdentity(fileIdentity(before), fileIdentity(after)) ||
+      !sameFileIdentity(fileIdentity(after), fileIdentity(currentPathInfo)) ||
+      bytesRead !== Number(before.size) ||
+      bytesRead > MAX_RESTORE_INPUT_BYTES
+    ) {
+      fail(stage);
+    }
+    return {
+      contents: buffer.subarray(0, bytesRead),
+      mode: Number(before.mode & 0o777n),
+      uid: Number(before.uid),
+      gid: Number(before.gid),
+    };
+  } catch (error) {
+    if (error instanceof ColdBackupFailure) throw error;
+    fail(stage);
+  } finally {
+    await handle?.close().catch(() => fail(stage));
+  }
+}
+
+async function verifyRestoreInputSources(inputs) {
+  for (const input of inputs) {
+    const source = await readRestoreInputSource(
+      input.sourcePath,
+      'verification',
+    );
+    if (
+      source.contents.length !== input.size ||
+      source.mode !== input.mode ||
+      source.uid !== input.sourceUid ||
+      source.gid !== input.sourceGid ||
+      hashBytes(source.contents) !== input.sha256
+    ) {
+      fail('verification');
+    }
+  }
+}
+
+async function writeCaptureManifest(
+  captureDirectory,
+  postgresDump,
+  restoreInputs,
+) {
   const manifest = {
     schemaVersion: 1,
     postgresDump,
+    ...(restoreInputs.length > 0 ? { restoreInputs } : {}),
   };
   await createOutputFile(
     join(captureDirectory, CAPTURE_MANIFEST_NAME),
@@ -1852,10 +2159,11 @@ async function writeCaptureManifest(captureDirectory, postgresDump) {
   );
 }
 
-async function writeChecksums(captureDirectory, postgresDump) {
+async function writeChecksums(captureDirectory, postgresDump, restoreInputs) {
   const names = [
     ...ARCHIVE_NAMES,
     ...(postgresDump.enabled ? [DUMP_NAME] : []),
+    ...restoreInputs.map((input) => input.archiveName),
     CAPTURE_MANIFEST_NAME,
   ];
   const lines = [];
@@ -2078,8 +2386,9 @@ export async function runColdBackup(configInput, dependencies = {}) {
         signal,
       );
     }
-    await writeCaptureManifest(captureDirectory, postgresDump);
-    await writeChecksums(captureDirectory, postgresDump);
+    const restoreInputs = await captureRestoreInputs(config, captureDirectory);
+    await writeCaptureManifest(captureDirectory, postgresDump, restoreInputs);
+    await writeChecksums(captureDirectory, postgresDump, restoreInputs);
     await assertStoppedServices(
       config,
       paths,
@@ -2103,7 +2412,26 @@ export async function runColdBackup(configInput, dependencies = {}) {
     let expectedCaptureNames;
     let captureProof;
     if (config.cleanupSuccessfulCapture) {
-      expectedCaptureNames = captureFileNames(postgresDump.enabled);
+      expectedCaptureNames = captureFileNames(
+        postgresDump.enabled,
+        restoreInputs,
+      );
+      captureProof = await localCaptureProof(
+        paths,
+        captureDirectory,
+        runName,
+        captureDirectoryIdentity,
+        expectedCaptureNames,
+      );
+    }
+
+    const verifySnapshot =
+      config.cleanupSuccessfulCapture || restoreInputs.length > 0;
+    if (verifySnapshot) {
+      expectedCaptureNames = captureFileNames(
+        postgresDump.enabled,
+        restoreInputs,
+      );
       captureProof = await localCaptureProof(
         paths,
         captureDirectory,
@@ -2125,14 +2453,12 @@ export async function runColdBackup(configInput, dependencies = {}) {
       'host,tags',
       captureDirectory,
     ];
-    if (config.cleanupSuccessfulCapture) {
-      resticArgs.splice(1, 0, '--quiet', '--json');
-    }
+    if (verifySnapshot) resticArgs.splice(1, 0, '--quiet', '--json');
     const uploadOutput = await runCommand(
       deps,
       'restic',
       resticArgs,
-      config.cleanupSuccessfulCapture
+      verifySnapshot
         ? {
             env: commandEnvironment(config, paths, runtimeEnv, 'restic'),
             signal,
@@ -2146,9 +2472,20 @@ export async function runColdBackup(configInput, dependencies = {}) {
           },
       'upload',
     );
-    const snapshotId = config.cleanupSuccessfulCapture
-      ? resticSnapshotId(uploadOutput)
-      : undefined;
+    if (verifySnapshot) {
+      const snapshotId = resticSnapshotId(uploadOutput);
+      await verifyResticSnapshot(
+        snapshotId,
+        config,
+        paths,
+        runtimeEnv,
+        deps,
+        signal,
+        captureDirectory,
+        expectedCaptureNames,
+        captureProof,
+      );
+    }
 
     if (config.resticRetentionEnabled) {
       await runCommand(
@@ -2177,17 +2514,6 @@ export async function runColdBackup(configInput, dependencies = {}) {
     }
 
     if (config.cleanupSuccessfulCapture) {
-      await verifyResticSnapshot(
-        snapshotId,
-        config,
-        paths,
-        runtimeEnv,
-        deps,
-        signal,
-        captureDirectory,
-        expectedCaptureNames,
-        captureProof,
-      );
       await removeVerifiedCapture(
         paths,
         captureDirectory,
