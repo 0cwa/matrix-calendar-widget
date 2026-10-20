@@ -1136,8 +1136,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
           const elapsedBucket = desktopRefreshElapsedBucket(
             Date.now() - desktopRefreshRoomNavigationClickStartedAt,
           );
-          desktopRefreshRoomNavigationDiagnostic.elapsedBucket =
-            elapsedBucket;
+          desktopRefreshRoomNavigationDiagnostic.elapsedBucket = elapsedBucket;
           desktopRefreshRoomNavigationDiagnostic.progressTimeline.push({
             stage: 'click_failed',
             roomListItemCountCapped:
