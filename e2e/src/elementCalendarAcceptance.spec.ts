@@ -4142,7 +4142,8 @@ test('Element Web preserves unsupported events and supports client interactions'
       exact: true,
     });
     const deleteButtonVisible = await deleteButton
-      .isVisible()
+      .waitFor({ state: 'visible', timeout: 8_000 })
+      .then(() => true)
       .catch(() => false);
     await deleteButton.click();
     const confirmation = frameA.getByRole('dialog', { name: 'Delete event' });
