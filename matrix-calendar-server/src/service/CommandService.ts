@@ -20,6 +20,7 @@ import { MatrixClient, MatrixError, MessageEventContent } from 'matrix-bot-sdk';
 import { AppRuntimeContext } from '../AppRuntimeContext';
 import { IAppConfiguration } from '../IAppConfiguration';
 import { ModuleProviderToken } from '../ModuleProviderToken';
+import { Matrix404Error } from '../error/Matrix404Error';
 import { TranslatableError } from '../error/TranslatableError';
 import { IRoomEvent } from '../matrix/event/IRoomEvent';
 import { StateEventName } from '../model/StateEventName';
@@ -398,9 +399,9 @@ export class CommandService {
 }
 
 function isMissingEncryptionState(error: unknown): boolean {
-  return (
-    error instanceof MatrixError &&
+  const isExpectedMatrixError =
+    (error instanceof MatrixError || error instanceof Matrix404Error) &&
     error.statusCode === 404 &&
-    error.errcode === 'M_NOT_FOUND'
-  );
+    error.errcode === 'M_NOT_FOUND';
+  return isExpectedMatrixError;
 }
