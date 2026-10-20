@@ -32,6 +32,40 @@ export const MATRIX_CALENDAR_EVENT_WRITE_POLICY =
 export const MATRIX_CALENDAR_MANAGE_POLICY =
   'io.github.0cwa.matrix-calendar.manage';
 
+/**
+ * Room versions 1–9 retain deprecated string and float encodings for power
+ * levels. Version 10 and later require integers, so legacy encodings are
+ * accepted only when the current room version is known to be 1–9.
+ */
+export function normalizeMatrixPowerLevel(
+  value: unknown,
+  roomVersion: string | undefined,
+): number | undefined {
+  if (typeof value === 'number' && Number.isSafeInteger(value)) {
+    return value;
+  }
+
+  if (roomVersion === undefined || !/^[1-9]$/u.test(roomVersion)) {
+    return undefined;
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!/^[+-]?[0-9]+$/u.test(trimmed)) {
+      return undefined;
+    }
+    const parsed = Number(trimmed);
+    return Number.isSafeInteger(parsed) ? parsed : undefined;
+  }
+
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return undefined;
+  }
+
+  const truncated = Math.trunc(value);
+  return Number.isSafeInteger(truncated) ? truncated : undefined;
+}
+
 type PowerLevelsLookup =
   | { kind: 'present'; content: PowerLevelsEventContent }
   | { kind: 'absent' }
@@ -132,50 +166,7 @@ class MatrixRoomCalendarAuthorization implements CalendarAuthorization {
       return true;
     }
 
-    return this.isImplicitRoomV12Creator();
-  }
-
-  private async isImplicitRoomV12Creator(): Promise<boolean> {
-    try {
-      const state = await this.matrixClient.getRoomState(this.roomId);
-      if (!Array.isArray(state)) {
-        return false;
-      }
-
-      const createEvents = state.filter(
-        (event: unknown) => isRecord(event) && event.type === 'm.room.create',
-      );
-      if (createEvents.length !== 1) {
-        return false;
-      }
-
-      const createEvent = createEvents[0];
-      if (
-        !isRecord(createEvent) ||
-        createEvent.state_key !== '' ||
-        !isRecord(createEvent.content) ||
-        createEvent.content.room_version !== '12' ||
-        !isMatrixUserId(createEvent.sender, true)
-      ) {
-        return false;
-      }
-
-      const additionalCreators = createEvent.content.additional_creators;
-      if (
-        additionalCreators !== undefined &&
-        (!Array.isArray(additionalCreators) ||
-          !additionalCreators.every((value) => isMatrixUserId(value)))
-      ) {
-        return false;
-      }
-
-      return (
-        createEvent.sender === this.userId ||
-        (additionalCreators?.includes(this.userId) ?? false)
-      );
-    } catch {
-      return false;
-    }
+    return isMatrixRoomV12Creator(this.matrixClient, this.userId, this.roomId);
   }
 
   private async getPowerLevels(): Promise<PowerLevelsLookup> {
@@ -203,6 +194,57 @@ class MatrixRoomCalendarAuthorization implements CalendarAuthorization {
 
   private userPower(powerLevels: PowerLevelsEventContent | undefined): number {
     return powerLevels?.users?.[this.userId] ?? powerLevels?.users_default ?? 0;
+  }
+}
+
+/**
+ * Returns whether a user has the implicit creator power granted by room
+ * version 12. Malformed or unavailable creation state fails closed.
+ */
+export async function isMatrixRoomV12Creator(
+  matrixClient: { getRoomState(roomId: string): Promise<unknown> },
+  userId: string,
+  roomId: string,
+): Promise<boolean> {
+  try {
+    const state = await matrixClient.getRoomState(roomId);
+    if (!Array.isArray(state)) {
+      return false;
+    }
+
+    const createEvents = state.filter(
+      (event: unknown) => isRecord(event) && event.type === 'm.room.create',
+    );
+    if (createEvents.length !== 1) {
+      return false;
+    }
+
+    const createEvent = createEvents[0];
+    if (
+      !isRecord(createEvent) ||
+      createEvent.state_key !== '' ||
+      !isRecord(createEvent.content) ||
+      createEvent.content.room_version !== '12' ||
+      !isMatrixUserId(createEvent.sender, true)
+    ) {
+      return false;
+    }
+
+    const additionalCreators = createEvent.content.additional_creators;
+    if (
+      additionalCreators !== undefined &&
+      (!Array.isArray(additionalCreators) ||
+        !additionalCreators.every((value) => isMatrixUserId(value)))
+    ) {
+      return false;
+    }
+
+    return (
+      createEvent.sender === userId ||
+      (additionalCreators?.includes(userId) ?? false)
+    );
+  } catch {
+    return false;
   }
 }
 

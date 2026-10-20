@@ -15,8 +15,7 @@
  */
 
 import { MatrixClient, MatrixError, UserID } from 'matrix-bot-sdk';
-import { RoomCalendarBinding } from '../model/IRoomCalendarBinding';
-import { resolveRoomCalendarBinding } from './RoomCalendarBindingResolver';
+import type { RoomCalendarBindingRegistry } from './IRoomCalendarBindingRegistry';
 
 export type RoomCalendarEventAuditAction = 'created' | 'updated' | 'deleted';
 
@@ -35,7 +34,7 @@ export interface RoomCalendarEventAuditContext {
 export interface RoomCalendarEventAuditOptions {
   /** Explicit opt-in; omitted and false both disable room messages. */
   readonly enabled?: boolean;
-  readonly roomCalendarBindings?: readonly RoomCalendarBinding[];
+  readonly bindingRegistry?: RoomCalendarBindingRegistry;
   readonly encryptionEnabled?: boolean;
 }
 
@@ -66,8 +65,8 @@ export class RoomCalendarEventAuditService {
         return;
       }
 
-      resolveRoomCalendarBinding(
-        this.options.roomCalendarBindings,
+      if (!this.options.bindingRegistry) return;
+      await this.options.bindingRegistry.resolve(
         context.roomId,
         context.calendarId,
       );

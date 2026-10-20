@@ -16,9 +16,6 @@
 
 import { FactoryProvider, Logger, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import i18next from 'i18next';
-import i18nextFsBackend from 'i18next-fs-backend';
-import i18nextMiddleware from 'i18next-http-middleware';
 import {
   ICryptoStorageProvider,
   IStorageProvider,
@@ -49,9 +46,9 @@ import { RoomReminderAlarmOptionsController } from './controller/RoomReminderAla
 import { RoomReminderConfigurationController } from './controller/RoomReminderConfigurationController';
 import { WelcomeWorkflowController } from './controller/WelcomeWorkflowController';
 import { WidgetController } from './controller/WidgetController';
-import { registerDateRangeFormatter } from './dateRangeFormatter';
 import { EventContentRenderer } from './EventContentRenderer';
 import { LegacyMeetingDisabledGuard } from './guard/LegacyMeetingDisabledGuard';
+import { initializeI18next } from './i18n';
 import { IAppConfiguration } from './IAppConfiguration';
 import { RoomMatrixEventsReader } from './io/RoomMatrixEventsReader';
 import { WidgetLayoutConfigReader } from './io/WidgetLayoutConfigReader';
@@ -61,6 +58,7 @@ import {
   AutojoinUpgradedRoomsMixin,
 } from './matrix/mixins';
 import { MatrixAuthMiddleware } from './middleware/MatrixAuthMiddleware';
+import type { RoomCalendarBindingStore } from './model/IRoomCalendarBindingStore';
 import { IRoomMatrixEvents } from './model/IRoomMatrixEvents';
 import { ModuleProviderToken } from './ModuleProviderToken';
 import {
@@ -68,20 +66,32 @@ import {
   PostgresRoomReminderStore,
   RoomReminderStore,
 } from './reminder';
-import { getReminderDatabaseTlsOptions } from './reminder/ReminderDatabaseConnection';
+import {
+  getPostgresDatabaseTlsOptions,
+  getReminderDatabaseTlsOptions,
+} from './reminder/ReminderDatabaseConnection';
 import { createRoomReminderModuleProviders } from './reminder/RoomReminderModuleProviders';
 import { MatrixServer } from './rpc/MatrixServer';
 import { CalendarCommandService } from './service/CalendarCommandService';
 import { CommandService } from './service/CommandService';
 import { ConfiguredRoomCalendarPrincipalIdentityProvider } from './service/ConfiguredRoomCalendarPrincipalIdentityProvider';
 import { ControlRoomMigrationService } from './service/ControlRoomMigrationService';
+import { DisabledRoomCalendarBindingStore } from './service/DisabledRoomCalendarBindingStore';
 import { GuestMemberService } from './service/GuestMemberService';
+import type { RoomCalendarBindingRegistry } from './service/IRoomCalendarBindingRegistry';
 import { MatrixCalendarAuthorizationFactory } from './service/MatrixCalendarAuthorization';
 import { MeetingService } from './service/MeetingService';
+import { PostgresRoomCalendarBindingStore } from './service/PostgresRoomCalendarBindingStore';
+import { RoomCalendarBindingRegistryAdapter } from './service/RoomCalendarBindingRegistryAdapter';
 import { RoomCalendarCalDavAccess } from './service/RoomCalendarCalDavAccess';
 import { RoomCalendarEventAuditService } from './service/RoomCalendarEventAuditService';
 import { RoomCalendarEventOperations } from './service/RoomCalendarEventOperations';
 import type { RoomCalendarPrincipalIdentityProvider } from './service/RoomCalendarPrincipalIdentity';
+import type { RoomCalendarPrincipalOpenIdProofPort } from './service/RoomCalendarPrincipalOpenIdProofProvider';
+import { MatrixRoomCalendarPrincipalOpenIdProofProvider } from './service/RoomCalendarPrincipalOpenIdProofProvider';
+import { RoomCalendarSetupCalDavProvisioner } from './service/RoomCalendarSetupCalDavProvisioner';
+import { MatrixRoomCalendarSetupService } from './service/RoomCalendarSetupService';
+import { RoomCalendarSetupWidgetInstaller } from './service/RoomCalendarSetupWidgetInstaller';
 import { RoomMessageService } from './service/RoomMessageService';
 import { WelcomeWorkflowService } from './service/WelcomeWorkflowService';
 import { WidgetLayoutService } from './service/WidgetLayoutService';
@@ -165,6 +175,62 @@ const roomReminderStoreFactory: FactoryProvider<Promise<RoomReminderStore>> = {
   },
   inject: [ModuleProviderToken.APP_CONFIGURATION],
 };
+
+const roomCalendarBindingStoreFactory: FactoryProvider<
+  Promise<RoomCalendarBindingStore>
+> = {
+  provide: ModuleProviderToken.ROOM_CALENDAR_BINDING_STORE,
+  useFactory: async (appConfig: IAppConfiguration) => {
+    if (!appConfig.room_calendar_binding_database_url) {
+      return new DisabledRoomCalendarBindingStore();
+    }
+
+    const postgresOptions = {
+      ...getPostgresDatabaseTlsOptions(
+        appConfig.room_calendar_binding_database_tls_mode,
+        appConfig.room_calendar_binding_database_url,
+      ),
+      max: 3,
+      connect_timeout: 5,
+      idle_timeout: 20,
+      connection: {
+        application_name: 'matrix-calendar-bindings',
+        // Postgres.js passes startup runtime settings in milliseconds.
+        statement_timeout: 5_000,
+      },
+    } as unknown as Parameters<typeof postgres>[1];
+    const sql = postgres(
+      appConfig.room_calendar_binding_database_url,
+      postgresOptions,
+    );
+    const store = new PostgresRoomCalendarBindingStore(sql);
+    try {
+      await store.migrate();
+      return store;
+    } catch (error) {
+      await store.onApplicationShutdown();
+      throw error;
+    }
+  },
+  inject: [ModuleProviderToken.APP_CONFIGURATION],
+};
+
+const roomCalendarBindingRegistryFactory: FactoryProvider<RoomCalendarBindingRegistry> =
+  {
+    provide: ModuleProviderToken.ROOM_CALENDAR_BINDING_REGISTRY,
+    useFactory: (
+      appConfig: IAppConfiguration,
+      store: RoomCalendarBindingStore,
+    ) =>
+      new RoomCalendarBindingRegistryAdapter(
+        appConfig.room_calendar_bindings,
+        store,
+      ),
+    inject: [
+      ModuleProviderToken.APP_CONFIGURATION,
+      ModuleProviderToken.ROOM_CALENDAR_BINDING_STORE,
+    ],
+  };
 
 const matrixClientFactoryHelper = {
   createStorageProvider: async (
@@ -262,25 +328,8 @@ const appRuntimeContextFactory: FactoryProvider<Promise<AppRuntimeContext>> = {
 
 const i18nFactory: FactoryProvider<void> = {
   provide: ModuleProviderToken.I18N,
-  useFactory: (appRuntimeContext: AppRuntimeContext): void => {
-    i18next
-      .use(i18nextFsBackend)
-      .use(i18nextMiddleware.LanguageDetector)
-      .init({
-        fallbackLng: 'en',
-        backend: {
-          loadPath: `${__dirname}/static/locales/{{lng}}/{{ns}}.json`,
-        },
-        debug: false,
-        saveMissing: true,
-        detection: {
-          order: ['header', 'querystring', 'cookie'],
-          caches: ['cookie'],
-        },
-        preload: appRuntimeContext.supportedLngs,
-      });
-    registerDateRangeFormatter(i18next);
-  },
+  useFactory: (appRuntimeContext: AppRuntimeContext): Promise<void> =>
+    initializeI18next(appRuntimeContext.supportedLngs),
   inject: [AppRuntimeContext],
 };
 
@@ -306,6 +355,8 @@ const i18nFactory: FactoryProvider<void> = {
   providers: [
     appConfigurationFactory,
     roomReminderStoreFactory,
+    roomCalendarBindingStoreFactory,
+    roomCalendarBindingRegistryFactory,
     ...createRoomReminderModuleProviders(),
     roomMatrixEventsFactory,
     widgetLayoutConfigFactory,
@@ -329,6 +380,99 @@ const i18nFactory: FactoryProvider<void> = {
         AppRuntimeContext,
       ],
     },
+    {
+      provide:
+        ModuleProviderToken.ROOM_CALENDAR_PRINCIPAL_OPENID_PROOF_PROVIDER,
+      useFactory: (
+        appConfig: IAppConfiguration,
+        principalIdentityProvider: RoomCalendarPrincipalIdentityProvider,
+        nativeFetch: typeof fetch,
+      ) =>
+        new MatrixRoomCalendarPrincipalOpenIdProofProvider(
+          appConfig,
+          principalIdentityProvider,
+          nativeFetch,
+        ),
+      inject: [
+        ModuleProviderToken.APP_CONFIGURATION,
+        ModuleProviderToken.ROOM_CALENDAR_PRINCIPAL_IDENTITY,
+        ModuleProviderToken.NATIVE_FETCH,
+      ],
+    },
+    {
+      provide: ModuleProviderToken.ROOM_CALENDAR_SETUP_CALDAV_PROVISIONER,
+      useFactory: (
+        appConfig: IAppConfiguration,
+        proofProvider: RoomCalendarPrincipalOpenIdProofPort,
+        nativeFetch: typeof fetch,
+      ) =>
+        new RoomCalendarSetupCalDavProvisioner(
+          appConfig.radicale_url,
+          proofProvider,
+          nativeFetch,
+        ),
+      inject: [
+        ModuleProviderToken.APP_CONFIGURATION,
+        ModuleProviderToken.ROOM_CALENDAR_PRINCIPAL_OPENID_PROOF_PROVIDER,
+        ModuleProviderToken.NATIVE_FETCH,
+      ],
+    },
+    {
+      provide: ModuleProviderToken.ROOM_CALENDAR_SETUP_WIDGET_INSTALLER,
+      useFactory: (
+        matrixClient: MatrixClient,
+        widgetClient: WidgetClient,
+        appConfig: IAppConfiguration,
+      ) =>
+        new RoomCalendarSetupWidgetInstaller(
+          matrixClient,
+          widgetClient,
+          appConfig.meetingwidget_url,
+        ),
+      inject: [
+        MatrixClient,
+        WidgetClient,
+        ModuleProviderToken.APP_CONFIGURATION,
+      ],
+    },
+    {
+      provide: ModuleProviderToken.ROOM_CALENDAR_SETUP_SERVICE,
+      useFactory: (
+        appConfig: IAppConfiguration,
+        authorizationFactory: MatrixCalendarAuthorizationFactory,
+        matrixClient: MatrixClient,
+        appRuntimeContext: AppRuntimeContext,
+        registry: RoomCalendarBindingRegistry,
+        bindingStore: RoomCalendarBindingStore,
+        caldavProvisioner: RoomCalendarSetupCalDavProvisioner,
+        widgetInstaller: RoomCalendarSetupWidgetInstaller,
+      ) =>
+        new MatrixRoomCalendarSetupService(
+          {
+            enabled: appConfig.room_calendar_setup_enabled,
+            staticBindings: appConfig.room_calendar_bindings,
+            allowedActorServerNames:
+              appConfig.room_calendar_setup_allowed_actor_server_names,
+          },
+          authorizationFactory,
+          matrixClient,
+          appRuntimeContext.botUserId,
+          registry,
+          bindingStore,
+          caldavProvisioner,
+          widgetInstaller,
+        ),
+      inject: [
+        ModuleProviderToken.APP_CONFIGURATION,
+        MatrixCalendarAuthorizationFactory,
+        MatrixClient,
+        AppRuntimeContext,
+        ModuleProviderToken.ROOM_CALENDAR_BINDING_REGISTRY,
+        ModuleProviderToken.ROOM_CALENDAR_BINDING_STORE,
+        ModuleProviderToken.ROOM_CALENDAR_SETUP_CALDAV_PROVISIONER,
+        ModuleProviderToken.ROOM_CALENDAR_SETUP_WIDGET_INSTALLER,
+      ],
+    },
     i18nFactory,
     EventContentRenderer,
     JitsiClient,
@@ -338,7 +482,17 @@ const i18nFactory: FactoryProvider<void> = {
     LegacyMeetingDisabledGuard,
     {
       provide: ModuleProviderToken.ROOM_CALENDAR_CALDAV_ACCESS,
-      useClass: RoomCalendarCalDavAccess,
+      useFactory: (
+        appConfig: IAppConfiguration,
+        bindingRegistry: RoomCalendarBindingRegistry,
+        proofProvider: RoomCalendarPrincipalOpenIdProofPort,
+      ) =>
+        new RoomCalendarCalDavAccess(appConfig, bindingRegistry, proofProvider),
+      inject: [
+        ModuleProviderToken.APP_CONFIGURATION,
+        ModuleProviderToken.ROOM_CALENDAR_BINDING_REGISTRY,
+        ModuleProviderToken.ROOM_CALENDAR_PRINCIPAL_OPENID_PROOF_PROVIDER,
+      ],
     },
     {
       provide: ModuleProviderToken.NATIVE_FETCH,
@@ -349,28 +503,38 @@ const i18nFactory: FactoryProvider<void> = {
       useFactory: (
         appConfig: IAppConfiguration,
         principalIdentityProvider: RoomCalendarPrincipalIdentityProvider,
+        bindingRegistry: RoomCalendarBindingRegistry,
       ) =>
         new RoomCalendarEventOperations(fetch, {
           eventWritesEnabled: appConfig.room_calendar_event_writes_enabled,
           maxResponseBytes: appConfig.caldav_max_event_response_bytes,
           radicaleBaseUrl: appConfig.radicale_url,
-          roomCalendarBindings: appConfig.room_calendar_bindings,
+          bindingRegistry,
           principalIdentityProvider,
         }),
       inject: [
         ModuleProviderToken.APP_CONFIGURATION,
         ModuleProviderToken.ROOM_CALENDAR_PRINCIPAL_IDENTITY,
+        ModuleProviderToken.ROOM_CALENDAR_BINDING_REGISTRY,
       ],
     },
     {
       provide: RoomCalendarEventAuditService,
-      useFactory: (matrixClient: MatrixClient, appConfig: IAppConfiguration) =>
+      useFactory: (
+        matrixClient: MatrixClient,
+        appConfig: IAppConfiguration,
+        bindingRegistry: RoomCalendarBindingRegistry,
+      ) =>
         new RoomCalendarEventAuditService(matrixClient, {
           enabled: appConfig.room_calendar_action_messages_enabled,
-          roomCalendarBindings: appConfig.room_calendar_bindings,
+          bindingRegistry,
           encryptionEnabled: appConfig.enable_crypto,
         }),
-      inject: [MatrixClient, ModuleProviderToken.APP_CONFIGURATION],
+      inject: [
+        MatrixClient,
+        ModuleProviderToken.APP_CONFIGURATION,
+        ModuleProviderToken.ROOM_CALENDAR_BINDING_REGISTRY,
+      ],
     },
     {
       provide: CalendarCommandService,
@@ -379,18 +543,21 @@ const i18nFactory: FactoryProvider<void> = {
         authorizationFactory: MatrixCalendarAuthorizationFactory,
         roomCalendarAccess: RoomCalendarCalDavAccess,
         eventOperations: RoomCalendarEventOperations,
+        bindingRegistry: RoomCalendarBindingRegistry,
       ) =>
         new CalendarCommandService(
           appConfig,
           authorizationFactory,
           roomCalendarAccess,
           eventOperations,
+          bindingRegistry,
         ),
       inject: [
         ModuleProviderToken.APP_CONFIGURATION,
         MatrixCalendarAuthorizationFactory,
         ModuleProviderToken.ROOM_CALENDAR_CALDAV_ACCESS,
         RoomCalendarEventOperations,
+        ModuleProviderToken.ROOM_CALENDAR_BINDING_REGISTRY,
       ],
     },
     MatrixOpenIdCalDavCredentialProviderFactory,

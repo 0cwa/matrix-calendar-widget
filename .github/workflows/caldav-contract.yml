@@ -28,6 +28,31 @@ on:
       - 'matrix-calendar-server/src/service/MatrixCalendarAuthorization.test.ts'
       - 'matrix-calendar-server/src/service/ConfiguredRoomCalendarPrincipalIdentityProvider*'
       - 'matrix-calendar-server/src/service/RoomCalendarPrincipalIdentity.ts'
+      - 'matrix-calendar-server/src/service/CommandService.ts'
+      - 'matrix-calendar-server/src/ModuleProviderToken.ts'
+      - 'matrix-calendar-server/src/service/IRoomCalendarSetupService.ts'
+      - 'matrix-calendar-server/src/service/RoomCalendarSetupCalDavProvisioner.ts'
+      - 'matrix-calendar-server/src/service/RoomCalendarSetupWidgetInstaller.ts'
+      - 'matrix-calendar-server/src/service/RoomCalendarSetupService.ts'
+      - 'matrix-calendar-server/src/service/RoomCalendarSetupPorts.ts'
+      - 'matrix-calendar-server/src/service/PostgresRoomCalendarBindingStore.ts'
+      - 'matrix-calendar-server/src/service/PostgresRoomCalendarBindingStore.integration.test.ts'
+      - 'matrix-calendar-server/src/service/RoomCalendarBindingRegistryAdapter.ts'
+      - 'matrix-calendar-server/src/service/RoomCalendarBindingRegistryAdapter.test.ts'
+      - 'matrix-calendar-server/src/service/RoomCalendarBindingResolver.ts'
+      - 'matrix-calendar-server/src/service/DisabledRoomCalendarBindingStore.ts'
+      - 'matrix-calendar-server/src/service/RoomCalendarPrincipalOpenIdProofProvider.ts'
+      - 'matrix-calendar-server/src/service/MatrixRoomEncryptionState.ts'
+      - 'matrix-calendar-server/src/model/IRoomCalendarBindingStore.ts'
+      - 'matrix-calendar-server/src/service/IRoomCalendarBindingRegistry.ts'
+      - 'matrix-calendar-server/src/client/WidgetClient.ts'
+      - 'matrix-calendar-server/src/EventContentRenderer.ts'
+      - 'matrix-calendar-server/src/model/StateEventName.ts'
+      - 'matrix-calendar-server/src/model/WidgetType.ts'
+      - 'matrix-calendar-server/src/model/IWidgetContent.ts'
+      - 'matrix-calendar-server/src/service/RoomCalendarSetupService.test.ts'
+      - 'matrix-calendar-server/src/service/RoomCalendarSetupCalDavProvisioner.test.ts'
+      - 'matrix-calendar-server/src/service/RoomCalendarSetupWidgetInstaller.test.ts'
       - 'matrix-calendar-server/src/service/RoomCalendarEventOperations.ts'
       - 'matrix-calendar-server/src/service/RoomCalendarEventOperations.test.ts'
       - 'matrix-calendar-server/src/service/RoomCalendarCalDavAccess.ts'
@@ -52,6 +77,20 @@ jobs:
     name: Real Radicale contract
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16.15-alpine3.23
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_USER: binding_bootstrap
+          POSTGRES_PASSWORD: binding_bootstrap_password
+        options: >-
+          --health-cmd "pg_isready -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
       MATRIX_CALENDAR_DEV_USER: calendar
       CALDAV_CONTRACT: '1'
@@ -79,6 +118,16 @@ jobs:
       - name: Initialize sanitized contract summary
         run: |
           : > "$RUNNER_TEMP/caldav-safe-contract-summary.txt"
+
+      - name: Provision restricted room binding test database
+        run: |
+          container_id="$(docker ps --filter 'ancestor=postgres:16.15-alpine3.23' --format '{{.ID}}')"
+          test -n "$container_id"
+          test "$(printf '%s\n' "$container_id" | wc -l)" -eq 1
+          docker exec "$container_id" psql --username binding_bootstrap --dbname postgres --set ON_ERROR_STOP=1 --command "CREATE ROLE matrix_calendar_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD 'matrix_calendar_binding_test_password';"
+          docker exec "$container_id" psql --username binding_bootstrap --dbname postgres --set ON_ERROR_STOP=1 --command "REVOKE CONNECT ON DATABASE postgres FROM PUBLIC;"
+          docker exec "$container_id" psql --username binding_bootstrap --dbname postgres --set ON_ERROR_STOP=1 --command "REVOKE CONNECT ON DATABASE template1 FROM PUBLIC;"
+          docker exec "$container_id" psql --username binding_bootstrap --dbname postgres --set ON_ERROR_STOP=1 --command "CREATE DATABASE matrix_calendar_binding_test OWNER matrix_calendar_app;"
 
       - name: Test CalDAV report status sanitizer
         run: node --test dev/caldav-contract-status.test.mjs
@@ -232,6 +281,8 @@ jobs:
             CALDAV_CONTRACT=1 \
             ROOM_CALENDAR_PRINCIPAL_MODE=bot-account \
             MATRIX_CALENDAR_DEV_APPSERVICE_REGISTRATION=disabled \
+            MATRIX_CALENDAR_BINDING_DATABASE_URL=postgresql://matrix_calendar_app:matrix_calendar_binding_test_password@localhost:5432/matrix_calendar_binding_test \
+            MATRIX_CALENDAR_BINDING_DATABASE_TLS_MODE=trusted-private-network \
             CALDAV_CONTRACT_STAGE_FILE="$contract_stage_file" \
             yarn workspace @matrix-calendar-widget/server jest \
               test/integration/RoomAppServiceRadicaleContract.test.ts \

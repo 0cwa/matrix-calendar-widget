@@ -49,6 +49,7 @@ import {
   appendDesktopPlaywrightResult,
   initializeDesktopJourneyEvidence,
   readDesktopJourneyEvidence,
+  readDesktopJourneyParentDiagnostic,
 } from './element-desktop-journey.mjs';
 
 const PACKAGE_HASH = 'a'.repeat(64);
@@ -398,6 +399,20 @@ test('keeps the Desktop child timeout and nonzero failure gate unchanged', () =>
       exitStatus: 0,
       timedOut: false,
     });
+    assert.deepEqual(
+      readDesktopJourneyParentDiagnostic({
+        filePath: join(
+          runnerTemp,
+          'element-desktop-journey-parent-diagnostic.json',
+        ),
+        runnerTemp,
+      }),
+      {
+        childOutcome: 'exited',
+        childExitStatus: 0,
+        evidenceState: 'valid',
+      },
+    );
     assert.equal(captured.program, 'yarn');
     assert.equal(captured.options.timeout, 165_000);
     assert.equal(captured.options.stdio, 'ignore');

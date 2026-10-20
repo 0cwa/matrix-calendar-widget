@@ -73,6 +73,28 @@ RADICALE_URL=https://calendar.example.com
 # Each room ID and app-owned calendar ID must be canonical and unique.
 # ROOM_CALENDAR_BINDINGS='[{"roomId":"!room-hash:example.org","calendarId":"team-calendar"}]'
 
+# Optional moderator-driven setup. This mutation gate defaults to false.
+# Setup still requires the actor's current joined membership and
+# calendar-manage power, the bot's room membership and widget power, and a
+# confirmed unencrypted room. See ADR043 before enabling it.
+# ROOM_CALENDAR_SETUP_ENABLED=false
+
+# Setup actors are limited to one Matrix server by default: the server name
+# from the normal calendar bot's MXID. To permit moderators from other servers,
+# set a comma-separated list of validated Matrix server names. This overrides
+# the default only for !calendar setup; it does not change ordinary access.
+# Wildcards are not accepted. Ports and bracketed IPv6 server names are allowed.
+# ROOM_CALENDAR_SETUP_ALLOWED_ACTOR_SERVER_NAMES=team.example.org,example.net:8448
+
+# Optional app-owned PostgreSQL store for dynamic room bindings. Keep the
+# setup feature gate off until the database role, TLS mode, and migrations are
+# ready. Binding and reminder URLs are independent and may point to the same
+# app-owned database; their adapters own separate schemas. Omitting either URL
+# disables only that store, with no fallback between stores. If they point to
+# different databases, ensure both are covered by backup and recovery.
+# MATRIX_CALENDAR_BINDING_DATABASE_URL=<application-owned-postgres-url>
+# MATRIX_CALENDAR_BINDING_DATABASE_TLS_MODE=verify-full
+
 # Process-wide room CalDAV/reminder principal; omitted defaults to appservice.
 # bot-account uses the identity verified by the same Matrix SDK client as ACCESS_TOKEN;
 # do not configure a separate claimed user ID. This setting does not enable room features.
@@ -133,7 +155,8 @@ MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_MAX_KEYS=10000
 # one quota; tune the request limit or add an upstream per-client limit.
 
 # optional - enables durable Matrix reminder state in an app-owned PostgreSQL database
-# use a database and least-privilege role dedicated to Matrix Calendar; never use Synapse's database
+# use a database and least-privilege role for Matrix Calendar; never use Synapse's database
+# this can share a database with MATRIX_CALENDAR_BINDING_DATABASE_URL; each store owns its schema
 # migrations run at server startup; omit this setting to keep reminders disabled
 # supply this URL through deployment secret management and do not log it
 MATRIX_CALENDAR_REMINDER_DATABASE_URL='postgresql://matrix_calendar:password@postgres.example.com:5432/matrix_calendar'
@@ -151,7 +174,9 @@ MATRIX_CALENDAR_REMINDER_DATABASE_URL='postgresql://matrix_calendar:password@pos
 ACCESS_TOKEN=syt_...
 
 # the url to the Matrix Calendar widget that will be added to the planning room
-MEETINGWIDGET_URL='http://meetings-widget.example.com/#/?theme=$org.matrix.msc2873.client_theme&matrix_user_id=$matrix_user_id&matrix_display_name=$matrix_display_name&matrix_avatar_url=$matrix_avatar_url&matrix_room_id=$matrix_room_id&matrix_client_id=$org.matrix.msc2873.client_id&matrix_client_language=$org.matrix.msc2873.client_language&matrix_device_id=$org.matrix.msc3819.matrix_device_id&matrix_base_url=$org.matrix.msc4039.matrix_base_url'
+# Include the public calendar gateway URL explicitly for moderator setup. The
+# widget image fallback is not visible to the server-side setup preflight.
+MEETINGWIDGET_URL='http://meetings-widget.example.com/#/?meetings_bot_base_url=http://meetings-widget-bot.example.com&theme=$org.matrix.msc2873.client_theme&matrix_user_id=$matrix_user_id&matrix_display_name=$matrix_display_name&matrix_avatar_url=$matrix_avatar_url&matrix_room_id=$matrix_room_id&matrix_client_id=$org.matrix.msc2873.client_id&matrix_client_language=$org.matrix.msc2873.client_language&matrix_device_id=$org.matrix.msc3819.matrix_device_id&matrix_base_url=$org.matrix.msc4039.matrix_base_url'
 
 # optional - the name of the Matrix Calendar widget that will be added to the planning room
 MEETINGWIDGET_NAME='Matrix Calendar'

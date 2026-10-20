@@ -134,7 +134,7 @@ describe('room reminder module ports', () => {
       'bot-account access token',
       { room_calendar_principal_mode: 'bot-account', access_token: ' ' },
     ],
-    ['room binding', { room_calendar_bindings: [] }],
+    ['room binding', { room_calendar_bindings: [{ roomId: 'invalid' }] }],
   ])('fails closed when enabled with invalid %s', (_name, override) => {
     const createTransport = jest.fn<
       RoomReminderMatrixPorts,
@@ -165,6 +165,41 @@ describe('room reminder module ports', () => {
       ),
     ).toThrow('Room reminder runtime configuration is invalid');
     expect(createTransport).not.toHaveBeenCalled();
+  });
+
+  it('allows a dynamic-only binding source when static bindings are empty', () => {
+    const createTransport = jest.fn<
+      RoomReminderMatrixPorts,
+      Parameters<RoomReminderTransportFactory>
+    >(() => ({
+      isRoomEncrypted: jest.fn(),
+      getJoinedRoomMembers: jest.fn(),
+      getPowerLevels: jest.fn(),
+      getRoomVersion: jest.fn(),
+      sendRoomMention: jest.fn(),
+    }));
+    const appConfig = {
+      room_reminder_configuration_enabled: true,
+      room_reminder_delivery_enabled: false,
+      room_calendar_access_enabled: true,
+      room_calendar_principal_mode: 'appservice',
+      application_service_token: 'server-secret',
+      application_service_user_id: '@calendar-bot:example.test',
+      homeserver_url: 'https://matrix.example.test',
+      radicale_url: 'https://dav.example.test/radicale',
+      room_calendar_bindings: [],
+    } as unknown as IAppConfiguration;
+
+    expect(
+      createRoomReminderMatrixPorts(
+        appConfig,
+        { enabled: true } as RoomReminderStore,
+        runtime,
+        principalIdentityProvider,
+        createTransport,
+      ),
+    ).toBeDefined();
+    expect(createTransport).toHaveBeenCalledTimes(1);
   });
 
   it('fails closed when enabled without a reminder database store', () => {

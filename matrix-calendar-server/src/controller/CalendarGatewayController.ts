@@ -83,11 +83,9 @@ import { MatrixRoomMembershipGuard } from '../guard/MatrixRoomMembershipGuard';
 import { IMatrixOpenIdCredential } from '../model/IMatrixOpenIdCredential';
 import { IUserContext } from '../model/IUserContext';
 import { calendarResourceIdFromHref } from '../service/CalendarCommandParser';
+import type { RoomCalendarBindingRegistry } from '../service/IRoomCalendarBindingRegistry';
 import { MatrixCalendarAuthorizationFactory } from '../service/MatrixCalendarAuthorization';
-import {
-  resolveRoomCalendarBinding,
-  RoomCalendarBindingError,
-} from '../service/RoomCalendarBindingResolver';
+import { RoomCalendarBindingError } from '../service/RoomCalendarBindingResolver';
 import {
   RoomCalendarCalDavAccess,
   RoomCalendarTarget,
@@ -121,6 +119,8 @@ export class CalendarGatewayController {
     @Optional()
     @Inject(RoomCalendarEventAuditService)
     private readonly roomCalendarEventAuditService?: RoomCalendarEventAuditService,
+    @Inject(ModuleProviderToken.ROOM_CALENDAR_BINDING_REGISTRY)
+    private readonly roomCalendarBindingRegistry?: RoomCalendarBindingRegistry,
   ) {}
 
   @Get('context')
@@ -1117,16 +1117,14 @@ export class CalendarGatewayController {
     }
   }
 
-  private resolveRoomTarget(
+  private async resolveRoomTarget(
     roomId: string,
     requestedCalendarId?: string,
-  ): RoomCalendarTarget {
+  ): Promise<RoomCalendarTarget> {
     try {
-      const binding = resolveRoomCalendarBinding(
-        this.appConfig.room_calendar_bindings,
-        roomId,
-        requestedCalendarId,
-      );
+      const registry = this.roomCalendarBindingRegistry;
+      if (!registry) throw new Error('Room calendar binding registry missing');
+      const binding = await registry.resolve(roomId, requestedCalendarId);
       return {
         roomId: binding.roomId,
         calendarId: binding.calendarId,
