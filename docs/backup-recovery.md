@@ -176,9 +176,36 @@ until its placeholders and host paths are replaced:
   "resticHost": "matrix-calendar-sidecar",
   "resticTags": ["matrix-calendar-sidecar", "cold-paired-store"],
   "resticRetentionEnabled": false,
-  "cleanupSuccessfulCapture": false
+  "cleanupSuccessfulCapture": false,
+  "restoreInputs": [
+    {
+      "name": "deployment-compose",
+      "path": "/etc/example-calendar/compose.yaml"
+    },
+    { "name": "deployment-env", "path": "/etc/example-calendar/deployment.env" }
+  ]
 }
 ```
+
+`restoreInputs` is optional for older configurations. When used, it is an
+explicit allowlist of at most 32 named regular files; each file is limited to
+4 MiB and their combined size to 16 MiB. The coordinator rejects missing files,
+symlinks, duplicate names or paths, group/other-writable files, and files it
+cannot safely read. It copies each input to a deterministic flat filename in
+the existing private capture directory with mode `0600`, records its exact
+source path, owner IDs, original mode, byte count, and SHA-256 in the encrypted
+capture manifest, and adds the copy to the normal checksum set. It verifies
+that sources did not change during capture or Restic upload and verifies the
+snapshot's manifest and input bytes through Restic readback. No input contents
+or private metadata are printed by the coordinator.
+
+List every host file needed to recreate the selected deployment, including
+runtime credential files where policy permits their encrypted backup. Keep
+the Restic repository password and cloud repository access credentials under
+independent recovery custody; they are needed to open the snapshot and cannot
+be recovered from it. Never capture or store a user's Matrix password. Restore
+inputs are recovered to a new staging directory and inspected there. The
+coordinator does not write them back to their original live paths.
 
 When the reminder database is enabled, the coordinator keeps `native` as the
 default `postgresDumpTransport`: it uses the host's PostgreSQL client and the
@@ -551,7 +578,11 @@ backup. At minimum:
 Restore the selected Restic snapshot into a new, empty staging directory first;
 never restore over an active production capture directory. Verify the restored
 `SHA256SUMS` manifest before extracting either volume archive or using the
-PostgreSQL dump. Supply the repository path, S3 credentials, and Restic
+PostgreSQL dump. When the manifest contains `restoreInputs`, confirm its
+entries map only to the expected explicit allowlist, then verify every flat
+input copy against `SHA256SUMS`. Use the recorded source path and ownership
+metadata only to guide a separate, operator-reviewed staging setup; do not
+apply recovered files over a live deployment. Supply the repository path, S3 credentials, and Restic
 password through the protected recovery environment; do not copy them into the
 restore command or logs. List snapshots with `restic snapshots` and select the
 intended backup by its stable host, tags, and recovery time:
