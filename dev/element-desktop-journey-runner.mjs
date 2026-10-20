@@ -34,7 +34,9 @@ import {
 } from './element-desktop-evidence.mjs';
 import {
   appendDesktopChildCompletion,
+  classifyDesktopJourneyEvidenceState,
   readDesktopJourneyEvidence,
+  writeDesktopJourneyParentDiagnostic,
 } from './element-desktop-journey.mjs';
 
 const PACKAGE_VERSION = '1.12.30';
@@ -1848,11 +1850,32 @@ export function runDesktopCalendarJourney(
     result = undefined;
   }
   const completion = classifyDesktopChildCompletion(result);
-  const completionAppended = appendDesktopChildCompletion({
+  let completionAppended = false;
+  try {
+    completionAppended = appendDesktopChildCompletion({
+      filePath: config.journeyStageFile,
+      runnerTemp: config.runnerTemp,
+      sourceSha: state.sourceSha,
+      completion,
+    });
+  } catch {
+    // The parent diagnostic below preserves the classified child outcome.
+  }
+  const evidenceState = classifyDesktopJourneyEvidenceState({
     filePath: config.journeyStageFile,
     runnerTemp: config.runnerTemp,
-    sourceSha: state.sourceSha,
-    completion,
+    expectedSourceSha: state.sourceSha,
+  });
+  writeDesktopJourneyParentDiagnostic({
+    filePath: resolve(
+      config.runnerTemp,
+      'element-desktop-journey-parent-diagnostic.json',
+    ),
+    runnerTemp: config.runnerTemp,
+    childOutcome: completion.outcome,
+    childExitStatus:
+      completion.outcome === 'exited' ? completion.exitStatus : null,
+    evidenceState,
   });
   const journeySummary = readDesktopJourneyEvidence({
     filePath: config.journeyStageFile,

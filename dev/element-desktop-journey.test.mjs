@@ -9,6 +9,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -30,6 +31,7 @@ import {
   appendDesktopPlaywrightResult,
   appendDesktopRefreshFailureWithFallback,
   classifyDesktopJourneyErrorClass,
+  classifyDesktopJourneyEvidenceState,
   classifyDesktopLoginFailure,
   desktopWidgetIsReady,
   enterDesktopPasswordLogin,
@@ -41,10 +43,12 @@ import {
   observeWebBEditRowRenderWithinDeadline,
   prepareDesktopWidget,
   readDesktopJourneyEvidence,
+  readDesktopJourneyParentDiagnostic,
   readOnlyWidgetIsReady,
   readSyntheticDesktopCredentials,
   summarizeDesktopJourneyEvidence,
   unavailableWebBEditRowRenderDiagnostic,
+  writeDesktopJourneyParentDiagnostic,
   writeSyntheticDesktopCredentials,
 } from './element-desktop-journey.mjs';
 
@@ -3258,6 +3262,138 @@ test('rejects duplicate or private-shaped evidence rows', () => {
   );
 });
 
+test('records only bounded child and evidence classification enums', () => {
+  withTempDirectory((runnerTemp) => {
+    const evidenceFile = join(
+      runnerTemp,
+      'element-desktop-journey-stage.jsonl',
+    );
+    const diagnosticFile = join(
+      runnerTemp,
+      'element-desktop-journey-parent-diagnostic.json',
+    );
+    assert.equal(
+      classifyDesktopJourneyEvidenceState({
+        filePath: evidenceFile,
+        runnerTemp,
+        expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+      }),
+      'absent',
+    );
+
+    initializeDesktopJourneyEvidence({
+      filePath: evidenceFile,
+      runnerTemp,
+    });
+    assert.equal(
+      classifyDesktopJourneyEvidenceState({
+        filePath: evidenceFile,
+        runnerTemp,
+        expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+      }),
+      'valid',
+    );
+    writeFileSync(
+      evidenceFile,
+      '{"privateValue":"private-evidence-sentinel"}\n',
+      { mode: 0o600 },
+    );
+    assert.equal(
+      classifyDesktopJourneyEvidenceState({
+        filePath: evidenceFile,
+        runnerTemp,
+        expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+      }),
+      'invalid',
+    );
+    const unreadableTemp = join(runnerTemp, 'unreadable');
+    mkdirSync(unreadableTemp, { mode: 0o700 });
+    chmodSync(unreadableTemp, 0o000);
+    try {
+      assert.equal(
+        classifyDesktopJourneyEvidenceState({
+          filePath: join(unreadableTemp, 'element-desktop-journey-stage.jsonl'),
+          runnerTemp: unreadableTemp,
+          expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+        }),
+        'unreadable',
+      );
+    } finally {
+      chmodSync(unreadableTemp, 0o700);
+    }
+
+    const childOutcomes = [
+      'spawn_error',
+      'timeout',
+      'signaled',
+      'exited',
+      'unknown',
+    ];
+    const evidenceStates = ['absent', 'valid', 'invalid', 'unreadable'];
+    for (const childOutcome of childOutcomes) {
+      const exitStatuses = childOutcome === 'exited' ? [0, 17, 255] : [null];
+      for (const childExitStatus of exitStatuses) {
+        for (const evidenceState of evidenceStates) {
+          writeDesktopJourneyParentDiagnostic({
+            filePath: diagnosticFile,
+            runnerTemp,
+            childOutcome,
+            childExitStatus,
+            evidenceState,
+          });
+          assert.deepEqual(
+            readDesktopJourneyParentDiagnostic({
+              filePath: diagnosticFile,
+              runnerTemp,
+            }),
+            { childOutcome, childExitStatus, evidenceState },
+          );
+          const serialized = readFileSync(diagnosticFile, 'utf8');
+          assert.doesNotMatch(serialized, /private-evidence-sentinel/u);
+          assert.equal(statSync(diagnosticFile).mode & 0o777, 0o600);
+          unlinkSync(diagnosticFile);
+        }
+      }
+    }
+    assert.throws(
+      () =>
+        writeDesktopJourneyParentDiagnostic({
+          filePath: diagnosticFile,
+          runnerTemp,
+          childOutcome: 'private-evidence-sentinel',
+          childExitStatus: null,
+          evidenceState: 'invalid',
+        }),
+      /Invalid Desktop journey input/u,
+    );
+    for (const invalidExitStatus of [null, -1, 256, 1.5]) {
+      assert.throws(
+        () =>
+          writeDesktopJourneyParentDiagnostic({
+            filePath: diagnosticFile,
+            runnerTemp,
+            childOutcome: 'exited',
+            childExitStatus: invalidExitStatus,
+            evidenceState: 'invalid',
+          }),
+        /Invalid Desktop journey input/u,
+      );
+    }
+    assert.throws(
+      () =>
+        writeDesktopJourneyParentDiagnostic({
+          filePath: diagnosticFile,
+          runnerTemp,
+          childOutcome: 'signaled',
+          childExitStatus: 0,
+          evidenceState: 'invalid',
+        }),
+      /Invalid Desktop journey input/u,
+    );
+    assert.equal(existsSync(diagnosticFile), false);
+  });
+});
+
 test('emits a sanitized unavailable summary when evidence cannot be parsed', () => {
   withTempDirectory((runnerTemp) => {
     const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
@@ -3267,6 +3403,16 @@ test('emits a sanitized unavailable summary when evidence cannot be parsed', () 
       `${JSON.stringify({ type: 'invalid', privateValue: privateSentinel })}\n`,
       { mode: 0o600 },
     );
+    writeDesktopJourneyParentDiagnostic({
+      filePath: join(
+        runnerTemp,
+        'element-desktop-journey-parent-diagnostic.json',
+      ),
+      runnerTemp,
+      childOutcome: 'exited',
+      childExitStatus: 23,
+      evidenceState: 'invalid',
+    });
 
     const scriptPath = fileURLToPath(
       new URL('./element-desktop-journey.mjs', import.meta.url),
@@ -3289,11 +3435,66 @@ test('emits a sanitized unavailable summary when evidence cannot be parsed', () 
     assert.doesNotMatch(result.stderr, new RegExp(privateSentinel, 'u'));
 
     const summary = JSON.parse(result.stdout);
-    assert.equal(summary.schemaVersion, 18);
+    assert.equal(summary.schemaVersion, 19);
     assert.equal(summary.sourceSha, DESKTOP_REFRESH_SOURCE_SHA);
     assert.equal(summary.status, 'unavailable');
     assert.equal(summary.desktopChildCompletion.outcome, 'unknown');
     assert.equal(summary.desktopChildCompletion.timedOut, null);
+    assert.deepEqual(summary.desktopChildDiagnostic, {
+      childOutcome: 'exited',
+      childExitStatus: 23,
+      evidenceState: 'invalid',
+    });
     assert.equal(summary.cases['desktop-a-refresh'], 'not_run');
+  });
+});
+
+test('declares the schema-19 CLI parent diagnostic shape', () => {
+  const declarations = readFileSync(
+    new URL('./element-desktop-journey.d.mts', import.meta.url),
+    'utf8',
+  );
+  assert.match(declarations, /schemaVersion: 19;/u);
+  assert.match(
+    declarations,
+    /desktopChildDiagnostic: DesktopChildDiagnostic;/u,
+  );
+  assert.match(declarations, /childExitStatus: number;/u);
+  assert.match(declarations, /childExitStatus: null;/u);
+  assert.match(declarations, /status: 'unavailable';[\s\S]*?timedOut: null;/u);
+  assert.match(
+    declarations,
+    /status: 'passed' \| 'failed' \| 'incomplete';[\s\S]*?timedOut: boolean;/u,
+  );
+});
+
+test('private acceptance cleanup removes the parent diagnostic file', () => {
+  withTempDirectory((runnerTemp) => {
+    const action = readFileSync(
+      new URL(
+        '../.github/actions/element-acceptance/action.yml',
+        import.meta.url,
+      ),
+      'utf8',
+    );
+    const cleanupBlock = action.match(/if ! rm -f \\\n([\s\S]*?); then/u)?.[1];
+    assert.equal(typeof cleanupBlock, 'string');
+    const fileNames = [
+      ...cleanupBlock.matchAll(/\$RUNNER_TEMP\/([^"\s]+)"/gu),
+    ].map((match) => match[1]);
+    const diagnosticName = 'element-desktop-journey-parent-diagnostic.json';
+    assert.ok(fileNames.includes(diagnosticName));
+
+    const diagnosticPath = join(runnerTemp, diagnosticName);
+    writeFileSync(diagnosticPath, '{"childOutcome":"unknown"}\n', {
+      mode: 0o600,
+    });
+    const result = spawnSync(
+      'rm',
+      ['-f', ...fileNames.map((name) => join(runnerTemp, name))],
+      { encoding: 'utf8' },
+    );
+    assert.equal(result.status, 0);
+    assert.equal(existsSync(diagnosticPath), false);
   });
 });

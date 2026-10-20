@@ -39,9 +39,11 @@ The gateway and bot are initially one deployable service. Split them only when s
 
 ## Principal and authorization boundary
 
-[ADR014](./adrs/adr014-split-widget-and-bot-calendar-principals.md) and
-[ADR015](./adrs/adr015-server-managed-room-calendar-bindings.md) define two
-distinct ownership paths and the initial room-target contract:
+[ADR014](./adrs/adr014-split-widget-and-bot-calendar-principals.md),
+[ADR015](./adrs/adr015-server-managed-room-calendar-bindings.md),
+[ADR041](./adrs/adr041-optional-normal-bot-account-for-room-operations.md), and
+[ADR043](./adrs/adr043-moderator-room-calendar-setup.md) define distinct
+ownership paths and the room-target contract:
 
 - **Personal widget calendars** remain associated with the authenticated Matrix
   user. The gateway validates that user's short-lived OpenID assertion and
@@ -56,13 +58,18 @@ distinct ownership paths and the initial room-target contract:
   provider/CalDAV I/O. This validates the pinned development stack only; the
   etke image override and `/data` host rehearsal remain unverified deployment
   gates.
-- **Room-owned calendars** belong to the configured application-service
-  principal. Room-target gateway operations resolve a canonical Matrix room ID
-  through the operator-managed `ROOM_CALENDAR_BINDINGS` map, check the current
-  actor, membership, action power, and exact binding, then obtain appservice
-  OpenID proof before CalDAV I/O. Read access and event writes use independent
+- **Room-owned calendars** belong to the selected process-wide room principal;
+  appservice remains the default and bot-account is an explicit ADR041 mode.
+  Room-target gateway operations resolve a canonical Matrix room ID through
+  the shared registry, check the current actor, membership, action power, and
+  exact binding, then obtain that principal's OpenID proof before CalDAV I/O.
+  Read access, event writes, and ADR043 moderator setup use independent
   default-off gates. The user's proof authenticates the widget actor; the
-  separate appservice proof identifies the room calendar's CalDAV principal.
+  separate server-side proof identifies the room calendar's CalDAV principal.
+  Static bindings remain operator-configured. When the binding store is
+  configured, setup can append one durable ready binding after exact
+  authorization and collection verification; it cannot rebind or remove an
+  existing room/calendar pair.
   Pinned Synapse/Radicale contracts cover room reads and conditional event
   mutations, including denial before proof or I/O. PR #201 connects the primary
   widget to the gateway's current room capabilities and bound calendar; it
@@ -79,26 +86,28 @@ failures deny the request.
 
 Identity proof and authorization are separate. Room-target gateway requests
 validate the requesting actor and current room membership/power, then resolve
-the exact server-side binding before using the application-service principal.
-Bot commands recheck sender membership/power and that binding for each data
-command. The Matrix sender is authorization and audit context; it does not
-prove OpenID identity or CalDAV identity. Per-user bot calendars remain
-deferred.
+the exact server-side binding before using the selected room principal. Bot
+commands recheck sender membership/power and that binding for each data
+command. `!calendar setup` derives its room and actor from the authenticated
+Matrix event and completes actor, bot, room-state, and widget preconditions
+before binding-store, proof, or CalDAV work. The Matrix sender is authorization
+and audit context; it does not prove OpenID identity or CalDAV identity.
+Per-user bot calendars remain deferred.
 
 ## Source-of-truth boundaries
 
-| Concern                        | Canonical store                                                     |
-| ------------------------------ | ------------------------------------------------------------------- |
-| calendar collection            | CalDAV/Radicale                                                     |
-| VEVENT fields                  | iCalendar object in Radicale                                        |
-| UID, SEQUENCE, recurrence      | iCalendar object                                                    |
-| organizer/attendees            | iCalendar object                                                    |
-| VALARM                         | iCalendar object                                                    |
-| calendar display properties    | CalDAV properties where supported                                   |
-| Matrix room ↔ calendar binding | operator-managed server configuration (ADR015)                      |
-| Matrix reminder configuration  | gateway sidecar state, separate from iCalendar                      |
-| reminder delivery history      | app-owned PostgreSQL store when enabled                             |
-| Matrix permissions             | room state plus configured gateway policy for room-owned operations |
+| Concern                        | Canonical store                                                                   |
+| ------------------------------ | --------------------------------------------------------------------------------- |
+| calendar collection            | CalDAV/Radicale                                                                   |
+| VEVENT fields                  | iCalendar object in Radicale                                                      |
+| UID, SEQUENCE, recurrence      | iCalendar object                                                                  |
+| organizer/attendees            | iCalendar object                                                                  |
+| VALARM                         | iCalendar object                                                                  |
+| calendar display properties    | CalDAV properties where supported                                                 |
+| Matrix room ↔ calendar binding | static server configuration plus optional app-owned binding store (ADR015/ADR043) |
+| Matrix reminder configuration  | gateway sidecar state, separate from iCalendar                                    |
+| reminder delivery history      | app-owned PostgreSQL store when enabled                                           |
+| Matrix permissions             | room state plus configured gateway policy for room-owned operations               |
 
 ## Collection profile
 
@@ -151,9 +160,9 @@ The exact TypeScript API is not frozen by this document. The important rule is t
 4. Personal operations use the validated actor's request-scoped proof under
    ADR009 and the clean-room adapter selected by ADR024.
 5. A room-target operation separately checks actor identity, current
-   membership, action-specific power, and the configured room-to-calendar
-   binding before asking the homeserver for an appservice OpenID proof or
-   making any CalDAV request.
+   membership, action-specific power, and the exact room/calendar binding
+   from the shared registry before asking the homeserver for the selected
+   server-side principal's OpenID proof or making any CalDAV request.
 6. The browser never handles Matrix passwords, bot credentials, or long-lived
    CalDAV credentials.
 
@@ -185,24 +194,34 @@ defined in the [Matrix identifier grammar](https://spec.matrix.org/v1.19/appendi
 
 ## Room/calendar binding
 
-The initial binding source is the server-only `ROOM_CALENDAR_BINDINGS` JSON
+The static binding source is the server-only `ROOM_CALENDAR_BINDINGS` JSON
 array. Each entry maps one canonical Matrix room ID to one app-owned calendar
 identifier, and each calendar identifier can map to only one room. The server
 validates the entire array before resolution so duplicate entries cannot be
-silently overwritten. Missing, malformed, duplicate, ambiguous, or
-request-mismatched bindings fail with opaque errors. A browser-supplied href or
-URL cannot select or create a binding. Room members cannot change bindings;
-collection create/delete/rename and room rebinding remain operator-managed.
+silently overwritten. When the separate app-owned binding database is
+configured, the shared asynchronous registry validates the complete static
+and dynamic set and exposes ready dynamic rows only; pending rows never grant
+access. Configured-store errors fail closed. Without the store, static-only
+resolution retains its prior validation and cardinality behavior. A
+browser-supplied href or URL cannot select or create a binding.
 
-The resolver is a pure in-memory function and performs no network or CalDAV
-I/O. The application-principal room path is implemented, but it is not enabled
-by default. Radicale `owner_only` grants the principal access to its whole
-home, so that home must stay within one trusted organizational boundary or
-use equivalent per-room isolation; gateway bindings are application-level
-scoping, not backend per-room ACLs. M2 #48/#45 cover personal actor
-authentication and same-user enumeration. M6 contracts cover the appservice
-room path and cross-room denial against pinned services, not compatibility
-with a team host. [ADR037](./adrs/adr037-independent-radicale-store-for-controlled-beta.md)
+ADR043 permits a joined, authorized room member to request one append-only
+dynamic binding through exact `!calendar setup`, only when its default-off
+gate is enabled and all setup preconditions pass. The service selects the
+opaque calendar ID and verifies the collection; it does not rebind, rename,
+or delete an existing binding or collection. Static configuration remains
+authoritative for rooms it names. Collection deletion and binding removal
+remain unavailable. The registry performs no CalDAV I/O; setup's CalDAV work
+uses the process-selected room principal only after Matrix authorization and
+widget preflight.
+
+Radicale `owner_only` grants the principal access to its whole home, so that
+home must stay within one trusted organizational boundary or use equivalent
+per-room isolation; gateway bindings are application-level scoping, not
+backend per-room ACLs. M2 #48/#45 cover personal actor authentication and
+same-user enumeration. M6 contracts cover the appservice room path and
+cross-room denial against pinned services, not compatibility with a team
+host. [ADR037](./adrs/adr037-independent-radicale-store-for-controlled-beta.md)
 selects a new project-owned Radicale store for the controlled beta; local
 acceptance does not establish team-host compatibility. If an operator selects
 an existing managed service or store, the custom-image override and

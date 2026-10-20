@@ -322,6 +322,22 @@ const JOURNEY_CREDENTIALS_NAME = 'element-acceptance-desktop-credentials.json';
 const JOURNEY_EVIDENCE_NAME = 'element-desktop-journey-stage.jsonl';
 const MAX_CREDENTIAL_BYTES = 2_048;
 const MAX_EVIDENCE_BYTES = 16_384;
+const DESKTOP_JOURNEY_PARENT_DIAGNOSTIC_NAME =
+  'element-desktop-journey-parent-diagnostic.json';
+const MAX_PARENT_DIAGNOSTIC_BYTES = 256;
+const DESKTOP_CHILD_OUTCOMES = new Set([
+  'spawn_error',
+  'timeout',
+  'signaled',
+  'exited',
+  'unknown',
+]);
+const DESKTOP_EVIDENCE_STATES = new Set([
+  'absent',
+  'valid',
+  'invalid',
+  'unreadable',
+]);
 const MAX_DIAGNOSTIC_ROW_BYTES = 256;
 const MAX_PROGRESS_ROW_BYTES = 512;
 const MAX_REFRESH_ROOM_NAVIGATION_ROW_BYTES = 1_024;
@@ -1480,6 +1496,133 @@ export function appendDesktopChildCompletion({
   });
 }
 
+export function classifyDesktopJourneyEvidenceState({
+  filePath,
+  runnerTemp,
+  expectedSourceSha,
+}) {
+  let path;
+  try {
+    path = privateRunnerPath(filePath, runnerTemp, JOURNEY_EVIDENCE_NAME);
+  } catch {
+    return 'invalid';
+  }
+
+  let stat;
+  try {
+    stat = lstatSync(path);
+  } catch (error) {
+    return error?.code === 'ENOENT' ? 'absent' : 'unreadable';
+  }
+  if (
+    !stat.isFile() ||
+    stat.isSymbolicLink() ||
+    stat.nlink !== 1 ||
+    (stat.mode & 0o777) !== 0o600 ||
+    (typeof process.getuid === 'function' && stat.uid !== process.getuid()) ||
+    stat.size > MAX_EVIDENCE_BYTES
+  ) {
+    return 'invalid';
+  }
+
+  let evidence;
+  try {
+    evidence = readFileSync(path, 'utf8');
+  } catch {
+    return 'unreadable';
+  }
+  try {
+    summarizeDesktopJourneyEvidence(evidence, { expectedSourceSha });
+    return 'valid';
+  } catch {
+    return 'invalid';
+  }
+}
+
+export function writeDesktopJourneyParentDiagnostic({
+  filePath,
+  runnerTemp,
+  childOutcome,
+  childExitStatus,
+  evidenceState,
+}) {
+  const path = privateRunnerPath(
+    filePath,
+    runnerTemp,
+    DESKTOP_JOURNEY_PARENT_DIAGNOSTIC_NAME,
+  );
+  if (
+    !DESKTOP_CHILD_OUTCOMES.has(childOutcome) ||
+    (childOutcome === 'exited'
+      ? !Number.isInteger(childExitStatus) ||
+        childExitStatus < 0 ||
+        childExitStatus > 255
+      : childExitStatus !== null) ||
+    !DESKTOP_EVIDENCE_STATES.has(evidenceState)
+  ) {
+    invalidInput();
+  }
+  const record = { childOutcome, childExitStatus, evidenceState };
+  let overwrite = false;
+  try {
+    privateFileStat(path, MAX_PARENT_DIAGNOSTIC_BYTES);
+    overwrite = true;
+  } catch {
+    if (existsSync(path)) invalidInput();
+  }
+  try {
+    writeFileSync(path, `${JSON.stringify(record)}\n`, {
+      encoding: 'utf8',
+      flag: overwrite ? 'w' : 'wx',
+      mode: 0o600,
+    });
+  } catch {
+    invalidInput();
+  }
+  privateFileStat(path, MAX_PARENT_DIAGNOSTIC_BYTES);
+}
+
+export function readDesktopJourneyParentDiagnostic({ filePath, runnerTemp }) {
+  const unavailable = {
+    childOutcome: 'unknown',
+    childExitStatus: null,
+    evidenceState: 'unreadable',
+  };
+  try {
+    const path = privateRunnerPath(
+      filePath,
+      runnerTemp,
+      DESKTOP_JOURNEY_PARENT_DIAGNOSTIC_NAME,
+    );
+    if (!existsSync(path)) return unavailable;
+    privateFileStat(path, MAX_PARENT_DIAGNOSTIC_BYTES);
+    const value = JSON.parse(readFileSync(path, 'utf8'));
+    if (
+      value === null ||
+      typeof value !== 'object' ||
+      Array.isArray(value) ||
+      Object.keys(value).sort().join(',') !==
+        'childExitStatus,childOutcome,evidenceState' ||
+      !DESKTOP_CHILD_OUTCOMES.has(value.childOutcome) ||
+      (value.childOutcome === 'exited'
+        ? !Number.isInteger(value.childExitStatus) ||
+          value.childExitStatus < 0 ||
+          value.childExitStatus > 255
+        : value.childExitStatus !== null) ||
+      !DESKTOP_EVIDENCE_STATES.has(value.evidenceState)
+    ) {
+      return unavailable;
+    }
+    return {
+      childOutcome: value.childOutcome,
+      childExitStatus: value.childExitStatus,
+      evidenceState: value.evidenceState,
+    };
+  } catch {
+    return unavailable;
+  }
+}
+
 export function writeSyntheticDesktopCredentials({
   filePath,
   runnerTemp,
@@ -2548,19 +2691,55 @@ if (
       runnerTemp,
       expectedSourceSha,
     });
-    process.stdout.write(`${JSON.stringify(summary)}\n`);
+    const parentDiagnostic =
+      typeof runnerTemp === 'string'
+        ? readDesktopJourneyParentDiagnostic({
+            filePath: resolve(
+              runnerTemp,
+              'element-desktop-journey-parent-diagnostic.json',
+            ),
+            runnerTemp,
+          })
+        : {
+            childOutcome: 'unknown',
+            childExitStatus: null,
+            evidenceState: 'unreadable',
+          };
+    process.stdout.write(
+      `${JSON.stringify({
+        ...summary,
+        schemaVersion: 19,
+        desktopChildDiagnostic: parentDiagnostic,
+      })}\n`,
+    );
   } catch {
     process.stderr.write('Desktop journey evidence is unavailable.\n');
+    const runnerTemp = process.env.RUNNER_TEMP;
     const expectedSourceSha = process.env.ELEMENT_DESKTOP_SOURCE_SHA;
     process.stdout.write(
-      `${JSON.stringify(
-        unavailableDesktopJourneySummary(
+      `${JSON.stringify({
+        ...unavailableDesktopJourneySummary(
           typeof expectedSourceSha === 'string' &&
             SOURCE_SHA_PATTERN.test(expectedSourceSha)
             ? expectedSourceSha
             : null,
         ),
-      )}\n`,
+        schemaVersion: 19,
+        desktopChildDiagnostic:
+          typeof runnerTemp === 'string'
+            ? readDesktopJourneyParentDiagnostic({
+                filePath: resolve(
+                  runnerTemp,
+                  'element-desktop-journey-parent-diagnostic.json',
+                ),
+                runnerTemp,
+              })
+            : {
+                childOutcome: 'unknown',
+                childExitStatus: null,
+                evidenceState: 'unreadable',
+              },
+      })}\n`,
     );
     process.exitCode = 1;
   }

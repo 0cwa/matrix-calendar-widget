@@ -16,13 +16,16 @@
 
 import { isIP } from 'net';
 
-export const REMINDER_DATABASE_TLS_MODES = [
+export const POSTGRES_DATABASE_TLS_MODES = [
   'verify-full',
   'trusted-private-network',
 ] as const;
 
-export type ReminderDatabaseTlsMode =
-  (typeof REMINDER_DATABASE_TLS_MODES)[number];
+export const REMINDER_DATABASE_TLS_MODES = POSTGRES_DATABASE_TLS_MODES;
+
+export type PostgresDatabaseTlsMode =
+  (typeof POSTGRES_DATABASE_TLS_MODES)[number];
+export type ReminderDatabaseTlsMode = PostgresDatabaseTlsMode;
 
 export function parseReminderDatabaseTlsMode(
   value: string | undefined,
@@ -40,11 +43,12 @@ export function parseReminderDatabaseTlsMode(
   );
 }
 
-export type ReminderDatabaseTlsOptions = {
+export type PostgresDatabaseTlsOptions = {
   host?: string[];
   port?: number[];
   ssl: 'verify-full' | false | { host: string; rejectUnauthorized: true };
 };
+export type ReminderDatabaseTlsOptions = PostgresDatabaseTlsOptions;
 
 type DatabaseUrlHost = { hostname: string; port?: number };
 
@@ -114,10 +118,10 @@ function getUrlHosts(databaseUrl: string): DatabaseUrlHost[] {
   return hosts;
 }
 
-export function getReminderDatabaseTlsOptions(
-  mode: ReminderDatabaseTlsMode,
+export function getPostgresDatabaseTlsOptions(
+  mode: PostgresDatabaseTlsMode,
   databaseUrl: string,
-): ReminderDatabaseTlsOptions {
+): PostgresDatabaseTlsOptions {
   const authority = databaseUrl.match(/^[a-z][a-z\d+.-]*:\/\/([^/?#]*)/i)?.[1];
   const urlHostList = authority?.slice(authority.lastIndexOf('@') + 1);
   const inspectHosts = mode === 'verify-full' || urlHostList?.includes('[');
@@ -164,4 +168,12 @@ export function getReminderDatabaseTlsOptions(
     port: [ipTarget.port],
     ssl: { host: ipTarget.hostname, rejectUnauthorized: true },
   };
+}
+
+/** Reminder adapter compatibility name for the shared PostgreSQL TLS policy. */
+export function getReminderDatabaseTlsOptions(
+  mode: ReminderDatabaseTlsMode,
+  databaseUrl: string,
+): ReminderDatabaseTlsOptions {
+  return getPostgresDatabaseTlsOptions(mode, databaseUrl);
 }

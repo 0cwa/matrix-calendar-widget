@@ -15,17 +15,47 @@ See the [dated continuation](handoff/2026-10-06/README.md) and
 
 For the owner-approved bounded pilot, the required browser profile is full Element Web/Desktop acceptance in `bot-account` mode with the existing strict 0/25-event ordinary-load limits. Full appservice-mode browser certification remains deferred after beta, although both modes passed on this candidate. Backend, identity/authentication, authorization, and CalDAV contract tests remain mandatory in both modes, and `appservice` remains the default mode. Scoped pilot authority is recorded privately; this is not broader rollout or publication authority.
 
-User feedback has opened a follow-up for room setup discovery across multiple
-rooms and clearer command-fallback acceptance. The current integration
-worktree adds an empty-room setup message, bot guidance for room principals and
-reply prerequisites, and handling for the proxied Matrix 404 that indicates an
-unencrypted room. Focused tests on this working tree pass: 16 calendar-surface
-widget tests and 32 command-service tests, including the Matrix client proxy
-path. Full repository CI, independent review, and configured-room Element
-acceptance remain pending. The feedback follow-up preserves server-side
-membership, power, binding, and encryption checks and leaves room capabilities
-behind their existing default-off gates. These changes are outside the frozen
-application candidate above and require fresh source qualification.
+User feedback opened a follow-up for room setup discovery across multiple
+rooms and clearer command-fallback acceptance. Accepted ADR043 and the current
+integration worktree add exact, no-argument `!calendar setup` behind its own
+default-off gate, a setup-only Matrix server allowlist, bot membership/power
+and encryption preconditions, durable dynamic bindings in a dedicated
+app-owned PostgreSQL store, exact CalDAV collection reconciliation, and widget
+installation. The same asynchronous registry now serves gateway reads,
+commands, event operations, and reminder paths; existing room access, event
+write, and reminder gates remain independent. Earlier focused checks passed 16
+calendar-surface widget tests and 32 command-service tests for empty-room
+guidance and the Matrix proxy-404 path. The binding store, registry, and
+configuration suites passed 50 tests before the final setup/consumer
+integration. Bounded in-band validation now passes the CalDAV-access tests, the
+setup, command, authorization, and configuration suites, and the gateway,
+event, and reminder unit suites. The scheduler cancellation test waits for
+identity resolution to start before aborting; its focused scheduler rerun
+passed. The dedicated PostgreSQL binding contract passed six tests on its
+recorded source hashes; it has not been rerun against this integrated source.
+The complete local check sequence now passes: formatting, lint, TypeScript,
+translations, the 22 calendar suites (372 tests), timezone tests (5 tests),
+widget tests (784 passed and 3 todo), and server tests (95 suites and 1,568
+tests passed; 7 suites and 40 tests skipped). The workspace build also passes.
+At this checkpoint, the isolated PostgreSQL binding contract, hosted CI, real
+Synapse/Radicale contracts, independent review, and configured-room Element
+acceptance were pending. Subsequent hosted qualification on exact source
+`898b9c3387545da5c66468bb8625be8bd26d91b9` passed all five required checks
+(Quality, Widget, Server and bot, Container image build smoke, and Analyze
+JavaScript/TypeScript), file-backed PostgreSQL bootstrap, the real
+Synapse/Radicale contract, the six-test PostgreSQL room-binding integration,
+and full normal-bot Element Web/Desktop acceptance. The separate appservice
+Element Web run failed in G6 member-B room context: Element stayed in
+`SYNCING` without a room heading before the bounded wait ended. Its cause is
+unknown; appservice browser certification remains deferred for the controlled
+pilot. The moderator setup contract calls the production setup service
+directly, so it does not establish Matrix sync delivery for `!calendar setup`
+or browser acceptance of the new setup flow. This qualification is source-only
+and does not establish deployment or pilot readiness. The current doc-only
+integration candidate still requires fresh checks on its exact source.
+
+These changes are outside the frozen application candidate above and require
+fresh source qualification.
 
 ### Frozen application candidate and operator gate
 

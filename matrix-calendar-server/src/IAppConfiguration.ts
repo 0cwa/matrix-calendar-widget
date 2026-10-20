@@ -27,6 +27,12 @@ export interface IAppConfiguration {
   caldav_max_event_response_bytes?: number;
   room_calendar_bindings: readonly RoomCalendarBinding[];
   room_calendar_principal_mode: RoomCalendarPrincipalMode;
+  room_calendar_binding_database_url?: string;
+  room_calendar_binding_database_tls_mode:
+    | 'verify-full'
+    | 'trusted-private-network';
+  room_calendar_setup_enabled: boolean;
+  room_calendar_setup_allowed_actor_server_names: readonly string[];
   room_calendar_access_enabled: boolean;
   room_calendar_event_writes_enabled: boolean;
   room_reminder_delivery_enabled: boolean;

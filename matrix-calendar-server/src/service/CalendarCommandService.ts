@@ -44,10 +44,7 @@ import {
   isWholeEventResourceDeletable,
   parseCalendarCommand,
 } from './CalendarCommandParser';
-import {
-  RoomCalendarBindingError,
-  resolveRoomCalendarBinding,
-} from './RoomCalendarBindingResolver';
+import type { RoomCalendarBindingRegistry } from './IRoomCalendarBindingRegistry';
 import {
   RoomCalendarCalDavPrincipal,
   RoomCalendarTarget,
@@ -132,6 +129,7 @@ export class CalendarCommandService {
     private readonly authorizationFactory: CalendarCommandAuthorizationPort,
     private readonly roomCalendarCalDavAccess: CalendarCommandCalDavAccessPort,
     private readonly eventOperations: CalendarCommandEventOperationsPort,
+    private readonly bindingRegistry: RoomCalendarBindingRegistry,
   ) {}
 
   async execute(
@@ -343,15 +341,9 @@ export class CalendarCommandService {
 
     let binding: RoomCalendarBinding;
     try {
-      binding = resolveRoomCalendarBinding(
-        this.appConfig.room_calendar_bindings,
-        roomId,
-      );
-    } catch (error) {
-      if (error instanceof RoomCalendarBindingError) {
-        throw new CalendarCommandFailure('disabled');
-      }
-      throw error;
+      binding = await this.bindingRegistry.resolve(roomId);
+    } catch {
+      throw new CalendarCommandFailure('disabled');
     }
 
     const authorizationRequest: CalendarAuthorizationRequest =

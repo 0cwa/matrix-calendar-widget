@@ -25,6 +25,7 @@
     "test": "jest --watch",
     "test:all": "jest --coverage --watchAll=false",
     "test:postgres-contract": "jest --runInBand src/reminder/PostgresRoomReminderStore.integration.test.ts",
+    "test:postgres-binding-contract": "jest --runInBand src/service/PostgresRoomCalendarBindingStore.integration.test.ts",
     "generate-disclaimer": "cp ../LICENSE ./lib/LICENSE.txt && cp NOTICE ./lib/NOTICE.txt && yarn licenses generate-disclaimer --prod >> ./lib/NOTICE.txt && yarn licenses list --prod --json --no-progress > ./lib/licenses.json"
   },
   "engines": {

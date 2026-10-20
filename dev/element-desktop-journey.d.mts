@@ -414,6 +414,53 @@ export type DesktopJourneySummary = {
   cases: Record<DesktopJourneyPhase, DesktopJourneyOutcome | 'not_run'>;
 };
 
+export type DesktopChildOutcome =
+  | 'spawn_error'
+  | 'timeout'
+  | 'signaled'
+  | 'exited'
+  | 'unknown';
+
+export type DesktopJourneyEvidenceState =
+  | 'absent'
+  | 'valid'
+  | 'invalid'
+  | 'unreadable';
+
+export type DesktopChildDiagnostic =
+  | {
+      childOutcome: 'exited';
+      childExitStatus: number;
+      evidenceState: DesktopJourneyEvidenceState;
+    }
+  | {
+      childOutcome: Exclude<DesktopChildOutcome, 'exited'>;
+      childExitStatus: null;
+      evidenceState: DesktopJourneyEvidenceState;
+    };
+
+type DesktopJourneyCliSummaryBase = Omit<
+  DesktopJourneySummary,
+  'schemaVersion' | 'status' | 'desktopChildCompletion'
+> & {
+  schemaVersion: 19;
+  desktopChildDiagnostic: DesktopChildDiagnostic;
+};
+
+export type DesktopJourneyCliSummary =
+  | (DesktopJourneyCliSummaryBase & {
+      status: 'passed' | 'failed' | 'incomplete';
+      desktopChildCompletion: DesktopChildCompletion;
+    })
+  | (DesktopJourneyCliSummaryBase & {
+      status: 'unavailable';
+      desktopChildCompletion: {
+        outcome: 'unknown';
+        exitStatus: null;
+        timedOut: null;
+      };
+    });
+
 export type DesktopChildCompletionSummary =
   | DesktopChildCompletion
   | {
@@ -585,6 +632,25 @@ export declare function appendDesktopChildCompletion(input: {
   sourceSha: string;
   completion: DesktopChildCompletion;
 }): boolean;
+
+export declare function classifyDesktopJourneyEvidenceState(input: {
+  filePath: string;
+  runnerTemp: string;
+  expectedSourceSha: string;
+}): DesktopJourneyEvidenceState;
+
+export declare function writeDesktopJourneyParentDiagnostic(input: {
+  filePath: string;
+  runnerTemp: string;
+  childOutcome: DesktopChildOutcome;
+  childExitStatus: number | null;
+  evidenceState: DesktopJourneyEvidenceState;
+}): void;
+
+export declare function readDesktopJourneyParentDiagnostic(input: {
+  filePath: string;
+  runnerTemp: string;
+}): DesktopChildDiagnostic;
 
 export declare function appendDesktopPlaywrightResult(input: {
   filePath: string;
