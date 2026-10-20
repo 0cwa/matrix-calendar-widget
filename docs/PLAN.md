@@ -607,10 +607,11 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       establishes local rehearsal only. Issue #255 is closed after completion
       of its public evidence ledger. Issue #251 and the separate production
       target, owner-input, canary, backup, and restore gates remain open.
-- [ ] Issues #275 and #276 were explicitly re-scoped for bounded pre-pilot
-      source cleanup. Issue #277 remains separately gated after the pilot. This
-      source cleanup does not change the frozen application candidate or pilot
-      gates, and any candidate incorporating it requires fresh qualification.
+- [x] Complete the bounded pre-pilot source cleanup for issues #275 and #276,
+      as explicitly re-scoped. Issue #277 remains separately gated after the
+      pilot. This cleanup does not change the frozen application candidate or
+      pilot gates; any candidate incorporating these source changes requires
+      fresh source-bound qualification.
 
 - [x] Wire a separate Chromium calendar-component fixture at 320, 390, 768, and
       1280 CSS pixels, with measured overflow, keyboard focus, and axe checks.
