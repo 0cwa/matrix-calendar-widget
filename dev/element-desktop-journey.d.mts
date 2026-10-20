@@ -71,6 +71,25 @@ export type DesktopRefreshRoomNavigationDiagnostic = {
     | '15_to_30s'
     | '30s_or_more'
     | 'unknown';
+  progressTimeline: DesktopRefreshRoomNavigationProgress[];
+};
+
+export type DesktopRefreshRoomNavigationProgress = {
+  stage:
+    | 'target_observed'
+    | 'click_started'
+    | 'click_resolved'
+    | 'click_failed';
+  roomListItemCountCapped: 0 | 1 | 2 | null;
+  fixtureRoomTargetVisible: boolean | null;
+  elapsedBucket:
+    | 'not_started'
+    | 'under_1s'
+    | '1_to_5s'
+    | '5_to_15s'
+    | '15_to_30s'
+    | '30s_or_more'
+    | 'unknown';
 };
 
 export type DesktopJourneyErrorClass =
@@ -375,7 +394,7 @@ export type DesktopJourneyFailureObservation =
   | null;
 
 export type DesktopJourneySummary = {
-  schemaVersion: 15;
+  schemaVersion: 16;
   sourceSha: string | null;
   status: 'passed' | 'failed' | 'incomplete';
   desktopChildCompletion: DesktopChildCompletion;
@@ -524,6 +543,7 @@ export declare function appendDesktopJourneyOutcome(input: {
   failurePoint?: DesktopJourneyFailurePoint;
   gatewayReadDiagnostic?: DesktopGatewayReadFailureDiagnostic;
   roomNavigationDiagnostic?: DesktopRoomNavigationDiagnostic;
+  desktopRefreshRoomNavigationDiagnostic?: DesktopRefreshRoomNavigationDiagnostic;
   desktopEventCreateDiagnostic?: DesktopEventCreateFailureDiagnostic;
   webBEditSaveDiagnostic?: WebBEditSaveFailureDiagnostic;
   errorClass?: DesktopJourneyErrorClass;
@@ -536,6 +556,7 @@ export declare function appendDesktopRefreshFailureWithFallback(input: {
   errorClass?: DesktopJourneyErrorClass;
   gatewayReadDiagnostic?: DesktopGatewayReadFailureDiagnostic;
   roomNavigationDiagnostic?: DesktopRoomNavigationDiagnostic;
+  desktopRefreshRoomNavigationDiagnostic?: DesktopRefreshRoomNavigationDiagnostic;
   desktopEventCreateDiagnostic?: DesktopEventCreateFailureDiagnostic;
   webBEditSaveDiagnostic?: WebBEditSaveFailureDiagnostic;
 }): boolean;
