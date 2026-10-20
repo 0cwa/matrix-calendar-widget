@@ -241,8 +241,33 @@ const ROOM_NAVIGATION_TARGET_KEYS = Object.freeze(
   ['countCapped', 'enabled', 'visible'].sort(),
 );
 const ROOM_NAVIGATION_DIAGNOSTIC_KEYS = Object.freeze(
-  ['currentOption', 'currentRow', 'legacyTreeItem', 'roomsReady'].sort(),
+  [
+    'clickProgress',
+    'currentOption',
+    'currentRow',
+    'legacyTreeItem',
+    'roomsReady',
+  ].sort(),
 );
+const ROOM_NAVIGATION_CLICK_PROGRESS_KEYS = Object.freeze(
+  [
+    'clickResolved',
+    'clickStarted',
+    'elapsedBucket',
+    'targetEnabled',
+    'targetMatched',
+    'targetVisible',
+  ].sort(),
+);
+const ROOM_NAVIGATION_CLICK_PROGRESS_ELAPSED_BUCKETS = new Set([
+  'not_started',
+  'under_1s',
+  '1_to_5s',
+  '5_to_15s',
+  '15_to_30s',
+  '30s_or_more',
+  'unknown',
+]);
 const DESKTOP_REFRESH_ROOM_NAVIGATION_DIAGNOSTIC_KEYS = Object.freeze(
   [
     'clickAttempted',
@@ -999,7 +1024,7 @@ function validRoomNavigationTargetObservation(value) {
   return true;
 }
 
-function validRoomNavigationDiagnostic(value) {
+function validRoomNavigationDiagnostic(value, failurePoint) {
   return (
     value !== null &&
     typeof value === 'object' &&
@@ -1009,8 +1034,37 @@ function validRoomNavigationDiagnostic(value) {
     validRoomNavigationTargetObservation(value.currentOption) &&
     validRoomNavigationTargetObservation(value.currentRow) &&
     validRoomNavigationTargetObservation(value.legacyTreeItem) &&
-    validRoomsReadyDiagnostic(value.roomsReady)
+    validRoomsReadyDiagnostic(value.roomsReady) &&
+    validRoomNavigationClickProgress(value.clickProgress, failurePoint)
   );
+}
+
+function validRoomNavigationClickProgress(value, failurePoint) {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(',') !==
+      ROOM_NAVIGATION_CLICK_PROGRESS_KEYS.join(',') ||
+    ![null, true, false].includes(value.targetMatched) ||
+    ![null, true, false].includes(value.targetVisible) ||
+    ![null, true, false].includes(value.targetEnabled) ||
+    typeof value.clickStarted !== 'boolean' ||
+    typeof value.clickResolved !== 'boolean' ||
+    !ROOM_NAVIGATION_CLICK_PROGRESS_ELAPSED_BUCKETS.has(value.elapsedBucket)
+  ) {
+    return false;
+  }
+  if (!value.clickStarted) {
+    return (
+      !value.clickResolved &&
+      value.elapsedBucket === 'not_started' &&
+      failurePoint === 'room-navigation'
+    );
+  }
+  if (value.elapsedBucket === 'not_started') return false;
+  if (failurePoint === 'room-navigation') return !value.clickResolved;
+  return failurePoint === 'room-heading' && value.clickResolved;
 }
 
 function validDesktopRefreshRoomNavigationDiagnostic(value, event) {
@@ -1761,8 +1815,11 @@ function parseEvidence(input, expectedSourceSha = null) {
           !hasFailurePoint ||
           value.phase !== 'desktop-room-widget-read' ||
           value.status !== 'failed' ||
-          value.failurePoint !== 'room-navigation' ||
-          !validRoomNavigationDiagnostic(value.roomNavigationDiagnostic))) ||
+          !['room-navigation', 'room-heading'].includes(value.failurePoint) ||
+          !validRoomNavigationDiagnostic(
+            value.roomNavigationDiagnostic,
+            value.failurePoint,
+          ))) ||
       (value.phase === 'desktop-event-create' &&
         value.status === 'failed' &&
         (!hasFailurePoint ||
@@ -2019,8 +2076,11 @@ export function appendDesktopJourneyOutcome({
       (parsed.roomNavigationDiagnostic !== null ||
         phase !== 'desktop-room-widget-read' ||
         status !== 'failed' ||
-        failurePoint !== 'room-navigation' ||
-        !validRoomNavigationDiagnostic(roomNavigationDiagnostic))) ||
+        !['room-navigation', 'room-heading'].includes(failurePoint) ||
+        !validRoomNavigationDiagnostic(
+          roomNavigationDiagnostic,
+          failurePoint,
+        ))) ||
     (phase === 'desktop-event-create' &&
       status === 'failed' &&
       (failurePoint === undefined ||
@@ -2293,7 +2353,7 @@ export function summarizeDesktopJourneyEvidence(
     childCompletedSuccessfully &&
     playwrightResult === 'passed';
   return {
-    schemaVersion: 14,
+    schemaVersion: 15,
     sourceSha,
     status: failed ? 'failed' : journeyEvidencePassed ? 'passed' : 'incomplete',
     desktopChildCompletion,
