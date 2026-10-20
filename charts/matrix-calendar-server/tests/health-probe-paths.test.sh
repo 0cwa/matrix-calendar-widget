@@ -31,7 +31,10 @@ for probe, expected_path in expectations.items():
             f"{probe} rendered path {actual!r}; expected {expected_path!r}"
         )
 
-if "/v1/health" not in connection_test:
+if not re.search(
+    r"(?m)^\s*args:\s*\[\x27[^\x27]*/v1/health\x27\]\s*$",
+    connection_test,
+):
     raise SystemExit("rendered chart connection test must use /v1/health")
 
 print("Helm rendered liveness, readiness, and connection-test paths are correct.")
