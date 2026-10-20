@@ -6581,6 +6581,7 @@ function observeReminderWidgetContextResponse(
   let responseStatus: number | undefined;
   const gatewayOrigin = new URL(fixture.gatewayUrl).origin;
   const widgetOrigin = new URL(fixture.widgetUrl).origin;
+  // eslint-disable-next-line playwright/missing-playwright-await -- Register before room/widget actions to avoid a response race; the caller awaits reminderContextResponseObserver.response after openCalendarWidget.
   const response = page.waitForResponse(
     (candidate) => {
       try {
