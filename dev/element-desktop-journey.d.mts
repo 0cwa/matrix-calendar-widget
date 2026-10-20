@@ -58,6 +58,21 @@ export type DesktopARefreshFailurePoint =
   | 'desktop-refresh-iframe-attached'
   | 'desktop-refresh-event-row';
 
+export type DesktopRefreshRoomNavigationDiagnostic = {
+  roomListItemCountCapped: 0 | 1 | 2 | null;
+  fixtureRoomTargetVisible: boolean | null;
+  clickAttempted: boolean;
+  clickCompleted: boolean;
+  elapsedBucket:
+    | 'not_completed'
+    | 'under_1s'
+    | '1_to_5s'
+    | '5_to_15s'
+    | '15_to_30s'
+    | '30s_or_more'
+    | 'unknown';
+};
+
 export type DesktopJourneyErrorClass =
   | 'timeout'
   | 'assertion'
@@ -343,7 +358,7 @@ export type DesktopJourneyFailureObservation =
   | null;
 
 export type DesktopJourneySummary = {
-  schemaVersion: 13;
+  schemaVersion: 14;
   sourceSha: string | null;
   status: 'passed' | 'failed' | 'incomplete';
   desktopChildCompletion: DesktopChildCompletion;
@@ -358,6 +373,7 @@ export type DesktopJourneySummary = {
   roomNavigationDiagnostic: DesktopRoomNavigationDiagnostic | null;
   desktopEventCreateDiagnostic: DesktopEventCreateFailureDiagnostic | null;
   webBEditSaveDiagnostic: WebBEditSaveFailureDiagnostic | null;
+  desktopRefreshRoomNavigationDiagnostic: DesktopRefreshRoomNavigationDiagnostic | null;
   cases: Record<DesktopJourneyPhase, DesktopJourneyOutcome | 'not_run'>;
 };
 
@@ -480,6 +496,7 @@ export declare function appendDesktopJourneyProgress(input: {
   event: 'begin' | 'point' | 'complete';
   phase: 'desktop-a-refresh';
   failurePoint?: DesktopARefreshFailurePoint;
+  desktopRefreshRoomNavigationDiagnostic?: DesktopRefreshRoomNavigationDiagnostic;
 }): boolean;
 
 export declare function appendDesktopJourneyOutcome(input: {
