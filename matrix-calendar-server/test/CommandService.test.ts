@@ -28,6 +28,7 @@ import {
 import { AppRuntimeContext } from '../src/AppRuntimeContext';
 import { IAppConfiguration } from '../src/IAppConfiguration';
 import { TranslatableError } from '../src/error/TranslatableError';
+import { MatrixClientProxyHandler } from '../src/matrix/MatrixClientProxyHandler';
 import { IRoomEvent } from '../src/matrix/event/IRoomEvent';
 import { StateEventName } from '../src/model/StateEventName';
 import { CalendarCommandService } from '../src/service/CalendarCommandService';
@@ -396,6 +397,88 @@ describe('test CommandService', () => {
     );
     verify(welcomeWorkflowService.handleAddWidgetCommand(ROOM_ID)).never();
   });
+
+  test('calendar help replies in an unencrypted room through the Matrix client proxy', async () => {
+    const matrixClientTarget = {
+      getRoomStateEvent: jest.fn(async (_roomId: string, eventType: string) => {
+        const error = Object.assign(new Error('Matrix request failed'), {
+          body: { errcode: 'M_NOT_FOUND', error: 'Event not found' },
+          statusCode: 404,
+        });
+        if (eventType === 'm.room.encryption') throw error;
+        throw error;
+      }),
+      sendMessage: jest.fn().mockResolvedValue('$calendar-help-reply'),
+    };
+    const matrixClient = new Proxy(
+      matrixClientTarget as unknown as MatrixClient,
+      new MatrixClientProxyHandler(),
+    );
+    const service = new CommandService(
+      matrixClient,
+      instance(welcomeWorkflowService),
+      { ...appConfig, enable_welcome_workflow: false, enable_crypto: false },
+      appRuntimeContext,
+      calendarCommandService,
+    );
+    const event = createEvent();
+    event.content.body = '!calendar help';
+
+    await service.handleRoomMessage(ROOM_ID, event);
+
+    expect(matrixClientTarget.getRoomStateEvent).toHaveBeenCalledWith(
+      ROOM_ID,
+      'm.room.encryption',
+      '',
+    );
+    expect(matrixClientTarget.sendMessage).toHaveBeenCalledTimes(1);
+    expect(matrixClientTarget.sendMessage.mock.calls[0][1]).toMatchObject({
+      msgtype: 'm.text',
+      'm.mentions': {},
+    });
+    expect(matrixClientTarget.sendMessage.mock.calls[0][1].body).toContain(
+      '!calendar upcoming',
+    );
+  });
+
+  test.each([
+    { errcode: 'M_FORBIDDEN', statusCode: 404 },
+    { errcode: 'M_NOT_FOUND', statusCode: 500 },
+  ])(
+    'calendar command remains closed for proxied responses other than exact M_NOT_FOUND 404',
+    async ({ errcode, statusCode }) => {
+      const matrixClientTarget = {
+        getRoomStateEvent: jest.fn(async () => {
+          throw Object.assign(new Error('Matrix request failed'), {
+            body: { errcode, error: 'State unavailable' },
+            statusCode,
+          });
+        }),
+        sendMessage: jest.fn().mockResolvedValue('$calendar-reply'),
+      };
+      const matrixClient = new Proxy(
+        matrixClientTarget as unknown as MatrixClient,
+        new MatrixClientProxyHandler(),
+      );
+      const commandRunner = {
+        execute: jest.fn().mockResolvedValue('Calendar data'),
+      } as unknown as CalendarCommandService;
+      const service = new CommandService(
+        matrixClient,
+        instance(welcomeWorkflowService),
+        appConfig,
+        appRuntimeContext,
+        commandRunner,
+      );
+      const event = createEvent();
+      event.content.body = '!calendar upcoming';
+
+      await service.handleRoomMessage(ROOM_ID, event);
+
+      expect(commandRunner.execute).not.toHaveBeenCalled();
+      expect(matrixClientTarget.sendMessage).not.toHaveBeenCalled();
+    },
+  );
 
   test('legacy meeting commands remain disabled with the welcome workflow', async () => {
     const event = createEvent();

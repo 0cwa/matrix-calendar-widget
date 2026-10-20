@@ -988,6 +988,27 @@ open until its remaining hardening and compatibility work is dispositioned.
 recorded its evidence. A controlled beta candidate may meet the separate
 bounded contract above while broader M4/M5/M8 work remains open.
 
+## User feedback follow-up — room onboarding and bot command acceptance
+
+Clarify how a team calendar becomes available in each Matrix room and how to
+use the command fallback. Room bindings remain server-configured; the widget
+should explain an unavailable team calendar and direct users to a room moderator
+or calendar administrator. Bot guidance should cover the selected room
+principal, command permissions, encryption/send prerequisites, and bounded
+command limits without implying that inviting the bot creates a calendar.
+
+- [ ] Validate the empty-room guidance for unconfigured and configured rooms,
+      and test multiple distinct room bindings while preserving cross-room
+      authorization.
+- [ ] Verify `!calendar help` and supported calendar commands in the pilot
+      room through the normal bot account, including a safe reply when the
+      unencrypted-room state request returns the expected Matrix 404.
+- [ ] Keep membership, power, binding, encryption, and default-off checks in
+      the server path; UI guidance and documentation do not grant access.
+- [ ] Qualify the integrated source with focused and full CI, then run the
+      configured-room Element Web/Desktop acceptance before recording a new
+      application candidate.
+
 ## Working rule
 
 Do not wait for a milestone to be “fully rewritten” before delivering value. Each milestone should land as small, tested vertical PRs that leave the application runnable.
