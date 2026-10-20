@@ -68,6 +68,7 @@ import {
   type DesktopLoginFieldObservation,
   type DesktopLoginFormObservation,
   type DesktopLoginStep,
+  type DesktopRefreshRoomNavigationDiagnostic,
   type DesktopRoomNavigationDiagnostic,
   type DesktopRoomsReadyDiagnostic,
   type DesktopRoomsReadyElementObservation,
@@ -504,6 +505,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
   };
   const enterDesktopRefreshFailurePoint = (
     failurePoint: DesktopARefreshFailurePoint,
+    desktopRefreshRoomNavigationDiagnostic?: DesktopRefreshRoomNavigationDiagnostic,
   ) => {
     currentFailurePoint = failurePoint;
     safeRecordDesktopJourneyProgress(
@@ -511,10 +513,12 @@ test('Element Desktop room event journey', async ({ browser }) => {
       'point',
       'desktop-a-refresh',
       failurePoint,
+      desktopRefreshRoomNavigationDiagnostic,
     );
   };
   const completeDesktopRefreshFailurePoint = (
     failurePoint: DesktopARefreshFailurePoint,
+    desktopRefreshRoomNavigationDiagnostic?: DesktopRefreshRoomNavigationDiagnostic,
   ) => {
     if (
       safeRecordDesktopJourneyProgress(
@@ -522,6 +526,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
         'complete',
         'desktop-a-refresh',
         failurePoint,
+        desktopRefreshRoomNavigationDiagnostic,
       )
     ) {
       currentFailurePoint = undefined;
@@ -883,9 +888,24 @@ test('Element Desktop room event journey', async ({ browser }) => {
     enterDesktopRefreshFailurePoint('desktop-refresh-rooms-list');
     await desktopElement.waitForRoomsList(60_000);
     completeDesktopRefreshFailurePoint('desktop-refresh-rooms-list');
-    enterDesktopRefreshFailurePoint('desktop-refresh-room-navigation');
+    const refreshRoomNavigationObservation =
+      await observeDesktopRefreshRoomNavigation(desktopPage, fixture.roomName);
+    enterDesktopRefreshFailurePoint('desktop-refresh-room-navigation', {
+      ...refreshRoomNavigationObservation,
+      clickAttempted: true,
+      clickCompleted: false,
+      elapsedBucket: 'not_completed',
+    });
+    const roomNavigationStartedAt = Date.now();
     await desktopElement.navigateToRoomOrInvitation(fixture.roomName);
-    completeDesktopRefreshFailurePoint('desktop-refresh-room-navigation');
+    completeDesktopRefreshFailurePoint('desktop-refresh-room-navigation', {
+      ...refreshRoomNavigationObservation,
+      clickAttempted: true,
+      clickCompleted: true,
+      elapsedBucket: desktopRefreshElapsedBucket(
+        Date.now() - roomNavigationStartedAt,
+      ),
+    });
     enterDesktopRefreshFailurePoint('desktop-refresh-room-id');
     if (desktopElement.getCurrentRoomId() !== fixture.teamRoomId) {
       throw new Error('Desktop refreshed into an unexpected room');
@@ -2779,6 +2799,7 @@ function safeRecordDesktopJourneyProgress(
   event: 'begin' | 'point' | 'complete',
   phase: 'desktop-a-refresh',
   failurePoint?: DesktopARefreshFailurePoint,
+  desktopRefreshRoomNavigationDiagnostic?: DesktopRefreshRoomNavigationDiagnostic,
 ) {
   const sourceSha = process.env.ELEMENT_DESKTOP_SOURCE_SHA;
   if (typeof sourceSha !== 'string') return false;
@@ -2789,10 +2810,63 @@ function safeRecordDesktopJourneyProgress(
       event,
       phase,
       ...(failurePoint === undefined ? {} : { failurePoint }),
+      ...(desktopRefreshRoomNavigationDiagnostic === undefined
+        ? {}
+        : { desktopRefreshRoomNavigationDiagnostic }),
     });
   } catch {
     return false;
   }
+}
+
+async function observeDesktopRefreshRoomNavigation(
+  page: Page,
+  roomName: string,
+): Promise<
+  Pick<
+    DesktopRefreshRoomNavigationDiagnostic,
+    'roomListItemCountCapped' | 'fixtureRoomTargetVisible'
+  >
+> {
+  let roomListItemCountCapped: 0 | 1 | 2 | null = null;
+  let fixtureRoomTargetVisible: boolean | null = null;
+  try {
+    const roomList = getMainRoomListLocator(page);
+    const roomItems = roomList
+      .getByRole('option')
+      .or(roomList.getByRole('row'))
+      .or(roomList.getByRole('treeitem'));
+    roomListItemCountCapped = Math.min(await roomItems.count(), 2) as 0 | 1 | 2;
+  } catch {
+    // Counts are immediate Playwright queries; unavailable remains null.
+  }
+  try {
+    const targets = await new ElementWebPage(page).observeRoomNavigationTargets(
+      roomName,
+    );
+    const observations = Object.values(targets);
+    fixtureRoomTargetVisible = observations.some(
+      (target) => target.visible === true,
+    )
+      ? true
+      : observations.every(
+            (target) => target.countCapped === 0 || target.visible === false,
+          )
+        ? false
+        : null;
+  } catch {
+    // Never include the fixture room name or Playwright error in evidence.
+  }
+  return { roomListItemCountCapped, fixtureRoomTargetVisible };
+}
+
+function desktopRefreshElapsedBucket(elapsedMs: number) {
+  if (!Number.isFinite(elapsedMs) || elapsedMs < 0) return 'unknown' as const;
+  if (elapsedMs < 1_000) return 'under_1s' as const;
+  if (elapsedMs < 5_000) return '1_to_5s' as const;
+  if (elapsedMs < 15_000) return '5_to_15s' as const;
+  if (elapsedMs < 30_000) return '15_to_30s' as const;
+  return '30s_or_more' as const;
 }
 
 function safeRecordPhase(
