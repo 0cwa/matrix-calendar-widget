@@ -342,6 +342,11 @@ const DESKTOP_EVIDENCE_FAILURE_CODES = new Set([
   'path_file_rejected',
   'json_parse_failed',
   'evidence_validation_failed',
+  'evidence_input_bounds_rejected',
+  'evidence_login_record_rejected',
+  'evidence_progress_refresh_sequence_rejected',
+  'evidence_phase_record_rejected',
+  'evidence_final_summary_cross_check_rejected',
 ]);
 const MAX_DIAGNOSTIC_ROW_BYTES = 256;
 const MAX_PROGRESS_ROW_BYTES = 512;
@@ -377,6 +382,13 @@ const MAX_PLAYWRIGHT_RESULT_ROW_BYTES = Buffer.byteLength(
 
 function invalidInput() {
   throw new Error('Invalid Desktop journey input');
+}
+
+function invalidEvidenceAt(stageCode) {
+  if (!DESKTOP_EVIDENCE_FAILURE_CODES.has(stageCode)) invalidInput();
+  const error = new Error('Invalid Desktop journey input');
+  error.code = stageCode;
+  throw error;
 }
 
 function validDesktopChildCompletion(value) {
@@ -1550,8 +1562,9 @@ export function classifyDesktopJourneyEvidence({
   } catch (error) {
     return {
       evidenceState: 'invalid',
-      evidenceFailureCode:
-        error?.code === 'desktop-evidence-json-parse'
+      evidenceFailureCode: DESKTOP_EVIDENCE_FAILURE_CODES.has(error?.code)
+        ? error.code
+        : error?.code === 'desktop-evidence-json-parse'
           ? 'json_parse_failed'
           : 'evidence_validation_failed',
     };
@@ -1716,7 +1729,7 @@ function parseEvidence(input, expectedSourceSha = null) {
     Buffer.byteLength(input) > MAX_EVIDENCE_BYTES ||
     (expectedSourceSha !== null && !SOURCE_SHA_PATTERN.test(expectedSourceSha))
   ) {
-    invalidInput();
+    invalidEvidenceAt('evidence_input_bounds_rejected');
   }
 
   let sourceSha = expectedSourceSha;
@@ -1743,7 +1756,9 @@ function parseEvidence(input, expectedSourceSha = null) {
   let loginDiagnostic = null;
   let roomsReadyDiagnostic = null;
   const rows = input.split(/\r?\n/u).filter(Boolean);
-  if (rows.length > MAX_EVIDENCE_ROWS) invalidInput();
+  if (rows.length > MAX_EVIDENCE_ROWS) {
+    invalidEvidenceAt('evidence_input_bounds_rejected');
+  }
 
   for (const row of rows) {
     let value;
@@ -1755,7 +1770,7 @@ function parseEvidence(input, expectedSourceSha = null) {
       throw error;
     }
     if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-      invalidInput();
+      invalidEvidenceAt('evidence_phase_record_rejected');
     }
     const keys = Object.keys(value).sort().join(',');
     if (
@@ -1769,7 +1784,7 @@ function parseEvidence(input, expectedSourceSha = null) {
       keys === 'loginDiagnostic,loginEntry,loginStep,roomsReadyDiagnostic'
     ) {
       if (loginStepRecorded || !LOGIN_STEP_SET.has(value.loginStep)) {
-        invalidInput();
+        invalidEvidenceAt('evidence_login_record_rejected');
       }
       if (
         Object.hasOwn(value, 'loginEntry') &&
@@ -1779,13 +1794,13 @@ function parseEvidence(input, expectedSourceSha = null) {
           (value.loginEntry === 'welcome_sign_in_clicked' &&
             value.loginStep === 'welcome_sign_in'))
       ) {
-        invalidInput();
+        invalidEvidenceAt('evidence_login_record_rejected');
       }
       if (
         Object.hasOwn(value, 'loginDiagnostic') &&
         !validDesktopLoginDiagnostic(value.loginDiagnostic)
       ) {
-        invalidInput();
+        invalidEvidenceAt('evidence_login_record_rejected');
       }
       if (
         Object.hasOwn(value, 'roomsReadyDiagnostic') &&
@@ -1793,7 +1808,7 @@ function parseEvidence(input, expectedSourceSha = null) {
           value.loginStep !== 'rooms_ready' ||
           Object.hasOwn(value, 'loginDiagnostic'))
       ) {
-        invalidInput();
+        invalidEvidenceAt('evidence_login_record_rejected');
       }
       loginStep = value.loginStep;
       loginEntry = value.loginEntry ?? 'not_observed';
@@ -1829,7 +1844,7 @@ function parseEvidence(input, expectedSourceSha = null) {
         value.phase !== 'desktop-a-refresh' ||
         !['begin', 'point', 'started', 'complete'].includes(value.event)
       ) {
-        invalidInput();
+        invalidEvidenceAt('evidence_progress_refresh_sequence_rejected');
       }
       sourceSha = value.sourceSha;
       if (value.event === 'begin') {
@@ -1842,7 +1857,7 @@ function parseEvidence(input, expectedSourceSha = null) {
             (phase) => outcomes.get(phase) === 'passed',
           )
         ) {
-          invalidInput();
+          invalidEvidenceAt('evidence_progress_refresh_sequence_rejected');
         }
         desktopRefreshProgress = {
           phase: 'desktop-a-refresh',
@@ -1860,7 +1875,7 @@ function parseEvidence(input, expectedSourceSha = null) {
           value.failurePoint !==
             DESKTOP_A_REFRESH_FAILURE_POINTS[nextPointIndex]
         ) {
-          invalidInput();
+          invalidEvidenceAt('evidence_progress_refresh_sequence_rejected');
         }
         desktopRefreshProgressPointIndex = nextPointIndex;
         if (
@@ -1871,7 +1886,7 @@ function parseEvidence(input, expectedSourceSha = null) {
               'point',
             ))
         ) {
-          invalidInput();
+          invalidEvidenceAt('evidence_progress_refresh_sequence_rejected');
         }
         if (hasRefreshRoomNavigationDiagnostic) {
           desktopRefreshRoomNavigationDiagnostic =
@@ -1895,7 +1910,7 @@ function parseEvidence(input, expectedSourceSha = null) {
             'started',
           )
         ) {
-          invalidInput();
+          invalidEvidenceAt('evidence_progress_refresh_sequence_rejected');
         }
         desktopRefreshRoomNavigationDiagnostic =
           value.desktopRefreshRoomNavigationDiagnostic;
@@ -1907,7 +1922,7 @@ function parseEvidence(input, expectedSourceSha = null) {
           desktopRefreshProgressPointIndex !==
             desktopRefreshCompletedPointIndex + 1
         ) {
-          invalidInput();
+          invalidEvidenceAt('evidence_progress_refresh_sequence_rejected');
         }
         if (
           hasRefreshRoomNavigationDiagnostic &&
@@ -1918,7 +1933,7 @@ function parseEvidence(input, expectedSourceSha = null) {
               'complete',
             ))
         ) {
-          invalidInput();
+          invalidEvidenceAt('evidence_progress_refresh_sequence_rejected');
         }
         if (hasRefreshRoomNavigationDiagnostic) {
           desktopRefreshRoomNavigationDiagnostic =
@@ -1993,7 +2008,9 @@ function parseEvidence(input, expectedSourceSha = null) {
       }
       continue;
     }
-    if (Object.hasOwn(value, 'sourceSha')) invalidInput();
+    if (Object.hasOwn(value, 'sourceSha')) {
+      invalidEvidenceAt('evidence_phase_record_rejected');
+    }
     const phaseKeys = Object.keys(value).sort().join(',');
     const hasFailurePoint = Object.hasOwn(value, 'failurePoint');
     const hasErrorClass = Object.hasOwn(value, 'errorClass');
@@ -2124,7 +2141,7 @@ function parseEvidence(input, expectedSourceSha = null) {
           ))) ||
       outcomes.has(value.phase)
     ) {
-      invalidInput();
+      invalidEvidenceAt('evidence_phase_record_rejected');
     }
     if (hasFailurePoint) {
       failurePoint = { phase: value.phase, point: value.failurePoint };
@@ -2608,7 +2625,7 @@ export function summarizeDesktopJourneyEvidence(
       loginStep !== 'complete' ||
       !['password_form_present', 'welcome_sign_in_clicked'].includes(loginEntry)
     ) {
-      invalidInput();
+      invalidEvidenceAt('evidence_final_summary_cross_check_rejected');
     }
   }
   const cases = Object.fromEntries(
@@ -2750,7 +2767,7 @@ if (
     process.stdout.write(
       `${JSON.stringify({
         ...summary,
-        schemaVersion: 20,
+        schemaVersion: 21,
         desktopChildDiagnostic: parentDiagnostic,
       })}\n`,
     );
@@ -2766,7 +2783,7 @@ if (
             ? expectedSourceSha
             : null,
         ),
-        schemaVersion: 20,
+        schemaVersion: 21,
         desktopChildDiagnostic:
           typeof runnerTemp === 'string'
             ? readDesktopJourneyParentDiagnostic({

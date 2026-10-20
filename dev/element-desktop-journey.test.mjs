@@ -3359,7 +3359,7 @@ test('records only bounded child and evidence classification enums', () => {
       }),
       {
         evidenceState: 'invalid',
-        evidenceFailureCode: 'evidence_validation_failed',
+        evidenceFailureCode: 'evidence_phase_record_rejected',
       },
     );
     const unreadableTemp = join(runnerTemp, 'unreadable');
@@ -3477,6 +3477,11 @@ test('records only bounded child and evidence classification enums', () => {
       'path_file_rejected',
       'json_parse_failed',
       'evidence_validation_failed',
+      'evidence_input_bounds_rejected',
+      'evidence_login_record_rejected',
+      'evidence_progress_refresh_sequence_rejected',
+      'evidence_phase_record_rejected',
+      'evidence_final_summary_cross_check_rejected',
     ]) {
       writeDesktopJourneyParentDiagnostic({
         filePath: diagnosticFile,
@@ -3565,6 +3570,75 @@ test('records only bounded child and evidence classification enums', () => {
   });
 });
 
+test('classifies fixed evidence validation stages without exposing input', () => {
+  withTempDirectory((runnerTemp) => {
+    const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
+    const cases = [
+      {
+        input: Array.from({ length: 100 }, () => '{}').join('\n'),
+        expected: 'evidence_input_bounds_rejected',
+      },
+      {
+        input: JSON.stringify({ loginStep: 'private-evidence-sentinel' }),
+        expected: 'evidence_login_record_rejected',
+      },
+      {
+        input: JSON.stringify({
+          type: 'desktop-journey-progress',
+          sourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+          phase: 'desktop-a-refresh',
+          event: 'point',
+        }),
+        expected: 'evidence_progress_refresh_sequence_rejected',
+      },
+      {
+        input: JSON.stringify({ privateValue: 'private-evidence-sentinel' }),
+        expected: 'evidence_phase_record_rejected',
+      },
+      {
+        input: JSON.stringify({ phase: 'desktop-login', status: 'passed' }),
+        expected: 'evidence_final_summary_cross_check_rejected',
+      },
+    ];
+
+    for (const { input, expected } of cases) {
+      writeFileSync(filePath, `${input}\n`, { mode: 0o600 });
+      assert.deepEqual(
+        classifyDesktopJourneyEvidence({
+          filePath,
+          runnerTemp,
+          expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+        }),
+        { evidenceState: 'invalid', evidenceFailureCode: expected },
+      );
+    }
+
+    writeFileSync(
+      filePath,
+      `${JSON.stringify({
+        type: 'desktop-child-completion',
+        sourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+        desktopChildCompletion: { outcome: 'private-evidence-sentinel' },
+      })}\n`,
+      { mode: 0o600 },
+    );
+    assert.deepEqual(
+      classifyDesktopJourneyEvidence({
+        filePath,
+        runnerTemp,
+        expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+      }),
+      { evidenceState: 'valid' },
+    );
+    const summary = summarizeDesktopJourneyEvidence(
+      readFileSync(filePath, 'utf8'),
+      { expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA },
+    );
+    assert.equal(summary.status, 'incomplete');
+    assert.equal(summary.desktopChildCompletion.outcome, 'unknown');
+  });
+});
+
 test('emits a sanitized unavailable summary when evidence validation fails', () => {
   withTempDirectory((runnerTemp) => {
     const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
@@ -3583,7 +3657,7 @@ test('emits a sanitized unavailable summary when evidence validation fails', () 
       childOutcome: 'exited',
       childExitStatus: 23,
       evidenceState: 'invalid',
-      evidenceFailureCode: 'evidence_validation_failed',
+      evidenceFailureCode: 'evidence_phase_record_rejected',
     });
 
     const scriptPath = fileURLToPath(
@@ -3607,7 +3681,7 @@ test('emits a sanitized unavailable summary when evidence validation fails', () 
     assert.doesNotMatch(result.stderr, new RegExp(privateSentinel, 'u'));
 
     const summary = JSON.parse(result.stdout);
-    assert.equal(summary.schemaVersion, 20);
+    assert.equal(summary.schemaVersion, 21);
     assert.equal(summary.sourceSha, DESKTOP_REFRESH_SOURCE_SHA);
     assert.equal(summary.status, 'unavailable');
     assert.equal(summary.desktopChildCompletion.outcome, 'unknown');
@@ -3616,22 +3690,22 @@ test('emits a sanitized unavailable summary when evidence validation fails', () 
       childOutcome: 'exited',
       childExitStatus: 23,
       evidenceState: 'invalid',
-      evidenceFailureCode: 'evidence_validation_failed',
+      evidenceFailureCode: 'evidence_phase_record_rejected',
     });
     assert.equal(summary.cases['desktop-a-refresh'], 'not_run');
   });
 });
 
-test('declares the schema-20 CLI parent diagnostic shape', () => {
+test('declares the schema-21 CLI parent diagnostic shape', () => {
   const declarations = readFileSync(
     new URL('./element-desktop-journey.d.mts', import.meta.url),
     'utf8',
   );
-  assert.match(declarations, /schemaVersion: 20;/u);
+  assert.match(declarations, /schemaVersion: 21;/u);
   assert.match(declarations, /DesktopJourneyEvidenceFailureCode/u);
   assert.match(
     declarations,
-    /'path_file_rejected'[\s\S]*?'json_parse_failed'[\s\S]*?'evidence_validation_failed'/u,
+    /'path_file_rejected'[\s\S]*?'json_parse_failed'[\s\S]*?'evidence_validation_failed'[\s\S]*?'evidence_input_bounds_rejected'[\s\S]*?'evidence_login_record_rejected'[\s\S]*?'evidence_progress_refresh_sequence_rejected'[\s\S]*?'evidence_phase_record_rejected'[\s\S]*?'evidence_final_summary_cross_check_rejected'/u,
   );
   assert.match(
     declarations,

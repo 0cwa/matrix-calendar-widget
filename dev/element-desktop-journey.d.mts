@@ -430,7 +430,12 @@ export type DesktopJourneyEvidenceState =
 export type DesktopJourneyEvidenceFailureCode =
   | 'path_file_rejected'
   | 'json_parse_failed'
-  | 'evidence_validation_failed';
+  | 'evidence_validation_failed'
+  | 'evidence_input_bounds_rejected'
+  | 'evidence_login_record_rejected'
+  | 'evidence_progress_refresh_sequence_rejected'
+  | 'evidence_phase_record_rejected'
+  | 'evidence_final_summary_cross_check_rejected';
 
 export type DesktopJourneyEvidenceClassification =
   | {
@@ -469,7 +474,7 @@ type DesktopJourneyCliSummaryBase = Omit<
   DesktopJourneySummary,
   'schemaVersion' | 'status' | 'desktopChildCompletion'
 > & {
-  schemaVersion: 20;
+  schemaVersion: 21;
   desktopChildDiagnostic: DesktopChildDiagnostic;
 };
 
