@@ -2002,6 +2002,62 @@ test('records bounded Desktop refresh room-navigation progress', () => {
   }
 });
 
+test('rejects malformed room-navigation diagnostics while parsing evidence', () => {
+  const diagnostic = {
+    roomListItemCountCapped: 2,
+    fixtureRoomTargetVisible: true,
+    clickAttempted: true,
+    clickCompleted: false,
+    elapsedBucket: 'not_completed',
+  };
+
+  for (const malformedDiagnostic of [
+    { ...diagnostic, unexpectedKey: true },
+    { ...diagnostic, roomListItemCountCapped: 3 },
+  ]) {
+    withTempDirectory((runnerTemp) => {
+      const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
+      initializeDesktopJourneyEvidence({ filePath, runnerTemp });
+      appendDesktopRefreshPrefix(filePath, runnerTemp);
+      appendDesktopRefreshBegin(filePath, runnerTemp);
+      for (const failurePoint of DESKTOP_A_REFRESH_FAILURE_POINTS.slice(
+        0,
+        DESKTOP_A_REFRESH_FAILURE_POINTS.indexOf(
+          'desktop-refresh-room-navigation',
+        ),
+      )) {
+        appendDesktopRefreshPoint(filePath, runnerTemp, failurePoint);
+        appendDesktopRefreshComplete(filePath, runnerTemp, failurePoint);
+      }
+      appendDesktopRefreshPoint(
+        filePath,
+        runnerTemp,
+        'desktop-refresh-room-navigation',
+        diagnostic,
+      );
+
+      const rows = readFileSync(filePath, 'utf8')
+        .trimEnd()
+        .split('\n')
+        .map((row) => JSON.parse(row));
+      const diagnosticRow = rows.find(
+        (row) =>
+          row.type === 'desktop-journey-progress' &&
+          row.event === 'point' &&
+          row.failurePoint === 'desktop-refresh-room-navigation',
+      );
+      diagnosticRow.desktopRefreshRoomNavigationDiagnostic =
+        malformedDiagnostic;
+
+      assert.throws(
+        () =>
+          summarizeDesktopJourneyEvidence(rows.map(JSON.stringify).join('\n')),
+        /Invalid Desktop journey input/u,
+      );
+    });
+  }
+});
+
 test('classifies caught Desktop refresh errors without persisting error text', () => {
   withTempDirectory((runnerTemp) => {
     const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
