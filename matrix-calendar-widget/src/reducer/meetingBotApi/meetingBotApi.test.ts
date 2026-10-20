@@ -414,9 +414,8 @@ describe('meetingBotApi', () => {
 
     it('should reject if token was rejected', async () => {
       server.use(
-        http.get(
-          'http://localhost/v1/meeting/!roomId/sharingInformation',
-          () => HttpResponse.json({}),
+        http.get('http://localhost/v1/meeting/!roomId/sharingInformation', () =>
+          HttpResponse.json({}),
         ),
       );
 
@@ -436,9 +435,8 @@ describe('meetingBotApi', () => {
 
     it('should reject server error', async () => {
       server.use(
-        http.get(
-          'http://localhost/v1/meeting/!roomId/sharingInformation',
-          () => HttpResponse.json('an error occurred', { status: 500 }),
+        http.get('http://localhost/v1/meeting/!roomId/sharingInformation', () =>
+          HttpResponse.json('an error occurred', { status: 500 }),
         ),
       );
 

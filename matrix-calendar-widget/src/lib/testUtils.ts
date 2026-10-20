@@ -404,9 +404,8 @@ export function mockMeetingSharingInformationEndpoint(
   }: { jitsi_dial_in_number?: string; jitsi_pin?: number } = {},
 ) {
   server.use(
-    http.get(
-      'http://localhost/v1/meeting/:room/sharingInformation',
-      () => HttpResponse.json({ jitsi_dial_in_number, jitsi_pin }),
+    http.get('http://localhost/v1/meeting/:room/sharingInformation', () =>
+      HttpResponse.json({ jitsi_dial_in_number, jitsi_pin }),
     ),
   );
 }
