@@ -353,6 +353,7 @@ runs:
           "$RUNNER_TEMP/element-acceptance-stage.jsonl" \
           "$RUNNER_TEMP/element-acceptance-desktop-credentials.json" \
           "$RUNNER_TEMP/element-desktop-journey-stage.jsonl" \
+          "$RUNNER_TEMP/element-desktop-journey-parent-diagnostic.json" \
           "$RUNNER_TEMP/element-desktop-startup-stage.jsonl" \
           "$RUNNER_TEMP/element-desktop-journey-runner-state.json" \
           "$RUNNER_TEMP/element-desktop-journey-startup-output.jsonl" \

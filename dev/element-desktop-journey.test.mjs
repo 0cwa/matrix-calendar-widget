@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import {
   appendFileSync,
   chmodSync,
@@ -8,11 +9,13 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import ElementDesktopAcceptanceResultReporter from '../e2e/src/elementDesktopAcceptanceResultReporter.mjs';
 import {
   DESKTOP_A_REFRESH_FAILURE_POINTS,
@@ -28,6 +31,8 @@ import {
   appendDesktopPlaywrightResult,
   appendDesktopRefreshFailureWithFallback,
   classifyDesktopJourneyErrorClass,
+  classifyDesktopJourneyEvidence,
+  classifyDesktopJourneyEvidenceState,
   classifyDesktopLoginFailure,
   desktopWidgetIsReady,
   enterDesktopPasswordLogin,
@@ -39,10 +44,12 @@ import {
   observeWebBEditRowRenderWithinDeadline,
   prepareDesktopWidget,
   readDesktopJourneyEvidence,
+  readDesktopJourneyParentDiagnostic,
   readOnlyWidgetIsReady,
   readSyntheticDesktopCredentials,
   summarizeDesktopJourneyEvidence,
   unavailableWebBEditRowRenderDiagnostic,
+  writeDesktopJourneyParentDiagnostic,
   writeSyntheticDesktopCredentials,
 } from './element-desktop-journey.mjs';
 
@@ -106,6 +113,22 @@ function appendDesktopRefreshPoint(
     ...(desktopRefreshRoomNavigationDiagnostic === undefined
       ? {}
       : { desktopRefreshRoomNavigationDiagnostic }),
+  });
+}
+
+function appendDesktopRefreshStarted(
+  filePath,
+  runnerTemp,
+  desktopRefreshRoomNavigationDiagnostic,
+) {
+  return appendDesktopJourneyProgress({
+    filePath,
+    runnerTemp,
+    sourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+    event: 'started',
+    phase: 'desktop-a-refresh',
+    failurePoint: 'desktop-refresh-room-navigation',
+    desktopRefreshRoomNavigationDiagnostic,
   });
 }
 
@@ -384,7 +407,7 @@ test('keeps journey evidence within finite phases and statuses', () => {
     });
 
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 16);
+    assert.equal(summary.schemaVersion, 18);
     assert.equal(summary.status, 'incomplete');
     assert.equal(summary.loginStep, 'complete');
     assert.equal(summary.loginEntry, 'password_form_present');
@@ -463,7 +486,7 @@ test('records only the source-bound Playwright result and child completion', () 
       runnerTemp,
       expectedSourceSha: sourceSha,
     });
-    assert.equal(summary.schemaVersion, 16);
+    assert.equal(summary.schemaVersion, 18);
     assert.equal(summary.sourceSha, sourceSha);
     assert.equal(summary.status, 'incomplete');
     assert.equal(summary.playwrightResult, 'timed_out');
@@ -843,7 +866,7 @@ test('reports bounded Desktop accessibility failure phases', () => {
       });
 
       const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-      assert.equal(summary.schemaVersion, 16);
+      assert.equal(summary.schemaVersion, 18);
       assert.equal(summary.cases[phase], 'failed');
       assert.deepEqual(summary.failurePoint, { phase, point: failurePoint });
       assert.equal(summary.status, 'failed');
@@ -929,7 +952,7 @@ test('records closed Desktop create observations without event or URL data', () 
       /private room|private title|private-event-id|response body|request URL/u,
     );
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 16);
+    assert.equal(summary.schemaVersion, 18);
     assert.deepEqual(summary.failurePoint, {
       phase: 'desktop-event-create',
       point: 'event-create-exact-row-visible',
@@ -1069,7 +1092,7 @@ test('records room-navigation evidence only at its closed failure boundary', () 
       roomNavigationDiagnostic: diagnostic,
     });
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 16);
+    assert.equal(summary.schemaVersion, 18);
     assert.deepEqual(summary.roomNavigationDiagnostic, diagnostic);
     assert.equal(summary.roomsReadyDiagnostic, null);
     assert.deepEqual(
@@ -1936,7 +1959,7 @@ test('requires ordered Desktop refresh progress before a complete pass', () => {
       runnerTemp,
       expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
     });
-    assert.equal(summary.schemaVersion, 16);
+    assert.equal(summary.schemaVersion, 18);
     assert.equal(summary.status, 'passed');
     assert.equal(summary.cases['desktop-a-refresh'], 'passed');
     assert.equal(summary.failureObservation, null);
@@ -1951,9 +1974,9 @@ test('records bounded Desktop refresh room-navigation progress', () => {
   const beforeClick = {
     roomListItemCountCapped: 2,
     fixtureRoomTargetVisible: true,
-    clickAttempted: true,
+    clickAttempted: false,
     clickCompleted: false,
-    elapsedBucket: 'not_completed',
+    elapsedBucket: 'not_started',
     progressTimeline: [
       {
         stage: 'target_observed',
@@ -1963,10 +1986,10 @@ test('records bounded Desktop refresh room-navigation progress', () => {
       },
     ],
   };
-  const afterClick = {
+  const startedClick = {
     ...beforeClick,
-    clickCompleted: true,
-    elapsedBucket: '1_to_5s',
+    clickAttempted: true,
+    elapsedBucket: 'not_completed',
     progressTimeline: [
       ...beforeClick.progressTimeline,
       {
@@ -1975,6 +1998,14 @@ test('records bounded Desktop refresh room-navigation progress', () => {
         fixtureRoomTargetVisible: true,
         elapsedBucket: 'under_1s',
       },
+    ],
+  };
+  const afterClick = {
+    ...startedClick,
+    clickCompleted: true,
+    elapsedBucket: '1_to_5s',
+    progressTimeline: [
+      ...startedClick.progressTimeline,
       {
         stage: 'click_resolved',
         roomListItemCountCapped: 2,
@@ -1997,6 +2028,10 @@ test('records bounded Desktop refresh room-navigation progress', () => {
       appendDesktopRefreshPoint(filePath, runnerTemp, failurePoint);
       appendDesktopRefreshComplete(filePath, runnerTemp, failurePoint);
     }
+    assert.throws(
+      () => appendDesktopRefreshStarted(filePath, runnerTemp, startedClick),
+      /Invalid Desktop journey input/u,
+    );
     assert.equal(
       appendDesktopRefreshPoint(
         filePath,
@@ -2005,6 +2040,22 @@ test('records bounded Desktop refresh room-navigation progress', () => {
         beforeClick,
       ),
       true,
+    );
+    assert.throws(
+      () =>
+        appendDesktopRefreshStarted(filePath, runnerTemp, {
+          ...startedClick,
+          elapsedBucket: 'not_started',
+        }),
+      /Invalid Desktop journey input/u,
+    );
+    assert.equal(
+      appendDesktopRefreshStarted(filePath, runnerTemp, startedClick),
+      true,
+    );
+    assert.throws(
+      () => appendDesktopRefreshStarted(filePath, runnerTemp, startedClick),
+      /Invalid Desktop journey input/u,
     );
     appendDesktopChildCompletion({
       filePath,
@@ -2033,7 +2084,7 @@ test('records bounded Desktop refresh room-navigation progress', () => {
     });
     assert.deepEqual(
       summary.desktopRefreshRoomNavigationDiagnostic,
-      beforeClick,
+      startedClick,
     );
     assert.equal(summary.desktopChildCompletion.exitStatus, 1);
     assert.equal(summary.desktopChildCompletion.timedOut, false);
@@ -2063,6 +2114,7 @@ test('records bounded Desktop refresh room-navigation progress', () => {
       'desktop-refresh-room-navigation',
       beforeClick,
     );
+    appendDesktopRefreshStarted(filePath, runnerTemp, startedClick);
     appendDesktopRefreshComplete(
       filePath,
       runnerTemp,
@@ -2081,7 +2133,7 @@ test('records bounded Desktop refresh room-navigation progress', () => {
     { ...beforeClick, roomListItemCountCapped: 3 },
     { ...beforeClick, fixtureRoomTargetVisible: 'private room name' },
     { ...beforeClick, elapsedBucket: 1_237 },
-    { ...beforeClick, clickAttempted: false },
+    { ...beforeClick, clickAttempted: true },
     { ...afterClick, clickCompleted: false },
     {
       ...beforeClick,
@@ -2126,9 +2178,9 @@ test('rejects malformed room-navigation diagnostics while parsing evidence', () 
   const diagnostic = {
     roomListItemCountCapped: 2,
     fixtureRoomTargetVisible: true,
-    clickAttempted: true,
+    clickAttempted: false,
     clickCompleted: false,
-    elapsedBucket: 'not_completed',
+    elapsedBucket: 'not_started',
     progressTimeline: [
       {
         stage: 'target_observed',
@@ -2221,6 +2273,11 @@ test('records only bounded failed refresh room-navigation progress', () => {
       },
     ],
   };
+  const startedDiagnostic = {
+    ...failedDiagnostic,
+    elapsedBucket: 'not_completed',
+    progressTimeline: failedDiagnostic.progressTimeline.slice(0, 2),
+  };
   withTempDirectory((runnerTemp) => {
     const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
     initializeDesktopJourneyEvidence({ filePath, runnerTemp });
@@ -2240,11 +2297,13 @@ test('records only bounded failed refresh room-navigation progress', () => {
       runnerTemp,
       'desktop-refresh-room-navigation',
       {
-        ...failedDiagnostic,
-        elapsedBucket: 'not_completed',
+        ...startedDiagnostic,
+        clickAttempted: false,
+        elapsedBucket: 'not_started',
         progressTimeline: failedDiagnostic.progressTimeline.slice(0, 1),
       },
     );
+    appendDesktopRefreshStarted(filePath, runnerTemp, startedDiagnostic);
     assert.equal(
       appendDesktopRefreshFailureWithFallback({
         filePath,
@@ -3210,4 +3269,496 @@ test('rejects duplicate or private-shaped evidence rows', () => {
       ),
     /Invalid Desktop journey input/u,
   );
+});
+
+test('records only bounded child and evidence classification enums', () => {
+  withTempDirectory((runnerTemp) => {
+    const evidenceFile = join(
+      runnerTemp,
+      'element-desktop-journey-stage.jsonl',
+    );
+    const diagnosticFile = join(
+      runnerTemp,
+      'element-desktop-journey-parent-diagnostic.json',
+    );
+    assert.equal(
+      classifyDesktopJourneyEvidenceState({
+        filePath: evidenceFile,
+        runnerTemp,
+        expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+      }),
+      'absent',
+    );
+    assert.deepEqual(
+      classifyDesktopJourneyEvidence({
+        filePath: join(runnerTemp, 'unexpected.jsonl'),
+        runnerTemp,
+        expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+      }),
+      {
+        evidenceState: 'invalid',
+        evidenceFailureCode: 'path_file_rejected',
+      },
+    );
+
+    initializeDesktopJourneyEvidence({
+      filePath: evidenceFile,
+      runnerTemp,
+    });
+    assert.equal(
+      classifyDesktopJourneyEvidenceState({
+        filePath: evidenceFile,
+        runnerTemp,
+        expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+      }),
+      'valid',
+    );
+    assert.deepEqual(
+      classifyDesktopJourneyEvidence({
+        filePath: evidenceFile,
+        runnerTemp,
+        expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+      }),
+      { evidenceState: 'valid' },
+    );
+    chmodSync(evidenceFile, 0o644);
+    assert.deepEqual(
+      classifyDesktopJourneyEvidence({
+        filePath: evidenceFile,
+        runnerTemp,
+        expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+      }),
+      {
+        evidenceState: 'invalid',
+        evidenceFailureCode: 'path_file_rejected',
+      },
+    );
+    chmodSync(evidenceFile, 0o600);
+    writeFileSync(evidenceFile, '{invalid json\n', { mode: 0o600 });
+    assert.deepEqual(
+      classifyDesktopJourneyEvidence({
+        filePath: evidenceFile,
+        runnerTemp,
+        expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+      }),
+      {
+        evidenceState: 'invalid',
+        evidenceFailureCode: 'json_parse_failed',
+      },
+    );
+    writeFileSync(
+      evidenceFile,
+      '{"privateValue":"private-evidence-sentinel"}\n',
+      { mode: 0o600 },
+    );
+    assert.equal(
+      classifyDesktopJourneyEvidenceState({
+        filePath: evidenceFile,
+        runnerTemp,
+        expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+      }),
+      'invalid',
+    );
+    assert.deepEqual(
+      classifyDesktopJourneyEvidence({
+        filePath: evidenceFile,
+        runnerTemp,
+        expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+      }),
+      {
+        evidenceState: 'invalid',
+        evidenceFailureCode: 'evidence_phase_record_rejected',
+      },
+    );
+    const unreadableTemp = join(runnerTemp, 'unreadable');
+    mkdirSync(unreadableTemp, { mode: 0o700 });
+    chmodSync(unreadableTemp, 0o000);
+    try {
+      assert.equal(
+        classifyDesktopJourneyEvidenceState({
+          filePath: join(unreadableTemp, 'element-desktop-journey-stage.jsonl'),
+          runnerTemp: unreadableTemp,
+          expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+        }),
+        'unreadable',
+      );
+      assert.deepEqual(
+        classifyDesktopJourneyEvidence({
+          filePath: join(unreadableTemp, 'element-desktop-journey-stage.jsonl'),
+          runnerTemp: unreadableTemp,
+          expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+        }),
+        { evidenceState: 'unreadable' },
+      );
+    } finally {
+      chmodSync(unreadableTemp, 0o700);
+    }
+
+    const childOutcomes = [
+      'spawn_error',
+      'timeout',
+      'signaled',
+      'exited',
+      'unknown',
+    ];
+    const evidenceStates = ['absent', 'valid', 'invalid', 'unreadable'];
+    for (const childOutcome of childOutcomes) {
+      const exitStatuses = childOutcome === 'exited' ? [0, 17, 255] : [null];
+      for (const childExitStatus of exitStatuses) {
+        for (const evidenceState of evidenceStates) {
+          const evidenceFailureCode =
+            evidenceState === 'invalid'
+              ? 'evidence_validation_failed'
+              : undefined;
+          writeDesktopJourneyParentDiagnostic({
+            filePath: diagnosticFile,
+            runnerTemp,
+            childOutcome,
+            childExitStatus,
+            evidenceState,
+            ...(evidenceFailureCode === undefined
+              ? {}
+              : { evidenceFailureCode }),
+          });
+          assert.deepEqual(
+            readDesktopJourneyParentDiagnostic({
+              filePath: diagnosticFile,
+              runnerTemp,
+            }),
+            {
+              childOutcome,
+              childExitStatus,
+              evidenceState,
+              ...(evidenceFailureCode === undefined
+                ? {}
+                : { evidenceFailureCode }),
+            },
+          );
+          const serialized = readFileSync(diagnosticFile, 'utf8');
+          assert.doesNotMatch(serialized, /private-evidence-sentinel/u);
+          assert.equal(statSync(diagnosticFile).mode & 0o777, 0o600);
+          unlinkSync(diagnosticFile);
+        }
+      }
+    }
+    assert.throws(
+      () =>
+        writeDesktopJourneyParentDiagnostic({
+          filePath: diagnosticFile,
+          runnerTemp,
+          childOutcome: 'private-evidence-sentinel',
+          childExitStatus: null,
+          evidenceState: 'invalid',
+          evidenceFailureCode: 'evidence_validation_failed',
+        }),
+      /Invalid Desktop journey input/u,
+    );
+    for (const invalidExitStatus of [null, -1, 256, 1.5]) {
+      assert.throws(
+        () =>
+          writeDesktopJourneyParentDiagnostic({
+            filePath: diagnosticFile,
+            runnerTemp,
+            childOutcome: 'exited',
+            childExitStatus: invalidExitStatus,
+            evidenceState: 'invalid',
+            evidenceFailureCode: 'evidence_validation_failed',
+          }),
+        /Invalid Desktop journey input/u,
+      );
+    }
+    assert.throws(
+      () =>
+        writeDesktopJourneyParentDiagnostic({
+          filePath: diagnosticFile,
+          runnerTemp,
+          childOutcome: 'signaled',
+          childExitStatus: 0,
+          evidenceState: 'invalid',
+          evidenceFailureCode: 'evidence_validation_failed',
+        }),
+      /Invalid Desktop journey input/u,
+    );
+    assert.equal(existsSync(diagnosticFile), false);
+
+    for (const evidenceFailureCode of [
+      'path_file_rejected',
+      'json_parse_failed',
+      'evidence_validation_failed',
+      'evidence_input_bounds_rejected',
+      'evidence_login_record_rejected',
+      'evidence_progress_refresh_sequence_rejected',
+      'evidence_phase_record_rejected',
+      'evidence_final_summary_cross_check_rejected',
+    ]) {
+      writeDesktopJourneyParentDiagnostic({
+        filePath: diagnosticFile,
+        runnerTemp,
+        childOutcome: 'exited',
+        childExitStatus: 23,
+        evidenceState: 'invalid',
+        evidenceFailureCode,
+      });
+      assert.deepEqual(
+        readDesktopJourneyParentDiagnostic({
+          filePath: diagnosticFile,
+          runnerTemp,
+        }),
+        {
+          childOutcome: 'exited',
+          childExitStatus: 23,
+          evidenceState: 'invalid',
+          evidenceFailureCode,
+        },
+      );
+      unlinkSync(diagnosticFile);
+    }
+
+    for (const invalidDiagnostic of [
+      {
+        childOutcome: 'exited',
+        childExitStatus: 1,
+        evidenceState: 'invalid',
+      },
+      {
+        childOutcome: 'exited',
+        childExitStatus: 1,
+        evidenceState: 'invalid',
+        evidenceFailureCode: 'private-evidence-sentinel',
+      },
+      {
+        childOutcome: 'exited',
+        childExitStatus: 0,
+        evidenceState: 'valid',
+        evidenceFailureCode: 'json_parse_failed',
+      },
+    ]) {
+      assert.throws(
+        () =>
+          writeDesktopJourneyParentDiagnostic({
+            filePath: diagnosticFile,
+            runnerTemp,
+            ...invalidDiagnostic,
+          }),
+        /Invalid Desktop journey input/u,
+      );
+    }
+    assert.equal(existsSync(diagnosticFile), false);
+
+    for (const invalidDiagnostic of [
+      {
+        childOutcome: 'exited',
+        childExitStatus: 1,
+        evidenceState: 'invalid',
+        evidenceFailureCode: 'private-evidence-sentinel',
+      },
+      {
+        childOutcome: 'exited',
+        childExitStatus: 0,
+        evidenceState: 'valid',
+        evidenceFailureCode: 'json_parse_failed',
+      },
+    ]) {
+      writeFileSync(diagnosticFile, `${JSON.stringify(invalidDiagnostic)}\n`, {
+        mode: 0o600,
+      });
+      assert.deepEqual(
+        readDesktopJourneyParentDiagnostic({
+          filePath: diagnosticFile,
+          runnerTemp,
+        }),
+        {
+          childOutcome: 'unknown',
+          childExitStatus: null,
+          evidenceState: 'unreadable',
+        },
+      );
+      unlinkSync(diagnosticFile);
+    }
+  });
+});
+
+test('classifies fixed evidence validation stages without exposing input', () => {
+  withTempDirectory((runnerTemp) => {
+    const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
+    const cases = [
+      {
+        input: Array.from({ length: 100 }, () => '{}').join('\n'),
+        expected: 'evidence_input_bounds_rejected',
+      },
+      {
+        input: JSON.stringify({ loginStep: 'private-evidence-sentinel' }),
+        expected: 'evidence_login_record_rejected',
+      },
+      {
+        input: JSON.stringify({
+          type: 'desktop-journey-progress',
+          sourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+          phase: 'desktop-a-refresh',
+          event: 'point',
+        }),
+        expected: 'evidence_progress_refresh_sequence_rejected',
+      },
+      {
+        input: JSON.stringify({ privateValue: 'private-evidence-sentinel' }),
+        expected: 'evidence_phase_record_rejected',
+      },
+      {
+        input: JSON.stringify({ phase: 'desktop-login', status: 'passed' }),
+        expected: 'evidence_final_summary_cross_check_rejected',
+      },
+    ];
+
+    for (const { input, expected } of cases) {
+      writeFileSync(filePath, `${input}\n`, { mode: 0o600 });
+      assert.deepEqual(
+        classifyDesktopJourneyEvidence({
+          filePath,
+          runnerTemp,
+          expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+        }),
+        { evidenceState: 'invalid', evidenceFailureCode: expected },
+      );
+    }
+
+    writeFileSync(
+      filePath,
+      `${JSON.stringify({
+        type: 'desktop-child-completion',
+        sourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+        desktopChildCompletion: { outcome: 'private-evidence-sentinel' },
+      })}\n`,
+      { mode: 0o600 },
+    );
+    assert.deepEqual(
+      classifyDesktopJourneyEvidence({
+        filePath,
+        runnerTemp,
+        expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+      }),
+      { evidenceState: 'valid' },
+    );
+    const summary = summarizeDesktopJourneyEvidence(
+      readFileSync(filePath, 'utf8'),
+      { expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA },
+    );
+    assert.equal(summary.status, 'incomplete');
+    assert.equal(summary.desktopChildCompletion.outcome, 'unknown');
+  });
+});
+
+test('emits a sanitized unavailable summary when evidence validation fails', () => {
+  withTempDirectory((runnerTemp) => {
+    const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
+    const privateSentinel = 'private-evidence-sentinel';
+    writeFileSync(
+      filePath,
+      `${JSON.stringify({ type: 'invalid', privateValue: privateSentinel })}\n`,
+      { mode: 0o600 },
+    );
+    writeDesktopJourneyParentDiagnostic({
+      filePath: join(
+        runnerTemp,
+        'element-desktop-journey-parent-diagnostic.json',
+      ),
+      runnerTemp,
+      childOutcome: 'exited',
+      childExitStatus: 23,
+      evidenceState: 'invalid',
+      evidenceFailureCode: 'evidence_phase_record_rejected',
+    });
+
+    const scriptPath = fileURLToPath(
+      new URL('./element-desktop-journey.mjs', import.meta.url),
+    );
+    const result = spawnSync(process.execPath, [scriptPath, 'summary'], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        RUNNER_TEMP: runnerTemp,
+        ELEMENT_DESKTOP_JOURNEY_STAGE_FILE: filePath,
+        ELEMENT_DESKTOP_SOURCE_SHA: DESKTOP_REFRESH_SOURCE_SHA,
+      },
+    });
+
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 1);
+    assert.equal(result.signal, null);
+    assert.match(result.stderr, /Desktop journey evidence is unavailable\./u);
+    assert.doesNotMatch(result.stdout, new RegExp(privateSentinel, 'u'));
+    assert.doesNotMatch(result.stderr, new RegExp(privateSentinel, 'u'));
+
+    const summary = JSON.parse(result.stdout);
+    assert.equal(summary.schemaVersion, 21);
+    assert.equal(summary.sourceSha, DESKTOP_REFRESH_SOURCE_SHA);
+    assert.equal(summary.status, 'unavailable');
+    assert.equal(summary.desktopChildCompletion.outcome, 'unknown');
+    assert.equal(summary.desktopChildCompletion.timedOut, null);
+    assert.deepEqual(summary.desktopChildDiagnostic, {
+      childOutcome: 'exited',
+      childExitStatus: 23,
+      evidenceState: 'invalid',
+      evidenceFailureCode: 'evidence_phase_record_rejected',
+    });
+    assert.equal(summary.cases['desktop-a-refresh'], 'not_run');
+  });
+});
+
+test('declares the schema-21 CLI parent diagnostic shape', () => {
+  const declarations = readFileSync(
+    new URL('./element-desktop-journey.d.mts', import.meta.url),
+    'utf8',
+  );
+  assert.match(declarations, /schemaVersion: 21;/u);
+  assert.match(declarations, /DesktopJourneyEvidenceFailureCode/u);
+  assert.match(
+    declarations,
+    /'path_file_rejected'[\s\S]*?'json_parse_failed'[\s\S]*?'evidence_validation_failed'[\s\S]*?'evidence_input_bounds_rejected'[\s\S]*?'evidence_login_record_rejected'[\s\S]*?'evidence_progress_refresh_sequence_rejected'[\s\S]*?'evidence_phase_record_rejected'[\s\S]*?'evidence_final_summary_cross_check_rejected'/u,
+  );
+  assert.match(
+    declarations,
+    /evidenceFailureCode: DesktopJourneyEvidenceFailureCode/u,
+  );
+  assert.match(
+    declarations,
+    /desktopChildDiagnostic: DesktopChildDiagnostic;/u,
+  );
+  assert.match(declarations, /childExitStatus: number;/u);
+  assert.match(declarations, /childExitStatus: null;/u);
+  assert.match(declarations, /status: 'unavailable';[\s\S]*?timedOut: null;/u);
+  assert.match(
+    declarations,
+    /status: 'passed' \| 'failed' \| 'incomplete';[\s\S]*?timedOut: boolean;/u,
+  );
+});
+
+test('private acceptance cleanup removes the parent diagnostic file', () => {
+  withTempDirectory((runnerTemp) => {
+    const action = readFileSync(
+      new URL(
+        '../.github/actions/element-acceptance/action.yml',
+        import.meta.url,
+      ),
+      'utf8',
+    );
+    const cleanupBlock = action.match(/if ! rm -f \\\n([\s\S]*?); then/u)?.[1];
+    assert.equal(typeof cleanupBlock, 'string');
+    const fileNames = [
+      ...cleanupBlock.matchAll(/\$RUNNER_TEMP\/([^"\s]+)"/gu),
+    ].map((match) => match[1]);
+    const diagnosticName = 'element-desktop-journey-parent-diagnostic.json';
+    assert.ok(fileNames.includes(diagnosticName));
+
+    const diagnosticPath = join(runnerTemp, diagnosticName);
+    writeFileSync(diagnosticPath, '{"childOutcome":"unknown"}\n', {
+      mode: 0o600,
+    });
+    const result = spawnSync(
+      'rm',
+      ['-f', ...fileNames.map((name) => join(runnerTemp, name))],
+      { encoding: 'utf8' },
+    );
+    assert.equal(result.status, 0);
+    assert.equal(existsSync(diagnosticPath), false);
+  });
 });

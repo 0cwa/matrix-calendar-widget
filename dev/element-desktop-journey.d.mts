@@ -64,6 +64,7 @@ export type DesktopRefreshRoomNavigationDiagnostic = {
   clickAttempted: boolean;
   clickCompleted: boolean;
   elapsedBucket:
+    | 'not_started'
     | 'not_completed'
     | 'under_1s'
     | '1_to_5s'
@@ -394,10 +395,10 @@ export type DesktopJourneyFailureObservation =
   | null;
 
 export type DesktopJourneySummary = {
-  schemaVersion: 16;
+  schemaVersion: 18;
   sourceSha: string | null;
-  status: 'passed' | 'failed' | 'incomplete';
-  desktopChildCompletion: DesktopChildCompletion;
+  status: 'passed' | 'failed' | 'incomplete' | 'unavailable';
+  desktopChildCompletion: DesktopChildCompletionSummary;
   playwrightResult: DesktopPlaywrightResult;
   loginStep: DesktopLoginStep;
   loginEntry: DesktopLoginEntry;
@@ -412,6 +413,92 @@ export type DesktopJourneySummary = {
   desktopRefreshRoomNavigationDiagnostic: DesktopRefreshRoomNavigationDiagnostic | null;
   cases: Record<DesktopJourneyPhase, DesktopJourneyOutcome | 'not_run'>;
 };
+
+export type DesktopChildOutcome =
+  | 'spawn_error'
+  | 'timeout'
+  | 'signaled'
+  | 'exited'
+  | 'unknown';
+
+export type DesktopJourneyEvidenceState =
+  | 'absent'
+  | 'valid'
+  | 'invalid'
+  | 'unreadable';
+
+export type DesktopJourneyEvidenceFailureCode =
+  | 'path_file_rejected'
+  | 'json_parse_failed'
+  | 'evidence_validation_failed'
+  | 'evidence_input_bounds_rejected'
+  | 'evidence_login_record_rejected'
+  | 'evidence_progress_refresh_sequence_rejected'
+  | 'evidence_phase_record_rejected'
+  | 'evidence_final_summary_cross_check_rejected';
+
+export type DesktopJourneyEvidenceClassification =
+  | {
+      evidenceState: 'invalid';
+      evidenceFailureCode: DesktopJourneyEvidenceFailureCode;
+    }
+  | {
+      evidenceState: Exclude<DesktopJourneyEvidenceState, 'invalid'>;
+    };
+
+export type DesktopChildDiagnostic =
+  | {
+      childOutcome: 'exited';
+      childExitStatus: number;
+      evidenceState: 'invalid';
+      evidenceFailureCode: DesktopJourneyEvidenceFailureCode;
+    }
+  | {
+      childOutcome: 'exited';
+      childExitStatus: number;
+      evidenceState: Exclude<DesktopJourneyEvidenceState, 'invalid'>;
+    }
+  | {
+      childOutcome: Exclude<DesktopChildOutcome, 'exited'>;
+      childExitStatus: null;
+      evidenceState: 'invalid';
+      evidenceFailureCode: DesktopJourneyEvidenceFailureCode;
+    }
+  | {
+      childOutcome: Exclude<DesktopChildOutcome, 'exited'>;
+      childExitStatus: null;
+      evidenceState: Exclude<DesktopJourneyEvidenceState, 'invalid'>;
+    };
+
+type DesktopJourneyCliSummaryBase = Omit<
+  DesktopJourneySummary,
+  'schemaVersion' | 'status' | 'desktopChildCompletion'
+> & {
+  schemaVersion: 21;
+  desktopChildDiagnostic: DesktopChildDiagnostic;
+};
+
+export type DesktopJourneyCliSummary =
+  | (DesktopJourneyCliSummaryBase & {
+      status: 'passed' | 'failed' | 'incomplete';
+      desktopChildCompletion: DesktopChildCompletion;
+    })
+  | (DesktopJourneyCliSummaryBase & {
+      status: 'unavailable';
+      desktopChildCompletion: {
+        outcome: 'unknown';
+        exitStatus: null;
+        timedOut: null;
+      };
+    });
+
+export type DesktopChildCompletionSummary =
+  | DesktopChildCompletion
+  | {
+      outcome: 'unknown';
+      exitStatus: null;
+      timedOut: null;
+    };
 
 export type DesktopChildCompletion = {
   outcome: 'exited' | 'signaled' | 'spawn_error' | 'timeout' | 'unknown';
@@ -529,7 +616,7 @@ export declare function appendDesktopJourneyProgress(input: {
   filePath: string;
   runnerTemp: string;
   sourceSha: string;
-  event: 'begin' | 'point' | 'complete';
+  event: 'begin' | 'point' | 'started' | 'complete';
   phase: 'desktop-a-refresh';
   failurePoint?: DesktopARefreshFailurePoint;
   desktopRefreshRoomNavigationDiagnostic?: DesktopRefreshRoomNavigationDiagnostic;
@@ -576,6 +663,30 @@ export declare function appendDesktopChildCompletion(input: {
   sourceSha: string;
   completion: DesktopChildCompletion;
 }): boolean;
+
+export declare function classifyDesktopJourneyEvidenceState(input: {
+  filePath: string;
+  runnerTemp: string;
+  expectedSourceSha: string;
+}): DesktopJourneyEvidenceState;
+
+export declare function classifyDesktopJourneyEvidence(input: {
+  filePath: string;
+  runnerTemp: string;
+  expectedSourceSha: string;
+}): DesktopJourneyEvidenceClassification;
+
+export declare function writeDesktopJourneyParentDiagnostic(
+  input: {
+    filePath: string;
+    runnerTemp: string;
+  } & DesktopChildDiagnostic,
+): void;
+
+export declare function readDesktopJourneyParentDiagnostic(input: {
+  filePath: string;
+  runnerTemp: string;
+}): DesktopChildDiagnostic;
 
 export declare function appendDesktopPlaywrightResult(input: {
   filePath: string;
