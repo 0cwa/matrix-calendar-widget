@@ -313,11 +313,28 @@ export type DesktopRoomNavigationTargetObservation = {
   enabled: boolean | null;
 };
 
+export type DesktopRoomNavigationClickProgress = {
+  targetMatched: boolean | null;
+  targetVisible: boolean | null;
+  targetEnabled: boolean | null;
+  clickStarted: boolean;
+  clickResolved: boolean;
+  elapsedBucket:
+    | 'not_started'
+    | 'under_1s'
+    | '1_to_5s'
+    | '5_to_15s'
+    | '15_to_30s'
+    | '30s_or_more'
+    | 'unknown';
+};
+
 export type DesktopRoomNavigationDiagnostic = {
   currentOption: DesktopRoomNavigationTargetObservation;
   currentRow: DesktopRoomNavigationTargetObservation;
   legacyTreeItem: DesktopRoomNavigationTargetObservation;
   roomsReady: DesktopRoomsReadyDiagnostic;
+  clickProgress: DesktopRoomNavigationClickProgress;
 };
 
 export type DesktopGatewayReadFailureDiagnostic = {
@@ -358,7 +375,7 @@ export type DesktopJourneyFailureObservation =
   | null;
 
 export type DesktopJourneySummary = {
-  schemaVersion: 14;
+  schemaVersion: 15;
   sourceSha: string | null;
   status: 'passed' | 'failed' | 'incomplete';
   desktopChildCompletion: DesktopChildCompletion;
