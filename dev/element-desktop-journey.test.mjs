@@ -13,8 +13,8 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import ElementDesktopAcceptanceResultReporter from '../e2e/src/elementDesktopAcceptanceResultReporter.mjs';
 import {
   DESKTOP_A_REFRESH_FAILURE_POINTS,
@@ -3260,10 +3260,7 @@ test('rejects duplicate or private-shaped evidence rows', () => {
 
 test('emits a sanitized unavailable summary when evidence cannot be parsed', () => {
   withTempDirectory((runnerTemp) => {
-    const filePath = join(
-      runnerTemp,
-      'element-desktop-journey-stage.jsonl',
-    );
+    const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
     const privateSentinel = 'private-evidence-sentinel';
     writeFileSync(
       filePath,
@@ -3274,19 +3271,15 @@ test('emits a sanitized unavailable summary when evidence cannot be parsed', () 
     const scriptPath = fileURLToPath(
       new URL('./element-desktop-journey.mjs', import.meta.url),
     );
-    const result = spawnSync(
-      process.execPath,
-      [scriptPath, 'summary'],
-      {
-        encoding: 'utf8',
-        env: {
-          ...process.env,
-          RUNNER_TEMP: runnerTemp,
-          ELEMENT_DESKTOP_JOURNEY_STAGE_FILE: filePath,
-          ELEMENT_DESKTOP_SOURCE_SHA: DESKTOP_REFRESH_SOURCE_SHA,
-        },
+    const result = spawnSync(process.execPath, [scriptPath, 'summary'], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        RUNNER_TEMP: runnerTemp,
+        ELEMENT_DESKTOP_JOURNEY_STAGE_FILE: filePath,
+        ELEMENT_DESKTOP_SOURCE_SHA: DESKTOP_REFRESH_SOURCE_SHA,
       },
-    );
+    });
 
     assert.equal(result.error, undefined);
     assert.equal(result.status, 1);
