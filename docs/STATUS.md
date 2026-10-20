@@ -37,10 +37,25 @@ The complete local check sequence now passes: formatting, lint, TypeScript,
 translations, the 22 calendar suites (372 tests), timezone tests (5 tests),
 widget tests (784 passed and 3 todo), and server tests (95 suites and 1,568
 tests passed; 7 suites and 40 tests skipped). The workspace build also passes.
-The isolated PostgreSQL binding contract, hosted CI, real Synapse/Radicale
-contracts, independent review, and configured-room Element acceptance remain
-pending for this source. These changes are outside the frozen application
-candidate above and require fresh source qualification.
+At this checkpoint, the isolated PostgreSQL binding contract, hosted CI, real
+Synapse/Radicale contracts, independent review, and configured-room Element
+acceptance were pending. Subsequent hosted qualification on exact source
+`898b9c3387545da5c66468bb8625be8bd26d91b9` passed all five required checks
+(Quality, Widget, Server and bot, Container image build smoke, and Analyze
+JavaScript/TypeScript), file-backed PostgreSQL bootstrap, the real
+Synapse/Radicale contract, the six-test PostgreSQL room-binding integration,
+and full normal-bot Element Web/Desktop acceptance. The separate appservice
+Element Web run failed in G6 member-B room context: Element stayed in
+`SYNCING` without a room heading before the bounded wait ended. Its cause is
+unknown; appservice browser certification remains deferred for the controlled
+pilot. The moderator setup contract calls the production setup service
+directly, so it does not establish Matrix sync delivery for `!calendar setup`
+or browser acceptance of the new setup flow. This qualification is source-only
+and does not establish deployment or pilot readiness. The current doc-only
+integration candidate still requires fresh checks on its exact source.
+
+These changes are outside the frozen application candidate above and require
+fresh source qualification.
 
 ### Frozen application candidate and operator gate
 
