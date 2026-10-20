@@ -15,6 +15,18 @@ See the [dated continuation](handoff/2026-10-06/README.md) and
 
 For the owner-approved bounded pilot, the required browser profile is full Element Web/Desktop acceptance in `bot-account` mode with the existing strict 0/25-event ordinary-load limits. Full appservice-mode browser certification remains deferred after beta, although both modes passed on this candidate. Backend, identity/authentication, authorization, and CalDAV contract tests remain mandatory in both modes, and `appservice` remains the default mode. Scoped pilot authority is recorded privately; this is not broader rollout or publication authority.
 
+User feedback has opened a follow-up for room setup discovery across multiple
+rooms and clearer command-fallback acceptance. The current integration
+worktree adds an empty-room setup message, bot guidance for room principals and
+reply prerequisites, and handling for the proxied Matrix 404 that indicates an
+unencrypted room. Focused tests on this working tree pass: 16 calendar-surface
+widget tests and 32 command-service tests, including the Matrix client proxy
+path. Full repository CI, independent review, and configured-room Element
+acceptance remain pending. The feedback follow-up preserves server-side
+membership, power, binding, and encryption checks and leaves room capabilities
+behind their existing default-off gates. These changes are outside the frozen
+application candidate above and require fresh source qualification.
+
 ### Frozen application candidate and operator gate
 
 Application acceptance remains tied to frozen source `99d4c9f9f36aa0b0861a13499a7f7cd512c56920` (application tree `97022a9d2351655d2aae0a50a44a14bd81daacc9`). Fresh exact-source CI, CodeQL, service contracts, standalone Desktop, and full Element Web/Desktop runs passed; the earlier refresh/navigation failure was not reproduced. Later trusted tooling and documentation changes have separate provenance. This establishes application-source acceptance only.

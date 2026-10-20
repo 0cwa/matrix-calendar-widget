@@ -175,6 +175,7 @@
     "loadError": "Calendar events could not be loaded.",
     "mixedCompatibilityNotice": "One or more calendars support additional item types. The widget displays and edits VEVENT entries only.",
     "partialAvailability": "Some calendars or events could not be loaded. Available calendars are still shown.",
+    "roomCalendarUnavailable": "A team calendar isn’t available in this room. Ask a room moderator or calendar administrator to check setup.",
     "roomReminder": {
       "action": "Notify room",
       "close": "Close room reminder",

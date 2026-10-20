@@ -50,7 +50,13 @@ function extractError(reason: unknown): Error {
   const body = (reason as any)?.body;
   if (body) {
     if (body.errcode && body.error) {
-      return new Matrix404Error(body.errcode, body.error);
+      const statusCode = (reason as { statusCode?: unknown } | null)
+        ?.statusCode;
+      return new Matrix404Error(
+        body.errcode,
+        body.error,
+        typeof statusCode === 'number' ? statusCode : undefined,
+      );
     } else {
       return new MatrixError(JSON.stringify(body));
     }

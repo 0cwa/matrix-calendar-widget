@@ -221,13 +221,13 @@ describe('<CalendarEventsSurface />', () => {
         getRoomCalendarCapabilities: vi.fn().mockResolvedValue(undefined),
         listCalendarsWithAvailability: vi.fn().mockResolvedValue({
           calendars,
-          partialAvailability: true,
+          partialAvailability: false,
           canManageCalendarCollections: true,
         }),
         listEventsWithAvailability: vi.fn().mockResolvedValue({
           events,
           diagnostics: [],
-          partialAvailability: false,
+          partialAvailability: true,
         }),
       },
     );
@@ -249,6 +249,92 @@ describe('<CalendarEventsSurface />', () => {
       'Some calendars or events could not be loaded. Available calendars are still shown.',
     );
     expect(screen.getByRole('alert')).not.toHaveTextContent('Room');
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('explains where to get help when no room calendar is available', async () => {
+    const repository = Object.assign(
+      new InMemoryCalendarRepository({ calendars: [], events: [] }),
+      {
+        getRoomCalendarCapabilities: vi.fn().mockResolvedValue(undefined),
+        listCalendarsWithAvailability: vi.fn().mockResolvedValue({
+          calendars: [],
+          partialAvailability: false,
+          canManageCalendarCollections: false,
+        }),
+        listEventsWithAvailability: vi.fn().mockResolvedValue({
+          events: [],
+          diagnostics: [],
+          partialAvailability: false,
+        }),
+      },
+    );
+
+    render(
+      <CalendarEventsSurface
+        filters={{
+          startDate: '2026-09-25T00:00:00Z',
+          endDate: '2026-09-25T23:59:59Z',
+        }}
+        onShowMore={() => undefined}
+        view="list"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'A team calendar isn’t available in this room. Ask a room moderator or calendar administrator to check setup.',
+    );
+  });
+
+  it('does not show setup guidance when room capabilities are available', async () => {
+    const repository = Object.assign(
+      new InMemoryCalendarRepository({
+        calendars: [calendars[0]],
+        events: [events[0]],
+      }),
+      {
+        getRoomCalendarCapabilities: vi.fn().mockResolvedValue({
+          calendarId: 'team',
+          roomId: '!room:example.test',
+          canReadEvents: true,
+          canWriteEvents: true,
+          canManageReminders: true,
+        }),
+        listCalendarsWithAvailability: vi.fn().mockResolvedValue({
+          calendars: [calendars[0]],
+          partialAvailability: false,
+          canManageCalendarCollections: false,
+          roomCapabilities: {
+            calendarId: 'team',
+            roomId: '!room:example.test',
+            canReadEvents: true,
+            canWriteEvents: true,
+            canManageReminders: true,
+          },
+        }),
+        listEventsWithAvailability: vi.fn().mockResolvedValue({
+          events: [events[0]],
+          diagnostics: [],
+          partialAvailability: false,
+        }),
+      },
+    );
+
+    render(
+      <CalendarEventsSurface
+        filters={{
+          startDate: '2026-09-25T00:00:00Z',
+          endDate: '2026-09-25T23:59:59Z',
+        }}
+        onShowMore={() => undefined}
+        view="list"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(await screen.findByText('Team planning')).toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
   it('hides and shows events with lightweight calendar visibility controls', async () => {
