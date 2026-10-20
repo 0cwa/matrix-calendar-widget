@@ -34,7 +34,7 @@ import {
 } from './element-desktop-evidence.mjs';
 import {
   appendDesktopChildCompletion,
-  classifyDesktopJourneyEvidenceState,
+  classifyDesktopJourneyEvidence,
   readDesktopJourneyEvidence,
   writeDesktopJourneyParentDiagnostic,
 } from './element-desktop-journey.mjs';
@@ -1861,7 +1861,7 @@ export function runDesktopCalendarJourney(
   } catch {
     // The parent diagnostic below preserves the classified child outcome.
   }
-  const evidenceState = classifyDesktopJourneyEvidenceState({
+  const evidenceClassification = classifyDesktopJourneyEvidence({
     filePath: config.journeyStageFile,
     runnerTemp: config.runnerTemp,
     expectedSourceSha: state.sourceSha,
@@ -1875,7 +1875,7 @@ export function runDesktopCalendarJourney(
     childOutcome: completion.outcome,
     childExitStatus:
       completion.outcome === 'exited' ? completion.exitStatus : null,
-    evidenceState,
+    ...evidenceClassification,
   });
   const journeySummary = readDesktopJourneyEvidence({
     filePath: config.journeyStageFile,

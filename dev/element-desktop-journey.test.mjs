@@ -31,6 +31,7 @@ import {
   appendDesktopPlaywrightResult,
   appendDesktopRefreshFailureWithFallback,
   classifyDesktopJourneyErrorClass,
+  classifyDesktopJourneyEvidence,
   classifyDesktopJourneyEvidenceState,
   classifyDesktopLoginFailure,
   desktopWidgetIsReady,
@@ -3280,6 +3281,17 @@ test('records only bounded child and evidence classification enums', () => {
       }),
       'absent',
     );
+    assert.deepEqual(
+      classifyDesktopJourneyEvidence({
+        filePath: join(runnerTemp, 'unexpected.jsonl'),
+        runnerTemp,
+        expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+      }),
+      {
+        evidenceState: 'invalid',
+        evidenceFailureCode: 'path_file_rejected',
+      },
+    );
 
     initializeDesktopJourneyEvidence({
       filePath: evidenceFile,
@@ -3292,6 +3304,39 @@ test('records only bounded child and evidence classification enums', () => {
         expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
       }),
       'valid',
+    );
+    assert.deepEqual(
+      classifyDesktopJourneyEvidence({
+        filePath: evidenceFile,
+        runnerTemp,
+        expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+      }),
+      { evidenceState: 'valid' },
+    );
+    chmodSync(evidenceFile, 0o644);
+    assert.deepEqual(
+      classifyDesktopJourneyEvidence({
+        filePath: evidenceFile,
+        runnerTemp,
+        expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+      }),
+      {
+        evidenceState: 'invalid',
+        evidenceFailureCode: 'path_file_rejected',
+      },
+    );
+    chmodSync(evidenceFile, 0o600);
+    writeFileSync(evidenceFile, '{invalid json\n', { mode: 0o600 });
+    assert.deepEqual(
+      classifyDesktopJourneyEvidence({
+        filePath: evidenceFile,
+        runnerTemp,
+        expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+      }),
+      {
+        evidenceState: 'invalid',
+        evidenceFailureCode: 'json_parse_failed',
+      },
     );
     writeFileSync(
       evidenceFile,
@@ -3306,6 +3351,17 @@ test('records only bounded child and evidence classification enums', () => {
       }),
       'invalid',
     );
+    assert.deepEqual(
+      classifyDesktopJourneyEvidence({
+        filePath: evidenceFile,
+        runnerTemp,
+        expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+      }),
+      {
+        evidenceState: 'invalid',
+        evidenceFailureCode: 'evidence_validation_failed',
+      },
+    );
     const unreadableTemp = join(runnerTemp, 'unreadable');
     mkdirSync(unreadableTemp, { mode: 0o700 });
     chmodSync(unreadableTemp, 0o000);
@@ -3317,6 +3373,14 @@ test('records only bounded child and evidence classification enums', () => {
           expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
         }),
         'unreadable',
+      );
+      assert.deepEqual(
+        classifyDesktopJourneyEvidence({
+          filePath: join(unreadableTemp, 'element-desktop-journey-stage.jsonl'),
+          runnerTemp: unreadableTemp,
+          expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+        }),
+        { evidenceState: 'unreadable' },
       );
     } finally {
       chmodSync(unreadableTemp, 0o700);
@@ -3334,19 +3398,33 @@ test('records only bounded child and evidence classification enums', () => {
       const exitStatuses = childOutcome === 'exited' ? [0, 17, 255] : [null];
       for (const childExitStatus of exitStatuses) {
         for (const evidenceState of evidenceStates) {
+          const evidenceFailureCode =
+            evidenceState === 'invalid'
+              ? 'evidence_validation_failed'
+              : undefined;
           writeDesktopJourneyParentDiagnostic({
             filePath: diagnosticFile,
             runnerTemp,
             childOutcome,
             childExitStatus,
             evidenceState,
+            ...(evidenceFailureCode === undefined
+              ? {}
+              : { evidenceFailureCode }),
           });
           assert.deepEqual(
             readDesktopJourneyParentDiagnostic({
               filePath: diagnosticFile,
               runnerTemp,
             }),
-            { childOutcome, childExitStatus, evidenceState },
+            {
+              childOutcome,
+              childExitStatus,
+              evidenceState,
+              ...(evidenceFailureCode === undefined
+                ? {}
+                : { evidenceFailureCode }),
+            },
           );
           const serialized = readFileSync(diagnosticFile, 'utf8');
           assert.doesNotMatch(serialized, /private-evidence-sentinel/u);
@@ -3363,6 +3441,7 @@ test('records only bounded child and evidence classification enums', () => {
           childOutcome: 'private-evidence-sentinel',
           childExitStatus: null,
           evidenceState: 'invalid',
+          evidenceFailureCode: 'evidence_validation_failed',
         }),
       /Invalid Desktop journey input/u,
     );
@@ -3375,6 +3454,7 @@ test('records only bounded child and evidence classification enums', () => {
             childOutcome: 'exited',
             childExitStatus: invalidExitStatus,
             evidenceState: 'invalid',
+            evidenceFailureCode: 'evidence_validation_failed',
           }),
         /Invalid Desktop journey input/u,
       );
@@ -3387,14 +3467,105 @@ test('records only bounded child and evidence classification enums', () => {
           childOutcome: 'signaled',
           childExitStatus: 0,
           evidenceState: 'invalid',
+          evidenceFailureCode: 'evidence_validation_failed',
         }),
       /Invalid Desktop journey input/u,
     );
     assert.equal(existsSync(diagnosticFile), false);
+
+    for (const evidenceFailureCode of [
+      'path_file_rejected',
+      'json_parse_failed',
+      'evidence_validation_failed',
+    ]) {
+      writeDesktopJourneyParentDiagnostic({
+        filePath: diagnosticFile,
+        runnerTemp,
+        childOutcome: 'exited',
+        childExitStatus: 23,
+        evidenceState: 'invalid',
+        evidenceFailureCode,
+      });
+      assert.deepEqual(
+        readDesktopJourneyParentDiagnostic({
+          filePath: diagnosticFile,
+          runnerTemp,
+        }),
+        {
+          childOutcome: 'exited',
+          childExitStatus: 23,
+          evidenceState: 'invalid',
+          evidenceFailureCode,
+        },
+      );
+      unlinkSync(diagnosticFile);
+    }
+
+    for (const invalidDiagnostic of [
+      {
+        childOutcome: 'exited',
+        childExitStatus: 1,
+        evidenceState: 'invalid',
+      },
+      {
+        childOutcome: 'exited',
+        childExitStatus: 1,
+        evidenceState: 'invalid',
+        evidenceFailureCode: 'private-evidence-sentinel',
+      },
+      {
+        childOutcome: 'exited',
+        childExitStatus: 0,
+        evidenceState: 'valid',
+        evidenceFailureCode: 'json_parse_failed',
+      },
+    ]) {
+      assert.throws(
+        () =>
+          writeDesktopJourneyParentDiagnostic({
+            filePath: diagnosticFile,
+            runnerTemp,
+            ...invalidDiagnostic,
+          }),
+        /Invalid Desktop journey input/u,
+      );
+    }
+    assert.equal(existsSync(diagnosticFile), false);
+
+    for (const invalidDiagnostic of [
+      {
+        childOutcome: 'exited',
+        childExitStatus: 1,
+        evidenceState: 'invalid',
+        evidenceFailureCode: 'private-evidence-sentinel',
+      },
+      {
+        childOutcome: 'exited',
+        childExitStatus: 0,
+        evidenceState: 'valid',
+        evidenceFailureCode: 'json_parse_failed',
+      },
+    ]) {
+      writeFileSync(diagnosticFile, `${JSON.stringify(invalidDiagnostic)}\n`, {
+        mode: 0o600,
+      });
+      assert.deepEqual(
+        readDesktopJourneyParentDiagnostic({
+          filePath: diagnosticFile,
+          runnerTemp,
+        }),
+        {
+          childOutcome: 'unknown',
+          childExitStatus: null,
+          evidenceState: 'unreadable',
+        },
+      );
+      unlinkSync(diagnosticFile);
+    }
   });
 });
 
-test('emits a sanitized unavailable summary when evidence cannot be parsed', () => {
+test('emits a sanitized unavailable summary when evidence validation fails', () => {
   withTempDirectory((runnerTemp) => {
     const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
     const privateSentinel = 'private-evidence-sentinel';
@@ -3412,6 +3583,7 @@ test('emits a sanitized unavailable summary when evidence cannot be parsed', () 
       childOutcome: 'exited',
       childExitStatus: 23,
       evidenceState: 'invalid',
+      evidenceFailureCode: 'evidence_validation_failed',
     });
 
     const scriptPath = fileURLToPath(
@@ -3435,7 +3607,7 @@ test('emits a sanitized unavailable summary when evidence cannot be parsed', () 
     assert.doesNotMatch(result.stderr, new RegExp(privateSentinel, 'u'));
 
     const summary = JSON.parse(result.stdout);
-    assert.equal(summary.schemaVersion, 19);
+    assert.equal(summary.schemaVersion, 20);
     assert.equal(summary.sourceSha, DESKTOP_REFRESH_SOURCE_SHA);
     assert.equal(summary.status, 'unavailable');
     assert.equal(summary.desktopChildCompletion.outcome, 'unknown');
@@ -3444,17 +3616,27 @@ test('emits a sanitized unavailable summary when evidence cannot be parsed', () 
       childOutcome: 'exited',
       childExitStatus: 23,
       evidenceState: 'invalid',
+      evidenceFailureCode: 'evidence_validation_failed',
     });
     assert.equal(summary.cases['desktop-a-refresh'], 'not_run');
   });
 });
 
-test('declares the schema-19 CLI parent diagnostic shape', () => {
+test('declares the schema-20 CLI parent diagnostic shape', () => {
   const declarations = readFileSync(
     new URL('./element-desktop-journey.d.mts', import.meta.url),
     'utf8',
   );
-  assert.match(declarations, /schemaVersion: 19;/u);
+  assert.match(declarations, /schemaVersion: 20;/u);
+  assert.match(declarations, /DesktopJourneyEvidenceFailureCode/u);
+  assert.match(
+    declarations,
+    /'path_file_rejected'[\s\S]*?'json_parse_failed'[\s\S]*?'evidence_validation_failed'/u,
+  );
+  assert.match(
+    declarations,
+    /evidenceFailureCode: DesktopJourneyEvidenceFailureCode/u,
+  );
   assert.match(
     declarations,
     /desktopChildDiagnostic: DesktopChildDiagnostic;/u,

@@ -427,23 +427,49 @@ export type DesktopJourneyEvidenceState =
   | 'invalid'
   | 'unreadable';
 
+export type DesktopJourneyEvidenceFailureCode =
+  | 'path_file_rejected'
+  | 'json_parse_failed'
+  | 'evidence_validation_failed';
+
+export type DesktopJourneyEvidenceClassification =
+  | {
+      evidenceState: 'invalid';
+      evidenceFailureCode: DesktopJourneyEvidenceFailureCode;
+    }
+  | {
+      evidenceState: Exclude<DesktopJourneyEvidenceState, 'invalid'>;
+    };
+
 export type DesktopChildDiagnostic =
   | {
       childOutcome: 'exited';
       childExitStatus: number;
-      evidenceState: DesktopJourneyEvidenceState;
+      evidenceState: 'invalid';
+      evidenceFailureCode: DesktopJourneyEvidenceFailureCode;
+    }
+  | {
+      childOutcome: 'exited';
+      childExitStatus: number;
+      evidenceState: Exclude<DesktopJourneyEvidenceState, 'invalid'>;
     }
   | {
       childOutcome: Exclude<DesktopChildOutcome, 'exited'>;
       childExitStatus: null;
-      evidenceState: DesktopJourneyEvidenceState;
+      evidenceState: 'invalid';
+      evidenceFailureCode: DesktopJourneyEvidenceFailureCode;
+    }
+  | {
+      childOutcome: Exclude<DesktopChildOutcome, 'exited'>;
+      childExitStatus: null;
+      evidenceState: Exclude<DesktopJourneyEvidenceState, 'invalid'>;
     };
 
 type DesktopJourneyCliSummaryBase = Omit<
   DesktopJourneySummary,
   'schemaVersion' | 'status' | 'desktopChildCompletion'
 > & {
-  schemaVersion: 19;
+  schemaVersion: 20;
   desktopChildDiagnostic: DesktopChildDiagnostic;
 };
 
@@ -639,13 +665,18 @@ export declare function classifyDesktopJourneyEvidenceState(input: {
   expectedSourceSha: string;
 }): DesktopJourneyEvidenceState;
 
-export declare function writeDesktopJourneyParentDiagnostic(input: {
+export declare function classifyDesktopJourneyEvidence(input: {
   filePath: string;
   runnerTemp: string;
-  childOutcome: DesktopChildOutcome;
-  childExitStatus: number | null;
-  evidenceState: DesktopJourneyEvidenceState;
-}): void;
+  expectedSourceSha: string;
+}): DesktopJourneyEvidenceClassification;
+
+export declare function writeDesktopJourneyParentDiagnostic(
+  input: {
+    filePath: string;
+    runnerTemp: string;
+  } & DesktopChildDiagnostic,
+): void;
 
 export declare function readDesktopJourneyParentDiagnostic(input: {
   filePath: string;

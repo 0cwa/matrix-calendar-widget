@@ -338,6 +338,11 @@ const DESKTOP_EVIDENCE_STATES = new Set([
   'invalid',
   'unreadable',
 ]);
+const DESKTOP_EVIDENCE_FAILURE_CODES = new Set([
+  'path_file_rejected',
+  'json_parse_failed',
+  'evidence_validation_failed',
+]);
 const MAX_DIAGNOSTIC_ROW_BYTES = 256;
 const MAX_PROGRESS_ROW_BYTES = 512;
 const MAX_REFRESH_ROOM_NAVIGATION_ROW_BYTES = 1_024;
@@ -1496,7 +1501,7 @@ export function appendDesktopChildCompletion({
   });
 }
 
-export function classifyDesktopJourneyEvidenceState({
+export function classifyDesktopJourneyEvidence({
   filePath,
   runnerTemp,
   expectedSourceSha,
@@ -1505,14 +1510,19 @@ export function classifyDesktopJourneyEvidenceState({
   try {
     path = privateRunnerPath(filePath, runnerTemp, JOURNEY_EVIDENCE_NAME);
   } catch {
-    return 'invalid';
+    return {
+      evidenceState: 'invalid',
+      evidenceFailureCode: 'path_file_rejected',
+    };
   }
 
   let stat;
   try {
     stat = lstatSync(path);
   } catch (error) {
-    return error?.code === 'ENOENT' ? 'absent' : 'unreadable';
+    return error?.code === 'ENOENT'
+      ? { evidenceState: 'absent' }
+      : { evidenceState: 'unreadable' };
   }
   if (
     !stat.isFile() ||
@@ -1522,21 +1532,34 @@ export function classifyDesktopJourneyEvidenceState({
     (typeof process.getuid === 'function' && stat.uid !== process.getuid()) ||
     stat.size > MAX_EVIDENCE_BYTES
   ) {
-    return 'invalid';
+    return {
+      evidenceState: 'invalid',
+      evidenceFailureCode: 'path_file_rejected',
+    };
   }
 
   let evidence;
   try {
     evidence = readFileSync(path, 'utf8');
   } catch {
-    return 'unreadable';
+    return { evidenceState: 'unreadable' };
   }
   try {
     summarizeDesktopJourneyEvidence(evidence, { expectedSourceSha });
-    return 'valid';
-  } catch {
-    return 'invalid';
+    return { evidenceState: 'valid' };
+  } catch (error) {
+    return {
+      evidenceState: 'invalid',
+      evidenceFailureCode:
+        error?.code === 'desktop-evidence-json-parse'
+          ? 'json_parse_failed'
+          : 'evidence_validation_failed',
+    };
   }
+}
+
+export function classifyDesktopJourneyEvidenceState(input) {
+  return classifyDesktopJourneyEvidence(input).evidenceState;
 }
 
 export function writeDesktopJourneyParentDiagnostic({
@@ -1545,6 +1568,7 @@ export function writeDesktopJourneyParentDiagnostic({
   childOutcome,
   childExitStatus,
   evidenceState,
+  evidenceFailureCode,
 }) {
   const path = privateRunnerPath(
     filePath,
@@ -1558,11 +1582,19 @@ export function writeDesktopJourneyParentDiagnostic({
         childExitStatus < 0 ||
         childExitStatus > 255
       : childExitStatus !== null) ||
-    !DESKTOP_EVIDENCE_STATES.has(evidenceState)
+    !DESKTOP_EVIDENCE_STATES.has(evidenceState) ||
+    (evidenceState === 'invalid'
+      ? !DESKTOP_EVIDENCE_FAILURE_CODES.has(evidenceFailureCode)
+      : evidenceFailureCode !== undefined)
   ) {
     invalidInput();
   }
-  const record = { childOutcome, childExitStatus, evidenceState };
+  const record = {
+    childOutcome,
+    childExitStatus,
+    evidenceState,
+    ...(evidenceFailureCode === undefined ? {} : { evidenceFailureCode }),
+  };
   let overwrite = false;
   try {
     privateFileStat(path, MAX_PARENT_DIAGNOSTIC_BYTES);
@@ -1601,15 +1633,20 @@ export function readDesktopJourneyParentDiagnostic({ filePath, runnerTemp }) {
       value === null ||
       typeof value !== 'object' ||
       Array.isArray(value) ||
-      Object.keys(value).sort().join(',') !==
-        'childExitStatus,childOutcome,evidenceState' ||
+      ![
+        'childExitStatus,childOutcome,evidenceState',
+        'childExitStatus,childOutcome,evidenceFailureCode,evidenceState',
+      ].includes(Object.keys(value).sort().join(',')) ||
       !DESKTOP_CHILD_OUTCOMES.has(value.childOutcome) ||
       (value.childOutcome === 'exited'
         ? !Number.isInteger(value.childExitStatus) ||
           value.childExitStatus < 0 ||
           value.childExitStatus > 255
         : value.childExitStatus !== null) ||
-      !DESKTOP_EVIDENCE_STATES.has(value.evidenceState)
+      !DESKTOP_EVIDENCE_STATES.has(value.evidenceState) ||
+      (value.evidenceState === 'invalid'
+        ? !DESKTOP_EVIDENCE_FAILURE_CODES.has(value.evidenceFailureCode)
+        : Object.hasOwn(value, 'evidenceFailureCode'))
     ) {
       return unavailable;
     }
@@ -1617,6 +1654,9 @@ export function readDesktopJourneyParentDiagnostic({ filePath, runnerTemp }) {
       childOutcome: value.childOutcome,
       childExitStatus: value.childExitStatus,
       evidenceState: value.evidenceState,
+      ...(value.evidenceFailureCode === undefined
+        ? {}
+        : { evidenceFailureCode: value.evidenceFailureCode }),
     };
   } catch {
     return unavailable;
@@ -1710,7 +1750,9 @@ function parseEvidence(input, expectedSourceSha = null) {
     try {
       value = JSON.parse(row);
     } catch {
-      invalidInput();
+      const error = new Error('Invalid Desktop journey input');
+      error.code = 'desktop-evidence-json-parse';
+      throw error;
     }
     if (value === null || typeof value !== 'object' || Array.isArray(value)) {
       invalidInput();
@@ -2708,7 +2750,7 @@ if (
     process.stdout.write(
       `${JSON.stringify({
         ...summary,
-        schemaVersion: 19,
+        schemaVersion: 20,
         desktopChildDiagnostic: parentDiagnostic,
       })}\n`,
     );
@@ -2724,7 +2766,7 @@ if (
             ? expectedSourceSha
             : null,
         ),
-        schemaVersion: 19,
+        schemaVersion: 20,
         desktopChildDiagnostic:
           typeof runnerTemp === 'string'
             ? readDesktopJourneyParentDiagnostic({
