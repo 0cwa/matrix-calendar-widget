@@ -390,12 +390,12 @@ export type DesktopJourneyFailureObservation =
       kind: 'unexpected-child-exit';
       phase: 'desktop-a-refresh';
       failurePoint: DesktopARefreshFailurePoint | null;
-      errorClass: null;
+      errorClass: DesktopJourneyErrorClass | null;
     }
   | null;
 
 export type DesktopJourneySummary = {
-  schemaVersion: 18;
+  schemaVersion: 19;
   sourceSha: string | null;
   status: 'passed' | 'failed' | 'incomplete' | 'unavailable';
   desktopChildCompletion: DesktopChildCompletionSummary;
@@ -620,6 +620,13 @@ export declare function appendDesktopJourneyProgress(input: {
   phase: 'desktop-a-refresh';
   failurePoint?: DesktopARefreshFailurePoint;
   desktopRefreshRoomNavigationDiagnostic?: DesktopRefreshRoomNavigationDiagnostic;
+}): boolean;
+
+export declare function appendDesktopUncaughtError(input: {
+  filePath: string;
+  runnerTemp: string;
+  sourceSha: string;
+  errorClass: DesktopJourneyErrorClass;
 }): boolean;
 
 export declare function appendDesktopJourneyOutcome(input: {
