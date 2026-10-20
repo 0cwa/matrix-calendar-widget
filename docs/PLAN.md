@@ -612,6 +612,12 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       pilot. This cleanup does not change the frozen application candidate or
       pilot gates; any candidate incorporating these source changes requires
       fresh source-bound qualification.
+- [ ] After the verified #251 pilot and completion of #277, complete issue
+      #278's inventory-backed cleanup of obsolete dependencies, workflows,
+      fixtures, localization, assets, package/docs metadata, and test
+      boundaries. Preserve required calendar, security, and Element evidence
+      and attribution; record before/after dependency, bundle, and test/typecheck
+      measures.
 
 - [x] Wire a separate Chromium calendar-component fixture at 320, 390, 768, and
       1280 CSS pixels, with measured overflow, keyboard focus, and axe checks.
