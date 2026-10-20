@@ -15,6 +15,8 @@ export const DESKTOP_JOURNEY_PHASES = Object.freeze([
   'desktop-room-widget-read',
   'desktop-widget-origin-isolation',
   'desktop-event-create',
+  'desktop-keyboard-focus',
+  'desktop-side-panel-layout',
   'web-member-b-read',
   'web-member-b-keyboard-open',
   'web-member-b-details-escape-focus',
@@ -54,6 +56,12 @@ export const DESKTOP_JOURNEY_FAILURE_POINTS = Object.freeze([
   'event-create-post-await',
   'event-create-post-status',
   'event-create-exact-row-visible',
+  'desktop-keyboard-focus-observation',
+  'desktop-keyboard-focus-evidence',
+  'desktop-keyboard-focus-assertion',
+  'desktop-side-panel-layout-observation',
+  'desktop-side-panel-layout-evidence',
+  'desktop-side-panel-layout-assertion',
   'web-b-authentication',
   'web-b-room-navigation',
   'web-b-widget-open',
@@ -235,6 +243,24 @@ const ROOM_NAVIGATION_TARGET_KEYS = Object.freeze(
 const ROOM_NAVIGATION_DIAGNOSTIC_KEYS = Object.freeze(
   ['currentOption', 'currentRow', 'legacyTreeItem', 'roomsReady'].sort(),
 );
+const DESKTOP_REFRESH_ROOM_NAVIGATION_DIAGNOSTIC_KEYS = Object.freeze(
+  [
+    'clickAttempted',
+    'clickCompleted',
+    'elapsedBucket',
+    'fixtureRoomTargetVisible',
+    'roomListItemCountCapped',
+  ].sort(),
+);
+const DESKTOP_REFRESH_ROOM_NAVIGATION_ELAPSED_BUCKETS = new Set([
+  'not_completed',
+  'under_1s',
+  '1_to_5s',
+  '5_to_15s',
+  '15_to_30s',
+  '30s_or_more',
+  'unknown',
+]);
 const GATEWAY_READ_FAILURE_POINTS = new Set([
   'widget-open',
   'gateway-read-await',
@@ -261,6 +287,7 @@ const JOURNEY_EVIDENCE_NAME = 'element-desktop-journey-stage.jsonl';
 const MAX_CREDENTIAL_BYTES = 2_048;
 const MAX_EVIDENCE_BYTES = 16_384;
 const MAX_DIAGNOSTIC_ROW_BYTES = 256;
+const MAX_PROGRESS_ROW_BYTES = 512;
 const MAX_PROGRESS_ROWS = DESKTOP_A_REFRESH_FAILURE_POINTS.length * 2 + 1;
 const MAX_EVIDENCE_ROWS = DESKTOP_JOURNEY_PHASES.length + MAX_PROGRESS_ROWS + 5;
 const SOURCE_SHA_PATTERN = /^[0-9a-f]{40}$/u;
@@ -345,6 +372,20 @@ function validJourneyFailurePoint(phase, status, failurePoint) {
   }
   if (phase === 'desktop-event-create') {
     return DESKTOP_EVENT_CREATE_FAILURE_POINT_SET.has(failurePoint);
+  }
+  if (phase === 'desktop-keyboard-focus') {
+    return (
+      failurePoint === 'desktop-keyboard-focus-observation' ||
+      failurePoint === 'desktop-keyboard-focus-evidence' ||
+      failurePoint === 'desktop-keyboard-focus-assertion'
+    );
+  }
+  if (phase === 'desktop-side-panel-layout') {
+    return (
+      failurePoint === 'desktop-side-panel-layout-observation' ||
+      failurePoint === 'desktop-side-panel-layout-evidence' ||
+      failurePoint === 'desktop-side-panel-layout-assertion'
+    );
   }
   if (phase === 'web-member-b-read') {
     return WEB_B_READ_FAILURE_POINT_SET.has(failurePoint);
@@ -972,6 +1013,24 @@ function validRoomNavigationDiagnostic(value) {
   );
 }
 
+function validDesktopRefreshRoomNavigationDiagnostic(value, event) {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.keys(value).sort().join(',') ===
+      DESKTOP_REFRESH_ROOM_NAVIGATION_DIAGNOSTIC_KEYS.join(',') &&
+    [null, 0, 1, 2].includes(value.roomListItemCountCapped) &&
+    [null, true, false].includes(value.fixtureRoomTargetVisible) &&
+    value.clickAttempted === true &&
+    value.clickCompleted === (event === 'complete') &&
+    DESKTOP_REFRESH_ROOM_NAVIGATION_ELAPSED_BUCKETS.has(value.elapsedBucket) &&
+    (event === 'point'
+      ? value.elapsedBucket === 'not_completed'
+      : value.elapsedBucket !== 'not_completed')
+  );
+}
+
 function validPromptObservation(observed, actionTaken) {
   return (
     [null, true, false].includes(observed) &&
@@ -1273,12 +1332,13 @@ function appendBoundedDesktopDiagnosticRecord({
   runnerTemp,
   record,
   reserveBytes = 0,
+  maxRowBytes = MAX_DIAGNOSTIC_ROW_BYTES,
 }) {
   const path = privateRunnerPath(filePath, runnerTemp, JOURNEY_EVIDENCE_NAME);
   const serialized = `${JSON.stringify(record)}\n`;
   const rowBytes = Buffer.byteLength(serialized);
   if (
-    rowBytes > MAX_DIAGNOSTIC_ROW_BYTES ||
+    rowBytes > maxRowBytes ||
     !Number.isSafeInteger(reserveBytes) ||
     reserveBytes < 0 ||
     reserveBytes > MAX_EVIDENCE_BYTES
@@ -1391,6 +1451,7 @@ function parseEvidence(input, expectedSourceSha = null) {
   let desktopRefreshProgress = null;
   let desktopRefreshProgressPointIndex = -1;
   let desktopRefreshCompletedPointIndex = -1;
+  let desktopRefreshRoomNavigationDiagnostic = null;
   let desktopRefreshOutcome = null;
   let loginStep = 'not_observed';
   let loginStepRecorded = false;
@@ -1457,8 +1518,14 @@ function parseEvidence(input, expectedSourceSha = null) {
     }
     if (value.type === 'desktop-journey-progress') {
       const hasFailurePoint = Object.hasOwn(value, 'failurePoint');
+      const hasRefreshRoomNavigationDiagnostic = Object.hasOwn(
+        value,
+        'desktopRefreshRoomNavigationDiagnostic',
+      );
       const expectedKeys = hasFailurePoint
-        ? 'event,failurePoint,phase,sourceSha,type'
+        ? hasRefreshRoomNavigationDiagnostic
+          ? 'desktopRefreshRoomNavigationDiagnostic,event,failurePoint,phase,sourceSha,type'
+          : 'event,failurePoint,phase,sourceSha,type'
         : 'event,phase,sourceSha,type';
       const validSourceSha =
         typeof value.sourceSha === 'string' &&
@@ -1467,7 +1534,10 @@ function parseEvidence(input, expectedSourceSha = null) {
       if (
         keys !== expectedKeys ||
         !validSourceSha ||
-        Buffer.byteLength(row) > MAX_DIAGNOSTIC_ROW_BYTES ||
+        Buffer.byteLength(row) >
+          (hasRefreshRoomNavigationDiagnostic
+            ? MAX_PROGRESS_ROW_BYTES
+            : MAX_DIAGNOSTIC_ROW_BYTES) ||
         desktopChildCompletionCount > 0 ||
         playwrightResultCount > 0 ||
         value.phase !== 'desktop-a-refresh' ||
@@ -1507,6 +1577,20 @@ function parseEvidence(input, expectedSourceSha = null) {
           invalidInput();
         }
         desktopRefreshProgressPointIndex = nextPointIndex;
+        if (
+          hasRefreshRoomNavigationDiagnostic &&
+          (value.failurePoint !== 'desktop-refresh-room-navigation' ||
+            !validDesktopRefreshRoomNavigationDiagnostic(
+              value.desktopRefreshRoomNavigationDiagnostic,
+              'point',
+            ))
+        ) {
+          invalidInput();
+        }
+        if (hasRefreshRoomNavigationDiagnostic) {
+          desktopRefreshRoomNavigationDiagnostic =
+            value.desktopRefreshRoomNavigationDiagnostic;
+        }
         desktopRefreshProgress = {
           phase: 'desktop-a-refresh',
           failurePoint: value.failurePoint,
@@ -1522,6 +1606,20 @@ function parseEvidence(input, expectedSourceSha = null) {
           invalidInput();
         }
         desktopRefreshCompletedPointIndex = desktopRefreshProgressPointIndex;
+        if (
+          hasRefreshRoomNavigationDiagnostic &&
+          (value.failurePoint !== 'desktop-refresh-room-navigation' ||
+            !validDesktopRefreshRoomNavigationDiagnostic(
+              value.desktopRefreshRoomNavigationDiagnostic,
+              'complete',
+            ))
+        ) {
+          invalidInput();
+        }
+        if (hasRefreshRoomNavigationDiagnostic) {
+          desktopRefreshRoomNavigationDiagnostic =
+            value.desktopRefreshRoomNavigationDiagnostic;
+        }
         desktopRefreshProgress = {
           phase: 'desktop-a-refresh',
           failurePoint: null,
@@ -1757,6 +1855,7 @@ function parseEvidence(input, expectedSourceSha = null) {
     desktopRefreshProgress,
     desktopRefreshProgressPointIndex,
     desktopRefreshCompletedPointIndex,
+    desktopRefreshRoomNavigationDiagnostic,
     desktopRefreshOutcome,
     loginStep,
     loginStepRecorded,
@@ -1820,6 +1919,7 @@ export function appendDesktopJourneyProgress({
   event,
   phase,
   failurePoint,
+  desktopRefreshRoomNavigationDiagnostic,
 }) {
   if (
     typeof sourceSha !== 'string' ||
@@ -1828,7 +1928,14 @@ export function appendDesktopJourneyProgress({
     !['begin', 'point', 'complete'].includes(event) ||
     (event === 'begin' && failurePoint !== undefined) ||
     (event !== 'begin' &&
-      !DESKTOP_A_REFRESH_FAILURE_POINT_SET.has(failurePoint))
+      !DESKTOP_A_REFRESH_FAILURE_POINT_SET.has(failurePoint)) ||
+    (desktopRefreshRoomNavigationDiagnostic !== undefined &&
+      (failurePoint !== 'desktop-refresh-room-navigation' ||
+        !['point', 'complete'].includes(event) ||
+        !validDesktopRefreshRoomNavigationDiagnostic(
+          desktopRefreshRoomNavigationDiagnostic,
+          event,
+        )))
   ) {
     invalidInput();
   }
@@ -1868,7 +1975,14 @@ export function appendDesktopJourneyProgress({
       sourceSha,
       phase,
       ...(failurePoint === undefined ? {} : { failurePoint }),
+      ...(desktopRefreshRoomNavigationDiagnostic === undefined
+        ? {}
+        : { desktopRefreshRoomNavigationDiagnostic }),
     },
+    maxRowBytes:
+      desktopRefreshRoomNavigationDiagnostic === undefined
+        ? MAX_DIAGNOSTIC_ROW_BYTES
+        : MAX_PROGRESS_ROW_BYTES,
     reserveBytes:
       MAX_PLAYWRIGHT_RESULT_ROW_BYTES + MAX_CHILD_COMPLETION_ROW_BYTES,
   });
@@ -2129,6 +2243,7 @@ export function summarizeDesktopJourneyEvidence(
     webBEditSaveDiagnostic,
     desktopRefreshProgress,
     desktopRefreshOutcome,
+    desktopRefreshRoomNavigationDiagnostic,
   } = parseEvidence(input, expectedSourceSha);
   if (outcomes.get('desktop-login') === 'passed') {
     if (
@@ -2178,7 +2293,7 @@ export function summarizeDesktopJourneyEvidence(
     childCompletedSuccessfully &&
     playwrightResult === 'passed';
   return {
-    schemaVersion: 12,
+    schemaVersion: 14,
     sourceSha,
     status: failed ? 'failed' : journeyEvidencePassed ? 'passed' : 'incomplete',
     desktopChildCompletion,
@@ -2193,6 +2308,7 @@ export function summarizeDesktopJourneyEvidence(
     roomNavigationDiagnostic,
     desktopEventCreateDiagnostic,
     webBEditSaveDiagnostic,
+    desktopRefreshRoomNavigationDiagnostic,
     cases,
   };
 }

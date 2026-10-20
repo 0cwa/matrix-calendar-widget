@@ -89,7 +89,12 @@ function appendDesktopRefreshBegin(filePath, runnerTemp) {
   });
 }
 
-function appendDesktopRefreshPoint(filePath, runnerTemp, failurePoint) {
+function appendDesktopRefreshPoint(
+  filePath,
+  runnerTemp,
+  failurePoint,
+  desktopRefreshRoomNavigationDiagnostic,
+) {
   return appendDesktopJourneyProgress({
     filePath,
     runnerTemp,
@@ -97,10 +102,18 @@ function appendDesktopRefreshPoint(filePath, runnerTemp, failurePoint) {
     event: 'point',
     phase: 'desktop-a-refresh',
     failurePoint,
+    ...(desktopRefreshRoomNavigationDiagnostic === undefined
+      ? {}
+      : { desktopRefreshRoomNavigationDiagnostic }),
   });
 }
 
-function appendDesktopRefreshComplete(filePath, runnerTemp, failurePoint) {
+function appendDesktopRefreshComplete(
+  filePath,
+  runnerTemp,
+  failurePoint,
+  desktopRefreshRoomNavigationDiagnostic,
+) {
   return appendDesktopJourneyProgress({
     filePath,
     runnerTemp,
@@ -108,6 +121,9 @@ function appendDesktopRefreshComplete(filePath, runnerTemp, failurePoint) {
     event: 'complete',
     phase: 'desktop-a-refresh',
     failurePoint,
+    ...(desktopRefreshRoomNavigationDiagnostic === undefined
+      ? {}
+      : { desktopRefreshRoomNavigationDiagnostic }),
   });
 }
 
@@ -367,7 +383,7 @@ test('keeps journey evidence within finite phases and statuses', () => {
     });
 
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 12);
+    assert.equal(summary.schemaVersion, 14);
     assert.equal(summary.status, 'incomplete');
     assert.equal(summary.loginStep, 'complete');
     assert.equal(summary.loginEntry, 'password_form_present');
@@ -446,7 +462,7 @@ test('records only the source-bound Playwright result and child completion', () 
       runnerTemp,
       expectedSourceSha: sourceSha,
     });
-    assert.equal(summary.schemaVersion, 12);
+    assert.equal(summary.schemaVersion, 14);
     assert.equal(summary.sourceSha, sourceSha);
     assert.equal(summary.status, 'incomplete');
     assert.equal(summary.playwrightResult, 'timed_out');
@@ -782,6 +798,58 @@ test('records one fixed failure point for a failed Desktop room read', () => {
   });
 });
 
+test('reports bounded Desktop accessibility failure phases', () => {
+  const cases = [
+    {
+      phase: 'desktop-keyboard-focus',
+      failurePoint: 'desktop-keyboard-focus-observation',
+    },
+    {
+      phase: 'desktop-side-panel-layout',
+      failurePoint: 'desktop-side-panel-layout-evidence',
+    },
+  ];
+
+  for (const { phase, failurePoint } of cases) {
+    withTempDirectory((runnerTemp) => {
+      const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
+      initializeDesktopJourneyEvidence({ filePath, runnerTemp });
+      for (const priorPhase of DESKTOP_JOURNEY_PHASES.slice(
+        0,
+        DESKTOP_JOURNEY_PHASES.indexOf(phase),
+      )) {
+        appendDesktopJourneyOutcome({
+          filePath,
+          runnerTemp,
+          phase: priorPhase,
+          status: 'passed',
+        });
+        if (priorPhase === 'desktop-login') {
+          appendDesktopLoginStep({
+            filePath,
+            runnerTemp,
+            step: 'complete',
+            entry: 'password_form_present',
+          });
+        }
+      }
+      appendDesktopJourneyOutcome({
+        filePath,
+        runnerTemp,
+        phase,
+        status: 'failed',
+        failurePoint,
+      });
+
+      const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
+      assert.equal(summary.schemaVersion, 14);
+      assert.equal(summary.cases[phase], 'failed');
+      assert.deepEqual(summary.failurePoint, { phase, point: failurePoint });
+      assert.equal(summary.status, 'failed');
+    });
+  }
+});
+
 test('records closed Desktop create observations without event or URL data', () => {
   const makeDiagnostic = (overrides = {}) => ({
     createPostObserved: null,
@@ -860,7 +928,7 @@ test('records closed Desktop create observations without event or URL data', () 
       /private room|private title|private-event-id|response body|request URL/u,
     );
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 12);
+    assert.equal(summary.schemaVersion, 14);
     assert.deepEqual(summary.failurePoint, {
       phase: 'desktop-event-create',
       point: 'event-create-exact-row-visible',
@@ -992,7 +1060,7 @@ test('records room-navigation evidence only at its closed failure boundary', () 
       roomNavigationDiagnostic: diagnostic,
     });
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 12);
+    assert.equal(summary.schemaVersion, 14);
     assert.deepEqual(summary.roomNavigationDiagnostic, diagnostic);
     assert.equal(summary.roomsReadyDiagnostic, null);
     assert.doesNotMatch(
@@ -1252,6 +1320,12 @@ test('accepts only the closed failure-point enum with its failed-phase match', (
       'event-create-post-await',
       'event-create-post-status',
       'event-create-exact-row-visible',
+      'desktop-keyboard-focus-observation',
+      'desktop-keyboard-focus-evidence',
+      'desktop-keyboard-focus-assertion',
+      'desktop-side-panel-layout-observation',
+      'desktop-side-panel-layout-evidence',
+      'desktop-side-panel-layout-assertion',
       'web-b-authentication',
       'web-b-room-navigation',
       'web-b-widget-open',
@@ -1790,7 +1864,7 @@ test('requires ordered Desktop refresh progress before a complete pass', () => {
       runnerTemp,
       expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
     });
-    assert.equal(summary.schemaVersion, 12);
+    assert.equal(summary.schemaVersion, 14);
     assert.equal(summary.status, 'passed');
     assert.equal(summary.cases['desktop-a-refresh'], 'passed');
     assert.equal(summary.failureObservation, null);
@@ -1799,6 +1873,189 @@ test('requires ordered Desktop refresh progress before a complete pass', () => {
       /private error|PRIVATE_TOKEN_SENTINEL/u,
     );
   });
+});
+
+test('records bounded Desktop refresh room-navigation progress', () => {
+  const beforeClick = {
+    roomListItemCountCapped: 2,
+    fixtureRoomTargetVisible: true,
+    clickAttempted: true,
+    clickCompleted: false,
+    elapsedBucket: 'not_completed',
+  };
+  const afterClick = {
+    ...beforeClick,
+    clickCompleted: true,
+    elapsedBucket: '1_to_5s',
+  };
+  withTempDirectory((runnerTemp) => {
+    const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
+    initializeDesktopJourneyEvidence({ filePath, runnerTemp });
+    appendDesktopRefreshPrefix(filePath, runnerTemp);
+    appendDesktopRefreshBegin(filePath, runnerTemp);
+    for (const failurePoint of DESKTOP_A_REFRESH_FAILURE_POINTS.slice(
+      0,
+      DESKTOP_A_REFRESH_FAILURE_POINTS.indexOf(
+        'desktop-refresh-room-navigation',
+      ),
+    )) {
+      appendDesktopRefreshPoint(filePath, runnerTemp, failurePoint);
+      appendDesktopRefreshComplete(filePath, runnerTemp, failurePoint);
+    }
+    assert.equal(
+      appendDesktopRefreshPoint(
+        filePath,
+        runnerTemp,
+        'desktop-refresh-room-navigation',
+        beforeClick,
+      ),
+      true,
+    );
+    appendDesktopChildCompletion({
+      filePath,
+      runnerTemp,
+      sourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+      completion: { outcome: 'exited', exitStatus: 1, timedOut: false },
+    });
+    appendDesktopPlaywrightResult({
+      filePath,
+      runnerTemp,
+      sourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+      status: 'failed',
+    });
+
+    const summary = readDesktopJourneyEvidence({
+      filePath,
+      runnerTemp,
+      expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+    });
+    assert.equal(summary.status, 'incomplete');
+    assert.deepEqual(summary.failureObservation, {
+      kind: 'unexpected-child-exit',
+      phase: 'desktop-a-refresh',
+      failurePoint: 'desktop-refresh-room-navigation',
+      errorClass: null,
+    });
+    assert.deepEqual(
+      summary.desktopRefreshRoomNavigationDiagnostic,
+      beforeClick,
+    );
+    assert.equal(summary.desktopChildCompletion.exitStatus, 1);
+    assert.equal(summary.desktopChildCompletion.timedOut, false);
+    assert.doesNotMatch(
+      readFileSync(filePath, 'utf8'),
+      /fixture room|room-name|room-id|private URL/u,
+    );
+  });
+
+  withTempDirectory((runnerTemp) => {
+    const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
+    initializeDesktopJourneyEvidence({ filePath, runnerTemp });
+    appendDesktopRefreshPrefix(filePath, runnerTemp);
+    appendDesktopRefreshBegin(filePath, runnerTemp);
+    for (const failurePoint of DESKTOP_A_REFRESH_FAILURE_POINTS.slice(
+      0,
+      DESKTOP_A_REFRESH_FAILURE_POINTS.indexOf(
+        'desktop-refresh-room-navigation',
+      ),
+    )) {
+      appendDesktopRefreshPoint(filePath, runnerTemp, failurePoint);
+      appendDesktopRefreshComplete(filePath, runnerTemp, failurePoint);
+    }
+    appendDesktopRefreshPoint(
+      filePath,
+      runnerTemp,
+      'desktop-refresh-room-navigation',
+      beforeClick,
+    );
+    appendDesktopRefreshComplete(
+      filePath,
+      runnerTemp,
+      'desktop-refresh-room-navigation',
+      afterClick,
+    );
+    assert.deepEqual(
+      readDesktopJourneyEvidence({ filePath, runnerTemp })
+        .desktopRefreshRoomNavigationDiagnostic,
+      afterClick,
+    );
+  });
+
+  for (const invalid of [
+    { ...beforeClick, roomName: 'private room name' },
+    { ...beforeClick, roomListItemCountCapped: 3 },
+    { ...beforeClick, fixtureRoomTargetVisible: 'private room name' },
+    { ...beforeClick, elapsedBucket: 1_237 },
+    { ...beforeClick, clickAttempted: false },
+    { ...afterClick, clickCompleted: false },
+  ]) {
+    assert.throws(
+      () =>
+        appendDesktopRefreshPoint(
+          '/tmp/unused-stage.jsonl',
+          '/tmp',
+          'desktop-refresh-room-navigation',
+          invalid,
+        ),
+      /Invalid Desktop journey input/u,
+    );
+  }
+});
+
+test('rejects malformed room-navigation diagnostics while parsing evidence', () => {
+  const diagnostic = {
+    roomListItemCountCapped: 2,
+    fixtureRoomTargetVisible: true,
+    clickAttempted: true,
+    clickCompleted: false,
+    elapsedBucket: 'not_completed',
+  };
+
+  for (const malformedDiagnostic of [
+    { ...diagnostic, unexpectedKey: true },
+    { ...diagnostic, roomListItemCountCapped: 3 },
+  ]) {
+    withTempDirectory((runnerTemp) => {
+      const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
+      initializeDesktopJourneyEvidence({ filePath, runnerTemp });
+      appendDesktopRefreshPrefix(filePath, runnerTemp);
+      appendDesktopRefreshBegin(filePath, runnerTemp);
+      for (const failurePoint of DESKTOP_A_REFRESH_FAILURE_POINTS.slice(
+        0,
+        DESKTOP_A_REFRESH_FAILURE_POINTS.indexOf(
+          'desktop-refresh-room-navigation',
+        ),
+      )) {
+        appendDesktopRefreshPoint(filePath, runnerTemp, failurePoint);
+        appendDesktopRefreshComplete(filePath, runnerTemp, failurePoint);
+      }
+      appendDesktopRefreshPoint(
+        filePath,
+        runnerTemp,
+        'desktop-refresh-room-navigation',
+        diagnostic,
+      );
+
+      const rows = readFileSync(filePath, 'utf8')
+        .trimEnd()
+        .split('\n')
+        .map((row) => JSON.parse(row));
+      const diagnosticRow = rows.find(
+        (row) =>
+          row.type === 'desktop-journey-progress' &&
+          row.event === 'point' &&
+          row.failurePoint === 'desktop-refresh-room-navigation',
+      );
+      diagnosticRow.desktopRefreshRoomNavigationDiagnostic =
+        malformedDiagnostic;
+
+      assert.throws(
+        () =>
+          summarizeDesktopJourneyEvidence(rows.map(JSON.stringify).join('\n')),
+        /Invalid Desktop journey input/u,
+      );
+    });
+  }
 });
 
 test('classifies caught Desktop refresh errors without persisting error text', () => {

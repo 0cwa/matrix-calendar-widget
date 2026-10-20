@@ -4,6 +4,8 @@ export type DesktopJourneyPhase =
   | 'desktop-room-widget-read'
   | 'desktop-widget-origin-isolation'
   | 'desktop-event-create'
+  | 'desktop-keyboard-focus'
+  | 'desktop-side-panel-layout'
   | 'web-member-b-read'
   | 'web-member-b-keyboard-open'
   | 'web-member-b-details-escape-focus'
@@ -56,6 +58,21 @@ export type DesktopARefreshFailurePoint =
   | 'desktop-refresh-iframe-attached'
   | 'desktop-refresh-event-row';
 
+export type DesktopRefreshRoomNavigationDiagnostic = {
+  roomListItemCountCapped: 0 | 1 | 2 | null;
+  fixtureRoomTargetVisible: boolean | null;
+  clickAttempted: boolean;
+  clickCompleted: boolean;
+  elapsedBucket:
+    | 'not_completed'
+    | 'under_1s'
+    | '1_to_5s'
+    | '5_to_15s'
+    | '15_to_30s'
+    | '30s_or_more'
+    | 'unknown';
+};
+
 export type DesktopJourneyErrorClass =
   | 'timeout'
   | 'assertion'
@@ -73,10 +90,19 @@ export type DesktopEventCreateFailurePoint =
   | 'event-create-post-status'
   | 'event-create-exact-row-visible';
 
+export type DesktopAccessibilityFailurePoint =
+  | 'desktop-keyboard-focus-observation'
+  | 'desktop-keyboard-focus-evidence'
+  | 'desktop-keyboard-focus-assertion'
+  | 'desktop-side-panel-layout-observation'
+  | 'desktop-side-panel-layout-evidence'
+  | 'desktop-side-panel-layout-assertion';
+
 export type DesktopJourneyFailurePoint =
   | DesktopRoomWidgetFailurePoint
   | 'origin-isolation'
   | DesktopEventCreateFailurePoint
+  | DesktopAccessibilityFailurePoint
   | WebMemberBReadFailurePoint
   | WebMemberBEditSaveFailurePoint
   | DesktopARefreshFailurePoint;
@@ -93,6 +119,20 @@ export type DesktopJourneyFailurePointObservation =
   | {
       phase: 'desktop-event-create';
       point: DesktopEventCreateFailurePoint;
+    }
+  | {
+      phase: 'desktop-keyboard-focus';
+      point: Extract<
+        DesktopAccessibilityFailurePoint,
+        `desktop-keyboard-focus-${string}`
+      >;
+    }
+  | {
+      phase: 'desktop-side-panel-layout';
+      point: Extract<
+        DesktopAccessibilityFailurePoint,
+        `desktop-side-panel-layout-${string}`
+      >;
     }
   | {
       phase: 'web-member-b-read';
@@ -318,7 +358,7 @@ export type DesktopJourneyFailureObservation =
   | null;
 
 export type DesktopJourneySummary = {
-  schemaVersion: 12;
+  schemaVersion: 14;
   sourceSha: string | null;
   status: 'passed' | 'failed' | 'incomplete';
   desktopChildCompletion: DesktopChildCompletion;
@@ -333,6 +373,7 @@ export type DesktopJourneySummary = {
   roomNavigationDiagnostic: DesktopRoomNavigationDiagnostic | null;
   desktopEventCreateDiagnostic: DesktopEventCreateFailureDiagnostic | null;
   webBEditSaveDiagnostic: WebBEditSaveFailureDiagnostic | null;
+  desktopRefreshRoomNavigationDiagnostic: DesktopRefreshRoomNavigationDiagnostic | null;
   cases: Record<DesktopJourneyPhase, DesktopJourneyOutcome | 'not_run'>;
 };
 
@@ -455,6 +496,7 @@ export declare function appendDesktopJourneyProgress(input: {
   event: 'begin' | 'point' | 'complete';
   phase: 'desktop-a-refresh';
   failurePoint?: DesktopARefreshFailurePoint;
+  desktopRefreshRoomNavigationDiagnostic?: DesktopRefreshRoomNavigationDiagnostic;
 }): boolean;
 
 export declare function appendDesktopJourneyOutcome(input: {

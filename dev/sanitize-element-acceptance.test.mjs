@@ -4264,3 +4264,105 @@ test('sanitizes bounded G6 keyboard focus diagnostics without claiming skipped a
     );
   }
 });
+
+test('sanitizes Desktop keyboard and side-panel acceptance evidence', () => {
+  const keyboard = {
+    phase: 'g6-desktop-keyboard-focus',
+    status: 'passed',
+    desktopEventFocused: true,
+    detailsOpened: true,
+    detailsTabReached: true,
+    editActionFocused: true,
+    deleteActionFocused: true,
+    closeActionFocused: true,
+    escapeClosedDialog: true,
+    focusReturnedToEvent: true,
+    desktopEventTabCount: 7,
+    desktopDetailsTabCount: 3,
+  };
+  const sidePanel = {
+    phase: 'g6-desktop-side-panel-layout',
+    status: 'passed',
+    desktopWidgetCardVisible: true,
+    desktopCreateControlReachable: true,
+    desktopEventDetailsReachable: true,
+    desktopHostNoHorizontalOverflow: true,
+    desktopWidgetNoHorizontalOverflow: true,
+    desktopPersistedHostFramePresent: true,
+    desktopAppDrawerAbsent: true,
+    desktopViewportWidth: 1280,
+    desktopViewportHeight: 720,
+    desktopIframeWidth: 319,
+    desktopIframeHeight: 640,
+    desktopWidgetCardCount: 1,
+    desktopAppDrawerCount: 1,
+  };
+  const summary = sanitizeElementAcceptance(
+    [keyboard, sidePanel].map((record) => JSON.stringify(record)).join('\n'),
+    sourceSha,
+  );
+  assert.match(
+    summary,
+    /phase=g6-desktop-keyboard-focus status=passed desktop_event_focused=true details_opened=true details_tab_reached=true edit_action_focused=true delete_action_focused=true close_action_focused=true escape_closed_dialog=true focus_returned_to_event=true desktop_event_tab_count=7 desktop_details_tab_count=3/u,
+  );
+  assert.match(
+    summary,
+    /phase=g6-desktop-side-panel-layout status=passed desktop_widget_card_visible=true desktop_create_control_reachable=true desktop_event_details_reachable=true desktop_host_no_horizontal_overflow=true desktop_widget_no_horizontal_overflow=true desktop_persisted_host_frame_present=true desktop_app_drawer_absent=true desktop_viewport_width=1280 desktop_viewport_height=720 desktop_iframe_width=319 desktop_iframe_height=640 desktop_widget_card_count=1 desktop_app_drawer_count=1/u,
+  );
+  assert.doesNotMatch(summary, /private|token|https?:|Matrix Calendar/iu);
+
+  for (const invalid of [
+    { ...keyboard, eventTitle: 'private title' },
+    { ...keyboard, desktopEventTabCount: 81 },
+    { ...sidePanel, desktopIframeUrl: 'https://private.example/widget' },
+    { ...sidePanel, desktopAppDrawerAbsent: false },
+    { ...sidePanel, desktopIframeWidth: 0 },
+    { ...sidePanel, desktopViewportWidth: 0 },
+    { ...sidePanel, desktopViewportHeight: 0 },
+  ]) {
+    assert.throws(
+      () => sanitizeElementAcceptance(JSON.stringify(invalid), sourceSha),
+      { message: 'invalid element acceptance summary' },
+    );
+  }
+
+  for (const [record, requiredBooleans] of [
+    [
+      keyboard,
+      [
+        'desktopEventFocused',
+        'detailsOpened',
+        'detailsTabReached',
+        'editActionFocused',
+        'deleteActionFocused',
+        'closeActionFocused',
+        'escapeClosedDialog',
+        'focusReturnedToEvent',
+      ],
+    ],
+    [
+      sidePanel,
+      [
+        'desktopWidgetCardVisible',
+        'desktopCreateControlReachable',
+        'desktopEventDetailsReachable',
+        'desktopHostNoHorizontalOverflow',
+        'desktopWidgetNoHorizontalOverflow',
+        'desktopPersistedHostFramePresent',
+        'desktopAppDrawerAbsent',
+      ],
+    ],
+  ]) {
+    for (const field of requiredBooleans) {
+      assert.throws(
+        () =>
+          sanitizeElementAcceptance(
+            JSON.stringify({ ...record, [field]: false }),
+            sourceSha,
+          ),
+        { message: 'invalid element acceptance summary' },
+        `${record.phase} must reject ${field}=false when passed`,
+      );
+    }
+  }
+});

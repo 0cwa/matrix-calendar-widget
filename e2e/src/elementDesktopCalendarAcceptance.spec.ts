@@ -27,7 +27,7 @@ import {
   type Response,
 } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
-import { lstatSync, readFileSync } from 'node:fs';
+import { appendFileSync, lstatSync, readFileSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import {
   compareEventTimingWithRoomRange,
@@ -68,6 +68,7 @@ import {
   type DesktopLoginFieldObservation,
   type DesktopLoginFormObservation,
   type DesktopLoginStep,
+  type DesktopRefreshRoomNavigationDiagnostic,
   type DesktopRoomNavigationDiagnostic,
   type DesktopRoomsReadyDiagnostic,
   type DesktopRoomsReadyElementObservation,
@@ -75,6 +76,7 @@ import {
   type WebBEditSaveFailureDiagnostic,
   type WebBEventListReadDiagnostic,
 } from '../../dev/element-desktop-journey.mjs';
+import { resolveDesktopViewportSize } from '../../dev/element-desktop-viewport.mjs';
 import { ElementWebPage, getMainRoomListLocator } from './pages/elementWebPage';
 
 type FixtureUser = {
@@ -503,6 +505,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
   };
   const enterDesktopRefreshFailurePoint = (
     failurePoint: DesktopARefreshFailurePoint,
+    desktopRefreshRoomNavigationDiagnostic?: DesktopRefreshRoomNavigationDiagnostic,
   ) => {
     currentFailurePoint = failurePoint;
     safeRecordDesktopJourneyProgress(
@@ -510,10 +513,12 @@ test('Element Desktop room event journey', async ({ browser }) => {
       'point',
       'desktop-a-refresh',
       failurePoint,
+      desktopRefreshRoomNavigationDiagnostic,
     );
   };
   const completeDesktopRefreshFailurePoint = (
     failurePoint: DesktopARefreshFailurePoint,
+    desktopRefreshRoomNavigationDiagnostic?: DesktopRefreshRoomNavigationDiagnostic,
   ) => {
     if (
       safeRecordDesktopJourneyProgress(
@@ -521,6 +526,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
         'complete',
         'desktop-a-refresh',
         failurePoint,
+        desktopRefreshRoomNavigationDiagnostic,
       )
     ) {
       currentFailurePoint = undefined;
@@ -711,6 +717,42 @@ test('Element Desktop room event journey', async ({ browser }) => {
     desktopEventCreatePostObserver = undefined;
     currentFailurePoint = undefined;
 
+    enterPhase('desktop-keyboard-focus');
+    currentFailurePoint = 'desktop-keyboard-focus-observation';
+    const desktopKeyboardFocus = await observeDesktopKeyboardFocus(
+      desktopPage,
+      desktopFrame,
+      initialTitle,
+    );
+    currentFailurePoint = 'desktop-keyboard-focus-evidence';
+    appendDesktopAccessibilityStage(
+      'g6-desktop-keyboard-focus',
+      desktopKeyboardFocus,
+    );
+    currentFailurePoint = 'desktop-keyboard-focus-assertion';
+    if (!desktopKeyboardFocus.passed) {
+      throw new Error('Desktop keyboard acceptance failed');
+    }
+    recordPhase(evidence, recorded, 'desktop-keyboard-focus');
+
+    enterPhase('desktop-side-panel-layout');
+    currentFailurePoint = 'desktop-side-panel-layout-observation';
+    const desktopSidePanelLayout = await observeDesktopSidePanelLayout(
+      desktopPage,
+      desktopFrame,
+      desktopKeyboardFocus.detailsOpened,
+    );
+    currentFailurePoint = 'desktop-side-panel-layout-evidence';
+    appendDesktopAccessibilityStage(
+      'g6-desktop-side-panel-layout',
+      desktopSidePanelLayout,
+    );
+    currentFailurePoint = 'desktop-side-panel-layout-assertion';
+    if (!desktopSidePanelLayout.passed) {
+      throw new Error('Desktop side-panel acceptance failed');
+    }
+    recordPhase(evidence, recorded, 'desktop-side-panel-layout');
+
     enterPhase('web-member-b-read');
     currentFailurePoint = 'web-b-authentication';
     webHttpRoute = { observedHttpRequests: 0, blockedHttpRequests: 0 };
@@ -846,9 +888,24 @@ test('Element Desktop room event journey', async ({ browser }) => {
     enterDesktopRefreshFailurePoint('desktop-refresh-rooms-list');
     await desktopElement.waitForRoomsList(60_000);
     completeDesktopRefreshFailurePoint('desktop-refresh-rooms-list');
-    enterDesktopRefreshFailurePoint('desktop-refresh-room-navigation');
+    const refreshRoomNavigationObservation =
+      await observeDesktopRefreshRoomNavigation(desktopPage, fixture.roomName);
+    enterDesktopRefreshFailurePoint('desktop-refresh-room-navigation', {
+      ...refreshRoomNavigationObservation,
+      clickAttempted: true,
+      clickCompleted: false,
+      elapsedBucket: 'not_completed',
+    });
+    const roomNavigationStartedAt = Date.now();
     await desktopElement.navigateToRoomOrInvitation(fixture.roomName);
-    completeDesktopRefreshFailurePoint('desktop-refresh-room-navigation');
+    completeDesktopRefreshFailurePoint('desktop-refresh-room-navigation', {
+      ...refreshRoomNavigationObservation,
+      clickAttempted: true,
+      clickCompleted: true,
+      elapsedBucket: desktopRefreshElapsedBucket(
+        Date.now() - roomNavigationStartedAt,
+      ),
+    });
     enterDesktopRefreshFailurePoint('desktop-refresh-room-id');
     if (desktopElement.getCurrentRoomId() !== fixture.teamRoomId) {
       throw new Error('Desktop refreshed into an unexpected room');
@@ -1959,6 +2016,229 @@ async function tabToEventButton(page: Page, eventButton: Locator) {
   throw new Error('Keyboard navigation did not reach the event');
 }
 
+async function observeDesktopKeyboardFocus(
+  page: Page,
+  frame: FrameLocator,
+  title: string,
+) {
+  const eventButton = frame
+    .getByRole('listitem', { name: title, exact: true })
+    .getByRole('button');
+  await eventButton.waitFor({ state: 'visible' });
+
+  let desktopEventFocused = false;
+  let desktopEventTabCount = 0;
+  while (!desktopEventFocused && desktopEventTabCount < 80) {
+    await page.keyboard.press('Tab');
+    desktopEventTabCount += 1;
+    desktopEventFocused = await eventButton
+      .evaluate((element) => element === element.ownerDocument.activeElement)
+      .catch(() => false);
+  }
+  if (desktopEventFocused) await page.keyboard.press('Enter');
+
+  const detailsDialog = frame.getByRole('dialog').last();
+  const detailsOpened = await detailsDialog
+    .waitFor({ state: 'visible', timeout: 8_000 })
+    .then(() => true)
+    .catch(() => false);
+  const editButton = detailsDialog.getByRole('button', {
+    name: 'Edit',
+    exact: true,
+  });
+  const deleteButton = detailsDialog.getByRole('button', {
+    name: 'Delete',
+    exact: true,
+  });
+  const closeButton = detailsDialog.getByRole('button', {
+    name: 'Close',
+    exact: true,
+  });
+
+  let desktopDetailsTabCount = 0;
+  let editActionFocused = await editButton
+    .evaluate((element) => element === element.ownerDocument.activeElement)
+    .catch(() => false);
+  while (!editActionFocused && detailsOpened && desktopDetailsTabCount < 12) {
+    await page.keyboard.press('Tab');
+    desktopDetailsTabCount += 1;
+    editActionFocused = await editButton
+      .evaluate((element) => element === element.ownerDocument.activeElement)
+      .catch(() => false);
+  }
+  const detailsTabReached =
+    detailsOpened &&
+    (await detailsDialog
+      .evaluate((dialog) => dialog.contains(dialog.ownerDocument.activeElement))
+      .catch(() => false));
+
+  let deleteActionFocused = false;
+  let closeActionFocused = false;
+  let escapeClosedDialog = false;
+  let focusReturnedToEvent = false;
+  if (editActionFocused) {
+    await page.keyboard.press('Tab');
+    desktopDetailsTabCount += 1;
+    deleteActionFocused = await deleteButton
+      .evaluate((element) => element === element.ownerDocument.activeElement)
+      .catch(() => false);
+    await page.keyboard.press('Tab');
+    desktopDetailsTabCount += 1;
+    closeActionFocused = await closeButton
+      .evaluate((element) => element === element.ownerDocument.activeElement)
+      .catch(() => false);
+    await page.keyboard.press('Escape');
+    escapeClosedDialog = await detailsDialog
+      .waitFor({ state: 'hidden', timeout: 5_000 })
+      .then(() => true)
+      .catch(() => false);
+    try {
+      await expect(eventButton).toBeFocused({ timeout: 5_000 });
+      focusReturnedToEvent = true;
+    } catch {
+      focusReturnedToEvent = false;
+    }
+  }
+
+  return {
+    passed:
+      desktopEventFocused &&
+      detailsOpened &&
+      detailsTabReached &&
+      editActionFocused &&
+      deleteActionFocused &&
+      closeActionFocused &&
+      escapeClosedDialog &&
+      focusReturnedToEvent,
+    desktopEventFocused,
+    detailsOpened,
+    detailsTabReached,
+    editActionFocused,
+    deleteActionFocused,
+    closeActionFocused,
+    escapeClosedDialog,
+    focusReturnedToEvent,
+    desktopEventTabCount,
+    desktopDetailsTabCount,
+  };
+}
+
+async function observeDesktopSidePanelLayout(
+  page: Page,
+  frame: FrameLocator,
+  eventDetailsReachable: boolean,
+) {
+  const widgetCard = page.locator('.mx_WidgetCard');
+  const widgetCardCount = Math.min(await widgetCard.count().catch(() => 0), 2);
+  const widgetCardVisible = await widgetCard
+    .first()
+    .isVisible()
+    .catch(() => false);
+  const appDrawer = page.locator('.mx_AppsDrawer');
+  const appDrawerCount = Math.min(await appDrawer.count().catch(() => 0), 2);
+  const desktopAppDrawerAbsent = !(await appDrawer
+    .first()
+    .isVisible()
+    .catch(() => false));
+  const iframe = page.locator('iframe[title="Matrix Calendar"]');
+  const persistedHostFramePresent =
+    (await iframe.count().catch(() => 0)) === 1 &&
+    (await iframe.isVisible().catch(() => false));
+  const iframeBox = await iframe.boundingBox().catch(() => null);
+  const configuredViewport = page.viewportSize();
+  const browserViewport =
+    configuredViewport === null
+      ? await page
+          .evaluate(() => ({
+            width: window.innerWidth,
+            height: window.innerHeight,
+          }))
+          .catch(() => null)
+      : null;
+  const viewport = resolveDesktopViewportSize(
+    configuredViewport,
+    browserViewport,
+  );
+  const hostNoHorizontalOverflow = await page
+    .evaluate(
+      () =>
+        document.documentElement.scrollWidth <=
+        document.documentElement.clientWidth,
+    )
+    .catch(() => false);
+  const widgetNoHorizontalOverflow = await frame
+    .locator('html')
+    .evaluate((element) => element.scrollWidth <= element.clientWidth)
+    .catch(() => false);
+  const createControlReachable = await frame
+    .getByRole('button', { name: 'Create event', exact: true })
+    .isVisible()
+    .catch(() => false);
+  const iframeWidth = iframeBox ? Math.round(iframeBox.width) : undefined;
+  const iframeHeight = iframeBox ? Math.round(iframeBox.height) : undefined;
+  const passed =
+    viewport !== null &&
+    viewport.width > 0 &&
+    viewport.height > 0 &&
+    widgetCardCount === 1 &&
+    widgetCardVisible &&
+    desktopAppDrawerAbsent &&
+    persistedHostFramePresent &&
+    iframeWidth !== undefined &&
+    iframeWidth > 0 &&
+    iframeHeight !== undefined &&
+    iframeHeight > 0 &&
+    createControlReachable &&
+    eventDetailsReachable &&
+    hostNoHorizontalOverflow &&
+    widgetNoHorizontalOverflow;
+
+  return {
+    passed,
+    desktopWidgetCardVisible: widgetCardVisible,
+    desktopCreateControlReachable: createControlReachable,
+    desktopEventDetailsReachable: eventDetailsReachable,
+    desktopHostNoHorizontalOverflow: hostNoHorizontalOverflow,
+    desktopWidgetNoHorizontalOverflow: widgetNoHorizontalOverflow,
+    desktopPersistedHostFramePresent: persistedHostFramePresent,
+    desktopAppDrawerAbsent,
+    ...(viewport
+      ? {
+          desktopViewportWidth: viewport.width,
+          desktopViewportHeight: viewport.height,
+        }
+      : {}),
+    ...(iframeWidth === undefined ? {} : { desktopIframeWidth: iframeWidth }),
+    ...(iframeHeight === undefined
+      ? {}
+      : { desktopIframeHeight: iframeHeight }),
+    desktopWidgetCardCount: widgetCardCount,
+    desktopAppDrawerCount: appDrawerCount,
+  };
+}
+
+function appendDesktopAccessibilityStage(
+  phase: 'g6-desktop-keyboard-focus' | 'g6-desktop-side-panel-layout',
+  observation: Record<string, boolean | number | undefined>,
+) {
+  const runnerTemp = requireAbsoluteEnvironment('RUNNER_TEMP');
+  const stageFile = requirePrivateRunnerPath(
+    'ELEMENT_ACCEPTANCE_STAGE_FILE',
+    runnerTemp,
+    'element-acceptance-stage.jsonl',
+  );
+  const { passed, ...fields } = observation;
+  appendFileSync(
+    stageFile,
+    `${JSON.stringify({
+      phase,
+      status: passed ? 'passed' : 'failed',
+      ...fields,
+    })}\n`,
+    { encoding: 'utf8', mode: 0o600 },
+  );
+}
+
 function matchesGatewayUrl(rawUrl: string, fixture: Fixture) {
   try {
     const url = new URL(rawUrl);
@@ -2519,6 +2799,7 @@ function safeRecordDesktopJourneyProgress(
   event: 'begin' | 'point' | 'complete',
   phase: 'desktop-a-refresh',
   failurePoint?: DesktopARefreshFailurePoint,
+  desktopRefreshRoomNavigationDiagnostic?: DesktopRefreshRoomNavigationDiagnostic,
 ) {
   const sourceSha = process.env.ELEMENT_DESKTOP_SOURCE_SHA;
   if (typeof sourceSha !== 'string') return false;
@@ -2529,10 +2810,63 @@ function safeRecordDesktopJourneyProgress(
       event,
       phase,
       ...(failurePoint === undefined ? {} : { failurePoint }),
+      ...(desktopRefreshRoomNavigationDiagnostic === undefined
+        ? {}
+        : { desktopRefreshRoomNavigationDiagnostic }),
     });
   } catch {
     return false;
   }
+}
+
+async function observeDesktopRefreshRoomNavigation(
+  page: Page,
+  roomName: string,
+): Promise<
+  Pick<
+    DesktopRefreshRoomNavigationDiagnostic,
+    'roomListItemCountCapped' | 'fixtureRoomTargetVisible'
+  >
+> {
+  let roomListItemCountCapped: 0 | 1 | 2 | null = null;
+  let fixtureRoomTargetVisible: boolean | null = null;
+  try {
+    const roomList = getMainRoomListLocator(page);
+    const roomItems = roomList
+      .getByRole('option')
+      .or(roomList.getByRole('row'))
+      .or(roomList.getByRole('treeitem'));
+    roomListItemCountCapped = Math.min(await roomItems.count(), 2) as 0 | 1 | 2;
+  } catch {
+    // Counts are immediate Playwright queries; unavailable remains null.
+  }
+  try {
+    const targets = await new ElementWebPage(page).observeRoomNavigationTargets(
+      roomName,
+    );
+    const observations = Object.values(targets);
+    fixtureRoomTargetVisible = observations.some(
+      (target) => target.visible === true,
+    )
+      ? true
+      : observations.every(
+            (target) => target.countCapped === 0 || target.visible === false,
+          )
+        ? false
+        : null;
+  } catch {
+    // Never include the fixture room name or Playwright error in evidence.
+  }
+  return { roomListItemCountCapped, fixtureRoomTargetVisible };
+}
+
+function desktopRefreshElapsedBucket(elapsedMs: number) {
+  if (!Number.isFinite(elapsedMs) || elapsedMs < 0) return 'unknown' as const;
+  if (elapsedMs < 1_000) return 'under_1s' as const;
+  if (elapsedMs < 5_000) return '1_to_5s' as const;
+  if (elapsedMs < 15_000) return '5_to_15s' as const;
+  if (elapsedMs < 30_000) return '15_to_30s' as const;
+  return '30s_or_more' as const;
 }
 
 function safeRecordPhase(
