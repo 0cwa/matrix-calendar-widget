@@ -279,6 +279,7 @@ const DESKTOP_REFRESH_ROOM_NAVIGATION_DIAGNOSTIC_KEYS = Object.freeze(
   ].sort(),
 );
 const DESKTOP_REFRESH_ROOM_NAVIGATION_ELAPSED_BUCKETS = new Set([
+  'not_started',
   'not_completed',
   'under_1s',
   '1_to_5s',
@@ -1081,6 +1082,7 @@ function validRoomNavigationClickProgress(value, failurePoint) {
 function validDesktopRefreshRoomNavigationDiagnostic(value, event) {
   const expectedStages = {
     point: ['target_observed'],
+    started: ['target_observed', 'click_started'],
     complete: ['target_observed', 'click_started', 'click_resolved'],
     failed: ['target_observed', 'click_started', 'click_failed'],
   }[event];
@@ -1092,13 +1094,17 @@ function validDesktopRefreshRoomNavigationDiagnostic(value, event) {
       DESKTOP_REFRESH_ROOM_NAVIGATION_DIAGNOSTIC_KEYS.join(',') &&
     [null, 0, 1, 2].includes(value.roomListItemCountCapped) &&
     [null, true, false].includes(value.fixtureRoomTargetVisible) &&
-    value.clickAttempted === true &&
+    value.clickAttempted === (event !== 'point') &&
     value.clickCompleted === (event === 'complete') &&
     (event === 'point'
-      ? value.elapsedBucket === 'not_completed'
-      : DESKTOP_REFRESH_ROOM_NAVIGATION_ELAPSED_BUCKETS.has(
-          value.elapsedBucket,
-        ) && value.elapsedBucket !== 'not_completed') &&
+      ? value.elapsedBucket === 'not_started'
+      : event === 'started'
+        ? value.elapsedBucket === 'not_completed'
+        : DESKTOP_REFRESH_ROOM_NAVIGATION_ELAPSED_BUCKETS.has(
+            value.elapsedBucket,
+          ) &&
+          value.elapsedBucket !== 'not_completed' &&
+          value.elapsedBucket !== 'not_started') &&
     Array.isArray(value.progressTimeline) &&
     value.progressTimeline.length === expectedStages?.length &&
     value.progressTimeline.every((sample, index) => {
@@ -1636,7 +1642,7 @@ function parseEvidence(input, expectedSourceSha = null) {
         desktopChildCompletionCount > 0 ||
         playwrightResultCount > 0 ||
         value.phase !== 'desktop-a-refresh' ||
-        !['begin', 'point', 'complete'].includes(value.event)
+        !['begin', 'point', 'started', 'complete'].includes(value.event)
       ) {
         invalidInput();
       }
@@ -1690,6 +1696,24 @@ function parseEvidence(input, expectedSourceSha = null) {
           phase: 'desktop-a-refresh',
           failurePoint: value.failurePoint,
         };
+      } else if (value.event === 'started') {
+        if (
+          desktopRefreshProgress?.failurePoint !==
+            'desktop-refresh-room-navigation' ||
+          value.failurePoint !== 'desktop-refresh-room-navigation' ||
+          !hasRefreshRoomNavigationDiagnostic ||
+          desktopRefreshProgressPointIndex !==
+            desktopRefreshCompletedPointIndex + 1 ||
+          desktopRefreshRoomNavigationDiagnostic?.clickAttempted !== false ||
+          !validDesktopRefreshRoomNavigationDiagnostic(
+            value.desktopRefreshRoomNavigationDiagnostic,
+            'started',
+          )
+        ) {
+          invalidInput();
+        }
+        desktopRefreshRoomNavigationDiagnostic =
+          value.desktopRefreshRoomNavigationDiagnostic;
       } else {
         if (
           desktopRefreshProgress === null ||
@@ -1700,10 +1724,10 @@ function parseEvidence(input, expectedSourceSha = null) {
         ) {
           invalidInput();
         }
-        desktopRefreshCompletedPointIndex = desktopRefreshProgressPointIndex;
         if (
           hasRefreshRoomNavigationDiagnostic &&
           (value.failurePoint !== 'desktop-refresh-room-navigation' ||
+            desktopRefreshRoomNavigationDiagnostic?.clickAttempted !== true ||
             !validDesktopRefreshRoomNavigationDiagnostic(
               value.desktopRefreshRoomNavigationDiagnostic,
               'complete',
@@ -1715,6 +1739,7 @@ function parseEvidence(input, expectedSourceSha = null) {
           desktopRefreshRoomNavigationDiagnostic =
             value.desktopRefreshRoomNavigationDiagnostic;
         }
+        desktopRefreshCompletedPointIndex = desktopRefreshProgressPointIndex;
         desktopRefreshProgress = {
           phase: 'desktop-a-refresh',
           failurePoint: null,
@@ -1837,6 +1862,7 @@ function parseEvidence(input, expectedSourceSha = null) {
           value.failurePoint !== 'desktop-refresh-room-navigation' ||
           desktopRefreshProgress?.failurePoint !==
             'desktop-refresh-room-navigation' ||
+          desktopRefreshRoomNavigationDiagnostic?.clickAttempted !== true ||
           !validDesktopRefreshRoomNavigationDiagnostic(
             value.desktopRefreshRoomNavigationDiagnostic,
             'failed',
@@ -2043,13 +2069,16 @@ export function appendDesktopJourneyProgress({
     typeof sourceSha !== 'string' ||
     !SOURCE_SHA_PATTERN.test(sourceSha) ||
     phase !== 'desktop-a-refresh' ||
-    !['begin', 'point', 'complete'].includes(event) ||
+    !['begin', 'point', 'started', 'complete'].includes(event) ||
     (event === 'begin' && failurePoint !== undefined) ||
+    (event === 'started' &&
+      (failurePoint !== 'desktop-refresh-room-navigation' ||
+        desktopRefreshRoomNavigationDiagnostic === undefined)) ||
     (event !== 'begin' &&
       !DESKTOP_A_REFRESH_FAILURE_POINT_SET.has(failurePoint)) ||
     (desktopRefreshRoomNavigationDiagnostic !== undefined &&
       (failurePoint !== 'desktop-refresh-room-navigation' ||
-        !['point', 'complete'].includes(event) ||
+        !['point', 'started', 'complete'].includes(event) ||
         !validDesktopRefreshRoomNavigationDiagnostic(
           desktopRefreshRoomNavigationDiagnostic,
           event,
@@ -2076,6 +2105,12 @@ export function appendDesktopJourneyProgress({
         DESKTOP_A_REFRESH_FAILURE_POINTS[
           parsed.desktopRefreshCompletedPointIndex + 1
         ] !== failurePoint)) ||
+    (event === 'started' &&
+      (parsed.desktopRefreshProgress?.failurePoint !== failurePoint ||
+        parsed.desktopRefreshProgressPointIndex !==
+          parsed.desktopRefreshCompletedPointIndex + 1 ||
+        parsed.desktopRefreshRoomNavigationDiagnostic?.clickAttempted !==
+          false)) ||
     (event === 'complete' &&
       (parsed.desktopRefreshProgress === null ||
         parsed.desktopRefreshProgress.failurePoint !== failurePoint ||
@@ -2431,7 +2466,7 @@ export function summarizeDesktopJourneyEvidence(
     childCompletedSuccessfully &&
     playwrightResult === 'passed';
   return {
-    schemaVersion: 16,
+    schemaVersion: 17,
     sourceSha,
     status: failed ? 'failed' : journeyEvidencePassed ? 'passed' : 'incomplete',
     desktopChildCompletion,

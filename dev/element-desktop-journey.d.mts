@@ -64,6 +64,7 @@ export type DesktopRefreshRoomNavigationDiagnostic = {
   clickAttempted: boolean;
   clickCompleted: boolean;
   elapsedBucket:
+    | 'not_started'
     | 'not_completed'
     | 'under_1s'
     | '1_to_5s'
@@ -394,7 +395,7 @@ export type DesktopJourneyFailureObservation =
   | null;
 
 export type DesktopJourneySummary = {
-  schemaVersion: 16;
+  schemaVersion: 17;
   sourceSha: string | null;
   status: 'passed' | 'failed' | 'incomplete';
   desktopChildCompletion: DesktopChildCompletion;
@@ -529,7 +530,7 @@ export declare function appendDesktopJourneyProgress(input: {
   filePath: string;
   runnerTemp: string;
   sourceSha: string;
-  event: 'begin' | 'point' | 'complete';
+  event: 'begin' | 'point' | 'started' | 'complete';
   phase: 'desktop-a-refresh';
   failurePoint?: DesktopARefreshFailurePoint;
   desktopRefreshRoomNavigationDiagnostic?: DesktopRefreshRoomNavigationDiagnostic;
