@@ -14,18 +14,22 @@
  * limitations under the License.
  */
 
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import i18next from 'i18next';
-import { MatrixClient, MatrixError, MessageEventContent } from 'matrix-bot-sdk';
+import { MatrixClient, MessageEventContent } from 'matrix-bot-sdk';
 import { AppRuntimeContext } from '../AppRuntimeContext';
 import { IAppConfiguration } from '../IAppConfiguration';
 import { ModuleProviderToken } from '../ModuleProviderToken';
-import { Matrix404Error } from '../error/Matrix404Error';
 import { TranslatableError } from '../error/TranslatableError';
 import { IRoomEvent } from '../matrix/event/IRoomEvent';
 import { StateEventName } from '../model/StateEventName';
 import { CalendarCommandService } from './CalendarCommandService';
 import { CalendarCommandTrafficLimiter } from './CalendarCommandTrafficLimiter';
+import type {
+  RoomCalendarSetupService,
+  RoomCalendarSetupStatus,
+} from './IRoomCalendarSetupService';
+import { isTrustedMatrixMissingStateError } from './MatrixRoomEncryptionState';
 import { WelcomeWorkflowService } from './WelcomeWorkflowService';
 
 const TRIGGER = '!meeting';
@@ -53,6 +57,9 @@ export class CommandService {
     appRuntimeContext: AppRuntimeContext,
     @Inject(CalendarCommandService)
     private readonly calendarCommandService: CalendarCommandService,
+    @Optional()
+    @Inject(ModuleProviderToken.ROOM_CALENDAR_SETUP_SERVICE)
+    private readonly roomCalendarSetupService?: RoomCalendarSetupService,
   ) {
     this.botUserId = appRuntimeContext.botUserId;
   }
@@ -187,6 +194,24 @@ export class CommandService {
       return;
     }
 
+    if (commandName === 'setup') {
+      if (extraArgs.length > 0) {
+        await this.replyCalendarError(roomId, event, 'badSyntax');
+        return;
+      }
+      if (!this.roomCalendarSetupService) {
+        await this.replyCalendarSetupStatus(roomId, event, 'unavailable');
+        return;
+      }
+
+      const result = await this.roomCalendarSetupService.setup({
+        roomId,
+        actorUserId: event.sender,
+      });
+      await this.replyCalendarSetupStatus(roomId, event, result.status);
+      return;
+    }
+
     const lng: string = await this.detectLocale(roomId);
     /*
      * IMPORTANT: These keys are translated by CalendarCommandService and are
@@ -314,6 +339,33 @@ export class CommandService {
     await this.sendCalendarReply(roomId, event, text);
   }
 
+  private async replyCalendarSetupStatus(
+    roomId: string,
+    event: IRoomEvent<MessageEventContent>,
+    status: RoomCalendarSetupStatus,
+  ): Promise<void> {
+    const lng = await this.detectLocale(roomId);
+    /*
+     * IMPORTANT: These bounded status keys are extracted by i18next-cli.
+     * t('calendarSetupStatus.created')
+     * t('calendarSetupStatus.already-ready')
+     * t('calendarSetupStatus.pending')
+     * t('calendarSetupStatus.widget-pending')
+     * t('calendarSetupStatus.disabled')
+     * t('calendarSetupStatus.not-authorized')
+     * t('calendarSetupStatus.unsupported-room')
+     * t('calendarSetupStatus.bot-not-ready')
+     * t('calendarSetupStatus.widget-power-required')
+     * t('calendarSetupStatus.capacity-reached')
+     * t('calendarSetupStatus.conflict')
+     * t('calendarSetupStatus.unavailable')
+     */
+    const text = i18next.t(`calendarSetupStatus.${status}`, {
+      lng,
+    }) as unknown as string;
+    await this.sendCalendarReply(roomId, event, text);
+  }
+
   private async sendCalendarReply(
     roomId: string,
     event: IRoomEvent<MessageEventContent>,
@@ -353,7 +405,7 @@ export class CommandService {
     } catch (error) {
       // Only the homeserver's exact not-found response proves this room has no
       // encryption state. Any other lookup failure is unknown and fails closed.
-      return isMissingEncryptionState(error);
+      return isTrustedMatrixMissingStateError(error);
     }
 
     if (
@@ -396,12 +448,4 @@ export class CommandService {
     // default
     return this.appConfig.welcome_workflow_default_locale;
   }
-}
-
-function isMissingEncryptionState(error: unknown): boolean {
-  const isExpectedMatrixError =
-    (error instanceof MatrixError || error instanceof Matrix404Error) &&
-    error.statusCode === 404 &&
-    error.errcode === 'M_NOT_FOUND';
-  return isExpectedMatrixError;
 }

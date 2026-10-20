@@ -103,5 +103,10 @@ function isValidPort(value: string | undefined): boolean {
   if (value === undefined) {
     return true;
   }
-  return /^[0-9]{1,5}$/.test(value);
+  if (!/^[0-9]{1,5}$/.test(value)) {
+    return false;
+  }
+
+  const port = Number(value);
+  return port >= 1 && port <= 65535;
 }

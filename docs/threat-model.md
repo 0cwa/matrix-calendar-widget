@@ -111,10 +111,12 @@ See
 ### Gateway to room-owned CalDAV
 
 Room-target operations check current actor membership, action-specific power,
-the exact configured room/calendar binding, and any requested calendar before
-creating appservice access. Read and write capabilities have independent
-default-off settings: `ROOM_CALENDAR_ACCESS_ENABLED` and
+the exact binding from the shared registry, and any requested calendar before
+creating the selected room-principal access. Read and write capabilities have
+independent default-off settings: `ROOM_CALENDAR_ACCESS_ENABLED` and
 `ROOM_CALENDAR_EVENT_WRITES_ENABLED`. The write flag cannot enable room reads.
+ADR043 adds default-off moderator setup; ready dynamic bindings use the same
+registry and do not bypass either access gate.
 The pinned Synapse/Radicale room contract exercises reads and event mutations,
 including cross-room and nonmember denial before proof or CalDAV I/O. See
 [CalendarGatewayController.ts](../matrix-calendar-server/src/controller/CalendarGatewayController.ts),
@@ -167,11 +169,13 @@ and power checks for each operation.
 
 ### Cross-room access through the service principal
 
-**Current control.** Before application-service proof or DAV I/O, the gateway
-checks the actor, membership, action power, exact `ROOM_CALENDAR_BINDINGS`
-entry, and requested calendar. The room access and write feature gates remain
-independently disabled by default. Pinned real-service contracts exercise
-allowed room access and negative cross-room attempts.
+**Current control.** Before selected-principal proof or DAV I/O, the gateway
+checks the actor, membership, action power, exact static or ready dynamic
+registry binding, and requested calendar. Setup has a separate default-off
+gate and must pass its actor, bot, room-state, and widget preconditions before
+binding-store or CalDAV work. The room access and write feature gates remain
+independently default-off. Pinned real-service contracts exercise allowed
+room access and negative cross-room attempts.
 
 **Residual risk and owner.** Radicale `owner_only` still grants the appservice
 principal whole-home access. Gateway binding checks are application-level

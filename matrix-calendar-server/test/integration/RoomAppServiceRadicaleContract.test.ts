@@ -31,24 +31,40 @@ import { appendFileSync } from 'node:fs';
 import { createServer, request as httpRequest } from 'node:http';
 import { AddressInfo } from 'node:net';
 import { resolve } from 'node:path';
+import postgres from 'postgres';
 import { AppRuntimeContext } from '../../src/AppRuntimeContext';
-import { IAppConfiguration } from '../../src/IAppConfiguration';
-import { ModuleProviderToken } from '../../src/ModuleProviderToken';
 import { CalDavEventClient } from '../../src/caldav/CalDavEventClient';
 import { MatrixOpenIdCalDavCredentialProviderFactory } from '../../src/caldav/MatrixOpenIdCalDavCredentialProviderFactory';
+import { WidgetClient } from '../../src/client/WidgetClient';
 import { CalendarGatewayController } from '../../src/controller/CalendarGatewayController';
+import { EventContentRenderer } from '../../src/EventContentRenderer';
 import { MatrixAuthGuard } from '../../src/guard/MatrixAuthGuard';
 import { MatrixRoomMembershipGuard } from '../../src/guard/MatrixRoomMembershipGuard';
+import { IAppConfiguration } from '../../src/IAppConfiguration';
 import { MatrixAuthMiddleware } from '../../src/middleware/MatrixAuthMiddleware';
+import type { RoomCalendarBindingRecord } from '../../src/model/IRoomCalendarBindingStore';
+import { StateEventName } from '../../src/model/StateEventName';
+import { WidgetType } from '../../src/model/WidgetType';
+import { ModuleProviderToken } from '../../src/ModuleProviderToken';
+import type { PostgresDatabaseTlsMode } from '../../src/reminder/ReminderDatabaseConnection';
+import { getPostgresDatabaseTlsOptions } from '../../src/reminder/ReminderDatabaseConnection';
 import {
   CalendarCommandService,
   CalendarCommandTranslation,
 } from '../../src/service/CalendarCommandService';
 import { ConfiguredRoomCalendarPrincipalIdentityProvider } from '../../src/service/ConfiguredRoomCalendarPrincipalIdentityProvider';
+import { DisabledRoomCalendarBindingStore } from '../../src/service/DisabledRoomCalendarBindingStore';
+import type { RoomCalendarBindingRegistry } from '../../src/service/IRoomCalendarBindingRegistry';
 import { MatrixCalendarAuthorizationFactory } from '../../src/service/MatrixCalendarAuthorization';
+import { PostgresRoomCalendarBindingStore } from '../../src/service/PostgresRoomCalendarBindingStore';
+import { RoomCalendarBindingRegistryAdapter } from '../../src/service/RoomCalendarBindingRegistryAdapter';
 import { RoomCalendarCalDavAccess } from '../../src/service/RoomCalendarCalDavAccess';
 import { RoomCalendarEventOperations } from '../../src/service/RoomCalendarEventOperations';
 import type { RoomCalendarPrincipalIdentityProvider } from '../../src/service/RoomCalendarPrincipalIdentity';
+import { MatrixRoomCalendarPrincipalOpenIdProofProvider } from '../../src/service/RoomCalendarPrincipalOpenIdProofProvider';
+import { RoomCalendarSetupCalDavProvisioner } from '../../src/service/RoomCalendarSetupCalDavProvisioner';
+import { MatrixRoomCalendarSetupService } from '../../src/service/RoomCalendarSetupService';
+import { RoomCalendarSetupWidgetInstaller } from '../../src/service/RoomCalendarSetupWidgetInstaller';
 import {
   MatrixApplicationServiceFixtureError,
   obtainMatrixApplicationServiceFixtureUserToken,
@@ -97,6 +113,137 @@ let roomPrincipalIdentityProvider:
   | undefined;
 let principalUserId = serviceUserId;
 let principalAccessToken = '';
+let normalBotClient: MatrixClient | undefined;
+let normalBotUserId = '';
+const bindingDatabaseUrl = process.env.MATRIX_CALENDAR_BINDING_DATABASE_URL;
+
+function bindingDatabaseTlsMode(
+  value: string | undefined,
+): PostgresDatabaseTlsMode {
+  if (value === undefined || value === 'verify-full') return 'verify-full';
+  if (value === 'trusted-private-network') return value;
+  throw new Error(
+    'MATRIX_CALENDAR_BINDING_DATABASE_TLS_MODE must be verify-full or trusted-private-network',
+  );
+}
+
+function bindingRecordsSnapshot(
+  records: readonly RoomCalendarBindingRecord[],
+): Array<{
+  roomId: string;
+  calendarId: string;
+  status: string;
+  createdBy: string;
+  createdAt: string;
+  readyAt: string | null;
+}> {
+  return records
+    .map((record) => ({
+      roomId: record.roomId,
+      calendarId: record.calendarId,
+      status: record.status,
+      createdBy: record.createdBy,
+      createdAt: record.createdAt.toISOString(),
+      readyAt: record.readyAt?.toISOString() ?? null,
+    }))
+    .sort((left, right) => left.roomId.localeCompare(right.roomId));
+}
+
+function widgetIdentitySnapshot(
+  state: readonly unknown[],
+): Array<[stateKey: string, sender: string | null, contentId: string | null]> {
+  return state
+    .filter(
+      (event): event is Record<string, unknown> =>
+        typeof event === 'object' && event !== null,
+    )
+    .filter(
+      (event) => event.type === StateEventName.IM_VECTOR_MODULAR_WIDGETS_EVENT,
+    )
+    .map((event): [string, string | null, string | null] => {
+      const content =
+        typeof event.content === 'object' && event.content !== null
+          ? (event.content as Record<string, unknown>)
+          : {};
+      return [
+        typeof event.state_key === 'string' ? event.state_key : '',
+        typeof event.sender === 'string' ? event.sender : null,
+        typeof content.id === 'string' ? content.id : null,
+      ];
+    })
+    .sort((left, right) =>
+      `${left[0]}\u0000${left[1] ?? ''}\u0000${left[2] ?? ''}`.localeCompare(
+        `${right[0]}\u0000${right[1] ?? ''}\u0000${right[2] ?? ''}`,
+      ),
+    );
+}
+
+function createBindingTestPostgresClient(): ReturnType<typeof postgres> {
+  if (!bindingDatabaseUrl) {
+    throw new Error('The isolated binding database URL is missing');
+  }
+  const options = {
+    ...getPostgresDatabaseTlsOptions(
+      bindingDatabaseTlsMode(
+        process.env.MATRIX_CALENDAR_BINDING_DATABASE_TLS_MODE,
+      ),
+      bindingDatabaseUrl,
+    ),
+    max: 3,
+    connect_timeout: 5,
+  } as unknown as Parameters<typeof postgres>[1];
+  return postgres(bindingDatabaseUrl, options);
+}
+
+async function requireIsolatedBindingTestDatabase(
+  sql: ReturnType<typeof postgres>,
+): Promise<void> {
+  const [database] = await sql<
+    {
+      name: string;
+      role: string;
+      owner: string;
+      is_superuser: boolean;
+      can_create_database: boolean;
+      can_create_role: boolean;
+      can_connect_current_database: boolean;
+      can_connect_postgres: boolean;
+      can_connect_template1: boolean;
+    }[]
+  >`
+    SELECT current_database() AS name,
+           current_user AS role,
+           pg_get_userbyid(database.datdba) AS owner,
+           current_role_row.rolsuper AS is_superuser,
+           current_role_row.rolcreatedb AS can_create_database,
+           current_role_row.rolcreaterole AS can_create_role,
+           has_database_privilege(current_user, current_database(), 'CONNECT') AS can_connect_current_database,
+           has_database_privilege(current_user, 'postgres', 'CONNECT') AS can_connect_postgres,
+           has_database_privilege(current_user, 'template1', 'CONNECT') AS can_connect_template1
+    FROM pg_database AS database
+    JOIN pg_roles AS current_role_row
+      ON current_role_row.rolname = current_user
+    WHERE database.datname = current_database()
+  `;
+  if (database.name !== 'matrix_calendar_binding_test') {
+    throw new Error(
+      'The room setup contract requires the isolated matrix_calendar_binding_test database',
+    );
+  }
+  if (
+    database.owner !== database.role ||
+    database.is_superuser ||
+    database.can_create_database ||
+    database.can_create_role ||
+    !database.can_connect_current_database ||
+    database.can_connect_postgres ||
+    database.can_connect_template1
+  ) {
+    throw new Error(
+      'The room setup contract requires a database-owning role without elevated PostgreSQL privileges',
+    );
+  }
+}
 
 let app: INestApplication;
 let actorAccessToken: string;
@@ -748,6 +895,24 @@ const matrixClient = {
       provide: ModuleProviderToken.ROOM_CALENDAR_PRINCIPAL_IDENTITY,
       useFactory: getRoomPrincipalIdentityProvider,
     },
+    {
+      provide:
+        ModuleProviderToken.ROOM_CALENDAR_PRINCIPAL_OPENID_PROOF_PROVIDER,
+      useFactory: () =>
+        new MatrixRoomCalendarPrincipalOpenIdProofProvider(
+          testConfiguration,
+          getRoomPrincipalIdentityProvider(),
+          (input, init) => globalThis.fetch(input, init),
+        ),
+    },
+    {
+      provide: ModuleProviderToken.ROOM_CALENDAR_BINDING_REGISTRY,
+      useFactory: () =>
+        new RoomCalendarBindingRegistryAdapter(
+          testConfiguration.room_calendar_bindings,
+          new DisabledRoomCalendarBindingStore(),
+        ),
+    },
     { provide: MatrixClient, useValue: matrixClient },
     MatrixCalendarAuthorizationFactory,
     MatrixOpenIdCalDavCredentialProviderFactory,
@@ -757,14 +922,15 @@ const matrixClient = {
     },
     {
       provide: RoomCalendarEventOperations,
-      useFactory: () =>
+      useFactory: (bindingRegistry: RoomCalendarBindingRegistry) =>
         new RoomCalendarEventOperations((input, init) => fetch(input, init), {
           eventWritesEnabled: true,
           maxResponseBytes: testConfiguration.caldav_max_event_response_bytes,
           radicaleBaseUrl,
-          roomCalendarBindings: testConfiguration.room_calendar_bindings,
+          bindingRegistry,
           principalIdentityProvider: getRoomPrincipalIdentityProvider(),
         }),
+      inject: [ModuleProviderToken.ROOM_CALENDAR_BINDING_REGISTRY],
     },
     {
       provide: CalendarCommandService,
@@ -773,18 +939,21 @@ const matrixClient = {
         authorizationFactory: MatrixCalendarAuthorizationFactory,
         access: RoomCalendarCalDavAccess,
         operations: RoomCalendarEventOperations,
+        bindingRegistry: RoomCalendarBindingRegistry,
       ) =>
         new CalendarCommandService(
           appConfig,
           authorizationFactory,
           access,
           operations,
+          bindingRegistry,
         ),
       inject: [
         ModuleProviderToken.APP_CONFIGURATION,
         MatrixCalendarAuthorizationFactory,
         ModuleProviderToken.ROOM_CALENDAR_CALDAV_ACCESS,
         RoomCalendarEventOperations,
+        ModuleProviderToken.ROOM_CALENDAR_BINDING_REGISTRY,
       ],
     },
     MatrixAuthMiddleware,
@@ -844,6 +1013,8 @@ describeContract(contractDescription, () => {
         homeserverUrl,
         testConfiguration.access_token,
       );
+      normalBotClient = principalClient;
+      normalBotUserId = principal.userId;
       const sdkIdentity = await inspectMatrixSdkWhoAmI(
         principalClient,
         principalUserId,
@@ -907,10 +1078,19 @@ describeContract(contractDescription, () => {
       { roomId: nonmemberRoomId, calendarId: nonmemberCalendarId },
     ];
 
+    const registry = new RoomCalendarBindingRegistryAdapter(
+      testConfiguration.room_calendar_bindings,
+      new DisabledRoomCalendarBindingStore(),
+    );
+    const proofProvider = new MatrixRoomCalendarPrincipalOpenIdProofProvider(
+      testConfiguration,
+      getRoomPrincipalIdentityProvider(),
+      nativeFetch,
+    );
     const access = new RoomCalendarCalDavAccess(
       testConfiguration,
-      undefined,
-      getRoomPrincipalIdentityProvider(),
+      registry,
+      proofProvider,
     );
     for (let index = 0; index < roomIds.length; index += 1) {
       markRoomAppServiceSetupStage(
@@ -1038,6 +1218,297 @@ describeContract(contractDescription, () => {
       return response;
     });
   });
+
+  it('sets up a moderator room with durable binding, widget, and dynamic event access', async () => {
+    if (roomPrincipalMode !== 'bot-account') return;
+    if (!bindingDatabaseUrl || !normalBotClient || !normalBotUserId) {
+      throw new Error('Normal bot setup acceptance fixture is incomplete');
+    }
+
+    const setupConfiguration = {
+      ...testConfiguration,
+      room_calendar_setup_enabled: true,
+      room_calendar_setup_allowed_actor_server_names: [matrixServerName],
+      meetingwidget_url:
+        'https://widget.example.test/calendar#/?meetings_bot_base_url=https://api.example.test/v1&theme=dark',
+      meetingwidget_name: 'Calendar',
+    } as IAppConfiguration;
+    const sql = createBindingTestPostgresClient();
+    let freshSql: ReturnType<typeof postgres> | undefined;
+    try {
+      await requireIsolatedBindingTestDatabase(sql);
+      const bindingStore = new PostgresRoomCalendarBindingStore(sql);
+      await bindingStore.migrate();
+      const registry = new RoomCalendarBindingRegistryAdapter([], bindingStore);
+      const authorization = new MatrixCalendarAuthorizationFactory(
+        normalBotClient,
+      );
+      const proofProvider = new MatrixRoomCalendarPrincipalOpenIdProofProvider(
+        setupConfiguration,
+        getRoomPrincipalIdentityProvider(),
+        globalThis.fetch,
+      );
+      const renderer = new EventContentRenderer(setupConfiguration);
+      const widgetClient = new WidgetClient(
+        normalBotClient,
+        setupConfiguration,
+        renderer,
+        {
+          stateEvents: [],
+          roomEvents: [],
+          widgetContents: [],
+          allWidgetIds: [],
+          defaultWidgetIds: [],
+        },
+      );
+      const widgetInstaller = new RoomCalendarSetupWidgetInstaller(
+        normalBotClient,
+        widgetClient,
+        setupConfiguration.meetingwidget_url,
+      );
+      const setupService = new MatrixRoomCalendarSetupService(
+        {
+          enabled: true,
+          staticBindings: [],
+          allowedActorServerNames: [matrixServerName],
+        },
+        authorization,
+        normalBotClient,
+        normalBotUserId,
+        registry,
+        bindingStore,
+        new RoomCalendarSetupCalDavProvisioner(
+          radicaleBaseUrl,
+          proofProvider,
+          globalThis.fetch,
+        ),
+        widgetInstaller,
+      );
+      const actorUserId = await matrixUserIdForAccessToken(actorAccessToken);
+      const roomId = await createRoom(
+        'Moderator room setup acceptance',
+        actorAccessToken,
+      );
+      await matrixJson(
+        `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/invite`,
+        {
+          method: 'POST',
+          token: actorAccessToken,
+          body: { user_id: normalBotUserId },
+        },
+      );
+      await normalBotClient.joinRoom(roomId);
+      await matrixJson(
+        `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/m.room.power_levels/`,
+        {
+          method: 'PUT',
+          token: actorAccessToken,
+          body: {
+            users: { [actorUserId]: 100, [normalBotUserId]: 0 },
+            users_default: 0,
+            state_default: 50,
+            events_default: 0,
+            events: { [StateEventName.IM_VECTOR_MODULAR_WIDGETS_EVENT]: 0 },
+          },
+        },
+      );
+
+      const created = await setupService.setup({ roomId, actorUserId });
+      expect(created.status).toBe('created');
+      const records = await bindingStore.listAll();
+      expect(records).toHaveLength(1);
+      expect(records[0]).toMatchObject({ roomId, status: 'ready' });
+      const bindingSnapshotAfterCreation = bindingRecordsSnapshot(records);
+      const calendarId = records[0].calendarId;
+      const roomStateAfterCreation = await normalBotClient.getRoomState(roomId);
+      const widgetSnapshotAfterCreation = widgetIdentitySnapshot(
+        roomStateAfterCreation,
+      );
+      expect(widgetSnapshotAfterCreation).toEqual([
+        [
+          `calendar-widget-${calendarId}`,
+          normalBotUserId,
+          `calendar-widget-${calendarId}`,
+        ],
+      ]);
+      const widgetEvents = roomStateAfterCreation.filter(
+        (event) =>
+          event.type === StateEventName.IM_VECTOR_MODULAR_WIDGETS_EVENT &&
+          event.state_key === `calendar-widget-${calendarId}`,
+      );
+      expect(widgetEvents).toHaveLength(1);
+      expect(widgetEvents[0].content).toMatchObject({
+        id: `calendar-widget-${calendarId}`,
+        type: WidgetType.MEETINGS,
+      });
+      const selected = await new RoomCalendarCalDavAccess(
+        setupConfiguration,
+        registry,
+        proofProvider,
+      ).forAuthorizedTarget(
+        { roomId, calendarId, principal: { kind: 'service' } },
+        'read',
+      );
+      const discovery = await nativeFetch(selected.calendarUrl, {
+        method: 'PROPFIND',
+        headers: {
+          Depth: '0',
+          ...(await new MatrixOpenIdCalDavCredentialProviderFactory()
+            .forPrincipal(selected.userId, selected.credential)
+            .getRequestHeaders()),
+        },
+      });
+      expect(discovery.status).toBe(207);
+
+      freshSql = createBindingTestPostgresClient();
+      await requireIsolatedBindingTestDatabase(freshSql);
+      const freshStore = new PostgresRoomCalendarBindingStore(freshSql);
+      const freshRegistry = new RoomCalendarBindingRegistryAdapter(
+        [],
+        freshStore,
+      );
+      const resolved = await freshRegistry.resolve(roomId);
+      expect(resolved).toEqual({ roomId, calendarId });
+      const freshAccess = new RoomCalendarCalDavAccess(
+        setupConfiguration,
+        freshRegistry,
+        proofProvider,
+      );
+      const freshPrincipal = await freshAccess.forAuthorizedTarget(
+        { roomId, calendarId, principal: { kind: 'service' } },
+        'write',
+      );
+      const operations = new RoomCalendarEventOperations(nativeFetch, {
+        eventWritesEnabled: true,
+        maxResponseBytes: setupConfiguration.caldav_max_event_response_bytes,
+        radicaleBaseUrl,
+        bindingRegistry: freshRegistry,
+        principalIdentityProvider: getRoomPrincipalIdentityProvider(),
+      });
+      const event = await operations.createEvent(
+        {
+          target: { roomId, calendarId, principal: { kind: 'service' } },
+          servicePrincipal: freshPrincipal,
+        },
+        {
+          uid: `moderator-setup-${randomUUID()}@example.test`,
+          title: 'Dynamic setup event',
+          timing: {
+            type: 'timed',
+            start: {
+              type: 'zoned',
+              local: '2026-10-21T10:00',
+              timezone: 'UTC',
+            },
+            end: { type: 'zoned', local: '2026-10-21T11:00', timezone: 'UTC' },
+          },
+        },
+      );
+      const eventAccess = {
+        target: { roomId, calendarId, principal: { kind: 'service' as const } },
+        servicePrincipal: freshPrincipal,
+      };
+      expect(
+        (await operations.getEvent(eventAccess, event.event.id)).event.title,
+      ).toBe('Dynamic setup event');
+      const updated = await operations.updateEvent(
+        eventAccess,
+        event.event.id,
+        event.etag,
+        { title: 'Updated dynamic setup event' },
+      );
+      expect(updated.event.title).toBe('Updated dynamic setup event');
+      await operations.deleteEvent(eventAccess, event.event.id, updated.etag);
+
+      const bindingSnapshotBeforeRetry = bindingRecordsSnapshot(
+        await bindingStore.listAll(),
+      );
+      const widgetSnapshotBeforeRetry = widgetIdentitySnapshot(
+        await normalBotClient.getRoomState(roomId),
+      );
+      const repeated = await setupService.setup({ roomId, actorUserId });
+      expect(repeated.status).toBe('already-ready');
+      expect(bindingRecordsSnapshot(await bindingStore.listAll())).toEqual(
+        bindingSnapshotBeforeRetry,
+      );
+      expect(bindingSnapshotBeforeRetry).toEqual(bindingSnapshotAfterCreation);
+      expect(
+        widgetIdentitySnapshot(await normalBotClient.getRoomState(roomId)),
+      ).toEqual(widgetSnapshotBeforeRetry);
+      expect(widgetSnapshotBeforeRetry).toEqual(widgetSnapshotAfterCreation);
+
+      const { userId: outsiderId, accessToken: outsiderToken } =
+        await registerNormalBotAccount();
+      const outsiderClient = new MatrixClient(homeserverUrl, outsiderToken);
+      const deniedRoom = await createRoom(
+        'Non-manager room setup denial',
+        actorAccessToken,
+      );
+      await matrixJson(
+        `/_matrix/client/v3/rooms/${encodeURIComponent(deniedRoom)}/invite`,
+        {
+          method: 'POST',
+          token: actorAccessToken,
+          body: { user_id: normalBotUserId },
+        },
+      );
+      await normalBotClient.joinRoom(deniedRoom);
+      await matrixJson(
+        `/_matrix/client/v3/rooms/${encodeURIComponent(deniedRoom)}/invite`,
+        {
+          method: 'POST',
+          token: actorAccessToken,
+          body: { user_id: outsiderId },
+        },
+      );
+      await outsiderClient.joinRoom(deniedRoom);
+      await matrixJson(
+        `/_matrix/client/v3/rooms/${encodeURIComponent(deniedRoom)}/state/m.room.power_levels/`,
+        {
+          method: 'PUT',
+          token: actorAccessToken,
+          body: {
+            users: {
+              [actorUserId]: 100,
+              [normalBotUserId]: 0,
+              [outsiderId]: 0,
+            },
+            users_default: 0,
+            state_default: 50,
+            events_default: 0,
+            events: { [StateEventName.IM_VECTOR_MODULAR_WIDGETS_EVENT]: 0 },
+          },
+        },
+      );
+      const openIdCountBeforeDenial = principalOpenIdRequests.length;
+      const calDavCountBeforeDenial = activeCalDavRequests?.length ?? 0;
+      const bindingSnapshotBeforeDenial = bindingRecordsSnapshot(
+        await bindingStore.listAll(),
+      );
+      const widgetSnapshotBeforeDenial = widgetIdentitySnapshot(
+        await normalBotClient.getRoomState(deniedRoom),
+      );
+      const denial = await setupService.setup({
+        roomId: deniedRoom,
+        actorUserId: outsiderId,
+      });
+      expect(denial.status).toBe('not-authorized');
+      expect(bindingRecordsSnapshot(await bindingStore.listAll())).toEqual(
+        bindingSnapshotBeforeDenial,
+      );
+      expect(
+        widgetIdentitySnapshot(await normalBotClient.getRoomState(deniedRoom)),
+      ).toEqual(widgetSnapshotBeforeDenial);
+      expect(widgetSnapshotBeforeDenial).toEqual([]);
+      expect(principalOpenIdRequests).toHaveLength(openIdCountBeforeDenial);
+      expect(activeCalDavRequests?.length ?? 0).toBe(calDavCountBeforeDenial);
+    } finally {
+      await Promise.all([
+        sql.end({ timeout: 5 }),
+        ...(freshSql ? [freshSql.end({ timeout: 5 })] : []),
+      ]);
+    }
+  }, 120000);
 
   afterAll(async () => {
     markRoomAppServiceTeardownStage('started');

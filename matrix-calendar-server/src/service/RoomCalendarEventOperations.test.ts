@@ -22,6 +22,8 @@ import type {
 import fs from 'fs';
 import path from 'path';
 import { ICalendarEventCodec } from '../caldav';
+import type { RoomCalendarBindingRegistry } from './IRoomCalendarBindingRegistry';
+import { resolveRoomCalendarBinding } from './RoomCalendarBindingResolver';
 import {
   AuthorizedRoomCalendarEventAccess,
   RoomCalendarEventOperationError,
@@ -32,6 +34,15 @@ import {
 const calendarId = 'room-calendar';
 const roomId = '!team:example.test';
 const roomCalendarBindings = [{ roomId, calendarId }];
+const bindingRegistry: RoomCalendarBindingRegistry = {
+  getSnapshot: async () => roomCalendarBindings,
+  resolve: async (requestedRoomId, requestedCalendarId) =>
+    resolveRoomCalendarBinding(
+      roomCalendarBindings,
+      requestedRoomId,
+      requestedCalendarId,
+    ),
+};
 const collectionUrl =
   'https://radicale.example.test/caldav/_matrix_calendar_service/room-calendar/';
 const serviceUserId = '@_matrix_calendar_service:example.test';
@@ -91,7 +102,7 @@ describe('RoomCalendarEventOperations', () => {
     operations = new RoomCalendarEventOperations(fetchMock, {
       eventWritesEnabled: true,
       radicaleBaseUrl: 'https://radicale.example.test/caldav/',
-      roomCalendarBindings,
+      bindingRegistry,
       principalIdentityProvider,
     });
   });
@@ -137,7 +148,7 @@ describe('RoomCalendarEventOperations', () => {
       'https://radicale.example.test/caldav/calendar_bot/room-calendar/';
     const botOperations = new RoomCalendarEventOperations(fetchMock, {
       radicaleBaseUrl: 'https://radicale.example.test/caldav/',
-      roomCalendarBindings,
+      bindingRegistry,
       principalIdentityProvider: { resolve: async () => botIdentity },
     });
     fetchMock.mockResolvedValueOnce(
@@ -193,7 +204,7 @@ describe('RoomCalendarEventOperations', () => {
     const cappedOperations = new RoomCalendarEventOperations(fetchMock, {
       maxResponseBytes: 32,
       radicaleBaseUrl: 'https://radicale.example.test/caldav/',
-      roomCalendarBindings,
+      bindingRegistry,
       principalIdentityProvider,
     });
     fetchMock.mockResolvedValueOnce(
@@ -289,7 +300,7 @@ describe('RoomCalendarEventOperations', () => {
     });
     const botOperations = new RoomCalendarEventOperations(fetchMock, {
       radicaleBaseUrl: 'https://radicale.example.test/caldav/',
-      roomCalendarBindings,
+      bindingRegistry,
       principalIdentityProvider: {
         resolve: async () => botIdentity,
       },
@@ -355,7 +366,7 @@ describe('RoomCalendarEventOperations', () => {
       };
       const constrainedOperations = new RoomCalendarEventOperations(fetchMock, {
         radicaleBaseUrl,
-        roomCalendarBindings,
+        bindingRegistry,
         principalIdentityProvider,
       });
 
@@ -475,7 +486,7 @@ describe('RoomCalendarEventOperations', () => {
     const disabledOperations = new RoomCalendarEventOperations(fetchMock, {
       eventWritesEnabled: false,
       radicaleBaseUrl: 'https://radicale.example.test/caldav/',
-      roomCalendarBindings,
+      bindingRegistry,
       principalIdentityProvider,
     });
 
@@ -830,7 +841,7 @@ describe('RoomCalendarEventOperations', () => {
       eventWritesEnabled: true,
       maxResponseBytes: byteLength + 64,
       radicaleBaseUrl: 'https://radicale.example.test/caldav/',
-      roomCalendarBindings,
+      bindingRegistry,
       principalIdentityProvider,
     });
     fetchMock.mockResolvedValueOnce(
