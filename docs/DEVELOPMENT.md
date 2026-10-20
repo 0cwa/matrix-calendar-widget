@@ -2,7 +2,7 @@
 
 ## Toolchain
 
-- Node.js: 22 recommended; inherited packages currently declare `>=20`.
+- Node.js: >=22.12.0 for the full-workspace development install and test toolchain. The server production runtime minimum remains `>=20`.
 - Package manager: Yarn 1.22.x.
 - TypeScript monorepo using Yarn workspaces.
 - Widget: React + Vite + Matrix Widget Toolkit + MUI + FullCalendar.
