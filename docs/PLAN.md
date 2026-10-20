@@ -622,12 +622,15 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       pass; backend, identity/authentication, room authorization, and CalDAV
       contracts remain mandatory in both modes. This scope does not authorize
       publication or broader rollout.
-  - [ ] Complete the separate source-bound keyboard/focus accessibility path
-        required by the beta scope: keyboard event open/details/Escape/focus
-        return in each target client. The release ledger records this gate as
-        blocked because the frozen-candidate public evidence does not identify a
-        separate result. Earlier client or synthetic fixture checks do not
-        substitute for this candidate-bound gate.
+  - [ ] Complete full exact-source client acceptance for the selected candidate.
+        The Desktop keyboard/focus and side-panel sub-gates passed on app tree
+        `99d4c9f` in [run 39345412924](https://github.com/0cwa/matrix-calendar-widget/actions/runs/39345412924),
+        using harness branch `5f0a900`; that run later failed normal-bot cleanup
+        (`process_snapshot_changed`) and Element appservice room readiness
+        (`element-room-heading-not-present`). PR #331 separately passed the
+        Desktop harness on current main, but its app source differs from the
+        frozen candidate. Web keyboard/focus and a successful full candidate run
+        remain required; see [the release ledger](./RELEASE.md).
   - [x] Add current calendar grid/list/details keyboard, focus, accessible-name,
         and axe regressions. Hosted browser fixture checks pass; actual client
         embedding remains unverified; see `docs/calendar-client-validation.md`.
@@ -911,8 +914,14 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       [docs/RELEASE.md](./RELEASE.md). This completes application-source
       acceptance for that frozen candidate; it does not qualify later `main`
       commits or establish target deployment acceptance. The separate
-      keyboard/focus accessibility gate remains blocked as recorded in the
-      release ledger. Full appservice-mode browser certification remains
+      harness branch `5f0a900` records Desktop keyboard/focus and side-panel
+      sub-gates passing on the frozen app tree, but that full run later failed
+      normal-bot cleanup (`process_snapshot_changed`) and Element appservice room
+      readiness (`element-room-heading-not-present`). PR #331 separately records
+      14 Desktop cases passing on current main, whose app source differs from the
+      frozen candidate. Web keyboard/focus and successful full candidate
+      acceptance remain outstanding, so the candidate gate remains blocked as
+      recorded in the release ledger. Full appservice-mode browser certification remains
       deferred after beta; backend, identity/authentication, authorization, and
       CalDAV contracts remain required in both modes.
 - [ ] Complete private operator readiness for the selected deployment before
