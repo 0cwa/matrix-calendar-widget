@@ -29,6 +29,7 @@ import {
   appendDesktopJourneyProgress,
   appendDesktopLoginStep,
   appendDesktopPlaywrightResult,
+  appendDesktopUncaughtError,
   appendDesktopRefreshFailureWithFallback,
   classifyDesktopJourneyErrorClass,
   classifyDesktopJourneyEvidence,
@@ -407,7 +408,7 @@ test('keeps journey evidence within finite phases and statuses', () => {
     });
 
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 18);
+    assert.equal(summary.schemaVersion, 19);
     assert.equal(summary.status, 'incomplete');
     assert.equal(summary.loginStep, 'complete');
     assert.equal(summary.loginEntry, 'password_form_present');
@@ -486,7 +487,7 @@ test('records only the source-bound Playwright result and child completion', () 
       runnerTemp,
       expectedSourceSha: sourceSha,
     });
-    assert.equal(summary.schemaVersion, 18);
+    assert.equal(summary.schemaVersion, 19);
     assert.equal(summary.sourceSha, sourceSha);
     assert.equal(summary.status, 'incomplete');
     assert.equal(summary.playwrightResult, 'timed_out');
@@ -866,7 +867,7 @@ test('reports bounded Desktop accessibility failure phases', () => {
       });
 
       const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-      assert.equal(summary.schemaVersion, 18);
+      assert.equal(summary.schemaVersion, 19);
       assert.equal(summary.cases[phase], 'failed');
       assert.deepEqual(summary.failurePoint, { phase, point: failurePoint });
       assert.equal(summary.status, 'failed');
@@ -952,7 +953,7 @@ test('records closed Desktop create observations without event or URL data', () 
       /private room|private title|private-event-id|response body|request URL/u,
     );
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 18);
+    assert.equal(summary.schemaVersion, 19);
     assert.deepEqual(summary.failurePoint, {
       phase: 'desktop-event-create',
       point: 'event-create-exact-row-visible',
@@ -1092,7 +1093,7 @@ test('records room-navigation evidence only at its closed failure boundary', () 
       roomNavigationDiagnostic: diagnostic,
     });
     const summary = readDesktopJourneyEvidence({ filePath, runnerTemp });
-    assert.equal(summary.schemaVersion, 18);
+    assert.equal(summary.schemaVersion, 19);
     assert.deepEqual(summary.roomNavigationDiagnostic, diagnostic);
     assert.equal(summary.roomsReadyDiagnostic, null);
     assert.deepEqual(
@@ -1959,7 +1960,7 @@ test('requires ordered Desktop refresh progress before a complete pass', () => {
       runnerTemp,
       expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
     });
-    assert.equal(summary.schemaVersion, 18);
+    assert.equal(summary.schemaVersion, 19);
     assert.equal(summary.status, 'passed');
     assert.equal(summary.cases['desktop-a-refresh'], 'passed');
     assert.equal(summary.failureObservation, null);
@@ -1967,6 +1968,84 @@ test('requires ordered Desktop refresh progress before a complete pass', () => {
       readFileSync(filePath, 'utf8'),
       /private error|PRIVATE_TOKEN_SENTINEL/u,
     );
+  });
+});
+
+test('reports uncaught Desktop refresh exceptions with fixed classifications', () => {
+  withTempDirectory((runnerTemp) => {
+    const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
+    initializeDesktopJourneyEvidence({ filePath, runnerTemp });
+    appendDesktopRefreshPrefix(filePath, runnerTemp);
+    appendDesktopRefreshBegin(filePath, runnerTemp);
+    const failurePoint = 'desktop-refresh-room-navigation';
+    for (const point of DESKTOP_A_REFRESH_FAILURE_POINTS.slice(
+      0,
+      DESKTOP_A_REFRESH_FAILURE_POINTS.indexOf(failurePoint),
+    )) {
+      appendDesktopRefreshPoint(filePath, runnerTemp, point);
+      appendDesktopRefreshComplete(filePath, runnerTemp, point);
+    }
+    appendDesktopRefreshPoint(filePath, runnerTemp, failurePoint);
+    appendDesktopUncaughtError({
+      filePath,
+      runnerTemp,
+      sourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+      errorClass: classifyDesktopJourneyErrorClass(
+        new Error('private room id, URL, and stack'),
+      ),
+    });
+
+    const previousEnvironment = {
+      stageFile: process.env.ELEMENT_DESKTOP_JOURNEY_STAGE_FILE,
+      runnerTemp: process.env.RUNNER_TEMP,
+      sourceSha: process.env.ELEMENT_DESKTOP_SOURCE_SHA,
+    };
+    process.env.ELEMENT_DESKTOP_JOURNEY_STAGE_FILE = filePath;
+    process.env.RUNNER_TEMP = runnerTemp;
+    process.env.ELEMENT_DESKTOP_SOURCE_SHA = DESKTOP_REFRESH_SOURCE_SHA;
+    try {
+      new ElementDesktopAcceptanceResultReporter().onEnd({
+        status: 'failed',
+        errors: [{ message: 'private Playwright error' }],
+        title: 'private test title',
+        attachments: [{ body: 'private attachment' }],
+      });
+    } finally {
+      for (const [key, value] of Object.entries({
+        ELEMENT_DESKTOP_JOURNEY_STAGE_FILE: previousEnvironment.stageFile,
+        RUNNER_TEMP: previousEnvironment.runnerTemp,
+        ELEMENT_DESKTOP_SOURCE_SHA: previousEnvironment.sourceSha,
+      })) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+    appendDesktopChildCompletion({
+      filePath,
+      runnerTemp,
+      sourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+      completion: { outcome: 'exited', exitStatus: 1, timedOut: false },
+    });
+
+    const raw = readFileSync(filePath, 'utf8');
+    assert.doesNotMatch(
+      raw,
+      /private room id|URL|stack|private Playwright error|private test title|private attachment/u,
+    );
+    const summary = readDesktopJourneyEvidence({
+      filePath,
+      runnerTemp,
+      expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+    });
+    assert.equal(summary.schemaVersion, 19);
+    assert.equal(summary.status, 'incomplete');
+    assert.equal(summary.playwrightResult, 'failed');
+    assert.deepEqual(summary.failureObservation, {
+      kind: 'unexpected-child-exit',
+      phase: 'desktop-a-refresh',
+      failurePoint,
+      errorClass: 'runtime',
+    });
   });
 });
 
