@@ -15,17 +15,28 @@ See the [dated continuation](handoff/2026-10-06/README.md) and
 
 For the owner-approved bounded pilot, the required browser profile is full Element Web/Desktop acceptance in `bot-account` mode with the existing strict 0/25-event ordinary-load limits. Full appservice-mode browser certification remains deferred after beta, although both modes passed on this candidate. Backend, identity/authentication, authorization, and CalDAV contract tests remain mandatory in both modes, and `appservice` remains the default mode. Scoped pilot authority is recorded privately; this is not broader rollout or publication authority.
 
-User feedback has opened a follow-up for room setup discovery across multiple
-rooms and clearer command-fallback acceptance. The current integration
-worktree adds an empty-room setup message, bot guidance for room principals and
-reply prerequisites, and handling for the proxied Matrix 404 that indicates an
-unencrypted room. Focused tests on this working tree pass: 16 calendar-surface
-widget tests and 32 command-service tests, including the Matrix client proxy
-path. Full repository CI, independent review, and configured-room Element
-acceptance remain pending. The feedback follow-up preserves server-side
-membership, power, binding, and encryption checks and leaves room capabilities
-behind their existing default-off gates. These changes are outside the frozen
-application candidate above and require fresh source qualification.
+User feedback opened a follow-up for room setup discovery across multiple
+rooms and clearer command-fallback acceptance. Accepted ADR043 and the current
+integration worktree add exact, no-argument `!calendar setup` behind its own
+default-off gate, a setup-only Matrix server allowlist, bot membership/power
+and encryption preconditions, durable dynamic bindings in a dedicated
+app-owned PostgreSQL store, exact CalDAV collection reconciliation, and widget
+installation. The same asynchronous registry now serves gateway reads,
+commands, event operations, and reminder paths; existing room access, event
+write, and reminder gates remain independent. Earlier focused checks passed 16
+calendar-surface widget tests and 32 command-service tests for empty-room
+guidance and the Matrix proxy-404 path. The binding store, registry, and
+configuration suites passed 50 tests before the final setup/consumer
+integration. Bounded in-band validation now passes the CalDAV-access tests, the
+setup, command, authorization, and configuration suites, and the gateway,
+event, and reminder unit suites. The scheduler cancellation test waits for
+identity resolution to start before aborting; its focused scheduler rerun
+passed. The dedicated PostgreSQL binding contract passed six tests on its
+recorded source hashes; a rerun against this final integrated tree remains
+pending. Full CI, real Synapse/Radicale contracts, independent review, and
+configured-room Element acceptance also remain pending. These changes are
+outside the frozen application candidate above and require fresh source
+qualification.
 
 ### Frozen application candidate and operator gate
 

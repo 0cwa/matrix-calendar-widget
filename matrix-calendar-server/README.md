@@ -5,6 +5,7 @@ The Matrix Calendar widget is the primary calendar interface. This server provid
 ## Calendar-only pilot behavior
 
 - Use `!calendar help` for the supported bot command fallback. Room-calendar commands remain subject to the configured room binding, access, and write gates.
+- When the operator enables `ROOM_CALENDAR_SETUP_ENABLED`, an eligible room member can use the exact no-argument `!calendar setup` command. Setup also requires the configured binding store for new rooms, a confirmed unencrypted room, bot membership and widget-state power, and a usable widget URL. See [the setup guide](../docs/bot-calendar.md).
 - The inherited `/v1/meeting/*` HTTP routes and Matrix meeting RPC handlers are disabled for the pilot.
 - `!meeting setup` is disabled because the legacy welcome-room marker cannot authorize widget writes to another room. The legacy `!meeting` workflow is off by default (`ENABLE_WELCOME_WORKFLOW=false`).
 - Legacy private help-room creation and RPC error-room notifications are off by default. The existing `ENABLE_WELCOME_WORKFLOW` and `ENABLE_PRIVATE_ROOM_ERROR_SENDING` variables are explicit compatibility opt-ins; `!calendar` remains available when the welcome workflow is off.
