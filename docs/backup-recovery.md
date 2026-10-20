@@ -358,6 +358,12 @@ when the reminder database is not configured. The private libpq service named
 by `PG_SERVICE` must resolve the database connection without putting a URL or
 password in this shell, command line, or log:
 
+The binding and reminder stores may share one PostgreSQL database. In that
+case, this whole-database dump includes both owned schemas. If
+`MATRIX_CALENDAR_BINDING_DATABASE_URL` points to a different database, the
+current reminder dump does not include it; arrange a separate protected dump
+and restore procedure for that database before relying on dynamic bindings.
+
 ```bash
 case "$REMINDER_DB_BACKUP_ENABLED" in
   true)
