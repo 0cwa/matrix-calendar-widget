@@ -69,6 +69,7 @@ import {
   type DesktopLoginFormObservation,
   type DesktopLoginStep,
   type DesktopRefreshRoomNavigationDiagnostic,
+  type DesktopRoomNavigationClickProgress,
   type DesktopRoomNavigationDiagnostic,
   type DesktopRoomsReadyDiagnostic,
   type DesktopRoomsReadyElementObservation,
@@ -475,6 +476,9 @@ test('Element Desktop room event journey', async ({ browser }) => {
   const evidence = { filePath: evidenceFile, runnerTemp };
   let fixture: Fixture;
   let roomNavigationTargetName: string | undefined;
+  let roomNavigationClickProgress =
+    unavailableDesktopRoomNavigationClickProgress();
+  let roomNavigationClickStartedAt: number | undefined;
   let roomsReadyIdentity: { memberAId: string; roomId: string } | undefined;
   const recorded = new Set<DesktopJourneyPhase>();
   const contexts: BrowserContext[] = [];
@@ -632,7 +636,18 @@ test('Element Desktop room event journey', async ({ browser }) => {
 
     enterPhase('desktop-room-widget-read');
     currentFailurePoint = 'room-navigation';
+    roomNavigationClickProgress =
+      await observeDesktopRoomNavigationClickProgress(
+        desktopPage,
+        fixture.roomName,
+      );
+    roomNavigationClickStartedAt = Date.now();
+    roomNavigationClickProgress.clickStarted = true;
     await desktopElement.navigateToRoomOrInvitation(fixture.roomName);
+    roomNavigationClickProgress.clickResolved = true;
+    roomNavigationClickProgress.elapsedBucket = desktopRefreshElapsedBucket(
+      Date.now() - roomNavigationClickStartedAt,
+    );
     currentFailurePoint = 'room-heading';
     await desktopElement.roomNameText
       .getByText(fixture.roomName, { exact: true })
@@ -1030,13 +1045,24 @@ test('Element Desktop room event journey', async ({ browser }) => {
       let roomNavigationDiagnostic: DesktopRoomNavigationDiagnostic | undefined;
       if (
         currentPhase === 'desktop-room-widget-read' &&
-        currentFailurePoint === 'room-navigation'
+        (currentFailurePoint === 'room-navigation' ||
+          currentFailurePoint === 'room-heading')
       ) {
+        if (
+          roomNavigationClickStartedAt !== undefined &&
+          !roomNavigationClickProgress.clickResolved
+        ) {
+          roomNavigationClickProgress.elapsedBucket =
+            desktopRefreshElapsedBucket(
+              Date.now() - roomNavigationClickStartedAt,
+            );
+        }
         roomNavigationDiagnostic = await observeDesktopRoomNavigationFailure(
           desktopPage,
           roomNavigationTargetName,
           roomsReadyIdentity?.roomId ?? null,
           roomsReadyIdentity?.memberAId ?? null,
+          roomNavigationClickProgress,
         );
       }
       let webBEditSaveDiagnostic: WebBEditSaveFailureDiagnostic | undefined;
@@ -2869,6 +2895,62 @@ function desktopRefreshElapsedBucket(elapsedMs: number) {
   return '30s_or_more' as const;
 }
 
+function unavailableDesktopRoomNavigationClickProgress(): DesktopRoomNavigationClickProgress {
+  return {
+    targetMatched: null,
+    targetVisible: null,
+    targetEnabled: null,
+    clickStarted: false,
+    clickResolved: false,
+    elapsedBucket: 'not_started',
+  };
+}
+
+async function observeDesktopRoomNavigationClickProgress(
+  page: Page,
+  roomName: string,
+): Promise<DesktopRoomNavigationClickProgress> {
+  const progress = unavailableDesktopRoomNavigationClickProgress();
+  try {
+    const targets = await new ElementWebPage(page).observeRoomNavigationTargets(
+      roomName,
+    );
+    const observations = Object.values(targets);
+    const counts = observations.map((target) => target.countCapped);
+    progress.targetMatched = counts.includes(1)
+      ? true
+      : counts.every((count) => count === 0)
+        ? false
+        : null;
+    progress.targetVisible = observeRoomNavigationBoolean(
+      observations.map((target) => target.visible),
+      observations.map((target) => target.countCapped),
+    );
+    progress.targetEnabled = observeRoomNavigationBoolean(
+      observations.map((target) => target.enabled),
+      observations.map((target) => target.countCapped),
+    );
+  } catch {
+    // Keep only the fixed unavailable values if the observation fails.
+  }
+  return progress;
+}
+
+function observeRoomNavigationBoolean(
+  values: Array<boolean | null>,
+  counts: Array<0 | 1 | 2 | null>,
+): boolean | null {
+  if (values.some((value) => value === true)) return true;
+  if (
+    values.every((value, index) =>
+      counts[index] === 0 ? value === null : value === false,
+    )
+  ) {
+    return false;
+  }
+  return null;
+}
+
 function safeRecordPhase(
   evidence: { filePath: string; runnerTemp: string },
   recorded: Set<DesktopJourneyPhase>,
@@ -3004,6 +3086,7 @@ function unavailableDesktopRoomNavigationDiagnostic(): DesktopRoomNavigationDiag
     currentRow: unavailableTarget,
     legacyTreeItem: unavailableTarget,
     roomsReady: unavailableDesktopRoomsReadyDiagnostic(),
+    clickProgress: unavailableDesktopRoomNavigationClickProgress(),
   };
 }
 
@@ -3012,9 +3095,15 @@ async function observeDesktopRoomNavigationFailure(
   roomName: string | undefined,
   expectedRoomId: string | null,
   expectedMemberAId: string | null,
+  clickProgress: DesktopRoomNavigationClickProgress,
 ): Promise<DesktopRoomNavigationDiagnostic> {
-  if (!page) return unavailableDesktopRoomNavigationDiagnostic();
   const unavailable = unavailableDesktopRoomNavigationDiagnostic();
+  if (!page) {
+    return {
+      ...unavailable,
+      clickProgress: { ...clickProgress },
+    };
+  }
   let targets = {
     currentOption: unavailable.currentOption,
     currentRow: unavailable.currentRow,
@@ -3039,7 +3128,11 @@ async function observeDesktopRoomNavigationFailure(
   } catch {
     roomsReady = unavailableDesktopRoomsReadyDiagnostic();
   }
-  return { ...targets, roomsReady };
+  return {
+    ...targets,
+    roomsReady,
+    clickProgress: { ...clickProgress },
+  };
 }
 
 function unavailableDesktopRoomsReadyElementObservation(): DesktopRoomsReadyElementObservation {
