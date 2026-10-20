@@ -25,9 +25,15 @@
     "writesDisabled": "Calendar event creation and deletion are not enabled on this server."
   },
   "calendarCommandHelp": {
-    "title": "Room calendar commands",
-    "intro": "Use these commands in a room where calendar commands are enabled.",
     "exampleLabel": "Example",
+    "intro": "Use these commands in a room where calendar commands are enabled.",
+    "requirements": [
+      "Read events: calendar access must be enabled, a calendar must be bound to this room, and you must be a current room member.",
+      "Create or delete events: the server must also enable event writes, and you need the room's current event-write permission.",
+      "Room setup is separate and must be enabled by the server. The caller must be a joined member with calendar-manage permission from an allowed Matrix server. Invite the bot first; it needs permission to send messages and add widgets. The room must be confirmed unencrypted.",
+      "For other calendar management, use the Matrix Calendar widget if your client supports widgets."
+    ],
+    "requirementsHeading": "Access and setup",
     "sections": [
       {
         "title": "Help",
@@ -78,13 +84,7 @@
         ]
       }
     ],
-    "requirementsHeading": "Access and setup",
-    "requirements": [
-      "Read events: calendar access must be enabled, a calendar must be bound to this room, and you must be a current room member.",
-      "Create or delete events: the server must also enable event writes, and you need the room's current event-write permission.",
-      "Room setup is separate and must be enabled by the server. The caller must be a joined member with calendar-manage permission from an allowed Matrix server. Invite the bot first; it needs permission to send messages and add widgets. The room must be confirmed unencrypted.",
-      "For other calendar management, use the Matrix Calendar widget if your client supports widgets."
-    ]
+    "title": "Room calendar commands"
   },
   "calendarCommandReplies": {
     "descriptionLabel": "Description",

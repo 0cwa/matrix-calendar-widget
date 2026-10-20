@@ -25,9 +25,15 @@
     "writesDisabled": "Das Erstellen und Löschen von Kalenderterminen ist auf diesem Server nicht aktiviert."
   },
   "calendarCommandHelp": {
-    "title": "Befehle für den Raumkalender",
-    "intro": "Nutze diese Befehle in einem Raum, in dem Kalenderbefehle freigegeben sind.",
     "exampleLabel": "Beispiel",
+    "intro": "Nutze diese Befehle in einem Raum, in dem Kalenderbefehle freigegeben sind.",
+    "requirements": [
+      "Termine lesen: Der Server muss den Kalenderzugriff freigeben und einen Kalender mit diesem Raum verknüpfen. Du musst aktuell Raummitglied sein.",
+      "Termine erstellen oder löschen: Zusätzlich müssen Schreibzugriffe freigegeben sein und du brauchst die aktuelle Schreibberechtigung im Raum.",
+      "Raumeinrichtung: Sie muss separat auf dem Server freigegeben sein. Du musst ein Raummitglied mit Kalenderverwaltungsrecht von einem erlaubten Matrix-Server sein. Lade zuerst den Bot ein; er muss Nachrichten senden und Widgets hinzufügen können. Der Raum muss nachweislich unverschlüsselt sein.",
+      "Für weitere Kalenderverwaltung nutze das Matrix Calendar Widget, sofern dein Client Widgets unterstützt."
+    ],
+    "requirementsHeading": "Zugriff und Einrichtung",
     "sections": [
       {
         "title": "Hilfe",
@@ -78,13 +84,7 @@
         ]
       }
     ],
-    "requirementsHeading": "Zugriff und Einrichtung",
-    "requirements": [
-      "Termine lesen: Der Server muss den Kalenderzugriff freigeben und einen Kalender mit diesem Raum verknüpfen. Du musst aktuell Raummitglied sein.",
-      "Termine erstellen oder löschen: Zusätzlich müssen Schreibzugriffe freigegeben sein und du brauchst die aktuelle Schreibberechtigung im Raum.",
-      "Raumeinrichtung: Sie muss separat auf dem Server freigegeben sein. Du musst ein Raummitglied mit Kalenderverwaltungsrecht von einem erlaubten Matrix-Server sein. Lade zuerst den Bot ein; er muss Nachrichten senden und Widgets hinzufügen können. Der Raum muss nachweislich unverschlüsselt sein.",
-      "Für weitere Kalenderverwaltung nutze das Matrix Calendar Widget, sofern dein Client Widgets unterstützt."
-    ]
+    "title": "Befehle für den Raumkalender"
   },
   "calendarCommandReplies": {
     "descriptionLabel": "Beschreibung",
