@@ -43,9 +43,9 @@ describe('HealthCheckController', () => {
   });
 
   it('preserves the dependency-aware homeserver health response', async () => {
-    const fetchSpy = jest.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response('Healthy', { status: 200 }),
-    );
+    const fetchSpy = jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response('Healthy', { status: 200 }));
 
     await expect(controller.health()).resolves.toBe('Healthy');
     expect(fetchSpy).toHaveBeenCalledWith('https://matrix.example/health');
@@ -62,9 +62,11 @@ describe('HealthCheckController', () => {
   });
 
   it('preserves status and response body when health fails', async () => {
-    jest.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response('homeserver unavailable', { status: 503 }),
-    );
+    jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        new Response('homeserver unavailable', { status: 503 }),
+      );
 
     try {
       await controller.health();
