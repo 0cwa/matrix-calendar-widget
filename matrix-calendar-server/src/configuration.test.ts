@@ -15,10 +15,14 @@
  */
 
 import postgres from 'postgres';
-import configuration, { ValidationSchema } from './configuration';
+import configuration, {
+  parseRoomCalendarSetupAllowedActorServerNames,
+  ValidationSchema,
+} from './configuration';
 import {
   getReminderDatabaseTlsOptions,
   parseReminderDatabaseTlsMode,
+  getPostgresDatabaseTlsOptions,
 } from './reminder/ReminderDatabaseConnection';
 
 describe('reminder database configuration', () => {
@@ -497,6 +501,125 @@ describe('room calendar binding configuration', () => {
     delete process.env.ROOM_CALENDAR_BINDINGS;
 
     expect(configuration().config.room_calendar_bindings).toEqual([]);
+  });
+});
+
+describe('room calendar setup and binding database configuration', () => {
+  const variables = [
+    'MATRIX_CALENDAR_BINDING_DATABASE_URL',
+    'MATRIX_CALENDAR_BINDING_DATABASE_TLS_MODE',
+    'ROOM_CALENDAR_SETUP_ENABLED',
+    'ROOM_CALENDAR_SETUP_ALLOWED_ACTOR_SERVER_NAMES',
+  ] as const;
+  const originalValues = new Map(
+    variables.map((name) => [name, process.env[name]]),
+  );
+
+  afterEach(() => {
+    for (const name of variables) {
+      const value = originalValues.get(name);
+      if (value === undefined) {
+        delete process.env[name];
+      } else {
+        process.env[name] = value;
+      }
+    }
+  });
+
+  it('keeps setup disabled and dynamic binding storage absent by default', () => {
+    for (const name of variables) delete process.env[name];
+
+    expect(configuration().config).toMatchObject({
+      room_calendar_binding_database_url: undefined,
+      room_calendar_binding_database_tls_mode: 'verify-full',
+      room_calendar_setup_enabled: false,
+      room_calendar_setup_allowed_actor_server_names: [],
+    });
+  });
+
+  it('loads an independent binding database URL and its TLS mode', () => {
+    process.env.MATRIX_CALENDAR_BINDING_DATABASE_URL =
+      'postgresql://bindings:secret@db.example.test:5432/matrix_calendar_bindings';
+    process.env.MATRIX_CALENDAR_BINDING_DATABASE_TLS_MODE =
+      'trusted-private-network';
+    process.env.ROOM_CALENDAR_SETUP_ENABLED = 'true';
+
+    expect(configuration().config).toMatchObject({
+      room_calendar_binding_database_url:
+        'postgresql://bindings:secret@db.example.test:5432/matrix_calendar_bindings',
+      room_calendar_binding_database_tls_mode: 'trusted-private-network',
+      room_calendar_setup_enabled: true,
+    });
+  });
+
+  it('accepts only PostgreSQL URLs and the explicit binding TLS modes', () => {
+    const urlSchema = ValidationSchema.extract(
+      'MATRIX_CALENDAR_BINDING_DATABASE_URL',
+    );
+    const tlsSchema = ValidationSchema.extract(
+      'MATRIX_CALENDAR_BINDING_DATABASE_TLS_MODE',
+    );
+    const setupSchema = ValidationSchema.extract('ROOM_CALENDAR_SETUP_ENABLED');
+
+    expect(
+      urlSchema.validate(
+        'postgresql://bindings:secret@localhost:5432/matrix_calendar_bindings',
+      ).error,
+    ).toBeUndefined();
+    expect(urlSchema.validate('').error).toBeUndefined();
+    expect(urlSchema.validate('https://example.org/db').error).toBeDefined();
+    expect(tlsSchema.validate('verify-full').error).toBeUndefined();
+    expect(tlsSchema.validate('trusted-private-network').error).toBeUndefined();
+    expect(tlsSchema.validate('prefer').error).toBeDefined();
+    expect(tlsSchema.validate(undefined).value).toBe('verify-full');
+    expect(setupSchema.validate('true').error).toBeUndefined();
+    expect(setupSchema.validate('false').error).toBeUndefined();
+    expect(setupSchema.validate('enabled').error).toBeDefined();
+  });
+
+  it('uses verified TLS for binding URLs and permits plaintext only by override', () => {
+    const databaseUrl =
+      'postgresql://bindings:secret@db.example.test:5432/matrix_calendar_bindings';
+    expect(
+      getPostgresDatabaseTlsOptions('verify-full', databaseUrl),
+    ).toEqual({ ssl: 'verify-full' });
+    expect(
+      getPostgresDatabaseTlsOptions('trusted-private-network', databaseUrl),
+    ).toEqual({ ssl: false });
+  });
+
+  it('parses exact Matrix server names, including ports and bracketed IPv6', () => {
+    const value =
+      'example.org, example.net:8448,127.0.0.1,[2001:db8::1]:8448';
+    process.env.ROOM_CALENDAR_SETUP_ALLOWED_ACTOR_SERVER_NAMES = value;
+
+    expect(
+      configuration().config.room_calendar_setup_allowed_actor_server_names,
+    ).toEqual([
+      'example.org',
+      'example.net:8448',
+      '127.0.0.1',
+      '[2001:db8::1]:8448',
+    ]);
+    expect(parseRoomCalendarSetupAllowedActorServerNames('')).toEqual([]);
+  });
+
+  it('rejects wildcards, empty members, duplicate realms, and invalid ports', () => {
+    const schema = ValidationSchema.extract(
+      'ROOM_CALENDAR_SETUP_ALLOWED_ACTOR_SERVER_NAMES',
+    );
+    for (const value of [
+      '*',
+      'example.org,,example.net',
+      'example.org, example.org',
+      'example.org:65536',
+      '[::1]:0',
+      'example.org:abc',
+      'https://example.org',
+    ]) {
+      expect(schema.validate(value).error).toBeDefined();
+      expect(() => parseRoomCalendarSetupAllowedActorServerNames(value)).toThrow();
+    }
   });
 });
 

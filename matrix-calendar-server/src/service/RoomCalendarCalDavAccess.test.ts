@@ -20,11 +20,16 @@ import { MatrixClient } from 'matrix-bot-sdk';
 import { AppRuntimeContext } from '../AppRuntimeContext';
 import { IAppConfiguration } from '../IAppConfiguration';
 import { ConfiguredRoomCalendarPrincipalIdentityProvider } from './ConfiguredRoomCalendarPrincipalIdentityProvider';
+import { DisabledRoomCalendarBindingStore } from './DisabledRoomCalendarBindingStore';
+import type { RoomCalendarBindingRegistry } from './IRoomCalendarBindingRegistry';
+import { RoomCalendarBindingRegistryAdapter } from './RoomCalendarBindingRegistryAdapter';
 import {
   RoomCalendarCalDavAccess,
   RoomCalendarTarget,
   parseRoomCalendarServiceUserId,
 } from './RoomCalendarCalDavAccess';
+import { MatrixRoomCalendarPrincipalOpenIdProofProvider } from './RoomCalendarPrincipalOpenIdProofProvider';
+import type { RoomCalendarPrincipalIdentityProvider } from './RoomCalendarPrincipalIdentity';
 
 const roomId = '!team:example.test';
 const calendarId = 'team-calendar';
@@ -59,25 +64,41 @@ function createAccess(
     sdkUserId?: string;
     runtimeUserId?: string;
     getUserId?: jest.Mock<Promise<string>, []>;
+    identityProvider?: RoomCalendarPrincipalIdentityProvider;
+    fetchImpl?: typeof globalThis.fetch;
+    bindingRegistry?: RoomCalendarBindingRegistry;
   } = {},
 ): RoomCalendarCalDavAccess {
-  const identityProvider = new ConfiguredRoomCalendarPrincipalIdentityProvider(
+  const identityProvider =
+    options.identityProvider ??
+    new ConfiguredRoomCalendarPrincipalIdentityProvider(
+      config,
+      {
+        getUserId:
+          options.getUserId ??
+          jest
+            .fn<Promise<string>, []>()
+            .mockResolvedValue(options.sdkUserId ?? botUserId),
+      } as unknown as Pick<MatrixClient, 'getUserId'>,
+      {
+        botUserId: options.runtimeUserId ?? options.sdkUserId ?? botUserId,
+      } as Pick<AppRuntimeContext, 'botUserId'>,
+    );
+  const bindingRegistry =
+    options.bindingRegistry ??
+    new RoomCalendarBindingRegistryAdapter(
+      config.room_calendar_bindings,
+      new DisabledRoomCalendarBindingStore(),
+    );
+  const proofProvider = new MatrixRoomCalendarPrincipalOpenIdProofProvider(
     config,
-    {
-      getUserId:
-        options.getUserId ??
-        jest
-          .fn<Promise<string>, []>()
-          .mockResolvedValue(options.sdkUserId ?? botUserId),
-    } as unknown as Pick<MatrixClient, 'getUserId'>,
-    {
-      botUserId: options.runtimeUserId ?? options.sdkUserId ?? botUserId,
-    } as Pick<AppRuntimeContext, 'botUserId'>,
+    identityProvider,
+    options.fetchImpl ?? (fetch as unknown as typeof globalThis.fetch),
   );
   return new RoomCalendarCalDavAccess(
     config,
-    fetch as unknown as typeof globalThis.fetch,
-    identityProvider,
+    bindingRegistry,
+    proofProvider,
   );
 }
 
@@ -138,11 +159,11 @@ describe('RoomCalendarCalDavAccess', () => {
         userId: applicationServiceUserId,
       }),
     };
-    const access = new RoomCalendarCalDavAccess(
-      configuration(),
-      (input, init) => globalThis.fetch(input, init),
+    const config = configuration();
+    const access = createAccess(config, {
       identityProvider,
-    );
+      fetchImpl: (input, init) => globalThis.fetch(input, init),
+    });
     const fetchObserver = jest.spyOn(globalThis, 'fetch');
 
     try {
@@ -170,17 +191,34 @@ describe('RoomCalendarCalDavAccess', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it('fails closed without proof I/O when the current binding read fails', async () => {
+    const resolve = jest.fn().mockRejectedValue(new Error('private database detail'));
+    const access = createAccess(configuration(), {
+      bindingRegistry: {
+        getSnapshot: async () => [],
+        resolve,
+      },
+    });
+
+    await expect(
+      access.forAuthorizedTarget(target, 'read'),
+    ).rejects.toMatchObject({
+      response: { code: 'room-calendar-caldav-disabled' },
+    });
+    expect(resolve).toHaveBeenCalledWith(roomId, calendarId, undefined);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it('does not resolve an appservice principal when gates are off and AS config is absent', async () => {
     const resolve = jest.fn();
-    const access = new RoomCalendarCalDavAccess(
-      configuration({
+    const config = configuration({
         room_calendar_access_enabled: false,
         application_service_token: undefined,
         application_service_user_id: undefined,
-      }),
-      undefined,
-      { resolve },
-    );
+      });
+    const access = createAccess(config, {
+      identityProvider: { resolve },
+    });
 
     await expect(
       access.forAuthorizedTarget(target, 'read'),

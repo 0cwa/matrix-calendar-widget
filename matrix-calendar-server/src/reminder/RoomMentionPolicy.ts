@@ -62,8 +62,11 @@ export interface RoomMentionScheduleRequest {
   /** Validated current widget actor, never copied from an untrusted body. */
   readonly authenticatedActorUserId: string;
   readonly roomId: string;
-  readonly calendarId: string;
-  readonly configuredBindings: unknown;
+  readonly calendarId?: string;
+  readonly configuredBindings?: unknown;
+  readonly resolveBinding?: (
+    signal?: AbortSignal,
+  ) => Promise<RoomCalendarBinding>;
 }
 
 /**
@@ -109,6 +112,10 @@ export async function authorizeRoomMentionScheduling(
     }
     if (actorPower < managePower) {
       return undefined;
+    }
+
+    if (request.resolveBinding) {
+      return await request.resolveBinding(signal);
     }
 
     return resolveRoomCalendarBinding(

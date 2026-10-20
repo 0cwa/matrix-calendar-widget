@@ -22,6 +22,8 @@ import {
 } from '@matrix-calendar-widget/calendar';
 import { createAppConfig } from '../../test/util/MockUtils';
 import { IMatrixOpenIdCredential } from '../model/IMatrixOpenIdCredential';
+import type { RoomCalendarBindingRegistry } from './IRoomCalendarBindingRegistry';
+import { resolveRoomCalendarBinding } from './RoomCalendarBindingResolver';
 import {
   CalendarCommandErrorKey,
   CalendarCommandEventAccess,
@@ -148,7 +150,16 @@ describe('CalendarCommandService', () => {
       authorizationFactory,
       { forAuthorizedTarget },
       operations,
+      bindingRegistryFor(config.room_calendar_bindings),
     );
+
+  const bindingRegistryFor = (
+    bindings: typeof baseConfig.room_calendar_bindings,
+  ): RoomCalendarBindingRegistry => ({
+    getSnapshot: async () => bindings,
+    resolve: async (roomId, calendarId) =>
+      resolveRoomCalendarBinding(bindings, roomId, calendarId),
+  });
 
   beforeEach(() => {
     order = [];

@@ -22,6 +22,7 @@ import {
   DEFAULT_CALDAV_EVENT_RESPONSE_MAX_BYTES,
   MAX_CALDAV_EVENT_RESPONSE_MAX_BYTES,
 } from './caldav/CalDavTransportLimits';
+import { isMatrixServerName } from './service/MatrixIdentifiers';
 import { parseRoomCalendarBindings } from './service/RoomCalendarBindingResolver';
 import type { RoomCalendarPrincipalMode } from './service/RoomCalendarPrincipalIdentity';
 
@@ -75,6 +76,53 @@ const openIdUserInfoOriginSchema = Joi.string()
   .empty('')
   .custom(validateOpenIdUserInfoOrigin);
 
+function isValidRoomCalendarSetupServerName(value: string): boolean {
+  if (value === '*' || !isMatrixServerName(value)) {
+    return false;
+  }
+
+  // Matrix server names use bracketed IPv6 literals. Parse their optional
+  // port separately from hostnames so embedded IPv6 colons are never split.
+  const bracketedIpv6 = /^\[[^\]]+\](?::([0-9]+))?$/u.exec(value);
+  const hostname = /^[^:]+(?::([0-9]+))?$/u.exec(value);
+  const port = bracketedIpv6?.[1] ?? hostname?.[1];
+  return (
+    port === undefined ||
+    (/^[0-9]{1,5}$/u.test(port) && Number(port) >= 1 && Number(port) <= 65535)
+  );
+}
+
+export function parseRoomCalendarSetupAllowedActorServerNames(
+  value: string | undefined,
+): readonly string[] {
+  if (value === undefined || value.trim() === '') {
+    return Object.freeze([]);
+  }
+
+  const serverNames = value.split(',').map((serverName) => serverName.trim());
+  if (
+    serverNames.some((serverName) => !isValidRoomCalendarSetupServerName(serverName)) ||
+    new Set(serverNames).size !== serverNames.length
+  ) {
+    throw new Error(
+      'ROOM_CALENDAR_SETUP_ALLOWED_ACTOR_SERVER_NAMES must be a comma-separated list of valid Matrix server names',
+    );
+  }
+
+  return Object.freeze(serverNames);
+}
+
+const roomCalendarSetupAllowedActorServerNamesSchema = Joi.string()
+  .empty('')
+  .custom((value: string, helpers) => {
+    try {
+      parseRoomCalendarSetupAllowedActorServerNames(value);
+      return value;
+    } catch {
+      return helpers.error('any.invalid');
+    }
+  });
+
 const toBoolean = (
   value: string | undefined,
   defaultValue: boolean,
@@ -118,6 +166,20 @@ function createConfiguration() {
     ),
     room_calendar_principal_mode: (process.env.ROOM_CALENDAR_PRINCIPAL_MODE ??
       'appservice') as RoomCalendarPrincipalMode,
+    room_calendar_binding_database_url: optionalEnvironmentValue(
+      process.env.MATRIX_CALENDAR_BINDING_DATABASE_URL,
+    ),
+    room_calendar_binding_database_tls_mode: (process.env
+      .MATRIX_CALENDAR_BINDING_DATABASE_TLS_MODE ??
+      'verify-full') as 'verify-full' | 'trusted-private-network',
+    room_calendar_setup_enabled: toBoolean(
+      process.env.ROOM_CALENDAR_SETUP_ENABLED,
+      false,
+    ),
+    room_calendar_setup_allowed_actor_server_names:
+      parseRoomCalendarSetupAllowedActorServerNames(
+        process.env.ROOM_CALENDAR_SETUP_ALLOWED_ACTOR_SERVER_NAMES,
+      ),
     room_calendar_access_enabled: toBoolean(
       process.env.ROOM_CALENDAR_ACCESS_ENABLED,
       false,
@@ -254,6 +316,15 @@ export const ValidationSchema = Joi.object({
     .max(MAX_CALDAV_EVENT_RESPONSE_MAX_BYTES),
   ROOM_CALENDAR_BINDINGS: Joi.string(),
   ROOM_CALENDAR_PRINCIPAL_MODE: Joi.string().valid('appservice', 'bot-account'),
+  MATRIX_CALENDAR_BINDING_DATABASE_URL: Joi.string()
+    .empty('')
+    .uri({ scheme: ['postgres', 'postgresql'] }),
+  MATRIX_CALENDAR_BINDING_DATABASE_TLS_MODE: Joi.string()
+    .valid('verify-full', 'trusted-private-network')
+    .default('verify-full'),
+  ROOM_CALENDAR_SETUP_ENABLED: Joi.boolean(),
+  ROOM_CALENDAR_SETUP_ALLOWED_ACTOR_SERVER_NAMES:
+    roomCalendarSetupAllowedActorServerNamesSchema,
   ROOM_CALENDAR_ACCESS_ENABLED: Joi.boolean(),
   ROOM_CALENDAR_EVENT_WRITES_ENABLED: Joi.boolean(),
   ROOM_CALENDAR_REMINDER_DELIVERY_ENABLED: Joi.boolean(),

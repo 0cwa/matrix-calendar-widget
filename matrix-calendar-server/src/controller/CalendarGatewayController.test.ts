@@ -46,6 +46,8 @@ import { MatrixRoomMembershipGuard } from '../guard/MatrixRoomMembershipGuard';
 import { IMatrixOpenIdCredential } from '../model/IMatrixOpenIdCredential';
 import { IUserContext } from '../model/IUserContext';
 import { MatrixCalendarAuthorizationFactory } from '../service/MatrixCalendarAuthorization';
+import { resolveRoomCalendarBinding } from '../service/RoomCalendarBindingResolver';
+import type { RoomCalendarBindingRegistry } from '../service/IRoomCalendarBindingRegistry';
 import {
   RoomCalendarAccessMode,
   RoomCalendarCalDavAccess,
@@ -121,6 +123,7 @@ describe('CalendarGatewayController', () => {
     credentialProviderFactory: MatrixOpenIdCalDavCredentialProviderFactory = new MatrixOpenIdCalDavCredentialProviderFactory(),
     roomEventOperations: RoomCalendarEventOperations = new RoomCalendarEventOperations(),
     roomEventAuditService?: RoomCalendarEventAuditService,
+    bindingRegistry: RoomCalendarBindingRegistry = bindingRegistryFor(config),
   ): CalendarGatewayController {
     return new CalendarGatewayController(
       config,
@@ -129,7 +132,22 @@ describe('CalendarGatewayController', () => {
       roomAccess,
       roomEventOperations,
       roomEventAuditService,
+      bindingRegistry,
     );
+  }
+
+  function bindingRegistryFor(
+    config: IAppConfiguration,
+  ): RoomCalendarBindingRegistry {
+    return {
+      getSnapshot: async () => config.room_calendar_bindings,
+      resolve: async (requestedRoomId, requestedCalendarId) =>
+        resolveRoomCalendarBinding(
+          config.room_calendar_bindings,
+          requestedRoomId,
+          requestedCalendarId,
+        ),
+    };
   }
 
   function createRoomTargetController(config: IAppConfiguration = appConfig): {

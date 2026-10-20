@@ -15,6 +15,9 @@
  */
 
 import { MatrixClient, MatrixError } from 'matrix-bot-sdk';
+import { RoomCalendarBinding } from '../model/IRoomCalendarBinding';
+import { resolveRoomCalendarBinding } from './RoomCalendarBindingResolver';
+import type { RoomCalendarBindingRegistry } from './IRoomCalendarBindingRegistry';
 import {
   RoomCalendarEventAuditContext,
   RoomCalendarEventAuditService,
@@ -25,6 +28,20 @@ const calendarId = 'team-calendar';
 const actorUserId = '@alice:example.test';
 const senderUserId = '@calendar-bot:example.test';
 const bindings = [{ roomId, calendarId }];
+
+function bindingRegistryFor(
+  configuredBindings: readonly RoomCalendarBinding[],
+): RoomCalendarBindingRegistry {
+  return {
+    getSnapshot: async () => configuredBindings,
+    resolve: async (requestedRoomId, requestedCalendarId) =>
+      resolveRoomCalendarBinding(
+        configuredBindings,
+        requestedRoomId,
+        requestedCalendarId,
+      ),
+  };
+}
 
 describe('RoomCalendarEventAuditService', () => {
   const context: RoomCalendarEventAuditContext = {
@@ -47,7 +64,7 @@ describe('RoomCalendarEventAuditService', () => {
   function createService(
     options: ConstructorParameters<typeof RoomCalendarEventAuditService>[1] = {
       enabled: true,
-      roomCalendarBindings: bindings,
+      bindingRegistry: bindingRegistryFor(bindings),
     },
   ): RoomCalendarEventAuditService {
     return new RoomCalendarEventAuditService(
@@ -82,7 +99,7 @@ describe('RoomCalendarEventAuditService', () => {
   });
 
   it('does nothing by default and performs no Matrix lookups', async () => {
-    await createService({ roomCalendarBindings: bindings }).record(context);
+    await createService({ bindingRegistry: bindingRegistryFor(bindings) }).record(context);
 
     expect(client.getUserId).not.toHaveBeenCalled();
     expect(client.getJoinedRoomMembers).not.toHaveBeenCalled();
@@ -276,7 +293,7 @@ describe('RoomCalendarEventAuditService', () => {
   it('fails closed if the room binding has changed', async () => {
     await createService({
       enabled: true,
-      roomCalendarBindings: [{ roomId, calendarId: 'other-calendar' }],
+      bindingRegistry: bindingRegistryFor([{ roomId, calendarId: 'other-calendar' }]),
     }).record(context);
 
     expect(client.getJoinedRoomMembers).not.toHaveBeenCalled();
@@ -326,7 +343,7 @@ describe('RoomCalendarEventAuditService', () => {
 
     await createService({
       enabled: true,
-      roomCalendarBindings: bindings,
+      bindingRegistry: bindingRegistryFor(bindings),
       encryptionEnabled: false,
     }).record(context);
     expect(client.crypto.isRoomEncrypted).not.toHaveBeenCalled();
@@ -335,7 +352,7 @@ describe('RoomCalendarEventAuditService', () => {
     client.crypto.isRoomEncrypted.mockResolvedValue(false);
     await createService({
       enabled: true,
-      roomCalendarBindings: bindings,
+      bindingRegistry: bindingRegistryFor(bindings),
       encryptionEnabled: true,
     }).record(context);
     expect(client.sendMessage).not.toHaveBeenCalled();
@@ -343,7 +360,7 @@ describe('RoomCalendarEventAuditService', () => {
     client.crypto.isRoomEncrypted.mockResolvedValue(true);
     await createService({
       enabled: true,
-      roomCalendarBindings: bindings,
+      bindingRegistry: bindingRegistryFor(bindings),
       encryptionEnabled: true,
     }).record(context);
     expect(client.sendMessage).toHaveBeenCalledTimes(1);

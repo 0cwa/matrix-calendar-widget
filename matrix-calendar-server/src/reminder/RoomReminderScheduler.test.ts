@@ -422,6 +422,74 @@ describe('RoomReminderScheduler', () => {
     expect(harness.matrixState.getJoinedRoomMembers).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps an existing candidate authorized when a new binding becomes ready mid-scan', async () => {
+    const harness = createHarness();
+    const listDueCandidatesSpy = jest.spyOn(
+      harness.canonical,
+      'listDueCandidates',
+    );
+    const existingConfig = configuration('existing-room');
+    const existingCandidate = candidate(
+      existingConfig,
+      '20261002T100000Z',
+    );
+    const newBinding = {
+      roomId: '!new-team:example.org',
+      calendarId: 'new-team-calendar',
+    };
+    const newConfig = {
+      ...configuration('new-room'),
+      roomId: newBinding.roomId,
+      calendarId: newBinding.calendarId,
+    };
+    const newCandidate = candidate(newConfig, '20261002T100000Z');
+    await harness.store.upsertConfiguration(existingConfig);
+    await harness.store.upsertConfiguration(newConfig);
+    harness.candidates.set(existingConfig.eventUid, [existingCandidate]);
+    harness.candidates.set(newConfig.eventUid, [newCandidate]);
+
+    const runtimeConfig = (bindings: readonly (typeof binding)[]) => ({
+      roomCalendarBindings: bindings,
+      roomCalendarPrincipalIdentity: roomPrincipalIdentity,
+      roomCalendarAccessEnabled: true,
+      roomReminderDeliveryEnabled: true,
+      reminderStoreEnabled: true,
+    });
+    harness.runtime.getCurrentConfiguration = jest
+      .fn()
+      .mockResolvedValueOnce(runtimeConfig([binding]))
+      .mockResolvedValueOnce(runtimeConfig([binding, newBinding]))
+      .mockResolvedValue(runtimeConfig([binding, newBinding]));
+
+    const firstScan = await harness.scheduler.runOnce();
+
+    expect(firstScan.deliveriesSent).toBe(1);
+    expect(harness.sent.map((entry) => entry.roomId)).toEqual([roomId]);
+    expect(listDueCandidatesSpy).toHaveBeenCalledWith(
+      existingConfig,
+      expect.anything(),
+      undefined,
+      1,
+      expect.anything(),
+    );
+    expect(
+      listDueCandidatesSpy.mock.calls.map(([config]) => config),
+    ).not.toContainEqual(newConfig);
+
+    const nextScan = await harness.scheduler.runOnce();
+
+    expect(nextScan.deliveriesSent).toBe(1);
+    expect(harness.sent.map((entry) => entry.roomId)).toEqual([
+      roomId,
+      newBinding.roomId,
+    ]);
+    expect(
+      listDueCandidatesSpy.mock.calls.some(
+        ([config]) => config.eventUid === newConfig.eventUid,
+      ),
+    ).toBe(true);
+  });
+
   it('releases a claim when the delivery gate is disabled after claim', async () => {
     const harness = createHarness();
     const config = configuration('gate-disabled-after-claim');

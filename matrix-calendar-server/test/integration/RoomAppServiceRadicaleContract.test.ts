@@ -48,6 +48,10 @@ import { ConfiguredRoomCalendarPrincipalIdentityProvider } from '../../src/servi
 import { MatrixCalendarAuthorizationFactory } from '../../src/service/MatrixCalendarAuthorization';
 import { RoomCalendarCalDavAccess } from '../../src/service/RoomCalendarCalDavAccess';
 import { RoomCalendarEventOperations } from '../../src/service/RoomCalendarEventOperations';
+import type { RoomCalendarBindingRegistry } from '../../src/service/IRoomCalendarBindingRegistry';
+import { DisabledRoomCalendarBindingStore } from '../../src/service/DisabledRoomCalendarBindingStore';
+import { RoomCalendarBindingRegistryAdapter } from '../../src/service/RoomCalendarBindingRegistryAdapter';
+import { MatrixRoomCalendarPrincipalOpenIdProofProvider } from '../../src/service/RoomCalendarPrincipalOpenIdProofProvider';
 import type { RoomCalendarPrincipalIdentityProvider } from '../../src/service/RoomCalendarPrincipalIdentity';
 import {
   MatrixApplicationServiceFixtureError,
@@ -748,6 +752,23 @@ const matrixClient = {
       provide: ModuleProviderToken.ROOM_CALENDAR_PRINCIPAL_IDENTITY,
       useFactory: getRoomPrincipalIdentityProvider,
     },
+    {
+      provide: ModuleProviderToken.ROOM_CALENDAR_PRINCIPAL_OPENID_PROOF_PROVIDER,
+      useFactory: () =>
+        new MatrixRoomCalendarPrincipalOpenIdProofProvider(
+          testConfiguration,
+          getRoomPrincipalIdentityProvider(),
+          (input, init) => globalThis.fetch(input, init),
+        ),
+    },
+    {
+      provide: ModuleProviderToken.ROOM_CALENDAR_BINDING_REGISTRY,
+      useFactory: () =>
+        new RoomCalendarBindingRegistryAdapter(
+          testConfiguration.room_calendar_bindings,
+          new DisabledRoomCalendarBindingStore(),
+        ),
+    },
     { provide: MatrixClient, useValue: matrixClient },
     MatrixCalendarAuthorizationFactory,
     MatrixOpenIdCalDavCredentialProviderFactory,
@@ -757,14 +778,15 @@ const matrixClient = {
     },
     {
       provide: RoomCalendarEventOperations,
-      useFactory: () =>
+      useFactory: (bindingRegistry: RoomCalendarBindingRegistry) =>
         new RoomCalendarEventOperations((input, init) => fetch(input, init), {
           eventWritesEnabled: true,
           maxResponseBytes: testConfiguration.caldav_max_event_response_bytes,
           radicaleBaseUrl,
-          roomCalendarBindings: testConfiguration.room_calendar_bindings,
+          bindingRegistry,
           principalIdentityProvider: getRoomPrincipalIdentityProvider(),
         }),
+      inject: [ModuleProviderToken.ROOM_CALENDAR_BINDING_REGISTRY],
     },
     {
       provide: CalendarCommandService,
@@ -773,18 +795,21 @@ const matrixClient = {
         authorizationFactory: MatrixCalendarAuthorizationFactory,
         access: RoomCalendarCalDavAccess,
         operations: RoomCalendarEventOperations,
+        bindingRegistry: RoomCalendarBindingRegistry,
       ) =>
         new CalendarCommandService(
           appConfig,
           authorizationFactory,
           access,
           operations,
+          bindingRegistry,
         ),
       inject: [
         ModuleProviderToken.APP_CONFIGURATION,
         MatrixCalendarAuthorizationFactory,
         ModuleProviderToken.ROOM_CALENDAR_CALDAV_ACCESS,
         RoomCalendarEventOperations,
+        ModuleProviderToken.ROOM_CALENDAR_BINDING_REGISTRY,
       ],
     },
     MatrixAuthMiddleware,
@@ -907,10 +932,19 @@ describeContract(contractDescription, () => {
       { roomId: nonmemberRoomId, calendarId: nonmemberCalendarId },
     ];
 
+    const registry = new RoomCalendarBindingRegistryAdapter(
+      testConfiguration.room_calendar_bindings,
+      new DisabledRoomCalendarBindingStore(),
+    );
+    const proofProvider = new MatrixRoomCalendarPrincipalOpenIdProofProvider(
+      testConfiguration,
+      getRoomPrincipalIdentityProvider(),
+      nativeFetch,
+    );
     const access = new RoomCalendarCalDavAccess(
       testConfiguration,
-      undefined,
-      getRoomPrincipalIdentityProvider(),
+      registry,
+      proofProvider,
     );
     for (let index = 0; index < roomIds.length; index += 1) {
       markRoomAppServiceSetupStage(

@@ -22,8 +22,7 @@ import {
 } from '@nestjs/common';
 import { UserID } from 'matrix-bot-sdk';
 import { IAppConfiguration } from '../IAppConfiguration';
-import { RoomCalendarBinding } from '../model/IRoomCalendarBinding';
-import { resolveRoomCalendarBinding } from '../service/RoomCalendarBindingResolver';
+import type { RoomCalendarBindingRegistry } from '../service/IRoomCalendarBindingRegistry';
 import {
   RoomCalendarCalDavAccess,
   RoomCalendarTarget,
@@ -67,6 +66,7 @@ export class RoomReminderConfigurationService {
     private readonly matrixState: RoomMentionMatrixState,
     private readonly roomCalendarAccess: RoomCalendarCalDavAccess,
     private readonly eventResources: RoomCalendarEventOperations,
+    private readonly bindingRegistry: RoomCalendarBindingRegistry,
   ) {}
 
   /**
@@ -217,22 +217,13 @@ export class RoomReminderConfigurationService {
       throw new ForbiddenException('Not permitted to manage reminders');
     }
 
-    let binding: RoomCalendarBinding;
-    try {
-      binding = resolveRoomCalendarBinding(
-        this.appConfig.room_calendar_bindings,
-        roomId,
-      );
-    } catch {
-      throw new ForbiddenException('Not permitted to manage reminders');
-    }
+    const bindingRegistry = this.bindingRegistry;
 
     const authorizedBinding = await authorizeRoomMentionScheduling(
       {
         authenticatedActorUserId: actorUserId,
-        roomId: binding.roomId,
-        calendarId: binding.calendarId,
-        configuredBindings: this.appConfig.room_calendar_bindings,
+        roomId,
+        resolveBinding: (signal) => bindingRegistry.resolve(roomId, undefined, signal),
       },
       this.matrixState,
     );

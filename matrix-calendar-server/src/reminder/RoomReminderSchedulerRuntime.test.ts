@@ -15,6 +15,11 @@
  */
 
 import { IAppConfiguration } from '../IAppConfiguration';
+import { resolveRoomCalendarBinding } from '../service/RoomCalendarBindingResolver';
+import { DisabledRoomCalendarBindingStore } from '../service/DisabledRoomCalendarBindingStore';
+import type { RoomCalendarBinding } from '../model/IRoomCalendarBinding';
+import type { RoomCalendarBindingRegistry } from '../service/IRoomCalendarBindingRegistry';
+import { RoomCalendarBindingRegistryAdapter } from '../service/RoomCalendarBindingRegistryAdapter';
 import type {
   RoomCalendarPrincipalIdentity,
   RoomCalendarPrincipalIdentityProvider,
@@ -65,9 +70,25 @@ function store(enabled: boolean): RoomReminderStore {
   return { enabled } as RoomReminderStore;
 }
 
+function createRuntimeSource(
+  appConfig: IAppConfiguration,
+  reminderStore: RoomReminderStore,
+  principalIdentityProvider: RoomCalendarPrincipalIdentityProvider,
+): ConfiguredReminderSchedulerRuntimeSource {
+  return new ConfiguredReminderSchedulerRuntimeSource(
+    appConfig,
+    reminderStore,
+    principalIdentityProvider,
+    new RoomCalendarBindingRegistryAdapter(
+      appConfig.room_calendar_bindings,
+      new DisabledRoomCalendarBindingStore(),
+    ),
+  );
+}
+
 describe('ConfiguredReminderSchedulerRuntimeSource', () => {
   it('returns only current bindings when every delivery prerequisite is enabled', async () => {
-    const source = new ConfiguredReminderSchedulerRuntimeSource(
+    const source = createRuntimeSource(
       configuration(),
       store(true),
       identityProvider(),
@@ -89,8 +110,9 @@ describe('ConfiguredReminderSchedulerRuntimeSource', () => {
     ['room-read gate', { room_calendar_access_enabled: false }, true],
     ['database store', {}, false],
   ])('fails closed when the %s is disabled', async (_name, overrides, dbOn) => {
-    const source = new ConfiguredReminderSchedulerRuntimeSource(
-      configuration(overrides as Partial<IAppConfiguration>),
+    const appConfig = configuration(overrides as Partial<IAppConfiguration>);
+    const source = createRuntimeSource(
+      appConfig,
       store(dbOn as boolean),
       identityProvider(),
     );
@@ -104,12 +126,13 @@ describe('ConfiguredReminderSchedulerRuntimeSource', () => {
 
   it('resolves the bot account without application-service credentials', async () => {
     const provider = identityProvider(botAccountIdentity);
-    const source = new ConfiguredReminderSchedulerRuntimeSource(
-      configuration({
+    const appConfig = configuration({
         room_calendar_principal_mode: 'bot-account',
         application_service_token: undefined,
         application_service_user_id: undefined,
-      }),
+      });
+    const source = createRuntimeSource(
+      appConfig,
       store(true),
       provider,
     );
@@ -129,7 +152,7 @@ describe('ConfiguredReminderSchedulerRuntimeSource', () => {
         throw new Error('private identity details');
       }),
     };
-    const rejectedSource = new ConfiguredReminderSchedulerRuntimeSource(
+    const rejectedSource = createRuntimeSource(
       configuration(),
       store(true),
       rejectingProvider,
@@ -140,8 +163,11 @@ describe('ConfiguredReminderSchedulerRuntimeSource', () => {
     expect(rejected.roomCalendarBindings).toEqual([]);
     expect(rejected.roomCalendarPrincipalIdentity).toBeUndefined();
 
-    const mismatchedSource = new ConfiguredReminderSchedulerRuntimeSource(
-      configuration({ room_calendar_principal_mode: 'bot-account' }),
+    const mismatchedConfig = configuration({
+      room_calendar_principal_mode: 'bot-account',
+    });
+    const mismatchedSource = createRuntimeSource(
+      mismatchedConfig,
       store(true),
       identityProvider(appserviceIdentity),
     );
@@ -152,8 +178,49 @@ describe('ConfiguredReminderSchedulerRuntimeSource', () => {
     expect(mismatched.roomCalendarPrincipalIdentity).toBeUndefined();
   });
 
-  it('rejects an already-aborted read before returning operator configuration', async () => {
+  it('uses a fresh append-only binding snapshot for post-claim checks and the next scan', async () => {
+    const originalBinding = { roomId, calendarId };
+    const newlyReadyBinding = {
+      roomId: '!next:example.test',
+      calendarId: 'next-calendar',
+    };
+    let currentBindings: readonly RoomCalendarBinding[] = [originalBinding];
+    const registry: RoomCalendarBindingRegistry = {
+      getSnapshot: jest.fn(async () => currentBindings),
+      resolve: async (targetRoomId, targetCalendarId) =>
+        resolveRoomCalendarBinding(
+          currentBindings,
+          targetRoomId,
+          targetCalendarId,
+        ),
+    };
     const source = new ConfiguredReminderSchedulerRuntimeSource(
+      configuration(),
+      store(true),
+      identityProvider(),
+      registry,
+    );
+    const signal = new AbortController().signal;
+
+    const scanSnapshot = await source.getCurrentConfiguration(signal);
+    currentBindings = [originalBinding, newlyReadyBinding];
+    const postClaimSnapshot = await source.getCurrentConfiguration(signal);
+    const nextScanSnapshot = await source.getCurrentConfiguration(signal);
+
+    expect(scanSnapshot.roomCalendarBindings).toEqual([originalBinding]);
+    expect(postClaimSnapshot.roomCalendarBindings).toEqual([
+      originalBinding,
+      newlyReadyBinding,
+    ]);
+    expect(nextScanSnapshot.roomCalendarBindings).toEqual([
+      originalBinding,
+      newlyReadyBinding,
+    ]);
+    expect(registry.getSnapshot).toHaveBeenCalledTimes(3);
+  });
+
+  it('rejects an already-aborted read before returning operator configuration', async () => {
+    const source = createRuntimeSource(
       configuration(),
       store(true),
       identityProvider(),
@@ -170,15 +237,21 @@ describe('ConfiguredReminderSchedulerRuntimeSource', () => {
 
   it('honors cancellation while resolving the shared identity', async () => {
     let resolveIdentity!: (identity: RoomCalendarPrincipalIdentity) => void;
+    let notifyIdentityStarted!: () => void;
+    const identityStarted = new Promise<void>((resolve) => {
+      notifyIdentityStarted = resolve;
+    });
     const provider: RoomCalendarPrincipalIdentityProvider = {
       resolve: jest.fn(
-        () =>
-          new Promise<RoomCalendarPrincipalIdentity>((resolve) => {
+        () => {
+          notifyIdentityStarted();
+          return new Promise<RoomCalendarPrincipalIdentity>((resolve) => {
             resolveIdentity = resolve;
-          }),
+          });
+        },
       ),
     };
-    const source = new ConfiguredReminderSchedulerRuntimeSource(
+    const source = createRuntimeSource(
       configuration(),
       store(true),
       provider,
@@ -186,9 +259,10 @@ describe('ConfiguredReminderSchedulerRuntimeSource', () => {
     const controller = new AbortController();
     const result = source.getCurrentConfiguration(controller.signal);
 
+    await identityStarted;
+    expect(provider.resolve).toHaveBeenCalledTimes(1);
     controller.abort();
     await expect(result).rejects.toMatchObject({ name: 'AbortError' });
-    expect(provider.resolve).toHaveBeenCalledTimes(1);
     resolveIdentity(appserviceIdentity);
   });
 });
