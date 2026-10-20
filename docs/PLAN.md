@@ -448,12 +448,15 @@ DST regression or recurrence-editing criteria above.
 - [x] Add separately gated, best-effort action notices after successful room
       create/update/delete operations (ADR032). The SDK request is awaited and
       retains its timeout behavior; notice failure does not roll back CalDAV.
-- [ ] Complete the controlled-beta local and operator readiness gates for the
-      selected deployment. Full isolated local Stage B has not passed: the
-      local probe stopped while verifying container capabilities; the
-      inspected value was not retained and guest execution was skipped. Hosted
-      source-bound Element and CI acceptance is complete; the separate local
-      source-bound server image/cache/runtime rehearsal remains open. Then
+- [ ] Complete the controlled-beta operator readiness gates for the selected
+      deployment. The earlier local probe stopped while verifying container
+      capabilities; the inspected value was not retained and guest execution
+      was skipped. A later bounded local Stage B rehearsal passed on frozen
+      application source `99d4c9f9f36aa0b0861a13499a7f7cd512c56920`; see
+      `docs/STATUS.md` and `docs/RELEASE.md`. Hosted source-bound Element, CI,
+      archive, and rehearsal evidence is also recorded for that frozen source.
+      These results do not establish current-main qualification or target
+      operator readiness. Then
       record the actual target's ingress,
       DNS/TLS/proxy, account ownership, MAS, credential issuance, and secret
       facts; validate encrypted off-server Restic-compatible S3 backups with
@@ -477,8 +480,10 @@ DST regression or recurrence-editing criteria above.
         reports the first tracked failure only when the report is complete;
         otherwise `first_failed_phase` is `unknown`. A diagnostic write failure
         is marked unavailable without changing acceptance or cleanup outcomes.
-        No external service or real API, image store, restart, or restore was exercised;
-        this does not pass local Stage B or image/cache/runtime acceptance.
+        Those focused tooling checks alone exercised no external service or
+        real API, image store, restart, or restore and did not pass local Stage
+        B or image/cache/runtime acceptance. The later source-bound rehearsal
+        is recorded separately above and in `docs/STATUS.md`.
 - [ ] Room-target diagnostics beyond the supported calendar/event paths.
 
 Room access, event writes, reminder configuration, reminder delivery, and
@@ -569,7 +574,8 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       staging, final operator recording, live calendar/room canary validation,
       first real paired backup, isolated gateway restore, disable/rollback,
       and daily activation
-      remain pending. Issues #255 and #251 remain open; no wider rollout or
+      remain pending. Issue #255 is closed after completion of the public
+      candidate evidence ledger; issue #251 remains open. No wider rollout or
       publication is authorized.
 - [x] Add an explicit `--profile local-microsandbox --manifest PATH` authoring
       path to the operator rehearsal. The closed v1 manifest binds curated
@@ -591,9 +597,9 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       the guest was stopped and run-owned resources were removed afterward. An
       earlier failed attempt remains recorded with cleanup marked unverified;
       its separately verified cleanup is not attributed to that receipt. This
-      establishes local rehearsal only. Issues #251 and #255 and the separate
-      production target, owner-input, canary, backup, and restore gates remain
-      open.
+      establishes local rehearsal only. Issue #255 is closed after completion
+      of its public evidence ledger. Issue #251 and the separate production
+      target, owner-input, canary, backup, and restore gates remain open.
 - [ ] Issues #275 and #276 were explicitly re-scoped for bounded pre-pilot
       source cleanup. Issue #277 remains separately gated after the pilot. This
       source cleanup does not change the frozen application candidate or pilot
@@ -604,8 +610,8 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       Hosted passing evidence is required; actual Matrix clients remain a
       separate release gate (docs/browser-calendar-validation.md).
 
-- [x] Actual Element Web/Desktop responsive and keyboard/focus acceptance for
-      the bounded beta target (see `docs/beta-scope.md`). Require the standard
+- [x] Complete actual Element Web/Desktop responsive-flow acceptance for the
+      bounded beta target (see `docs/beta-scope.md`). Require the standard
       side-panel widget layout and overflow checks; pinned/full-width Apps-drawer
       layout certification is deferred. Mobile clients and formal screen-reader
       certification are deferred beyond this candidate. Candidate `99d4c9f`
@@ -616,6 +622,12 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       pass; backend, identity/authentication, room authorization, and CalDAV
       contracts remain mandatory in both modes. This scope does not authorize
       publication or broader rollout.
+  - [ ] Complete the separate source-bound keyboard/focus accessibility path
+        required by the beta scope: keyboard event open/details/Escape/focus
+        return in each target client. The release ledger records this gate as
+        blocked because the frozen-candidate public evidence does not identify a
+        separate result. Earlier client or synthetic fixture checks do not
+        substitute for this candidate-bound gate.
   - [x] Add current calendar grid/list/details keyboard, focus, accessible-name,
         and axe regressions. Hosted browser fixture checks pass; actual client
         embedding remains unverified; see `docs/calendar-client-validation.md`.
@@ -733,6 +745,12 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       so no local full-ZIP verification is claimed. These artifacts expire
       2026-10-16. Target-specific operator comparison, deployment, and private
       operator readiness remain separate open gates.
+  - [x] Add a validated `server-only` image set to the trusted archive
+        workflow. The default remains `all`; manifest verification requires
+        the selected set, while older full manifests without an `image_set`
+        field continue to mean `all`. This reduces future archive transfer
+        needs for server-only rehearsal without closing the separate local
+        image/cache/runtime or operator-readiness gates.
 - [x] Document upgrade/migration, schema compatibility, and safe rollback for
       the project-owned stack; live operator rehearsal remains unverified.
 - [ ] Record exact Element Web and Desktop versions and results for the beta
@@ -881,34 +899,32 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       trusted Element-origin opening errors per profile qualified for the
       approved opening-stage diagnostic policy; their cause is unknown. This
       is isolated application evidence, not operator or deployment acceptance.
-- [ ] Run the owner-approved normal-bot-only browser acceptance for the
-      integrated PR #260 candidate. The full Element Web/Desktop journey must
-      pass in `bot-account` mode, including authorization, CRUD and stale-write
-      rejection, reminders across gateway restart, paired Radicale/PostgreSQL
-      restore, G6 unsupported-resource preservation and owned cleanup, and
-      keyboard/focus, standard side-panel layout, and browser-egress checks.
-      Keep the ordinary 0/25-event thresholds unchanged:
-      cold activation and same-range refresh at or below 2,000 ms, each
-      required decoded non-OpenID calendar API response at or below 1,000 ms,
-      and all five 25-event details samples at or below 500 ms. The five
-      protected checks, CodeQL, browser-layout and real Radicale/PostgreSQL
-      contracts, and independent review must be bound to the exact integrated
-      source. Full appservice-mode Element Web/Desktop browser certification
-      is deferred until after beta; backend, identity/authentication, room
-      authorization, and CalDAV contracts remain mandatory in both modes.
-      The forward-merge base is `56ebedd97ffa778cb433707cbcd5a74beaafe5a7`
-      (tree `529bd984f398ae1921b68189fa9a66c274e1b349`); checks on the prior
-      `3643166` head or on `main` alone do not establish acceptance of the
-      integrated candidate. This scope does not authorize production
-      installation or rollout.
-- [ ] Complete private operator readiness evidence for the merged candidate
-      before any separate rollout decision. Independent review is complete
-      only for PR #260's pre-integration candidate; review of the integrated
-      source remains required. Full isolated local Stage B and source-bound server
-      image/cache/runtime acceptance remain open, followed by actual
-      target-specific deployment facts and recovery validation. The reminder
-      restore helper honors explicit skip-Element mode during quiescence while
-      keeping the default full Element stop and inspection path.
+- [x] Complete frozen-candidate Element Web/Desktop and backend acceptance on
+      application source `99d4c9f9f36aa0b0861a13499a7f7cd512c56920` (tree
+      `97022a9d2351655d2aae0a50a44a14bd81daacc9`), selected from PR #294.
+      Element run [38892207008](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38892207008)
+      passed normal-bot and appservice flows, authorization, CRUD and stale-write
+      rejection, reminder restart, paired Radicale/PostgreSQL restore, G6
+      preservation and owned cleanup, and the recorded ordinary 0/25-event
+      performance limits. Exact-source CI/browser layout, CodeQL, PostgreSQL,
+      both-mode CalDAV, and standalone Desktop evidence is listed in
+      [docs/RELEASE.md](./RELEASE.md). This completes application-source
+      acceptance for that frozen candidate; it does not qualify later `main`
+      commits or establish target deployment acceptance. The separate
+      keyboard/focus accessibility gate remains blocked as recorded in the
+      release ledger. Full appservice-mode browser certification remains
+      deferred after beta; backend, identity/authentication, authorization, and
+      CalDAV contracts remain required in both modes.
+- [ ] Complete private operator readiness for the selected deployment before
+      any rollout decision. The bounded local Stage B rehearsal and hosted
+      source-bound archive/rehearsal passed for the frozen candidate; see
+      `docs/STATUS.md` and `docs/RELEASE.md`. Target configuration, credential
+      staging, live calendar/room canary, actual off-server backup, isolated
+      target restore, disable/rollback rehearsal, and daily activation remain
+      pending. The reminder restore helper honors explicit skip-Element mode
+      during quiescence while keeping the default full Element stop and
+      inspection path. This checklist does not qualify current `main` or claim
+      pilot installation.
   - [x] Run the path-scoped real-Docker PostgreSQL first-initialization
         contract from `.github/workflows/operator-postgres-contract.yml`.
         Require restricted app-role ownership and writes, distinct

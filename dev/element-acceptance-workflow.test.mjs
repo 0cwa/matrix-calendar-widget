@@ -168,6 +168,7 @@ test('the shared runner preserves the Element, restart, restore, and cleanup gat
     'only the diagnostic reporter may continue after failure',
   );
   const trackedPhaseIds = [
+    'web_member_outsider_journey',
     'desktop_journey',
     'desktop_journey_cleanup',
     'reminder_room',
@@ -190,5 +191,15 @@ test('the shared runner preserves the Element, restart, restore, and cleanup gat
   for (const phaseId of trackedPhaseIds) {
     assert.match(runner, new RegExp(`^\\s+id: ${phaseId}$`, 'mu'));
   }
+  assert.match(runner, /journey_started_at_ms="\$\(date \+%s%3N\)"/u);
+  assert.match(
+    reporter,
+    /ELEMENT_ACCEPTANCE_WEB_MEMBER_OUTSIDER_JOURNEY_ELAPSED_MS/u,
+  );
+  assert.match(
+    runner,
+    /ELEMENT_ACCEPTANCE_PHASE_WEB_MEMBER_OUTSIDER_JOURNEY=%s/u,
+  );
+  assert.match(runner, /\{"phase":"browser-test-suite","status":"failed"\}/u);
   assert.doesNotMatch(reporter, /toJSON\(\s*steps/u);
 });

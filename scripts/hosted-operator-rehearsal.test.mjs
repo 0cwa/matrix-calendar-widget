@@ -835,7 +835,7 @@ test('failure artifact carries only the closed gateway smoke classification', ()
     gatewayNetworkSmoke,
   });
 
-  assert.equal(diagnostic.schema_version, 10);
+  assert.equal(diagnostic.schema_version, 12);
   assert.equal(diagnostic.failed_phase, 'compose-run-gateway-smoke');
   assert.equal(diagnostic.failure_operation, 'gateway-network-smoke');
   assert.equal(diagnostic.failure_check, 'network-smoke');
@@ -1024,7 +1024,7 @@ test('failure artifact projects only the API CRUD probe enum fields', () => {
     failureCode: 'api-probe-process-failed',
     apiCrudProbe,
   });
-  assert.equal(diagnostic.schema_version, 10);
+  assert.equal(diagnostic.schema_version, 12);
   assert.equal(diagnostic.failure_check, 'api-contract');
   assert.deepEqual(diagnostic.api_crud_probe, apiCrudProbe);
 
@@ -1127,7 +1127,7 @@ test('reminder child failures retain only the finite fixture outcome and validat
         childExitCode: error.childExitCode,
         reminderFixture: error.reminderFixture,
       });
-      assert.equal(diagnostic.schema_version, 10);
+      assert.equal(diagnostic.schema_version, 12);
       assert.equal(diagnostic.failure_check, 'reminder-fixture');
       assert.equal(diagnostic.child_exit_code, 1);
       assert.deepEqual(diagnostic.reminder_fixture, error.reminderFixture);
@@ -2095,7 +2095,7 @@ test('foreign volume deltas stay gated and report bounded direction and owned mo
     failureCode: failure.code,
     foreignInventoryChange: failure.foreignInventoryChange,
   });
-  assert.equal(diagnostic.schema_version, 10);
+  assert.equal(diagnostic.schema_version, 12);
   assert.equal(diagnostic.cleanup_attempted, false);
   assert.equal(diagnostic.owned_cleanup_verified, false);
   const serialized = JSON.stringify(diagnostic);
@@ -2685,6 +2685,33 @@ process.stdout.write(output);
   assert.ok(removeContainer >= 0 && removeContainer < removeVolume);
   assert.ok(removeVolume < removeNetwork);
 
+  const mismatchedPlan = runCleanup(false);
+  const privateVolumeName = `${project}_private-inventory-value`;
+  assert.throws(
+    () =>
+      removeOwnedResources({
+        plan: {
+          ...mismatchedPlan.plan,
+          volumes: [
+            ...mismatchedPlan.plan.volumes,
+            { ...volume, Name: privateVolumeName },
+          ],
+        },
+        context,
+        baseline,
+        runId,
+        project,
+        prefix: 'success',
+      }),
+    (error) => {
+      assert.equal(error.stage, 'success-cleanup');
+      assert.equal(error.code, 'inventory-postcondition-failed');
+      assert.equal(error.cleanupCheckpoint, 'owned-volumes-after-containers');
+      assert.doesNotMatch(JSON.stringify(error), /private-inventory-value/u);
+      return true;
+    },
+  );
+
   const foreign = runCleanup(true);
   assert.throws(
     () =>
@@ -2778,7 +2805,7 @@ test('failure diagnostic writes fixed identity and cleanup fields outside task d
     );
     assert.equal(statSync(file).mode & 0o777, 0o600);
     const initial = JSON.parse(readFileSync(file, 'utf8'));
-    assert.equal(initial.schema_version, 10);
+    assert.equal(initial.schema_version, 12);
     assert.equal(initial.failed_phase, 'fixture-setup');
     assert.equal(initial.failure_class, 'gate-failed');
     assert.equal(initial.failure_operation, 'gate');
@@ -2853,6 +2880,11 @@ test('failure diagnostic writes fixed identity and cleanup fields outside task d
     assert.equal(initial.cleanup_attempted, false);
     assert.equal(initial.owned_cleanup_verified, false);
     assert.equal(initial.foreign_inventory_change.checkpoint, 'not-applicable');
+    assert.deepEqual(initial.recovery_failure, {
+      phase: 'not-run',
+      failure_check: 'not-applicable',
+      cleanup_checkpoint: 'not-applicable',
+    });
 
     assert.equal(
       writeFailureDiagnostic(
@@ -3261,6 +3293,143 @@ test('cleanup failure diagnostics retain the fixed check and safe phase only', (
   assert.doesNotMatch(JSON.stringify(hostile), /synthetic-private-value/u);
 });
 
+test('cleanup inventory diagnostics expose only allowlisted checkpoint identifiers', () => {
+  const fields = {
+    phase: 'success-cleanup',
+    failureClass: 'gate-failed',
+    operation: failureOperationForStage('success-cleanup'),
+    failureCode: 'inventory-postcondition-failed',
+  };
+  const expected = formatFailureDiagnostic({
+    ...fields,
+    cleanupCheckpoint: 'owned-volumes-after-containers',
+  });
+  assert.equal(expected.failure_check, 'cleanup-inventory');
+  assert.equal(expected.cleanup_checkpoint, 'owned-volumes-after-containers');
+
+  const privateInventory = {
+    containers: [{ Id: 'private-container-id' }],
+    volumes: [{ Name: 'private-volume-name' }],
+  };
+  const hostile = formatFailureDiagnostic({
+    ...fields,
+    cleanupCheckpoint: JSON.stringify(privateInventory),
+  });
+  assert.equal(hostile.cleanup_checkpoint, 'unknown');
+  assert.doesNotMatch(
+    JSON.stringify(hostile),
+    /private-container-id|private-volume-name/u,
+  );
+  assert.equal(
+    formatFailureDiagnostic({
+      phase: 'service-inventory',
+      failureCode: 'service-state-mismatch',
+      cleanupCheckpoint: 'owned-volumes-after-containers',
+    }).cleanup_checkpoint,
+    'not-applicable',
+  );
+});
+
+test('failure diagnostics keep sanitized recovery failure separate from original failure', (t) => {
+  const recoveryFailure = {
+    phase: 'failure-cleanup',
+    failureCode: 'inventory-postcondition-failed',
+    cleanupCheckpoint: 'owned-volumes-after-containers',
+  };
+  const original = formatFailureDiagnostic({
+    phase: 'owned-cleanup',
+    failureCode: 'owned-container-remains',
+    cleanupCheckpoint: 'container-plan',
+    recoveryFailure,
+  });
+
+  assert.equal(original.failed_phase, 'owned-cleanup');
+  assert.equal(original.failure_check, 'cleanup-container');
+  assert.equal(original.cleanup_checkpoint, 'not-applicable');
+  assert.deepEqual(original.recovery_failure, {
+    phase: 'failure-cleanup',
+    failure_check: 'cleanup-inventory',
+    cleanup_checkpoint: 'owned-volumes-after-containers',
+  });
+
+  const hostile = formatFailureDiagnostic({
+    phase: 'owned-cleanup',
+    failureCode: 'owned-container-remains',
+    recoveryFailure: {
+      phase: 'private task inventory token=secret',
+      failureCode: 'raw error token=secret',
+      cleanupCheckpoint: JSON.stringify({ Id: 'private-container-id' }),
+    },
+  });
+  assert.deepEqual(hostile.recovery_failure, {
+    phase: 'runner',
+    failure_check: 'unknown',
+    cleanup_checkpoint: 'not-applicable',
+  });
+  assert.doesNotMatch(
+    JSON.stringify(hostile),
+    /secret|private-container-id|private task inventory|raw error/u,
+  );
+
+  const runnerTemp = mkdtempSync(join(tmpdir(), 'mcw-recovery-failure-'));
+  chmodSync(runnerTemp, 0o700);
+  t.after(() => rmSync(runnerTemp, { recursive: true, force: true }));
+  const fields = {
+    sourceSha,
+    workflowSha: '2'.repeat(40),
+    runId,
+    attempt: '1',
+    phase: 'owned-cleanup',
+    failureClass: 'gate-failed',
+    operation: 'gate',
+    failureCode: 'owned-container-remains',
+    cleanupStatus: 'pending',
+    cleanupAttempted: false,
+  };
+  assert.equal(writeFailureDiagnostic(runnerTemp, fields), true);
+  assert.equal(
+    writeFailureDiagnostic(
+      runnerTemp,
+      {
+        ...fields,
+        cleanupStatus: 'unverified',
+        cleanupAttempted: true,
+        recoveryFailure,
+      },
+      true,
+    ),
+    true,
+  );
+  const artifactPath = join(
+    runnerTemp,
+    'matrix-calendar-widget-operator-rehearsal-failure.json',
+  );
+  const written = JSON.parse(readFileSync(artifactPath, 'utf8'));
+  assert.equal(written.failed_phase, 'owned-cleanup');
+  assert.equal(written.failure_check, 'cleanup-container');
+  assert.deepEqual(written.recovery_failure, original.recovery_failure);
+  assert.doesNotMatch(
+    readFileSync(artifactPath, 'utf8'),
+    /secret|private-container-id|raw error/u,
+  );
+  assert.equal(
+    writeFailureDiagnostic(
+      runnerTemp,
+      {
+        ...fields,
+        cleanupStatus: 'unverified',
+        cleanupAttempted: true,
+        recoveryFailure: {
+          ...recoveryFailure,
+          cleanupCheckpoint: 'volume-plan',
+        },
+      },
+      true,
+    ),
+    false,
+  );
+});
+
 test('startup failure markers accept only one source-formatted closed marker matching child status', () => {
   const stages = [
     'configuration-preflight',
@@ -3474,9 +3643,14 @@ test('failure operation identifiers cover every literal and generated task label
 
 test('workflow rehearsal input defaults off and executes between manifest verification and upload', () => {
   const workflow = readFileSync(workflowPath, 'utf8');
+  assert.match(workflow, /image_set:[\s\S]*?default: all[\s\S]*?server-only/u);
   assert.match(
     workflow,
     /operator_rehearsal:[\s\S]*?default: false[\s\S]*?type: boolean/u,
+  );
+  assert.match(
+    workflow,
+    /server-only' && "\$INPUT_OPERATOR_REHEARSAL" == 'true'[\s\S]*?operator_rehearsal requires image_set=all/u,
   );
 
   const verifyIndex = workflow.indexOf('release-image-archive.mjs verify');
@@ -3521,7 +3695,7 @@ test('workflow rehearsal input defaults off and executes between manifest verifi
   assert.doesNotMatch(failureUpload, /\*/u);
 });
 
-test('trusted sparse checkout can load and enter the hosted rehearsal runner', (t) => {
+test('trusted sparse checkout can load its hosted tooling entry points', (t) => {
   const workflow = readFileSync(workflowPath, 'utf8');
   const lines = workflow.split(/\r?\n/u);
   const sparseCheckoutIndex = lines.findIndex((line) =>
@@ -3553,6 +3727,8 @@ test('trusted sparse checkout can load and enter the hosted rehearsal runner', (
     copyFileSync(sourcePath, destinationPath);
   }
 
+  assert.ok(sparsePaths.includes('scripts/release-image-archive.mjs'));
+
   const result = spawnSync(
     process.execPath,
     [join(toolingRoot, 'scripts/hosted-operator-rehearsal.mjs')],
@@ -3571,4 +3747,20 @@ test('trusted sparse checkout can load and enter the hosted rehearsal runner', (
     /failed at phase preflight; owned cleanup not-run/u,
   );
   assert.doesNotMatch(result.stderr, /ERR_MODULE_NOT_FOUND/u);
+
+  const archiveResult = spawnSync(
+    process.execPath,
+    [join(toolingRoot, 'scripts/release-image-archive.mjs')],
+    {
+      cwd: toolingRoot,
+      encoding: 'utf8',
+      env: {},
+    },
+  );
+  assert.equal(archiveResult.status, 1, archiveResult.stderr);
+  assert.match(
+    archiveResult.stderr,
+    /Usage: release-image-archive\.mjs prepare\|create\|verify --options/u,
+  );
+  assert.doesNotMatch(archiveResult.stderr, /ERR_MODULE_NOT_FOUND/u);
 });

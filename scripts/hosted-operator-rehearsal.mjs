@@ -302,6 +302,14 @@ const FAILURE_CHECK_BY_CODE = new Map([
   ['owned-network-still-attached', 'cleanup-network'],
   ['inventory-postcondition-failed', 'cleanup-inventory'],
 ]);
+const CLEANUP_EQUALITY_CHECKPOINTS = new Set([
+  'container-plan',
+  'owned-volumes-after-containers',
+  'volume-plan',
+  'owned-networks-after-volumes',
+  'network-plan',
+  'final-inventory-baseline',
+]);
 const PRIMARY_SERVICE_ROLES = Object.freeze([
   'synapse',
   'radicale',
@@ -1763,6 +1771,11 @@ class RehearsalFailure extends Error {
     super('Hosted operator rehearsal failed');
     this.stage = stage;
     this.code = code;
+    this.cleanupCheckpoint = CLEANUP_EQUALITY_CHECKPOINTS.has(
+      diagnostic.cleanupCheckpoint,
+    )
+      ? diagnostic.cleanupCheckpoint
+      : undefined;
     this.startupStage = SAFE_STARTUP_STAGES.has(diagnostic.startupStage)
       ? diagnostic.startupStage
       : 'unknown';
@@ -3529,9 +3542,9 @@ function currentIdentity(resource, kind, runId, project) {
   }
 }
 
-function assertInventoryEqual(actual, expected, stage) {
+function assertInventoryEqual(actual, expected, stage, cleanupCheckpoint) {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-    fail(stage, 'inventory-postcondition-failed');
+    fail(stage, 'inventory-postcondition-failed', { cleanupCheckpoint });
   }
 }
 
@@ -3560,7 +3573,12 @@ export function removeOwnedResources({
     if (fresh.length !== 1) fail(stage, 'container-changed-before-cleanup');
     const stable = stableContainer(fresh[0]);
     currentIdentity(stable, 'container', runId, project);
-    assertInventoryEqual(stable, plannedContainers.get(containerId), stage);
+    assertInventoryEqual(
+      stable,
+      plannedContainers.get(containerId),
+      stage,
+      'container-plan',
+    );
     if (fresh[0].State?.Running === true) {
       runTask(
         `${prefix}-stop-container`,
@@ -3592,7 +3610,12 @@ export function removeOwnedResources({
   const observedVolumes = afterContainers.volumes.filter(
     (volume) => ownership(volume, 'volume', runId, project) === 'owned',
   );
-  assertInventoryEqual(observedVolumes, plan.volumes, stage);
+  assertInventoryEqual(
+    observedVolumes,
+    plan.volumes,
+    stage,
+    'owned-volumes-after-containers',
+  );
   const mountedVolumeNames = new Set(
     afterContainers.containers.flatMap((container) =>
       (container.Mounts ?? []).map((mount) => mount.Name).filter(Boolean),
@@ -3605,7 +3628,7 @@ export function removeOwnedResources({
       context,
     );
     if (fresh.length !== 1) fail(stage, 'volume-changed-before-cleanup');
-    assertInventoryEqual(stableVolume(fresh[0]), volume, stage);
+    assertInventoryEqual(stableVolume(fresh[0]), volume, stage, 'volume-plan');
     currentIdentity(volume, 'volume', runId, project);
     if (mountedVolumeNames.has(volume.Name))
       fail(stage, 'owned-volume-still-mounted');
@@ -3640,6 +3663,7 @@ export function removeOwnedResources({
     observedNetworks,
     networkAfterContainerRemoval ? [networkAfterContainerRemoval] : [],
     stage,
+    'owned-networks-after-volumes',
   );
   if (plan.network) {
     const fresh = dockerJson(
@@ -3652,7 +3676,12 @@ export function removeOwnedResources({
     if (Object.keys(currentNetwork.Containers ?? {}).length !== 0) {
       fail(stage, 'owned-network-still-attached');
     }
-    assertInventoryEqual(currentNetwork, networkAfterContainerRemoval, stage);
+    assertInventoryEqual(
+      currentNetwork,
+      networkAfterContainerRemoval,
+      stage,
+      'network-plan',
+    );
     currentIdentity(plan.network, 'network', runId, project);
     runTask(
       `${prefix}-remove-network`,
@@ -3670,7 +3699,12 @@ export function removeOwnedResources({
     project,
     foreignCheckpoints.finalInventory ?? 'unknown',
   );
-  assertInventoryEqual(finalInventory, baseline, `${prefix}-final-inventory`);
+  assertInventoryEqual(
+    finalInventory,
+    baseline,
+    `${prefix}-final-inventory`,
+    'final-inventory-baseline',
+  );
   for (const kind of ['container', 'network', 'volume']) {
     assertNoOwnedResources(finalInventory, runId, project, kind, stage);
   }
@@ -3957,6 +3991,8 @@ export function formatFailureDiagnostic({
   cleanupStatus,
   cleanupAttempted,
   failureCode,
+  cleanupCheckpoint,
+  recoveryFailure,
   serviceInventory,
   serviceRunId,
   serviceProject,
@@ -4003,6 +4039,33 @@ export function formatFailureDiagnostic({
       ? childExitCode
       : 'unavailable';
   const safeFailureCheck = FAILURE_CHECK_BY_CODE.get(failureCode) ?? 'unknown';
+  const safeCleanupCheckpoint =
+    failureCode === 'inventory-postcondition-failed'
+      ? CLEANUP_EQUALITY_CHECKPOINTS.has(cleanupCheckpoint)
+        ? cleanupCheckpoint
+        : 'unknown'
+      : 'not-applicable';
+  const safeRecoveryFailure = recoveryFailure
+    ? {
+        phase: SAFE_PHASES.has(recoveryFailure.phase)
+          ? recoveryFailure.phase
+          : 'runner',
+        failure_check:
+          FAILURE_CHECK_BY_CODE.get(recoveryFailure.failureCode) ?? 'unknown',
+        cleanup_checkpoint:
+          recoveryFailure.failureCode === 'inventory-postcondition-failed'
+            ? CLEANUP_EQUALITY_CHECKPOINTS.has(
+                recoveryFailure.cleanupCheckpoint,
+              )
+              ? recoveryFailure.cleanupCheckpoint
+              : 'unknown'
+            : 'not-applicable',
+      }
+    : {
+        phase: 'not-run',
+        failure_check: 'not-applicable',
+        cleanup_checkpoint: 'not-applicable',
+      };
   const safeListenerScope = {
     callsite: ['primary', 'paired-restore'].includes(listenerScope?.site)
       ? listenerScope.site
@@ -4025,7 +4088,7 @@ export function formatFailureDiagnostic({
   );
 
   return {
-    schema_version: 10,
+    schema_version: 12,
     result: 'failed',
     phase: 'hosted-docker-operator-v5',
     failed_phase: SAFE_PHASES.has(phase) ? phase : 'runner',
@@ -4034,6 +4097,8 @@ export function formatFailureDiagnostic({
       : 'unknown',
     failure_operation: safeOperation,
     failure_check: safeFailureCheck,
+    cleanup_checkpoint: safeCleanupCheckpoint,
+    recovery_failure: safeRecoveryFailure,
     service_roles: projectPrimaryServiceInventory(serviceInventory, {
       runId: serviceRunId,
       project: serviceProject,
@@ -4173,6 +4238,16 @@ export function writeFailureDiagnostic(runnerTemp, fields, update = false) {
         FAILURE_CLEANUP_FOREIGN_CHECKPOINTS.has(
           diagnostic.foreign_inventory_change?.checkpoint,
         );
+      const recoveryFailureUnchanged =
+        JSON.stringify(previous?.recovery_failure) ===
+        JSON.stringify(diagnostic.recovery_failure);
+      const recoveryFailureAddedDuringFailureCleanup =
+        JSON.stringify(previous?.recovery_failure) ===
+          JSON.stringify({
+            phase: 'not-run',
+            failure_check: 'not-applicable',
+            cleanup_checkpoint: 'not-applicable',
+          }) && diagnostic.recovery_failure?.phase !== 'not-run';
       if (
         ![
           'run_id',
@@ -4183,6 +4258,7 @@ export function writeFailureDiagnostic(runnerTemp, fields, update = false) {
           'failure_class',
           'failure_operation',
           'failure_check',
+          'cleanup_checkpoint',
           'startup_stage',
           'child_exit_code',
         ].every((key) => previous?.[key] === diagnostic[key]) ||
@@ -4197,7 +4273,8 @@ export function writeFailureDiagnostic(runnerTemp, fields, update = false) {
         JSON.stringify(previous?.reminder_fixture) !==
           JSON.stringify(diagnostic.reminder_fixture) ||
         (!foreignInventoryChangeUnchanged &&
-          !foreignInventoryChangeAddedDuringFailureCleanup)
+          !foreignInventoryChangeAddedDuringFailureCleanup) ||
+        (!recoveryFailureUnchanged && !recoveryFailureAddedDuringFailureCleanup)
       ) {
         fail('receipt-publish', 'failure-diagnostic-identity-mismatch');
       }
@@ -4999,6 +5076,8 @@ async function main() {
           ? failureOperationForStage(error.stage)
           : 'runner-error',
       failureCode: error instanceof RehearsalFailure ? error.code : 'unknown',
+      cleanupCheckpoint:
+        error instanceof RehearsalFailure ? error.cleanupCheckpoint : undefined,
       foreignInventoryChange:
         error instanceof RehearsalFailure
           ? error.foreignInventoryChange
@@ -5060,6 +5139,20 @@ async function main() {
         cleanupStatus = 'verified';
         if (localMode) localChecks.owned_cleanup = 'passed';
       } catch (cleanupError) {
+        failure.recoveryFailure = {
+          phase:
+            cleanupError instanceof RehearsalFailure
+              ? cleanupError.stage
+              : 'runner',
+          failureCode:
+            cleanupError instanceof RehearsalFailure
+              ? cleanupError.code
+              : 'unknown',
+          cleanupCheckpoint:
+            cleanupError instanceof RehearsalFailure
+              ? cleanupError.cleanupCheckpoint
+              : undefined,
+        };
         if (
           !failure.foreignInventoryChange &&
           cleanupError instanceof RehearsalFailure

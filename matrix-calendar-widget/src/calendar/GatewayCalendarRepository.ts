@@ -41,6 +41,7 @@ import type {
   CalendarRoomCapabilities,
   CalendarTargetAvailabilityRepository,
 } from './CalendarTargetAvailabilityRepository';
+import { GatewayCalendarTransport } from './GatewayCalendarTransport';
 
 type CalendarTarget = 'personal' | 'room';
 
@@ -100,10 +101,10 @@ export class GatewayCalendarRepository
     CalendarEventId,
     EventReference
   >();
-  private readonly fetchImpl: typeof fetch;
+  private readonly transport: GatewayCalendarTransport;
 
   constructor(private readonly options: GatewayCalendarRepositoryOptions) {
-    this.fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
+    this.transport = new GatewayCalendarTransport(options);
   }
 
   async listCalendars(): Promise<Calendar[]> {
@@ -112,8 +113,8 @@ export class GatewayCalendarRepository
 
   async listCalendarsWithAvailability(): Promise<CalendarListWithAvailability> {
     const [personalResult, capabilitiesResult] = await Promise.allSettled([
-      this.requestJson<Calendar[]>(
-        this.url('/v1/calendar/calendars', {
+      this.transport.requestJson<Calendar[]>(
+        this.transport.url('/v1/calendar/calendars', {
           roomId: this.options.roomId,
           target: 'personal',
         }),
@@ -141,8 +142,8 @@ export class GatewayCalendarRepository
       const capabilities = capabilitiesResult.value;
       if (capabilities.canReadEvents) {
         try {
-          const roomCalendars = await this.requestJson<Calendar[]>(
-            this.url('/v1/calendar/calendars', {
+          const roomCalendars = await this.transport.requestJson<Calendar[]>(
+            this.transport.url('/v1/calendar/calendars', {
               roomId: this.options.roomId,
               target: 'room',
             }),
@@ -197,9 +198,12 @@ export class GatewayCalendarRepository
       );
     }
 
-    const context = await this.requestJson<CalendarGatewayContextResource>(
-      this.url('/v1/calendar/context', { roomId: this.options.roomId }),
-    );
+    const context =
+      await this.transport.requestJson<CalendarGatewayContextResource>(
+        this.transport.url('/v1/calendar/context', {
+          roomId: this.options.roomId,
+        }),
+      );
     const capabilities = validateRoomCapabilities(context?.roomCalendar);
     if (!capabilities) {
       return undefined;
@@ -221,8 +225,8 @@ export class GatewayCalendarRepository
     eventId: CalendarEventId,
   ): Promise<CalendarRoomReminderAlarmOption[]> {
     const reference = this.roomEventReference(calendarId, eventId);
-    const response = await this.requestJson<unknown>(
-      this.url(
+    const response = await this.transport.requestJson<unknown>(
+      this.transport.url(
         `/v1/calendar/rooms/${encodePathSegment(this.options.roomId)}/reminders/options`,
         { eventId: reference.eventId },
       ),
@@ -238,8 +242,8 @@ export class GatewayCalendarRepository
     let cursor: string | undefined;
     const maxPages = 20;
     for (let page = 0; page < maxPages; page += 1) {
-      const response = await this.requestJson<unknown>(
-        this.url(
+      const response = await this.transport.requestJson<unknown>(
+        this.transport.url(
           `/v1/calendar/rooms/${encodePathSegment(this.options.roomId)}/reminders`,
           { limit: '100', ...(cursor ? { cursor } : {}) },
         ),
@@ -265,8 +269,8 @@ export class GatewayCalendarRepository
     recurrenceId: string | null,
   ): Promise<CalendarRoomReminderIdentity> {
     const reference = this.roomEventReference(calendarId, eventId);
-    const response = await this.requestJson<unknown>(
-      this.url(
+    const response = await this.transport.requestJson<unknown>(
+      this.transport.url(
         `/v1/calendar/rooms/${encodePathSegment(this.options.roomId)}/reminders`,
         {},
       ),
@@ -286,8 +290,8 @@ export class GatewayCalendarRepository
   async disableRoomReminder(
     identity: CalendarRoomReminderIdentity,
   ): Promise<void> {
-    const response = await this.requestJson<unknown>(
-      this.url(
+    const response = await this.transport.requestJson<unknown>(
+      this.transport.url(
         `/v1/calendar/rooms/${encodePathSegment(this.options.roomId)}/reminders`,
         {},
       ),
@@ -311,8 +315,8 @@ export class GatewayCalendarRepository
   }
 
   async getCalendarDiagnostics(): Promise<CalendarDiagnostics> {
-    return this.requestJson<CalendarDiagnostics>(
-      this.url('/v1/calendar/calendars/diagnostics', {
+    return this.transport.requestJson<CalendarDiagnostics>(
+      this.transport.url('/v1/calendar/calendars/diagnostics', {
         roomId: this.options.roomId,
         target: 'personal',
       }),
@@ -322,8 +326,8 @@ export class GatewayCalendarRepository
   async createCalendar(name: string): Promise<Calendar> {
     return this.rememberCalendar(
       'personal',
-      await this.requestJson<Calendar>(
-        this.url('/v1/calendar/calendars', {
+      await this.transport.requestJson<Calendar>(
+        this.transport.url('/v1/calendar/calendars', {
           roomId: this.options.roomId,
           target: 'personal',
         }),
@@ -337,8 +341,8 @@ export class GatewayCalendarRepository
 
   async renameCalendar(calendarId: CalendarId, name: string): Promise<void> {
     const reference = this.managedCalendarReference(calendarId);
-    await this.requestVoid(
-      this.url('/v1/calendar/calendars', {
+    await this.transport.requestVoid(
+      this.transport.url('/v1/calendar/calendars', {
         roomId: this.options.roomId,
         target: reference.target,
         calendarId: reference.calendarId,
@@ -355,8 +359,8 @@ export class GatewayCalendarRepository
     description: string,
   ): Promise<void> {
     const reference = this.managedCalendarReference(calendarId);
-    await this.requestVoid(
-      this.url('/v1/calendar/calendars/description', {
+    await this.transport.requestVoid(
+      this.transport.url('/v1/calendar/calendars/description', {
         roomId: this.options.roomId,
         target: reference.target,
         calendarId: reference.calendarId,
@@ -373,8 +377,8 @@ export class GatewayCalendarRepository
     color: string,
   ): Promise<void> {
     const reference = this.managedCalendarReference(calendarId);
-    await this.requestVoid(
-      this.url('/v1/calendar/calendars/color', {
+    await this.transport.requestVoid(
+      this.transport.url('/v1/calendar/calendars/color', {
         roomId: this.options.roomId,
         target: reference.target,
         calendarId: reference.calendarId,
@@ -389,8 +393,8 @@ export class GatewayCalendarRepository
   async deleteCalendar(calendarId: CalendarId): Promise<void> {
     const reference = this.managedCalendarReference(calendarId);
     try {
-      await this.requestVoid(
-        this.url('/v1/calendar/calendars', {
+      await this.transport.requestVoid(
+        this.transport.url('/v1/calendar/calendars', {
           roomId: this.options.roomId,
           target: reference.target,
           calendarId: reference.calendarId,
@@ -436,16 +440,18 @@ export class GatewayCalendarRepository
     const results = await Promise.allSettled(
       calendarIds.map((publicCalendarId) => {
         const reference = this.referenceForCalendar(publicCalendarId);
-        return this.requestJson<CalendarGatewayEventListResource>(
-          this.url('/v1/calendar/events', {
-            roomId: this.options.roomId,
-            target: reference.target,
-            calendarId: reference.calendarId,
-            start: range.start,
-            end: range.end,
-            timezone: viewerTimezone,
-          }),
-        ).then((result) => ({ publicCalendarId, reference, result }));
+        return this.transport
+          .requestJson<CalendarGatewayEventListResource>(
+            this.transport.url('/v1/calendar/events', {
+              roomId: this.options.roomId,
+              target: reference.target,
+              calendarId: reference.calendarId,
+              start: range.start,
+              end: range.end,
+              timezone: viewerTimezone,
+            }),
+          )
+          .then((result) => ({ publicCalendarId, reference, result }));
       }),
     );
     const successfulResults = results.flatMap((result) =>
@@ -486,8 +492,8 @@ export class GatewayCalendarRepository
     const reference = this.referenceForEvent(calendarReference, eventId);
     return this.remember(
       calendarReference,
-      await this.requestJson<CalendarGatewayEventResource>(
-        this.url('/v1/calendar/event', {
+      await this.transport.requestJson<CalendarGatewayEventResource>(
+        this.transport.url('/v1/calendar/event', {
           roomId: this.options.roomId,
           target: reference.target,
           calendarId: reference.calendarId,
@@ -504,8 +510,8 @@ export class GatewayCalendarRepository
     const reference = this.referenceForCalendar(calendarId);
     return this.remember(
       reference,
-      await this.requestJson<CalendarGatewayEventResource>(
-        this.url('/v1/calendar/events', {
+      await this.transport.requestJson<CalendarGatewayEventResource>(
+        this.transport.url('/v1/calendar/events', {
           roomId: this.options.roomId,
           target: reference.target,
           calendarId: reference.calendarId,
@@ -530,8 +536,8 @@ export class GatewayCalendarRepository
     try {
       return this.remember(
         calendarReference,
-        await this.requestJson<CalendarGatewayEventResource>(
-          this.url('/v1/calendar/events', {
+        await this.transport.requestJson<CalendarGatewayEventResource>(
+          this.transport.url('/v1/calendar/events', {
             roomId: this.options.roomId,
             target: reference.target,
             calendarId: reference.calendarId,
@@ -564,8 +570,8 @@ export class GatewayCalendarRepository
     const etag = await this.etagFor(reference);
 
     try {
-      await this.requestVoid(
-        this.url('/v1/calendar/events', {
+      await this.transport.requestVoid(
+        this.transport.url('/v1/calendar/events', {
           roomId: this.options.roomId,
           target: reference.target,
           calendarId: reference.calendarId,
@@ -766,110 +772,6 @@ export class GatewayCalendarRepository
       );
     }
     return this.referenceForEvent(calendarReference, publicEventId);
-  }
-
-  private async requestJson<T>(
-    url: string,
-    init: RequestInit = {},
-  ): Promise<T> {
-    const response = await this.request(url, init);
-
-    try {
-      return (await response.json()) as T;
-    } catch {
-      throw new CalendarRepositoryError(
-        'request-failed',
-        'Calendar gateway returned invalid JSON',
-      );
-    }
-  }
-
-  private async requestVoid(
-    url: string,
-    init: RequestInit = {},
-  ): Promise<void> {
-    await this.request(url, init);
-  }
-
-  private async request(url: string, init: RequestInit): Promise<Response> {
-    const authorization = await this.options.getAuthorizationHeader();
-    const headers = new Headers(init.headers);
-
-    if (authorization) {
-      headers.set('Authorization', authorization);
-    }
-    if (init.body !== undefined) {
-      headers.set('Content-Type', 'application/json');
-    }
-
-    let response: Response;
-    try {
-      response = await this.fetchImpl(url, {
-        ...init,
-        headers,
-      });
-    } catch (error) {
-      throw new CalendarRepositoryError(
-        'request-failed',
-        error instanceof Error
-          ? `Calendar gateway request failed: ${error.message}`
-          : 'Calendar gateway request failed',
-      );
-    }
-
-    if (response.ok) {
-      return response;
-    }
-
-    if (response.status === 401) {
-      throw new CalendarRepositoryError(
-        'authentication-required',
-        'Calendar gateway authentication is required',
-      );
-    }
-
-    if (response.status === 409) {
-      throw new CalendarRepositoryError(
-        'event-conflict',
-        'The event changed on the server',
-      );
-    }
-
-    if (response.status === 400) {
-      try {
-        const body: unknown = await response.clone().json();
-        if (
-          body &&
-          typeof body === 'object' &&
-          'code' in body &&
-          body.code === 'unsupported-patch' &&
-          'message' in body &&
-          typeof body.message === 'string'
-        ) {
-          throw new CalendarRepositoryError(
-            'unsupported-patch',
-            body.message.slice(0, 500),
-          );
-        }
-      } catch (error) {
-        if (
-          error instanceof CalendarRepositoryError &&
-          error.code === 'unsupported-patch'
-        ) {
-          throw error;
-        }
-      }
-    }
-
-    throw new CalendarRepositoryError(
-      'request-failed',
-      `Calendar gateway request failed with status ${response.status}`,
-    );
-  }
-
-  private url(path: string, params: Record<string, string>): string {
-    const search = new URLSearchParams(params);
-    return `${this.options.baseUrl.replace(/\/$/, '')}${path}?${search}`;
   }
 }
 
