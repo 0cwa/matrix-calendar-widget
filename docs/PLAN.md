@@ -622,19 +622,22 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       pass; backend, identity/authentication, room authorization, and CalDAV
       contracts remain mandatory in both modes. This scope does not authorize
       publication or broader rollout.
-  - [ ] Complete the required frozen-candidate beta acceptance in bot-account
+  - [x] Complete the required frozen-candidate beta acceptance in bot-account
         mode: the Web/Desktop flow, including candidate-bound Web keyboard event
-        open/details/Escape/focus return. Desktop keyboard/focus and side-panel
-        sub-gates passed on app tree `99d4c9f` in
-        [run 39345412924](https://github.com/0cwa/matrix-calendar-widget/actions/runs/39345412924),
-        using harness branch `5f0a900`; the bot-account job later failed cleanup
-        (`process_snapshot_changed`), which remains a required unresolved gate.
-        The separate appservice job failed room readiness
-        (`element-room-heading-not-present`), but appservice-mode browser
-        certification is deferred after beta and is not a beta blocker. PR #331
-        separately passed the Desktop harness on current main, whose app source
-        differs from the frozen candidate. Complete candidate-bound Web keyboard/
-        focus evidence and a successful bot-account Web/Desktop flow; see
+        open/details/Escape/focus return. [Run 39353242381](https://github.com/0cwa/matrix-calendar-widget/actions/runs/39353242381)
+        on harness head `c36326d5d58349fe73636c259ba5ce11453e9ae5` passed both
+        Element Web and normal-bot acceptance profiles. The application remains
+        frozen at SHA `99d4c9f9f36aa0b0861a13499a7f7cd512c56920`, tree
+        `97022a9d2351655d2aae0a50a44a14bd81daacc9`; the
+        [comparison](https://github.com/0cwa/matrix-calendar-widget/compare/99d4c9f9f36aa0b0861a13499a7f7cd512c56920...c36326d5d58349fe73636c259ba5ce11453e9ae5)
+        contains only `dev/` and `e2e/` harness paths. Both Desktop summaries
+        passed all 14 cases, including keyboard/focus and side-panel layout; both
+        Web summaries passed keyboard/focus return, side-panel layout, and owned
+        cleanup. The earlier failed attempt in run 39345412924 remains historical
+        and is superseded for this gate by the later successful run. Full
+        appservice-mode browser certification remains deferred after beta despite
+        the profile pass in this run; backend, identity/authentication, room
+        authorization, and CalDAV contracts remain mandatory in both modes. See
         [the release ledger](./RELEASE.md).
   - [x] Add current calendar grid/list/details keyboard, focus, accessible-name,
         and axe regressions. Hosted browser fixture checks pass; actual client
@@ -918,19 +921,22 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       both-mode CalDAV, and standalone Desktop evidence is listed in
       [docs/RELEASE.md](./RELEASE.md). This completes application-source
       acceptance for that frozen candidate; it does not qualify later `main`
-      commits or establish target deployment acceptance. The separate
-      harness branch `5f0a900` records Desktop keyboard/focus and side-panel
-      sub-gates passing on the frozen app tree. The bot-account job later failed
-      cleanup (`process_snapshot_changed`), so the required bot-account
-      Web/Desktop flow remains incomplete. The separate appservice job failed
-      room readiness (`element-room-heading-not-present`); appservice-mode browser
-      certification is deferred after beta and does not block beta acceptance.
-      PR #331 separately records 14 Desktop cases passing on current main, whose
-      app source differs from the frozen candidate. Candidate-bound Web
-      keyboard/focus evidence and a successful bot-account flow remain
-      outstanding, so the release gate remains blocked as recorded in the release
-      ledger. Backend, identity/authentication, authorization, and CalDAV
-      contracts remain required in both modes.
+      commits or establish target deployment acceptance. The later candidate run
+      [39353242381](https://github.com/0cwa/matrix-calendar-widget/actions/runs/39353242381)
+      used harness head `c36326d5d58349fe73636c259ba5ce11453e9ae5`; the
+      comparison to frozen application SHA/tree
+      `99d4c9f9f36aa0b0861a13499a7f7cd512c56920` /
+      `97022a9d2351655d2aae0a50a44a14bd81daacc9` shows only `dev/` and `e2e/`
+      harness changes. Both Web acceptance profiles passed, including the
+      keyboard/focus and side-panel checks and owned cleanup. Both Desktop
+      summaries passed all 14 cases, including keyboard/focus and side-panel
+      layout; both startup summaries passed their cleanup checks. This completes
+      the required bot-account Web/Desktop acceptance for the frozen candidate.
+      Run 39345412924 remains an earlier failed attempt, superseded for this gate
+      by the later pass. Full appservice-mode browser certification remains
+      deferred after beta despite the profile pass in 39353242381. Backend,
+      identity/authentication, authorization, and CalDAV contracts remain
+      required in both modes.
 - [ ] Complete private operator readiness for the selected deployment before
       any rollout decision. The bounded local Stage B rehearsal and hosted
       source-bound archive/rehearsal passed for the frozen candidate; see
