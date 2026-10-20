@@ -20,7 +20,7 @@
     "start:debug": "PORT=3001 nest start --debug --watch",
     "copyfiles": "copyfiles -E -u 0 src/static/locales/**/*.json lib",
     "copyImages": "copyfiles -E -u 1 src/static/images/* lib",
-    "translation:smoke": "node scripts/check-translation-package.js",
+    "translation:smoke": "node scripts/check-translation-package.mjs",
     "lint": "eslint . --max-warnings=0",
     "translate": "i18next-cli extract --sync-primary",
     "test": "jest --watch",

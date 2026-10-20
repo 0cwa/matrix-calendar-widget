@@ -14,9 +14,12 @@
  * limitations under the License.
  */
 
-const assert = require('node:assert/strict');
-const i18next = require('i18next');
-const { initializeI18next } = require('../lib/src/i18n');
+import assert from 'node:assert/strict';
+import console from 'node:console';
+import process from 'node:process';
+import i18nextModule from '../lib/src/i18n.js';
+
+const { initializeI18next, i18next } = i18nextModule;
 
 async function main() {
   await initializeI18next(['en', 'de']);

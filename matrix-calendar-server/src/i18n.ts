@@ -19,6 +19,8 @@ import i18nextFsBackend from 'i18next-fs-backend';
 import i18nextMiddleware from 'i18next-http-middleware';
 import { registerDateRangeFormatter } from './dateRangeFormatter';
 
+export { i18next };
+
 export async function initializeI18next(
   supportedLngs: string[],
 ): Promise<void> {
