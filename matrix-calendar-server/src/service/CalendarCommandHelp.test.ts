@@ -17,6 +17,7 @@
 import i18next from 'i18next';
 import {
   formatCalendarCommandHelp,
+  formatCalendarCommandReply,
   type CalendarCommandHelp,
 } from './CalendarCommandHelp';
 import { parseCalendarCommand } from './CalendarCommandParser';
@@ -30,7 +31,9 @@ describe('formatCalendarCommandHelp', () => {
 
     const result = formatCalendarCommandHelp(help);
 
-    expect(result.body).toContain('Find and read events\n!calendar upcoming');
+    expect(result.body).toContain(
+      'Find and read events\n!calendar upcoming [count] [--ids]',
+    );
     expect(result.body).toContain(
       'Example: !calendar create 2026-10-22T10:00 2026-10-22T11:00 "Planning"',
     );
@@ -93,5 +96,17 @@ describe('formatCalendarCommandHelp', () => {
     expect(result.formattedBody).toContain('<h3>&lt;Access&gt;</h3>');
     expect(result.formattedBody).toContain('&lt;Example&gt;:</strong>');
     expect(result.formattedBody).not.toContain('<script>');
+  });
+});
+
+describe('formatCalendarCommandReply', () => {
+  test('escapes dynamic text and preserves line breaks for the equivalent Matrix HTML body', () => {
+    const text = 'Planning <review>\nResource ID: event.ics';
+    const formattedBody = formatCalendarCommandReply(text);
+
+    expect(formattedBody).toBe(
+      '<p>Planning &lt;review&gt;<br/>Resource ID: event.ics</p>',
+    );
+    expect(formattedBody).not.toContain('<review>');
   });
 });

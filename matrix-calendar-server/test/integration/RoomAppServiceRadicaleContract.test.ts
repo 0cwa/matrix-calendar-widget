@@ -2037,10 +2037,10 @@ describeContract(contractDescription, () => {
     const upcomingText = await commandService.execute(
       roomIds[0],
       sender,
-      'upcoming 10 --tz UTC',
+      'upcoming 10 --ids --tz UTC',
       translateCalendarCommand,
     );
-    expect(upcomingText).toContain(resourceId);
+    expect(upcomingText).toContain(`Resource ID: ${resourceId}`);
     expect(upcomingText).toContain(title);
     expect(
       activeCalDavRequests?.some(({ method }) => method === 'REPORT'),
@@ -2503,6 +2503,7 @@ function eventCalendar(uid: string, summary: string): string {
 
 const calendarCommandTranslations: Record<string, string> = {
   'calendarCommandErrors.notAllowed': 'Not allowed.',
+  'calendarCommandReplies.allDay': 'All day',
   'calendarCommandReplies.descriptionLabel': 'Description',
   'calendarCommandReplies.eventDetails': 'Calendar event:',
   'calendarCommandReplies.idLabel': 'Resource ID',

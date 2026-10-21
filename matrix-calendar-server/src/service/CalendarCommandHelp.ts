@@ -35,6 +35,11 @@ export interface FormattedCalendarCommandHelp {
   formattedBody: string;
 }
 
+/** Format calendar command text using Matrix custom HTML with a plain fallback. */
+export function formatCalendarCommandReply(text: string): string {
+  return `<p>${text.split('\n').map(escapeHtml).join('<br/>')}</p>`;
+}
+
 const HTML_ENTITIES: Record<string, string> = {
   '&': '&amp;',
   '<': '&lt;',
