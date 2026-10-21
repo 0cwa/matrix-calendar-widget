@@ -39,6 +39,8 @@ export type RoomReminderConfiguration = {
   target?: RoomReminderTarget;
   /** DATE events require an explicit sidecar schedule; timed events use VALARM. */
   allDaySchedule?: RoomReminderAllDaySchedule | null;
+  /** When the current all-day Matrix schedule became active. */
+  scheduleEffectiveAt?: Date | null;
   /** Incremented only when target or schedule metadata changes. */
   revision?: number;
 };
@@ -148,6 +150,7 @@ const REMINDER_CONFIGURATION_KEYS_WITH_METADATA = [
   ...REMINDER_CONFIGURATION_KEYS,
   'target',
   'allDaySchedule',
+  'scheduleEffectiveAt',
   'revision',
 ] as const;
 const REMINDER_DELIVERY_IDENTITY_KEYS = [
@@ -352,6 +355,15 @@ export function validateRoomReminderConfiguration(
   ) {
     throw new Error('Invalid room reminder configuration: revision');
   }
+
+  if (
+    configuration.scheduleEffectiveAt !== undefined &&
+    configuration.scheduleEffectiveAt !== null &&
+    (!(configuration.scheduleEffectiveAt instanceof Date) ||
+      !Number.isFinite(configuration.scheduleEffectiveAt.getTime()))
+  ) {
+    throw new Error('Invalid room reminder configuration: scheduleEffectiveAt');
+  }
 }
 
 export const MAX_SELECTED_REMINDER_RECIPIENTS = 50;
@@ -376,6 +388,14 @@ export function normalizeRoomReminderConfiguration(
         ? { kind: 'room' }
         : { kind: 'users', userIds: [...target.userIds].sort() },
     allDaySchedule: configuration.allDaySchedule ?? null,
+    ...(configuration.scheduleEffectiveAt === undefined
+      ? {}
+      : {
+          scheduleEffectiveAt:
+            configuration.scheduleEffectiveAt === null
+              ? null
+              : new Date(configuration.scheduleEffectiveAt.getTime()),
+        }),
     revision: configuration.revision ?? 1,
   };
 }

@@ -54,7 +54,12 @@ this decision.
 6. Do not send past reminders retroactively. For a one-time all-day event,
    require a future local reminder instant before saving. For a recurring
    series with a past current occurrence, explain that it will not be sent and
-   that future occurrences use the saved schedule. Bound the scheduler's
+   that the saved schedule applies to any future occurrences that remain; if
+   none remain, no reminder will be sent. Persist when the all-day schedule
+   became active. A newly enabled or materially changed schedule starts at the
+   save instant; editing only its destination does not reset activation. Skip
+   firings due before activation, while preserving the normal catch-up window
+   for schedules enabled before their due instant. Bound the scheduler's
    canonical-source lookahead by the configured day offset and time-zone
    margin, independently of the CalDAV alarm's relative trigger.
 7. Show supported and unsupported CalDAV alarms in one reminder surface for
@@ -68,7 +73,9 @@ this decision.
    nullable all-day schedule JSON, and configuration revision; old rows
    receive whole-room, no all-day schedule, and revision 1 defaults. Migration
    3 adds a constrained skipped-delivery reason. Neither migration deletes
-   configurations, delivery rows, or stable firing identities. Unknown
+   configurations, delivery rows, or stable firing identities. Migration 4
+   adds the schedule activation timestamp and backfills existing DATE schedules
+   to migration time, so old due instants cannot fire retroactively. Unknown
    persisted metadata fails closed.
 
 ## Consequences
@@ -87,3 +94,5 @@ must disable and quiesce reminder delivery before starting older code, retain
 the forward-migrated database and all rows, and keep delivery disabled until a
 compatible server is restored. Prefer a compatible forward fix when the
 selected-user rows must remain active. No downgrade migration is provided.
+A server predating migration 4 must also keep delivery disabled while all-day
+schedule rows exist because it cannot enforce their activation timestamps.

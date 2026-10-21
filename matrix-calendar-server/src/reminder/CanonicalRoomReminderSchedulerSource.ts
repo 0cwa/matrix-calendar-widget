@@ -436,6 +436,13 @@ export class CanonicalRoomReminderSchedulerSource implements CanonicalReminderSc
           if (!dueAt) {
             throw new CanonicalReminderSourceError('unsupported-source');
           }
+          if (
+            occurrenceTiming.type === 'all-day' &&
+            configuration.scheduleEffectiveAt instanceof Date &&
+            dueAt.getTime() < configuration.scheduleEffectiveAt.getTime()
+          ) {
+            continue;
+          }
           if (!isDueAt(dueAt, window)) continue;
           dueFirings.push({ triggerOrdinal, dueAt });
         }

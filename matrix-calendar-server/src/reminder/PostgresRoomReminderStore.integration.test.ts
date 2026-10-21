@@ -202,8 +202,71 @@ describeWithDatabase('PostgresRoomReminderStore integration', () => {
       await sql<{ version: number }[]>`
         SELECT version FROM matrix_calendar.schema_migrations ORDER BY version
       `,
-    ).toEqual([{ version: 1 }, { version: 2 }, { version: 3 }]);
+    ).toEqual([{ version: 1 }, { version: 2 }, { version: 3 }, { version: 4 }]);
     await store.deleteConfiguration(legacy);
+  });
+
+  it('backfills schedule activation on a v3 all-day configuration without resetting its delivery', async () => {
+    const config = {
+      roomId,
+      calendarId,
+      eventUid: 'migration-v3-all-day',
+      recurrenceId: null,
+      alarmUid: 'migration-alarm',
+      target: { kind: 'users' as const, userIds: ['@alice:example.test'] },
+      allDaySchedule: {
+        daysBefore: 1,
+        localTime: '09:00',
+        timezone: 'Europe/Stockholm',
+      },
+    };
+    const identity = {
+      roomId: config.roomId,
+      calendarId: config.calendarId,
+      eventUid: config.eventUid,
+      recurrenceId: config.recurrenceId,
+      alarmUid: config.alarmUid,
+      triggerOrdinal: 0,
+    };
+    await store.upsertConfiguration(config);
+    const claim = await store.claimDelivery(identity, 60_000);
+    expect(claim).toBeDefined();
+    expect(
+      await store.markDeliverySent(claim!.deliveryKey, claim!.claimToken),
+    ).toBe(true);
+
+    await sql`
+      ALTER TABLE matrix_calendar.room_reminder_configurations
+      DROP CONSTRAINT room_reminder_configurations_schedule_effective_check
+    `;
+    await sql`
+      ALTER TABLE matrix_calendar.room_reminder_configurations
+      DROP COLUMN schedule_effective_at
+    `;
+    await sql`
+      DELETE FROM matrix_calendar.schema_migrations WHERE version = 4
+    `;
+
+    const migrationStartedAt = Date.now();
+    await store.migrate();
+    const migrationFinishedAt = Date.now();
+    const restored = await store.getConfiguration(config);
+    expect(restored?.scheduleEffectiveAt).toBeInstanceOf(Date);
+    expect(restored!.scheduleEffectiveAt!.getTime()).toBeGreaterThanOrEqual(
+      migrationStartedAt - 2_000,
+    );
+    expect(restored!.scheduleEffectiveAt!.getTime()).toBeLessThanOrEqual(
+      migrationFinishedAt + 2_000,
+    );
+    expect(await store.claimDelivery(identity, 60_000)).toBeUndefined();
+    expect(
+      await sql<{ state: string; attempt_count: number }[]>`
+        SELECT state, attempt_count
+        FROM matrix_calendar.reminder_deliveries
+        WHERE delivery_key = ${claim!.deliveryKey}
+      `,
+    ).toEqual([{ state: 'sent', attempt_count: 1 }]);
+    await store.deleteConfiguration(config);
   });
 
   it('returns bounded exclusive configuration pages and checks exact existence', async () => {
@@ -432,6 +495,8 @@ describeWithDatabase('PostgresRoomReminderStore integration', () => {
     };
 
     await store.upsertConfiguration(config);
+    const firstConfiguration = await store.getConfiguration(config);
+    expect(firstConfiguration?.scheduleEffectiveAt).toBeInstanceOf(Date);
     const deliveryKeyBeforeMetadataEdit = createReminderDeliveryKey(identity);
     const claim = await store.claimDelivery(identity, 60_000);
     expect(claim).toBeDefined();
@@ -442,12 +507,27 @@ describeWithDatabase('PostgresRoomReminderStore integration', () => {
     await store.upsertConfiguration({
       ...config,
       target: { kind: 'users', userIds: ['@bob:example.test'] },
+    });
+    const targetOnlyEdit = await store.getConfiguration(config);
+    expect(targetOnlyEdit?.scheduleEffectiveAt).toEqual(
+      firstConfiguration?.scheduleEffectiveAt,
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await store.upsertConfiguration({
+      ...config,
+      target: { kind: 'users', userIds: ['@bob:example.test'] },
       allDaySchedule: {
         daysBefore: 0,
         localTime: '09:00',
         timezone: 'Europe/Stockholm',
       },
     });
+    const scheduleEdit = await store.getConfiguration(config);
+    expect(scheduleEdit?.scheduleEffectiveAt).toBeInstanceOf(Date);
+    expect(scheduleEdit!.scheduleEffectiveAt!.getTime()).toBeGreaterThan(
+      firstConfiguration!.scheduleEffectiveAt!.getTime(),
+    );
     const deliveryKeyAfterMetadataEdit = createReminderDeliveryKey(identity);
     expect(deliveryKeyAfterMetadataEdit).toBe(deliveryKeyBeforeMetadataEdit);
 
@@ -464,7 +544,8 @@ describeWithDatabase('PostgresRoomReminderStore integration', () => {
         localTime: '09:00',
         timezone: 'Europe/Stockholm',
       },
-      revision: 2,
+      scheduleEffectiveAt: scheduleEdit!.scheduleEffectiveAt,
+      revision: 3,
     });
     expect(await store.claimDelivery(identity, 60_000)).toBeUndefined();
   });

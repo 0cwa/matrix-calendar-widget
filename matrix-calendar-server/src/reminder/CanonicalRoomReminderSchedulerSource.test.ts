@@ -358,6 +358,51 @@ describe('CanonicalRoomReminderSchedulerSource', () => {
     });
   });
 
+  it('skips an all-day firing whose due instant predates schedule activation', async () => {
+    const fetchMock = createFetchMock(allDayFixture('2026-10-28'));
+    const { source } = createSource(fetchMock as typeof fetch);
+
+    const candidates = await source.listDueCandidates(
+      configuration({
+        allDaySchedule: {
+          daysBefore: 7,
+          localTime: '09:00',
+          timezone: 'Europe/Stockholm',
+        },
+        scheduleEffectiveAt: new Date('2026-10-21T07:01:00.000Z'),
+      }),
+      window('2026-10-21T06:55:00.000Z', '2026-10-21T07:05:00.000Z'),
+      undefined,
+      1,
+      new AbortController().signal,
+    );
+
+    expect(candidates).toEqual([]);
+  });
+
+  it('keeps the normal catch-up window when a schedule was active before its due instant', async () => {
+    const fetchMock = createFetchMock(allDayFixture('2026-10-28'));
+    const { source } = createSource(fetchMock as typeof fetch);
+
+    const candidates = await source.listDueCandidates(
+      configuration({
+        allDaySchedule: {
+          daysBefore: 7,
+          localTime: '09:00',
+          timezone: 'Europe/Stockholm',
+        },
+        scheduleEffectiveAt: new Date('2026-10-21T06:59:00.000Z'),
+      }),
+      window('2026-10-21T06:55:00.000Z', '2026-10-21T07:05:00.000Z'),
+      undefined,
+      1,
+      new AbortController().signal,
+    );
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].dueAt.toISOString()).toBe('2026-10-21T07:00:00.000Z');
+  });
+
   it.each([
     {
       label: 'zero days in UTC',

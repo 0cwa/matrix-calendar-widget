@@ -45,6 +45,7 @@ type DatabaseRoomReminderConfiguration = {
   alarm_uid: string;
   target_json?: unknown;
   all_day_schedule_json?: unknown;
+  schedule_effective_at?: Date | null;
   revision?: number;
 };
 
@@ -162,6 +163,23 @@ const reminderStoreMigrations = [
           );
     `,
   },
+  {
+    version: 4,
+    sql: `
+      ALTER TABLE matrix_calendar.room_reminder_configurations
+        ADD COLUMN schedule_effective_at timestamptz;
+      UPDATE matrix_calendar.room_reminder_configurations
+        SET schedule_effective_at = clock_timestamp()
+        WHERE all_day_schedule_json IS NOT NULL;
+      ALTER TABLE matrix_calendar.room_reminder_configurations
+        ADD CONSTRAINT room_reminder_configurations_schedule_effective_check
+          CHECK (
+            (all_day_schedule_json IS NULL AND schedule_effective_at IS NULL)
+            OR
+            (all_day_schedule_json IS NOT NULL AND schedule_effective_at IS NOT NULL)
+          );
+    `,
+  },
 ];
 const latestReminderStoreMigrationVersion = Math.max(
   ...reminderStoreMigrations.map(({ version }) => version),
@@ -195,7 +213,17 @@ function readConfigurationRow(
             row.all_day_schedule_json as RoomReminderAllDaySchedule | null,
         }),
     ...(row.revision === undefined ? {} : { revision: row.revision }),
+    ...(row.schedule_effective_at == null
+      ? {}
+      : { scheduleEffectiveAt: row.schedule_effective_at }),
   };
+  if (
+    (configuration.allDaySchedule != null) !==
+    (row.schedule_effective_at instanceof Date &&
+      Number.isFinite(row.schedule_effective_at.getTime()))
+  ) {
+    throw new Error('Invalid room reminder configuration in store');
+  }
   try {
     return normalizeRoomReminderConfiguration(configuration);
   } catch {
@@ -269,7 +297,7 @@ export class PostgresRoomReminderStore implements RoomReminderStore {
     await this.sql`
       INSERT INTO matrix_calendar.room_reminder_configurations (
         room_id, calendar_id, event_uid, recurrence_id, alarm_uid,
-        target_json, all_day_schedule_json, revision
+        target_json, all_day_schedule_json, schedule_effective_at, revision
       ) VALUES (
         ${normalized.roomId},
         ${normalized.calendarId},
@@ -278,12 +306,22 @@ export class PostgresRoomReminderStore implements RoomReminderStore {
         ${normalized.alarmUid},
         ${this.sql.json(normalized.target)},
         ${normalized.allDaySchedule === null ? null : this.sql.json(normalized.allDaySchedule)},
+        CASE
+          WHEN ${normalized.allDaySchedule === null} THEN NULL
+          ELSE clock_timestamp()
+        END,
         1
       )
       ON CONFLICT (room_id, calendar_id, event_uid, recurrence_id, alarm_uid)
       DO UPDATE SET
         target_json = EXCLUDED.target_json,
         all_day_schedule_json = EXCLUDED.all_day_schedule_json,
+        schedule_effective_at = CASE
+          WHEN matrix_calendar.room_reminder_configurations.all_day_schedule_json
+                 IS DISTINCT FROM EXCLUDED.all_day_schedule_json
+          THEN EXCLUDED.schedule_effective_at
+          ELSE matrix_calendar.room_reminder_configurations.schedule_effective_at
+        END,
         revision = matrix_calendar.room_reminder_configurations.revision + 1
       WHERE matrix_calendar.room_reminder_configurations.target_json
               IS DISTINCT FROM EXCLUDED.target_json
@@ -298,7 +336,7 @@ export class PostgresRoomReminderStore implements RoomReminderStore {
   ): Promise<RoomReminderConfiguration[]> {
     const rows = await this.sql<DatabaseRoomReminderConfiguration[]>`
       SELECT room_id, calendar_id, event_uid, recurrence_id, alarm_uid,
-             target_json, all_day_schedule_json, revision
+             target_json, all_day_schedule_json, schedule_effective_at, revision
       FROM matrix_calendar.room_reminder_configurations
       WHERE room_id = ${roomId} AND calendar_id = ${calendarId}
       ORDER BY event_uid, recurrence_id, alarm_uid
@@ -322,7 +360,7 @@ export class PostgresRoomReminderStore implements RoomReminderStore {
     const query = after
       ? this.sql<DatabaseRoomReminderConfiguration[]>`
           SELECT room_id, calendar_id, event_uid, recurrence_id, alarm_uid,
-                 target_json, all_day_schedule_json, revision
+                 target_json, all_day_schedule_json, schedule_effective_at, revision
           FROM matrix_calendar.room_reminder_configurations
           WHERE room_id = ${roomId}
             AND calendar_id = ${calendarId}
@@ -334,7 +372,7 @@ export class PostgresRoomReminderStore implements RoomReminderStore {
         `
       : this.sql<DatabaseRoomReminderConfiguration[]>`
           SELECT room_id, calendar_id, event_uid, recurrence_id, alarm_uid,
-                 target_json, all_day_schedule_json, revision
+                 target_json, all_day_schedule_json, schedule_effective_at, revision
           FROM matrix_calendar.room_reminder_configurations
           WHERE room_id = ${roomId} AND calendar_id = ${calendarId}
           ORDER BY event_uid, recurrence_id, alarm_uid
@@ -372,7 +410,7 @@ export class PostgresRoomReminderStore implements RoomReminderStore {
     validateRoomReminderConfiguration(configuration);
     const query = this.sql<DatabaseRoomReminderConfiguration[]>`
       SELECT room_id, calendar_id, event_uid, recurrence_id, alarm_uid,
-             target_json, all_day_schedule_json, revision
+             target_json, all_day_schedule_json, schedule_effective_at, revision
       FROM matrix_calendar.room_reminder_configurations
       WHERE room_id = ${configuration.roomId}
         AND calendar_id = ${configuration.calendarId}

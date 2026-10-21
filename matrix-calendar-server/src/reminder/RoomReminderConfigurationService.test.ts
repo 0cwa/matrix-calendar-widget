@@ -61,10 +61,12 @@ describe('RoomReminderConfigurationService', () => {
   let isRoomEncrypted: jest.Mock;
   let forAuthorizedTarget: jest.Mock;
   let getEventResource: jest.Mock;
+  let currentTime: number;
   let service: RoomReminderConfigurationService;
   let bindingRegistry: RoomCalendarBindingRegistry;
 
   beforeEach(() => {
+    currentTime = Date.parse('2026-10-01T00:00:00.000Z');
     configuration = {
       room_reminder_configuration_enabled: true,
       room_calendar_access_enabled: true,
@@ -134,6 +136,7 @@ describe('RoomReminderConfigurationService', () => {
       { forAuthorizedTarget } as unknown as RoomCalendarCalDavAccess,
       { getEventResource } as unknown as RoomCalendarEventOperations,
       bindingRegistry,
+      () => currentTime,
     );
   });
 
@@ -414,6 +417,7 @@ describe('RoomReminderConfigurationService', () => {
 
   it('allows an explicitly scheduled DATE alarm and persists only its schedule sidecar', async () => {
     const allDayIcalendar = icalendar
+      .replace('RRULE:FREQ=WEEKLY;COUNT=3', '')
       .replace(
         'DTSTART;TZID=Europe/Stockholm:20261005T090000',
         'DTSTART;VALUE=DATE:20261005',
@@ -460,6 +464,87 @@ describe('RoomReminderConfigurationService', () => {
       target: { kind: 'room' },
       allDaySchedule,
     });
+  });
+
+  it('rejects a past one-time DATE reminder on the server before persistence', async () => {
+    const allDayIcalendar = icalendar
+      .replace('RRULE:FREQ=WEEKLY;COUNT=3', '')
+      .replace(
+        'DTSTART;TZID=Europe/Stockholm:20261005T090000',
+        'DTSTART;VALUE=DATE:20261005',
+      )
+      .replace(
+        'DTEND;TZID=Europe/Stockholm:20261005T100000',
+        'DTEND;VALUE=DATE:20261006',
+      );
+    getEventResource.mockResolvedValue({
+      event: { summary: 'private title' },
+      etag: 'private-etag',
+      icalendar: allDayIcalendar,
+    });
+    currentTime = Date.parse('2026-10-04T07:01:00.000Z');
+
+    await expect(
+      service.upsert(actor, roomId, {
+        eventId: 'https://dav.example.test/calendar/planning.ics',
+        recurrenceId: null,
+        alarmUid,
+        allDaySchedule: {
+          daysBefore: 1,
+          localTime: '09:00',
+          timezone: 'Europe/Stockholm',
+        },
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      response: {
+        code: 'room-reminder-time-in-past',
+      },
+    });
+    expect(upsertConfiguration).not.toHaveBeenCalled();
+  });
+
+  it('allows a past current DATE occurrence when the selected master is recurring', async () => {
+    const allDayRecurringIcalendar = icalendar
+      .replace(
+        'DTSTART;TZID=Europe/Stockholm:20261005T090000',
+        'DTSTART;VALUE=DATE:20261005',
+      )
+      .replace('RRULE:FREQ=WEEKLY;COUNT=3', 'RRULE:FREQ=DAILY;COUNT=3')
+      .replace(
+        'DTEND;TZID=Europe/Stockholm:20261005T100000',
+        'DTEND;VALUE=DATE:20261006',
+      );
+    getEventResource.mockResolvedValue({
+      event: { summary: 'private title' },
+      etag: 'private-etag',
+      icalendar: allDayRecurringIcalendar,
+    });
+    const allDaySchedule = {
+      daysBefore: 0,
+      localTime: '09:00',
+      timezone: 'Europe/Stockholm',
+    };
+    getConfiguration.mockImplementation(async (identity) => ({
+      ...identity,
+      target: { kind: 'room' },
+      allDaySchedule,
+      revision: 1,
+    }));
+    currentTime = Date.parse('2026-10-05T08:00:00.000Z');
+
+    await expect(
+      service.upsert(actor, roomId, {
+        eventId: 'https://dav.example.test/calendar/planning.ics',
+        recurrenceId: null,
+        alarmUid,
+        allDaySchedule,
+      }),
+    ).resolves.toMatchObject({
+      target: { kind: 'room' },
+      allDaySchedule,
+    });
+    expect(upsertConfiguration).toHaveBeenCalledTimes(1);
   });
 
   it('shares the authorized current-source read with internal alarm-options code', async () => {

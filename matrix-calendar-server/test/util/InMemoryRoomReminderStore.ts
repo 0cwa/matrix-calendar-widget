@@ -55,14 +55,25 @@ export class InMemoryRoomReminderStore implements RoomReminderStore {
     const key = configurationKey(configuration);
     const normalized = normalizeRoomReminderConfiguration(configuration);
     const current = this.configurations.get(key);
+    const scheduleUnchanged =
+      current &&
+      JSON.stringify(current.allDaySchedule) ===
+        JSON.stringify(normalized.allDaySchedule);
     const unchanged =
       current &&
       JSON.stringify(current.target) === JSON.stringify(normalized.target) &&
-      JSON.stringify(current.allDaySchedule) ===
-        JSON.stringify(normalized.allDaySchedule);
+      scheduleUnchanged;
     normalized.revision = current
       ? (current.revision ?? 1) + (unchanged ? 0 : 1)
       : 1;
+    normalized.scheduleEffectiveAt =
+      current &&
+      scheduleUnchanged &&
+      current.scheduleEffectiveAt instanceof Date
+        ? new Date(current.scheduleEffectiveAt.getTime())
+        : normalized.allDaySchedule === null
+          ? null
+          : new Date();
     this.configurations.set(key, cloneConfiguration(normalized));
   }
 
@@ -264,6 +275,10 @@ function cloneConfiguration(
     allDaySchedule: normalized.allDaySchedule
       ? { ...normalized.allDaySchedule }
       : null,
+    scheduleEffectiveAt:
+      normalized.scheduleEffectiveAt instanceof Date
+        ? new Date(normalized.scheduleEffectiveAt.getTime())
+        : normalized.scheduleEffectiveAt,
   };
 }
 

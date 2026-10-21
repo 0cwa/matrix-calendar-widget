@@ -29,7 +29,7 @@ import {
 } from '../service/RoomCalendarCalDavAccess';
 import { RoomCalendarEventOperations } from '../service/RoomCalendarEventOperations';
 import { CanonicalReminderResourceData } from './CanonicalReminderIdentityResolver';
-import { resolveTriggerableReminderIdentity } from './ReminderConfigurationSourceValidator';
+import { resolveTriggerableReminderConfiguration } from './ReminderConfigurationSourceValidator';
 import {
   RoomMentionMatrixState,
   authorizeRoomMentionScheduling,
@@ -69,6 +69,7 @@ export class RoomReminderConfigurationService {
     private readonly roomCalendarAccess: RoomCalendarCalDavAccess,
     private readonly eventResources: RoomCalendarEventOperations,
     private readonly bindingRegistry: RoomCalendarBindingRegistry,
+    private readonly now: () => number = Date.now,
   ) {}
 
   /**
@@ -265,9 +266,9 @@ export class RoomReminderConfigurationService {
   ): Promise<RoomReminderConfigurationIdentity> {
     const resource = await this.readSourceForTarget(target, input.eventId);
 
-    let identity: ReturnType<typeof resolveTriggerableReminderIdentity>;
+    let resolution: ReturnType<typeof resolveTriggerableReminderConfiguration>;
     try {
-      identity = resolveTriggerableReminderIdentity(
+      resolution = resolveTriggerableReminderConfiguration(
         {
           calendarId: target.calendarId,
           recurrenceId: input.recurrenceId,
@@ -282,10 +283,20 @@ export class RoomReminderConfigurationService {
         message: 'Event reminder source is not supported',
       });
     }
+    if (
+      resolution.allDayReminderDueAt &&
+      !resolution.isRecurringSeries &&
+      resolution.allDayReminderDueAt.getTime() <= this.now()
+    ) {
+      throw new BadRequestException({
+        code: 'room-reminder-time-in-past',
+        message: 'Choose a future Matrix reminder time before saving',
+      });
+    }
     return {
-      eventUid: identity.eventUid,
-      recurrenceId: identity.recurrenceId,
-      alarmUid: identity.alarmUid,
+      eventUid: resolution.identity.eventUid,
+      recurrenceId: resolution.identity.recurrenceId,
+      alarmUid: resolution.identity.alarmUid,
     };
   }
 

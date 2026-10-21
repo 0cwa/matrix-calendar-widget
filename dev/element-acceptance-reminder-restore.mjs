@@ -1094,7 +1094,7 @@ function reminderConfigurationSnapshot(database, phase) {
   );
   if (!/^\d+$/u.test(schemaVersionOutput)) throw new StageFailure(phase);
   const schemaVersion = Number(schemaVersionOutput);
-  if (schemaVersion !== 3) {
+  if (schemaVersion !== 4) {
     throw new StageFailure(phase, { schemaVersion });
   }
 
@@ -1105,7 +1105,10 @@ function reminderConfigurationSnapshot(database, phase) {
       "'roomId', room_id, 'calendarId', calendar_id,",
       "'eventUid', event_uid, 'recurrenceId', NULLIF(recurrence_id, ''),",
       "'alarmUid', alarm_uid, 'target', target_json,",
-      "'allDaySchedule', all_day_schedule_json, 'revision', revision",
+      "'allDaySchedule', all_day_schedule_json,",
+      "'scheduleEffectiveAt', CASE WHEN schedule_effective_at IS NULL THEN NULL",
+      'ELSE floor(extract(epoch FROM schedule_effective_at) * 1000)::bigint END,',
+      "'revision', revision",
       ')::text FROM matrix_calendar.room_reminder_configurations',
       'ORDER BY room_id, calendar_id, event_uid, recurrence_id, alarm_uid;',
     ].join(' '),

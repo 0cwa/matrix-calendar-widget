@@ -130,6 +130,7 @@ test('restore reminder snapshots preserve target, all-day schedule, and revision
         localTime: '09:00',
         timezone: 'Europe/Stockholm',
       },
+      scheduleEffectiveAt: 1792566000000,
       revision: 3,
     },
     {
@@ -140,6 +141,7 @@ test('restore reminder snapshots preserve target, all-day schedule, and revision
       alarmUid: 'timed-alarm',
       target: { kind: 'room' },
       allDaySchedule: null,
+      scheduleEffectiveAt: null,
       revision: 1,
     },
   ];
@@ -177,6 +179,7 @@ test('restore reminder snapshots fail closed on unknown or invalid metadata', ()
       localTime: '09:00',
       timezone: 'Europe/Stockholm',
     },
+    scheduleEffectiveAt: 1792566000000,
     revision: 2,
   };
   for (const invalid of [
@@ -194,6 +197,7 @@ test('restore reminder snapshots fail closed on unknown or invalid metadata', ()
       allDaySchedule: { ...valid.allDaySchedule, timezone: 'Not/AZone' },
     },
     { ...valid, revision: 0 },
+    { ...valid, scheduleEffectiveAt: null },
   ]) {
     assert.throws(
       () => parseReminderConfigurationSnapshotOutput(JSON.stringify(invalid)),

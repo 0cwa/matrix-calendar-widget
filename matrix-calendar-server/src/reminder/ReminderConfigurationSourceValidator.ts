@@ -31,6 +31,7 @@ import {
 import {
   ReminderAlarmTimingOption,
   ResolvedReminderOccurrenceTiming,
+  calculateAllDayReminderDueAt,
   isAllDayReminderScheduleWithinLimits,
   isReminderScheduleWithinLimits,
   readReminderAlarmTimingOption,
@@ -63,6 +64,32 @@ export function resolveTriggerableReminderIdentity(
   resource: CanonicalReminderResourceData,
   allDaySchedule?: RoomReminderAllDaySchedule | null,
 ): CanonicalReminderIdentity {
+  return resolveTriggerableReminderConfiguration(
+    identity,
+    resource,
+    allDaySchedule,
+  ).identity;
+}
+
+export type TriggerableReminderConfigurationResolution = {
+  identity: CanonicalReminderIdentity;
+  allDayReminderDueAt?: Date;
+  isRecurringSeries: boolean;
+};
+
+/**
+ * Resolve a supported alarm and its manager-selected DATE delivery instant.
+ * The recurrence flag describes a selected series master, not whether the
+ * recurrence rule is guaranteed to contain a future instance.
+ */
+export function resolveTriggerableReminderConfiguration(
+  identity: Pick<
+    CanonicalReminderIdentity,
+    'calendarId' | 'recurrenceId' | 'alarmUid'
+  > & { eventUid?: string },
+  resource: CanonicalReminderResourceData,
+  allDaySchedule?: RoomReminderAllDaySchedule | null,
+): TriggerableReminderConfigurationResolution {
   try {
     const selection = resolveCanonicalReminderResourceSelection(
       identity,
@@ -78,6 +105,8 @@ export function resolveTriggerableReminderIdentity(
     }
 
     const timing = resolveSelectedEventTiming(selection);
+    let allDayReminderDueAt: Date | undefined;
+    let isRecurringSeries = false;
     if (timing.type === 'timed') {
       if (
         allDaySchedule != null ||
@@ -94,8 +123,25 @@ export function resolveTriggerableReminderIdentity(
       )
     ) {
       throw new Error('An explicit all-day reminder schedule is required');
+    } else {
+      allDayReminderDueAt = calculateAllDayReminderDueAt(
+        selection.alarmSource,
+        allDaySchedule,
+        timing.startDate,
+      );
+      if (!allDayReminderDueAt) {
+        throw new Error('Invalid all-day reminder delivery instant');
+      }
+      isRecurringSeries =
+        selection.identity.recurrenceId === null &&
+        (selection.event.getAllProperties('rrule').length > 0 ||
+          selection.event.getAllProperties('rdate').length > 0);
     }
-    return selection.identity;
+    return {
+      identity: selection.identity,
+      ...(allDayReminderDueAt ? { allDayReminderDueAt } : {}),
+      isRecurringSeries,
+    };
   } catch {
     throw new ReminderConfigurationSourceError();
   }

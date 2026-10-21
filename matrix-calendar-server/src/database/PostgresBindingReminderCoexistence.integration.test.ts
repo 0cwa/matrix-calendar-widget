@@ -170,7 +170,7 @@ async function expectBothSchemasOwnedByRole(
     ORDER BY schema
   `;
   expect(versions).toEqual([
-    { schema: 'matrix_calendar', version: 1 },
+    { schema: 'matrix_calendar', version: 4 },
     { schema: 'matrix_calendar_bindings', version: 1 },
   ]);
 }
@@ -288,14 +288,23 @@ describeWithDatabase('shared PostgreSQL binding and reminder database', () => {
       eventUid: `event-${id}`,
       recurrenceId: null,
       alarmUid: `alarm-${id}`,
+      target: { kind: 'room' as const },
+      allDaySchedule: {
+        daysBefore: 3,
+        localTime: '09:00',
+        timezone: 'Europe/Stockholm',
+      },
     };
     await reminder.upsertConfiguration(reminderState);
+    const persistedReminderState =
+      await reminder.getConfiguration(reminderState);
+    expect(persistedReminderState?.scheduleEffectiveAt).toBeInstanceOf(Date);
     expect(
       await reminder.listConfigurations(
         reminderState.roomId,
         reminderState.calendarId,
       ),
-    ).toEqual([reminderState]);
+    ).toEqual([persistedReminderState]);
 
     const bindingState = {
       roomId: `!coexist-binding-${id}:example.test`,
@@ -347,7 +356,7 @@ describeWithDatabase('shared PostgreSQL binding and reminder database', () => {
           reminderState.roomId,
           reminderState.calendarId,
         ),
-      ).resolves.toEqual([reminderState]);
+      ).resolves.toEqual([persistedReminderState]);
       await expect(restoredBinding.listAll()).resolves.toContainEqual(
         expect.objectContaining({ ...bindingState, status: 'ready' }),
       );

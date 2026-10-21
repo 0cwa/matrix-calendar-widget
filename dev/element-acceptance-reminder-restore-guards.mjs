@@ -25,6 +25,7 @@ const REMINDER_CONFIGURATION_SNAPSHOT_KEYS = [
   'alarmUid',
   'target',
   'allDaySchedule',
+  'scheduleEffectiveAt',
   'revision',
 ];
 
@@ -136,6 +137,15 @@ export function parseReminderConfigurationSnapshotOutput(output) {
         throw new TypeError('invalid reminder configuration snapshot');
       }
     }
+    const scheduleEffectiveAt = value.scheduleEffectiveAt;
+    if (
+      (schedule === null && scheduleEffectiveAt !== null) ||
+      (schedule !== null &&
+        (!Number.isSafeInteger(scheduleEffectiveAt) ||
+          scheduleEffectiveAt <= 0))
+    ) {
+      throw new TypeError('invalid reminder configuration snapshot');
+    }
 
     const identity = JSON.stringify([
       value.roomId,
@@ -166,6 +176,7 @@ export function parseReminderConfigurationSnapshotOutput(output) {
               localTime: schedule.localTime,
               timezone: schedule.timezone,
             },
+      scheduleEffectiveAt,
       revision: value.revision,
     });
   }
