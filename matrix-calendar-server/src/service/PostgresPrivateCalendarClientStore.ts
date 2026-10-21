@@ -214,6 +214,8 @@ function isSafeCanonicalPath(path: string): boolean {
         !decoded.includes('/') &&
         !decoded.includes('\\') &&
         !decoded.includes('%') &&
+        // Intentional validation of raw control characters in path segments.
+        // eslint-disable-next-line no-control-regex
         !/[\u0000-\u001f\u007f]/u.test(decoded)
       );
     } catch {

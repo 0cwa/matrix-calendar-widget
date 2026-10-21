@@ -30,13 +30,13 @@ if not project_config.read(args.radicale_config):
     raise FileNotFoundError(
         f'Radicale config could not be read: {args.radicale_config}'
     )
-assert project_config.get('rights', 'type') == 'owner_only', ('project rights config', project_config.get('rights', 'type', fallback=None))
+assert project_config.get('rights', 'type') == 'matrix_calendar_radicale_auth.private_client_rights', ('project rights config', project_config.get('rights', 'type', fallback=None))
 expected_sharing_config = {
     'type': 'files',
     'collection_by_token': 'True',
-    'collection_by_map': 'False',
+    'collection_by_map': 'True',
     'permit_create_token': 'True',
-    'permit_create_map': 'False',
+    'permit_create_map': 'True',
     'permit_properties_overlay': 'False',
     'default_permissions_create_token': 'r',
 }
@@ -110,7 +110,28 @@ def start_radicale(config_path, data_path, port, userinfo_port):
     )
     env['RADICALE_MATRIX_HOMESERVER_URL'] = f'http://127.0.0.1:{userinfo_port}'
     env['RADICALE_MATRIX_SERVER_NAME'] = 'example.test'
-    return subprocess.Popen([sys.executable, '-m', 'radicale', '--config', str(config_path)], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    process = subprocess.Popen([sys.executable, '-m', 'radicale', '--config', str(config_path)], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    process.contract_output = []
+    process.contract_reader = threading.Thread(
+        target=lambda: process.contract_output.extend(process.stdout),
+        daemon=True,
+    )
+    process.contract_reader.start()
+    return process
+
+
+def stop_radicale(process):
+    if process.poll() is None:
+        process.terminate()
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5)
+    process.contract_reader.join(timeout=5)
+    if process.stdout:
+        process.stdout.close()
+    return ''.join(process.contract_output)
 
 
 ics = '''BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Matrix Calendar Widget//Share contract//EN\r\nCALSCALE:GREGORIAN\r\nX-WR-CALNAME:Canonical team calendar\r\nBEGIN:VTIMEZONE\r\nTZID:Europe/Stockholm\r\nBEGIN:STANDARD\r\nDTSTART:19701025T030000\r\nTZOFFSETFROM:+0200\r\nTZOFFSETTO:+0100\r\nRRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU\r\nEND:STANDARD\r\nBEGIN:DAYLIGHT\r\nDTSTART:19700329T020000\r\nTZOFFSETFROM:+0100\r\nTZOFFSETTO:+0200\r\nRRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU\r\nEND:DAYLIGHT\r\nEND:VTIMEZONE\r\nBEGIN:VEVENT\r\nUID:feed-contract-event\r\nDTSTAMP:20261021T100000Z\r\nDTSTART;TZID=Europe/Stockholm:20261022T090000\r\nDTEND;TZID=Europe/Stockholm:20261022T100000\r\nRRULE:FREQ=WEEKLY;BYDAY=TH;COUNT=3\r\nSUMMARY:Canonical round trip\r\nX-COMPANY-OPAQUE;X-KEEP=attribute:keep-this-value\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n'''.encode()
@@ -125,7 +146,7 @@ with tempfile.TemporaryDirectory(prefix='mcw-public-feed-contract-') as raw_temp
     userinfo_port = userinfo.server_address[1]
     threading.Thread(target=userinfo.serve_forever, daemon=True).start()
     config = temp / 'config'
-    config.write_text(f'''[server]\nhosts = 127.0.0.1:{port}\nmax_connections = 4\nmax_content_length = 1048576\nmax_resource_size = 1048576\ntimeout = 5\n\n[auth]\ntype = matrix_calendar_radicale_auth\ncache_logins = False\nlc_username = False\nuc_username = False\nstrip_domain = False\nurldecode_username = False\ndelay = 0\n\n[rights]\ntype = owner_only\n\n[storage]\ntype = multifilesystem\nfilesystem_folder = {collections}\n\n[sharing]\ntype = files\ncollection_by_token = True\ncollection_by_map = False\npermit_create_token = True\npermit_create_map = False\npermit_properties_overlay = False\ndefault_permissions_create_token = r\n\n[logging]\nlevel = trace\nmask_passwords = True\n''')
+    config.write_text(f'''[server]\nhosts = 127.0.0.1:{port}\nmax_connections = 4\nmax_content_length = 1048576\nmax_resource_size = 1048576\ntimeout = 5\n\n[auth]\ntype = matrix_calendar_radicale_auth\ncache_logins = False\nlc_username = False\nuc_username = False\nstrip_domain = False\nurldecode_username = False\ndelay = 0\n\n[rights]\ntype = matrix_calendar_radicale_auth.private_client_rights\n\n[storage]\ntype = multifilesystem\nfilesystem_folder = {collections}\n\n[sharing]\ntype = files\ncollection_by_token = True\ncollection_by_map = True\npermit_create_token = True\npermit_create_map = True\npermit_properties_overlay = False\ndefault_permissions_create_token = r\n\n[logging]\nlevel = trace\nmask_passwords = True\n''')
     process = start_radicale(config, collections, port, userinfo_port)
     logs = []
     try:
@@ -180,13 +201,7 @@ with tempfile.TemporaryDirectory(prefix='mcw-public-feed-contract-') as raw_temp
         status, _, _ = request(port, 'GET', unknown_token_path)
         assert status in {401, 403, 404}, ('unknown feed token should be unavailable', status)
 
-        process.terminate()
-        try:
-            raw_log = process.communicate(timeout=5)[0]
-        except subprocess.TimeoutExpired:
-            process.kill()
-            raw_log = process.communicate()[0]
-        logs.append(raw_log)
+        logs.append(stop_radicale(process))
         process = start_radicale(config, collections, port, userinfo_port)
         wait_ready(process, port)
         status, _, restored = request(port, 'GET', path)
@@ -232,13 +247,7 @@ with tempfile.TemporaryDirectory(prefix='mcw-public-feed-contract-') as raw_temp
         status, _, mixed = request(port, 'GET', mixed_path)
         assert status == 200 and b'BEGIN:VEVENT' in mixed and b'BEGIN:VTODO' in mixed and b'BEGIN:VJOURNAL' in mixed, ('native feed must expose newly added mixed components for gateway rejection', status, mixed[:1500])
 
-        process.terminate()
-        try:
-            raw_log = process.communicate(timeout=5)[0]
-        except subprocess.TimeoutExpired:
-            process.kill()
-            raw_log = process.communicate()[0]
-        logs.append(raw_log)
+        logs.append(stop_radicale(process))
         combined = '\n'.join(logs)
         path_token = path.rsplit('/', 2)[-2]
         bot_token = bot_path.rsplit('/', 2)[-2]
@@ -249,10 +258,10 @@ with tempfile.TemporaryDirectory(prefix='mcw-public-feed-contract-') as raw_temp
         assert '[REDACTED]' in combined, ('trace logging did not exercise token-path redaction', combined[-2000:])
         share_dir = collections / 'collection-db' / 'files' / 'token'
         assert share_dir.is_dir(), ('sharing store missing below canonical collection tree', share_dir)
-        print(json.dumps({'status': 'passed', 'radicale_version': radicale.VERSION, 'project_config_native_sharing': 'passed', 'rights': 'owner_only unchanged', 'native_token_prefix': '/.token/v1/', 'token_chars': 44, 'permissions': 'r', 'conversion': 'none', 'anonymous_get_head': 'passed', 'anonymous_propfind_component_metadata': 'passed', 'unsupported_components_returned_by_radicale': ['VTODO', 'VJOURNAL'], 'admin_requires_auth': 'passed', 'database_restart_persistence': 'passed', 'revocation': 'passed', 'personal_owner': 'alice', 'room_service_owner': 'calendarbot', 'canonical_fields': ['VEVENT', 'Europe/Stockholm VTIMEZONE', 'RRULE', 'opaque X property'], 'native_collection_displayname_projection': 'X-WR-CALNAME present; exact external metadata shape must not be promised', 'sharing_store_relative_path': 'collection-db/files/token', 'share_token_redacted_at_radicale_logging_level_trace': 'passed for successful, failed, and revoked requests'}))
+        print(json.dumps({'status': 'passed', 'radicale_version': radicale.VERSION, 'project_config_native_sharing': 'passed with token and map enabled', 'rights': 'composite delegates ordinary Matrix principals to owner_only', 'native_token_prefix': '/.token/v1/', 'token_chars': 44, 'permissions': 'r', 'conversion': 'none', 'anonymous_get_head': 'passed', 'anonymous_propfind_component_metadata': 'passed', 'unsupported_components_returned_by_radicale': ['VTODO', 'VJOURNAL'], 'admin_requires_auth': 'passed', 'database_restart_persistence': 'passed', 'revocation': 'passed', 'personal_owner': 'alice', 'room_service_owner': 'calendarbot', 'canonical_fields': ['VEVENT', 'Europe/Stockholm VTIMEZONE', 'RRULE', 'opaque X property'], 'native_collection_displayname_projection': 'X-WR-CALNAME present; exact external metadata shape must not be promised', 'sharing_store_relative_path': 'collection-db/files/token', 'share_token_redacted_at_radicale_logging_level_trace': 'passed for successful, failed, and revoked requests'}))
     finally:
         if process.poll() is None:
-            process.terminate()
+            stop_radicale(process)
             try:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:

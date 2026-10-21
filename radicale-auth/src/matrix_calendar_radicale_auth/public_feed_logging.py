@@ -26,6 +26,13 @@ _TOKEN_PATH = re.compile(r"(?i)(/\.token/v1/)[^/?\s'\"<>]+")
 _ENCODED_TOKEN_STORAGE_PATH = re.compile(
     r"(?i)(%2f\.token%2fv1%2f)[^/%\s'\"<>]+(%2f)"
 )
+_PRIVATE_CLIENT_APP_ID = re.compile(r"(?i)mcwpc~[a-f0-9]{48}")
+_ENCODED_PRIVATE_CLIENT_PATH = re.compile(
+    r"(?i)%2fmcwpc~[a-f0-9]{48}(?:%2f[^\s'\"<>?#]*)?"
+)
+_PRIVATE_CLIENT_PATH = re.compile(
+    r"(?i)/mcwpc~[a-f0-9]{48}(?:/[^\s'\"<>?#]*)?"
+)
 _REDACTED = r"\1[REDACTED]"
 
 
@@ -53,6 +60,9 @@ class PublicFeedTokenPathFilter(logging.Filter):
 
 
 def _redact_token_paths(value: str) -> str:
+    value = _ENCODED_PRIVATE_CLIENT_PATH.sub("[PRIVATE-CALDAV-PATH]", value)
+    value = _PRIVATE_CLIENT_PATH.sub("[PRIVATE-CALDAV-PATH]", value)
+    value = _PRIVATE_CLIENT_APP_ID.sub("[REDACTED]", value)
     return _ENCODED_TOKEN_STORAGE_PATH.sub(
         r"\1[REDACTED]\2", _TOKEN_PATH.sub(_REDACTED, value)
     )

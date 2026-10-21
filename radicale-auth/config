@@ -10,14 +10,14 @@ strip_domain = False
 urldecode_username = False
 
 [rights]
-type = owner_only
+type = matrix_calendar_radicale_auth.private_client_rights
 
 [sharing]
 type = files
 collection_by_token = True
-collection_by_map = False
+collection_by_map = True
 permit_create_token = True
-permit_create_map = False
+permit_create_map = True
 permit_properties_overlay = False
 default_permissions_create_token = r
 
