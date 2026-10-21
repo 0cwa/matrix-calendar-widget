@@ -102,6 +102,7 @@ const PHASES = new Set([
   'reminder-alarm-ui-readback',
   'reminder-room-configuration-enabled',
   'reminder-ui-readback',
+  'public-feed-browser-lifecycle',
   'reminder-initial-delivery',
   'reminder-restart-prior-state',
   'reminder-restart-scheduler-scan',
@@ -225,6 +226,25 @@ const REMINDER_ROOM_CONTEXT_RESPONSE_FIELDS = [
   'reminderWidgetContextResponseCount',
   'reminderWidgetContextResponseStatus',
 ];
+const PUBLIC_FEED_BROWSER_STATUS_FIELDS = [
+  'publicFeedManagementGetStatus',
+  'publicFeedPublishStatus',
+  'publicFeedGetStatus',
+  'publicFeedHeadStatus',
+  'publicFeedUnpublishStatus',
+  'publicFeedRevokedGetStatus',
+  'publicFeedRevokedHeadStatus',
+];
+const PUBLIC_FEED_BROWSER_BOOLEAN_FIELDS = [
+  'publicConsentGateObserved',
+  'publicManagerPublishSucceeded',
+  'publicUrlOriginAndRouteMatch',
+  'anonymousGetContainsCanonicalEvent',
+  'anonymousHeadMatchesGet',
+  'unpublishSucceeded',
+  'anonymousGetDeniedAfterUnpublish',
+  'anonymousHeadDeniedAfterUnpublish',
+];
 const PHASE_BOOLEAN_FIELDS = new Map([
   ['service-room-ready', ['serviceUserJoined', 'powerPolicyVerified']],
   ['reminder-role-verified', ['rolePolicyVerified']],
@@ -240,6 +260,7 @@ const PHASE_BOOLEAN_FIELDS = new Map([
       'allDayScheduleReadback',
     ],
   ],
+  ['public-feed-browser-lifecycle', PUBLIC_FEED_BROWSER_BOOLEAN_FIELDS],
   [
     'reminder-initial-delivery',
     [
@@ -1216,6 +1237,8 @@ const ALLOWED_KEYS = new Set([
   'reminderEnabled',
   'targetSettingsReadback',
   'allDayScheduleReadback',
+  ...PUBLIC_FEED_BROWSER_STATUS_FIELDS,
+  ...PUBLIC_FEED_BROWSER_BOOLEAN_FIELDS,
   'canaryDelivered',
   'roomMentioned',
   'selectedMemberMentioned',
@@ -2791,6 +2814,23 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         (PHASE_REQUIRED_TRUE_FIELDS.get(record.phase) ?? phaseBooleans).some(
           (key) => record[key] !== true,
         )) ||
+      PUBLIC_FEED_BROWSER_STATUS_FIELDS.some(
+        (key) =>
+          Object.hasOwn(record, key) &&
+          (record.phase !== 'public-feed-browser-lifecycle' ||
+            !Number.isInteger(record[key]) ||
+            record[key] < 100 ||
+            record[key] > 599),
+      ) ||
+      (record.phase === 'public-feed-browser-lifecycle' &&
+        record.status === 'passed' &&
+        (record.publicFeedManagementGetStatus !== 200 ||
+          record.publicFeedPublishStatus !== 200 ||
+          record.publicFeedGetStatus !== 200 ||
+          record.publicFeedHeadStatus !== 200 ||
+          record.publicFeedUnpublishStatus !== 200 ||
+          record.publicFeedRevokedGetStatus !== 404 ||
+          record.publicFeedRevokedHeadStatus !== 404)) ||
       !validTargetObservation
     ) {
       throw new SummaryValidationError(rejectionCategory, rejectedPhase);
@@ -4017,6 +4057,16 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     const phaseBooleans = PHASE_BOOLEAN_FIELDS.get(phase) ?? [];
     for (const key of phaseBooleans) {
       if (Object.hasOwn(record, key)) {
+        const outputKey = key.replace(
+          /[A-Z]/gu,
+          (letter) => `_${letter.toLowerCase()}`,
+        );
+        fields.push(`${outputKey}=${record[key]}`);
+      }
+    }
+    if (phase === 'public-feed-browser-lifecycle') {
+      for (const key of PUBLIC_FEED_BROWSER_STATUS_FIELDS) {
+        if (!Object.hasOwn(record, key)) continue;
         const outputKey = key.replace(
           /[A-Z]/gu,
           (letter) => `_${letter.toLowerCase()}`,

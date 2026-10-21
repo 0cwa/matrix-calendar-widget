@@ -865,6 +865,69 @@ test('requires selected-user Matrix mentions to exclude a room broadcast', () =>
   );
 });
 
+test('sanitizes the manager-consented anonymous public feed lifecycle', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'public-feed-browser-lifecycle',
+      status: 'passed',
+      httpStatus: 404,
+      publicFeedManagementGetStatus: 200,
+      publicFeedPublishStatus: 200,
+      publicFeedGetStatus: 200,
+      publicFeedHeadStatus: 200,
+      publicFeedUnpublishStatus: 200,
+      publicFeedRevokedGetStatus: 404,
+      publicFeedRevokedHeadStatus: 404,
+      publicConsentGateObserved: true,
+      publicManagerPublishSucceeded: true,
+      publicUrlOriginAndRouteMatch: true,
+      anonymousGetContainsCanonicalEvent: true,
+      anonymousHeadMatchesGet: true,
+      unpublishSucceeded: true,
+      anonymousGetDeniedAfterUnpublish: true,
+      anonymousHeadDeniedAfterUnpublish: true,
+    }),
+    sourceSha,
+  );
+
+  assert.match(
+    summary,
+    /public_feed_management_get_status=200 public_feed_publish_status=200 public_feed_get_status=200 public_feed_head_status=200 public_feed_unpublish_status=200 public_feed_revoked_get_status=404 public_feed_revoked_head_status=404/u,
+  );
+  assert.match(
+    summary,
+    /public_consent_gate_observed=true public_manager_publish_succeeded=true public_url_origin_and_route_match=true anonymous_get_contains_canonical_event=true anonymous_head_matches_get=true unpublish_succeeded=true anonymous_get_denied_after_unpublish=true anonymous_head_denied_after_unpublish=true/u,
+  );
+  assert.doesNotMatch(summary, /https?:\/\/|feed-url|signature|token-path/iu);
+
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify({
+          phase: 'public-feed-browser-lifecycle',
+          status: 'passed',
+          publicFeedManagementGetStatus: 200,
+          publicFeedPublishStatus: 200,
+          publicFeedGetStatus: 302,
+          publicFeedHeadStatus: 200,
+          publicFeedUnpublishStatus: 200,
+          publicFeedRevokedGetStatus: 404,
+          publicFeedRevokedHeadStatus: 404,
+          publicConsentGateObserved: true,
+          publicManagerPublishSucceeded: true,
+          publicUrlOriginAndRouteMatch: true,
+          anonymousGetContainsCanonicalEvent: true,
+          anonymousHeadMatchesGet: true,
+          unpublishSucceeded: true,
+          anonymousGetDeniedAfterUnpublish: true,
+          anonymousHeadDeniedAfterUnpublish: true,
+        }),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+});
+
 test('sanitizes the fixed reminder option failure boundary', () => {
   const summary = sanitizeElementAcceptance(
     JSON.stringify(missingReminderOptionObservation()),

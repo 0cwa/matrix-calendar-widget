@@ -172,6 +172,34 @@ type ReminderConfigurationObservation = {
   reminderPutStatus: number;
 };
 
+type PublicFeedBrowserObservation = {
+  publicFeedManagementGetStatus?: number;
+  publicFeedPublishStatus?: number;
+  publicFeedGetStatus?: number;
+  publicFeedHeadStatus?: number;
+  publicFeedUnpublishStatus?: number;
+  publicFeedRevokedGetStatus?: number;
+  publicFeedRevokedHeadStatus?: number;
+  publicConsentGateObserved: boolean;
+  publicManagerPublishSucceeded: boolean;
+  publicUrlOriginAndRouteMatch: boolean;
+  anonymousGetContainsCanonicalEvent: boolean;
+  anonymousHeadMatchesGet: boolean;
+  unpublishSucceeded: boolean;
+  anonymousGetDeniedAfterUnpublish: boolean;
+  anonymousHeadDeniedAfterUnpublish: boolean;
+};
+
+type AnonymousPublicFeedResponse = {
+  status?: number;
+  contentType?: string;
+  contentLength?: string;
+  cacheControl?: string;
+  pragma?: string;
+  nosniff?: string;
+  body: Uint8Array;
+};
+
 type G6Phase =
   | 'g6-fixture-ready'
   | 'g6-unsupported-preservation'
@@ -453,6 +481,7 @@ type Phase =
   | 'reminder-alarm-ui-readback'
   | 'reminder-room-configuration-enabled'
   | 'reminder-ui-readback'
+  | 'public-feed-browser-lifecycle'
   | 'reminder-initial-delivery'
   | 'reminder-restart-prior-state'
   | 'reminder-restart-scheduler-scan'
@@ -3406,6 +3435,10 @@ test('Element Web delivers room-timed and selected-member all-day reminders acro
       allDayScheduleReadback: allReadback.allDayScheduleReadback,
     });
 
+    if (flow === 'initial') {
+      await verifyPublicFeedBrowserLifecycle(frame, page, markerTitle);
+    }
+
     const deliveryPhase =
       flow === 'initial'
         ? 'reminder-initial-delivery'
@@ -5899,6 +5932,299 @@ async function waitForReminderDelivery(
     latest = await inspectReminderTimeline(titles);
   }
   return { ...latest, deliveredAfterDue: false };
+}
+
+async function waitForPublicFeedPublicationResponse(
+  page: Page,
+  method: 'GET' | 'PUT' | 'DELETE',
+): Promise<Response> {
+  const gatewayOrigin = new URL(fixture.gatewayUrl).origin;
+  return page.waitForResponse(
+    (response) => {
+      const url = new URL(response.url());
+      return (
+        url.origin === gatewayOrigin &&
+        url.pathname === '/v1/calendar-feeds/publication' &&
+        response.request().method() === method
+      );
+    },
+    { timeout: 20_000 },
+  );
+}
+
+async function fetchAnonymousPublicFeed(
+  url: string,
+  method: 'GET' | 'HEAD',
+): Promise<AnonymousPublicFeedResponse> {
+  const headers = new Headers({ Accept: 'text/calendar' });
+  try {
+    const response = await fetch(url, {
+      method,
+      headers,
+      redirect: 'manual',
+      signal: AbortSignal.timeout(10_000),
+    });
+    let body = new Uint8Array();
+    try {
+      body = new Uint8Array(await response.arrayBuffer());
+    } catch {
+      // Retain the observed status and closed headers if the body read fails.
+    }
+    return {
+      status: response.status,
+      contentType: response.headers.get('Content-Type') ?? undefined,
+      contentLength: response.headers.get('Content-Length') ?? undefined,
+      cacheControl: response.headers.get('Cache-Control') ?? undefined,
+      pragma: response.headers.get('Pragma') ?? undefined,
+      nosniff: response.headers.get('X-Content-Type-Options') ?? undefined,
+      body,
+    };
+  } catch {
+    return { body: new Uint8Array() };
+  }
+}
+
+async function verifyPublicFeedBrowserLifecycle(
+  frame: FrameLocator,
+  page: Page,
+  eventTitle: string,
+): Promise<void> {
+  activePhase = 'public-feed-browser-lifecycle';
+  record(activePhase, 'started');
+  const observation: PublicFeedBrowserObservation = {
+    publicConsentGateObserved: false,
+    publicManagerPublishSucceeded: false,
+    publicUrlOriginAndRouteMatch: false,
+    anonymousGetContainsCanonicalEvent: false,
+    anonymousHeadMatchesGet: false,
+    unpublishSucceeded: false,
+    anonymousGetDeniedAfterUnpublish: false,
+    anonymousHeadDeniedAfterUnpublish: false,
+  };
+  let publicUrl: string | undefined;
+  let dialog: Locator | undefined;
+  let publicationCreated = false;
+  try {
+    const publicFeedButton = frame.getByRole('button', {
+      name: 'Public feed',
+      exact: true,
+    });
+    await expect(publicFeedButton).toBeVisible();
+    const initialSettingsResponse = waitForPublicFeedPublicationResponse(
+      page,
+      'GET',
+    );
+    await publicFeedButton.click();
+    dialog = frame.getByRole('dialog', {
+      name: 'Public calendar feed',
+    });
+    await expect(dialog).toBeVisible();
+    const settingsResponse = await initialSettingsResponse;
+    observation.publicFeedManagementGetStatus = settingsResponse.status();
+    let managementState: unknown = await settingsResponse
+      .json()
+      .catch(() => null);
+
+    const calendarSelect = dialog.getByRole('combobox', {
+      name: 'Calendar',
+    });
+    const selectedCalendarName = (await calendarSelect.innerText()).trim();
+    if (selectedCalendarName !== 'Synthetic team calendar') {
+      const targetSettingsResponse = waitForPublicFeedPublicationResponse(
+        page,
+        'GET',
+      );
+      await calendarSelect.click();
+      await frame
+        .getByRole('option', {
+          name: 'Synthetic team calendar',
+          exact: true,
+        })
+        .click();
+      const response = await targetSettingsResponse;
+      observation.publicFeedManagementGetStatus = response.status();
+      managementState = await response.json().catch(() => null);
+    }
+
+    const managerCanPublish =
+      isRecord(managementState) &&
+      managementState.enabled === true &&
+      managementState.published === false;
+    const consent = dialog.getByRole('checkbox', {
+      name: 'I understand that anyone with the link can read this calendar.',
+      exact: true,
+    });
+    const publishButton = dialog.getByRole('button', {
+      name: 'Publish feed',
+      exact: true,
+    });
+    await expect(consent).toBeVisible();
+    const publishDisabledBeforeConsent = await publishButton.isDisabled();
+    await consent.check();
+    const publishEnabledAfterConsent = !(await publishButton.isDisabled());
+    observation.publicConsentGateObserved =
+      managerCanPublish &&
+      publishDisabledBeforeConsent &&
+      publishEnabledAfterConsent;
+    if (!observation.publicConsentGateObserved) {
+      throw new Error('Manager publication consent gate was not observed');
+    }
+
+    const publishResponsePromise = waitForPublicFeedPublicationResponse(
+      page,
+      'PUT',
+    );
+    await publishButton.click();
+    const publishResponse = await publishResponsePromise;
+    observation.publicFeedPublishStatus = publishResponse.status();
+    const publishedState: unknown = await publishResponse
+      .json()
+      .catch(() => null);
+    publicationCreated =
+      publishResponse.status() >= 200 &&
+      publishResponse.status() < 300 &&
+      isRecord(publishedState) &&
+      publishedState.published === true;
+    observation.publicManagerPublishSucceeded = publicationCreated;
+    if (!publicationCreated) {
+      throw new Error('Manager publication did not succeed');
+    }
+
+    const publicUrlInput = dialog.getByRole('textbox', {
+      name: 'Public feed URL',
+      exact: true,
+    });
+    await expect(publicUrlInput).toBeVisible();
+    publicUrl = await publicUrlInput.inputValue();
+    let parsedPublicUrl: URL | undefined;
+    try {
+      parsedPublicUrl = new URL(publicUrl);
+    } catch {
+      parsedPublicUrl = undefined;
+    }
+    observation.publicUrlOriginAndRouteMatch =
+      parsedPublicUrl !== undefined &&
+      parsedPublicUrl.origin === new URL(fixture.gatewayUrl).origin &&
+      /^\/v1\/public-calendar-feeds\/[A-Za-z0-9_.-]+$/u.test(
+        parsedPublicUrl.pathname,
+      ) &&
+      parsedPublicUrl.username === '' &&
+      parsedPublicUrl.password === '' &&
+      parsedPublicUrl.search === '' &&
+      parsedPublicUrl.hash === '';
+    if (!observation.publicUrlOriginAndRouteMatch) {
+      throw new Error('Public feed URL did not match the synthetic gateway');
+    }
+
+    const [publicGet, publicHead] = await Promise.all([
+      fetchAnonymousPublicFeed(publicUrl, 'GET'),
+      fetchAnonymousPublicFeed(publicUrl, 'HEAD'),
+    ]);
+    observation.publicFeedGetStatus = publicGet.status;
+    observation.publicFeedHeadStatus = publicHead.status;
+    let feedText = '';
+    try {
+      feedText = new TextDecoder('utf-8', { fatal: true }).decode(
+        publicGet.body,
+      );
+    } catch {
+      feedText = '';
+    }
+    const getHeadersAreSafe =
+      publicGet.cacheControl?.toLowerCase().includes('no-store') === true &&
+      publicGet.pragma?.toLowerCase() === 'no-cache' &&
+      publicGet.nosniff?.toLowerCase() === 'nosniff';
+    observation.anonymousGetContainsCanonicalEvent =
+      publicGet.status === 200 &&
+      publicGet.contentType?.toLowerCase().startsWith('text/calendar') ===
+        true &&
+      getHeadersAreSafe &&
+      feedText.startsWith('BEGIN:VCALENDAR') &&
+      feedText.includes('BEGIN:VEVENT') &&
+      feedText.includes(eventTitle) &&
+      feedText.trimEnd().endsWith('END:VCALENDAR');
+    const headHeadersAreSafe =
+      publicHead.cacheControl?.toLowerCase().includes('no-store') === true &&
+      publicHead.pragma?.toLowerCase() === 'no-cache' &&
+      publicHead.nosniff?.toLowerCase() === 'nosniff';
+    observation.anonymousHeadMatchesGet =
+      publicHead.status === 200 &&
+      publicHead.contentType?.toLowerCase().startsWith('text/calendar') ===
+        true &&
+      headHeadersAreSafe &&
+      publicHead.body.byteLength === 0 &&
+      publicHead.contentLength === String(publicGet.body.byteLength);
+    if (
+      !observation.anonymousGetContainsCanonicalEvent ||
+      !observation.anonymousHeadMatchesGet
+    ) {
+      throw new Error('Anonymous public feed GET/HEAD did not match');
+    }
+
+    const unpublishResponsePromise = waitForPublicFeedPublicationResponse(
+      page,
+      'DELETE',
+    );
+    await dialog
+      .getByRole('button', { name: 'Unpublish', exact: true })
+      .click();
+    const unpublishResponse = await unpublishResponsePromise;
+    observation.publicFeedUnpublishStatus = unpublishResponse.status();
+    observation.unpublishSucceeded =
+      unpublishResponse.status() >= 200 && unpublishResponse.status() < 300;
+    if (!observation.unpublishSucceeded) {
+      throw new Error('Public feed could not be unpublished');
+    }
+    publicationCreated = false;
+
+    const [revokedGet, revokedHead] = await Promise.all([
+      fetchAnonymousPublicFeed(publicUrl, 'GET'),
+      fetchAnonymousPublicFeed(publicUrl, 'HEAD'),
+    ]);
+    observation.publicFeedRevokedGetStatus = revokedGet.status;
+    observation.publicFeedRevokedHeadStatus = revokedHead.status;
+    observation.anonymousGetDeniedAfterUnpublish =
+      revokedGet.status === 404 && revokedGet.body.byteLength === 0;
+    observation.anonymousHeadDeniedAfterUnpublish =
+      revokedHead.status === 404 && revokedHead.body.byteLength === 0;
+    if (
+      !observation.anonymousGetDeniedAfterUnpublish ||
+      !observation.anonymousHeadDeniedAfterUnpublish
+    ) {
+      throw new Error('Public feed remained available after unpublishing');
+    }
+
+    record(
+      activePhase,
+      'passed',
+      observation.publicFeedRevokedGetStatus,
+      undefined,
+      observation,
+    );
+  } catch {
+    activeReminderFailureRecorded = true;
+    record(activePhase, 'failed', undefined, undefined, observation);
+    throw new Error('Public calendar feed lifecycle could not be confirmed');
+  } finally {
+    if (publicationCreated && dialog) {
+      try {
+        const unpublishButton = dialog.getByRole('button', {
+          name: 'Unpublish',
+          exact: true,
+        });
+        if (await unpublishButton.isVisible()) {
+          const cleanupResponse = waitForPublicFeedPublicationResponse(
+            page,
+            'DELETE',
+          );
+          await unpublishButton.click();
+          await cleanupResponse;
+        }
+      } catch {
+        // The isolated Element stack is removed by the acceptance job.
+      }
+    }
+  }
 }
 
 function readFixture(): Fixture {
@@ -8633,6 +8959,7 @@ function record(
     allDayScheduleReadback?: boolean;
     canManageReminders?: boolean;
   } & Partial<ReminderConfigurationObservation> &
+    Partial<PublicFeedBrowserObservation> &
     Partial<Omit<G6StageRecord, 'phase' | 'status' | 'httpStatus' | 'count'>>,
 ) {
   const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
