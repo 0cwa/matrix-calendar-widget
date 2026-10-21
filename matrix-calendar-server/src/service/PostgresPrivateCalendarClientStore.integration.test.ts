@@ -38,11 +38,13 @@ const target = {
 };
 const appIds = {
   pending: `mcwpc~${'1'.repeat(48)}`,
+  bootstrap: `mcwpc~${'7'.repeat(48)}`,
   active: `mcwpc~${'2'.repeat(48)}`,
   revoked: `mcwpc~${'3'.repeat(48)}`,
   removed: `mcwpc~${'4'.repeat(48)}`,
   expiredActive: `mcwpc~${'5'.repeat(48)}`,
   expiredPending: `mcwpc~${'6'.repeat(48)}`,
+  bootstrapExpires: `mcwpc~${'8'.repeat(48)}`,
 };
 const now = new Date('2026-10-21T12:00:00.000Z');
 const clientSecret = Buffer.alloc(32, 0x73).toString('base64url');
@@ -191,6 +193,14 @@ describeWithDatabase('PostgresPrivateCalendarClientStore integration', () => {
           clientSecret,
         ),
       });
+      expect(await store.getByAppId(appIds.bootstrap, now)).toMatchObject({
+        state: 'pending',
+        mapState: 'bootstrap',
+        secretVerifier: privateCalendarClientSecretVerifier(
+          appIds.bootstrap,
+          clientSecret,
+        ),
+      });
       expect(await store.getByAppId(appIds.active, now)).toMatchObject({
         state: 'active',
         mapState: 'present',
@@ -201,6 +211,7 @@ describeWithDatabase('PostgresPrivateCalendarClientStore integration', () => {
         [appIds.removed, 'removed'],
         [appIds.expiredActive, 'cleanup-pending'],
         [appIds.expiredPending, 'cleanup-pending'],
+        [appIds.bootstrapExpires, 'cleanup-pending'],
       ] as const) {
         const revoked = await store.getByAppId(appId, now);
         expect(revoked).toMatchObject({ state: 'revoked', mapState });
@@ -237,8 +248,30 @@ describeWithDatabase('PostgresPrivateCalendarClientStore integration', () => {
 
     const created = await store.createPending(makeRecord(appIds.pending));
     expect(created).toEqual({ kind: 'created' });
+    await store.createPending(makeRecord(appIds.bootstrap));
+    expect(await store.beginBootstrap(appIds.bootstrap, now)).toMatchObject({
+      state: 'pending',
+      mapState: 'bootstrap',
+    });
+    await store.createPending(makeRecord(appIds.revoked));
+    expect(await store.beginBootstrap(appIds.revoked, now)).toMatchObject({
+      state: 'pending',
+      mapState: 'bootstrap',
+    });
+    expect(await store.revoke(appIds.revoked, now)).toMatchObject({
+      state: 'revoked',
+      mapState: 'cleanup-pending',
+    });
+    const revokedBootstrap = await store.getByAppId(appIds.revoked, now);
+    expect(revokedBootstrap).not.toHaveProperty('secretVerifier');
+    expect(await store.activate(appIds.revoked, now)).toBeUndefined();
+
     expect(await store.createPending(makeRecord(appIds.active))).toEqual({
       kind: 'created',
+    });
+    expect(await store.beginBootstrap(appIds.active, now)).toMatchObject({
+      state: 'pending',
+      mapState: 'bootstrap',
     });
     expect(await store.activate(appIds.active, now)).toMatchObject({
       state: 'active',
@@ -249,17 +282,8 @@ describeWithDatabase('PostgresPrivateCalendarClientStore integration', () => {
       ),
     });
 
-    await store.createPending(makeRecord(appIds.revoked));
-    await store.activate(appIds.revoked, now);
-    const revoked = await store.revoke(appIds.revoked, now);
-    expect(revoked).toMatchObject({
-      state: 'revoked',
-      mapState: 'cleanup-pending',
-      revokedAt: now,
-    });
-    expect(revoked).not.toHaveProperty('secretVerifier');
-
     await store.createPending(makeRecord(appIds.removed));
+    await store.beginBootstrap(appIds.removed, now);
     await store.activate(appIds.removed, now);
     const revokedRemoved = await store.revoke(appIds.removed, now);
     expect(revokedRemoved).not.toHaveProperty('secretVerifier');
@@ -273,6 +297,7 @@ describeWithDatabase('PostgresPrivateCalendarClientStore integration', () => {
     await store.createPending(
       makeRecord(appIds.expiredActive, now, activeExpiry),
     );
+    await store.beginBootstrap(appIds.expiredActive, now);
     expect(await store.activate(appIds.expiredActive, now)).toMatchObject({
       state: 'active',
       secretVerifier: privateCalendarClientSecretVerifier(
@@ -291,12 +316,36 @@ describeWithDatabase('PostgresPrivateCalendarClientStore integration', () => {
     });
     expect(expiredActive).not.toHaveProperty('secretVerifier');
 
+    const bootstrapExpiry = new Date(now.getTime() + 1);
+    await store.createPending(
+      makeRecord(appIds.bootstrapExpires, now, bootstrapExpiry),
+    );
+    expect(
+      await store.beginBootstrap(appIds.bootstrapExpires, now),
+    ).toMatchObject({ state: 'pending', mapState: 'bootstrap' });
+    expect(
+      await store.activate(appIds.bootstrapExpires, bootstrapExpiry),
+    ).toBeUndefined();
+    const expiredBootstrap = await store.getByAppId(
+      appIds.bootstrapExpires,
+      bootstrapExpiry,
+    );
+    expect(expiredBootstrap).toMatchObject({
+      state: 'revoked',
+      mapState: 'cleanup-pending',
+    });
+    expect(expiredBootstrap).not.toHaveProperty('secretVerifier');
+
     const expiredPendingCreatedAt = new Date(
       now.getTime() - PRIVATE_CALENDAR_CLIENT_LIMITS.pendingLifetimeMs,
     );
     await store.createPending(
       makeRecord(appIds.expiredPending, expiredPendingCreatedAt),
     );
+    expect(
+      await store.beginBootstrap(appIds.expiredPending, now),
+    ).toBeUndefined();
+    expect(await store.activate(appIds.expiredPending, now)).toBeUndefined();
     const expiredPending = await store.getByAppId(appIds.expiredPending, now);
     expect(expiredPending).toMatchObject({
       state: 'revoked',
@@ -332,6 +381,7 @@ describeWithDatabase('PostgresPrivateCalendarClientStore integration', () => {
       appIds.removed,
       appIds.expiredActive,
       appIds.expiredPending,
+      appIds.bootstrapExpires,
     ]) {
       const record = await store.getByAppId(appId, now);
       expect(record).toMatchObject({ state: 'revoked' });

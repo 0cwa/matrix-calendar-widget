@@ -27,7 +27,7 @@ from .private_client_callback import PrivateClientCallbackClient
 
 _APP_ID_PREFIX = "mcwpc~"
 _APP_ID_PATTERN = re.compile(r"^mcwpc~[a-f0-9]{48}$")
-_ALLOWED_PRIVATE_RIGHTS = {"", "R", "r", "rw"}
+_ALLOWED_PRIVATE_RIGHTS = {"", "R", "r", "rw", "RWdD"}
 
 
 class Rights(BaseRights):

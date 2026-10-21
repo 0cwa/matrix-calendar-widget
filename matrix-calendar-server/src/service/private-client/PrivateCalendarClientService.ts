@@ -174,6 +174,34 @@ export class PrivateCalendarClientService {
           });
         }
 
+        try {
+          await this.requireMapClient().assertPrincipalHomeAbsent(
+            appId,
+            clientCredential,
+          );
+        } catch (error) {
+          if (
+            error instanceof RadicalePrivateClientMapError &&
+            error.code === 'conflict'
+          ) {
+            throw new ConflictException({
+              code: 'private-calendar-client-principal-conflict',
+              message: 'A private calendar client principal already exists',
+            });
+          }
+          throw error;
+        }
+
+        const bootstrap = await store.beginBootstrap(appId, this.now());
+        if (
+          !bootstrap ||
+          bootstrap.state !== 'pending' ||
+          bootstrap.mapState !== 'bootstrap' ||
+          bootstrap.secretVerifier !== pending.secretVerifier
+        ) {
+          throw this.unavailable();
+        }
+
         mapMayExist = true;
         await this.requireMapClient().createForClient(
           resolved.canonicalPath,

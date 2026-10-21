@@ -92,7 +92,7 @@ describe('private CalDAV credential and Matrix policy', () => {
   });
 
   it('scopes Radicale rights to the one alias and its exact canonical collection', async () => {
-    expect(await policy.rights(APP_ID, `/${APP_ID}/`)).toBe('r');
+    expect(await policy.rights(APP_ID, `/${APP_ID}/`)).toBe('R');
     expect(await policy.rights(APP_ID, `/${APP_ID}/calendar/`)).toBe('r');
     expect(await policy.rights(APP_ID, `/${APP_ID}/calendar/event.ics`)).toBe(
       'rw',
@@ -111,6 +111,55 @@ describe('private CalDAV credential and Matrix policy', () => {
     }
   });
 
+  it('checks a pending principal home under read-only rights before bootstrap', async () => {
+    record = {
+      ...activeRecord('personal', '/alice/personal/'),
+      state: 'pending',
+      mapState: 'pending',
+    };
+
+    expect(await policy.authenticate(APP_ID, SECRET)).toBe(true);
+    expect(await policy.rights(APP_ID, `/${APP_ID}/`)).toBe('R');
+    expect(await policy.rights(APP_ID, `/${APP_ID}/calendar/`)).toBe('r');
+    expect(await policy.rights(APP_ID, `/${APP_ID}/calendar/event.ics`)).toBe(
+      '',
+    );
+    expect(await policy.rights(APP_ID, '/alice/personal/event.ics')).toBe('');
+  });
+
+  it('grants only the pending principal-home bootstrap mask after the collision check', async () => {
+    record = {
+      ...activeRecord('personal', '/alice/personal/'),
+      state: 'pending',
+      mapState: 'bootstrap',
+    };
+
+    expect(await policy.rights(APP_ID, `/${APP_ID}/`)).toBe('RWdD');
+    expect(await policy.rights(APP_ID, `/${APP_ID}/calendar/`)).toBe('r');
+    expect(await policy.rights(APP_ID, `/${APP_ID}/calendar/event.ics`)).toBe(
+      '',
+    );
+    expect(await policy.rights(APP_ID, '/alice/personal/event.ics')).toBe('');
+  });
+
+  it('requires current room membership and manager power during pending map bootstrap', async () => {
+    record = {
+      ...activeRecord('room', '/calendarbot/room-team/'),
+      state: 'pending',
+      mapState: 'pending',
+    };
+    authorizationFactory.canManageCalendars.mockResolvedValue(false);
+
+    expect(await policy.authenticate(APP_ID, SECRET)).toBe(false);
+    expect(await policy.rights(APP_ID, `/${APP_ID}/calendar/`)).toBe('');
+    expect(matrixClient.getJoinedRoomMembers).toHaveBeenCalledTimes(2);
+    expect(authorizationFactory.canManageCalendars).toHaveBeenCalledTimes(2);
+
+    matrixClient.getJoinedRoomMembers.mockResolvedValueOnce([]);
+    expect(await policy.rights(APP_ID, `/${APP_ID}/calendar/`)).toBe('');
+    expect(record.state).toBe('revoked');
+  });
+
   it('tombstones a leave observed by a request and does not revive it after rejoin', async () => {
     record = activeRecord('room', '/calendarbot/room-team/');
     matrixClient.getJoinedRoomMembers.mockResolvedValueOnce([]);
@@ -126,6 +175,27 @@ describe('private CalDAV credential and Matrix policy', () => {
     );
     expect(matrixClient.getJoinedRoomMembers).toHaveBeenCalledTimes(1);
     expect(store.revoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('denies an observed leave when its tombstone cannot be committed', async () => {
+    record = activeRecord('room', '/calendarbot/room-team/');
+    store.revoke.mockRejectedValueOnce(new Error('store unavailable'));
+    matrixClient.getJoinedRoomMembers.mockResolvedValueOnce([]);
+
+    expect(await policy.authorizeDavRequest(APP_ID, 'GET', 'resource')).toBe(
+      false,
+    );
+    expect(record.state).toBe('active');
+    expect(store.revoke).toHaveBeenCalledWith(APP_ID, NOW);
+
+    // The failed write cannot record leave history. A later request still
+    // checks current membership and can proceed after the issuer rejoins.
+    matrixClient.getJoinedRoomMembers.mockResolvedValueOnce([
+      '@alice:example.test',
+    ]);
+    expect(await policy.authorizeDavRequest(APP_ID, 'GET', 'resource')).toBe(
+      true,
+    );
   });
 
   it('rechecks room membership, current binding, and manager power for every request', async () => {

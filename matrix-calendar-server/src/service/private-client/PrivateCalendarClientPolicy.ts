@@ -84,13 +84,11 @@ export class PrivateCalendarClientPolicy {
       const supplied = privateCalendarClientSecretVerifier(username, password);
       if (!constantTimeHexEqual(record.secretVerifier, supplied)) return false;
 
-      if (record.state === 'active' && record.target.target === 'room') {
-        const membership = await this.currentMembership(record);
-        if (membership === 'left') {
-          await this.store.revoke(record.appId, this.now());
+      if (record.target.target === 'room') {
+        const current = await this.currentPolicy(record);
+        if (!current.read || (record.state === 'pending' && !current.write)) {
           return false;
         }
-        if (membership !== 'joined') return false;
       }
       return true;
     } catch {
@@ -109,14 +107,42 @@ export class PrivateCalendarClientPolicy {
     }
 
     try {
-      const record = await this.activeRecord(username);
-      if (!record) return '';
+      const record = await this.store.getByAppId(username, this.now());
+      if (
+        !record ||
+        !record.secretVerifier ||
+        !HASH_PATTERN.test(record.secretVerifier) ||
+        !this.hasCurrentEpoch(record)
+      ) {
+        return '';
+      }
+      const pathKind = radicalePathKind(record, path);
+      if (
+        record.state === 'pending' &&
+        (record.mapState === 'pending' || record.mapState === 'bootstrap')
+      ) {
+        // Check that the reserved principal home is absent with R before
+        // entering the bootstrap subphase. Radicale creates the home when a
+        // request has W; bootstrap grants only that home the required rights
+        // plus collection-delete denials. The alias gets read only and pending
+        // resource/canonical paths stay denied.
+        if (pathKind !== 'principal' && pathKind !== 'alias-collection') {
+          return '';
+        }
+        const current = await this.currentPolicy(record);
+        if (!current.read || !current.write) return '';
+        return pathKind === 'principal'
+          ? record.mapState === 'pending'
+            ? 'R'
+            : 'RWdD'
+          : 'r';
+      }
+      if (record.state !== 'active' || record.mapState !== 'present') return '';
       const current = await this.currentPolicy(record);
       if (!current.read) return '';
 
-      const pathKind = radicalePathKind(record, path);
-      if (pathKind === 'principal' || pathKind === 'alias-collection')
-        return 'r';
+      if (pathKind === 'principal') return 'R';
+      if (pathKind === 'alias-collection') return 'r';
       if (pathKind === 'alias-resource' || pathKind === 'canonical') {
         // Radicale resolves mapped resources to the canonical owner path before
         // calling Rights. The exact stored collection boundary therefore

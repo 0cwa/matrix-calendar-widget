@@ -99,6 +99,44 @@ const STORE_MIGRATIONS = [
         WHERE state = 'active';
     `,
   },
+  {
+    version: 2,
+    sql: `
+      ALTER TABLE matrix_calendar_private_clients.private_calendar_clients
+        DROP CONSTRAINT IF EXISTS private_calendar_clients_map_state_check;
+      ALTER TABLE matrix_calendar_private_clients.private_calendar_clients
+        ADD CONSTRAINT private_calendar_clients_map_state_check
+        CHECK (map_state IN ('pending', 'bootstrap', 'present', 'cleanup-pending', 'removed'));
+      DO $$
+      DECLARE existing_constraint text;
+      BEGIN
+        FOR existing_constraint IN
+          SELECT conname
+          FROM pg_constraint
+          WHERE conrelid = 'matrix_calendar_private_clients.private_calendar_clients'::regclass
+            AND contype = 'c'
+            AND pg_get_constraintdef(oid) LIKE '%map_state%'
+            AND pg_get_constraintdef(oid) LIKE '%revoked%'
+        LOOP
+          EXECUTE format(
+            'ALTER TABLE matrix_calendar_private_clients.private_calendar_clients DROP CONSTRAINT %I',
+            existing_constraint
+          );
+        END LOOP;
+      END $$;
+      ALTER TABLE matrix_calendar_private_clients.private_calendar_clients
+        ADD CONSTRAINT private_calendar_clients_state_shape_check CHECK (
+          (state = 'revoked' AND secret_verifier IS NULL AND revoked_at IS NOT NULL
+            AND map_state IN ('cleanup-pending', 'removed'))
+          OR
+          (state = 'pending' AND secret_verifier IS NOT NULL AND revoked_at IS NULL
+            AND map_state IN ('pending', 'bootstrap'))
+          OR
+          (state = 'active' AND secret_verifier IS NOT NULL AND revoked_at IS NULL
+            AND map_state = 'present')
+        );
+    `,
+  },
 ];
 
 const latestMigrationVersion = Math.max(
@@ -155,7 +193,9 @@ function readRecord(
     (row.state !== 'revoked' &&
       (row.secret_verifier === null ||
         revokedAt !== undefined ||
-        (row.state === 'pending' && row.map_state !== 'pending') ||
+        (row.state === 'pending' &&
+          row.map_state !== 'pending' &&
+          row.map_state !== 'bootstrap') ||
         (row.state === 'active' && row.map_state !== 'present')))
   ) {
     throw new Error('Invalid private calendar client record in store');
@@ -183,6 +223,7 @@ function isClientState(value: string): value is PrivateCalendarClientState {
 function isMapState(value: string): value is PrivateCalendarClientMapState {
   return (
     value === 'pending' ||
+    value === 'bootstrap' ||
     value === 'present' ||
     value === 'cleanup-pending' ||
     value === 'removed'
@@ -346,8 +387,8 @@ export class PostgresPrivateCalendarClientStore implements PrivateCalendarClient
             secret_verifier = NULL,
             revoked_at = COALESCE(revoked_at, ${record.createdAt}),
             map_state = CASE WHEN map_state = 'removed' THEN 'removed' ELSE 'cleanup-pending' END
-        WHERE (state = 'active' AND expires_at <= ${record.createdAt})
-           OR (state = 'pending' AND created_at <= ${new Date(record.createdAt.getTime() - PRIVATE_CALENDAR_CLIENT_LIMITS.pendingLifetimeMs)})
+        WHERE ((state IN ('active', 'pending') AND expires_at <= ${record.createdAt})
+           OR (state = 'pending' AND created_at <= ${new Date(record.createdAt.getTime() - PRIVATE_CALENDAR_CLIENT_LIMITS.pendingLifetimeMs)}))
       `;
 
       const [existing] = await transaction<{ app_id: string }[]>`
@@ -439,6 +480,23 @@ export class PostgresPrivateCalendarClientStore implements PrivateCalendarClient
     return Object.freeze(rows.map(readRecord));
   }
 
+  async beginBootstrap(
+    appId: string,
+    now: Date,
+  ): Promise<PrivateCalendarClientRecord | undefined> {
+    const [row] = await this.sql<PrivateCalendarClientRow[]>`
+      UPDATE matrix_calendar_private_clients.private_calendar_clients
+      SET map_state = 'bootstrap'
+      WHERE app_id = ${appId}
+        AND state = 'pending'
+        AND map_state = 'pending'
+        AND expires_at > ${now}
+        AND created_at > ${new Date(now.getTime() - PRIVATE_CALENDAR_CLIENT_LIMITS.pendingLifetimeMs)}
+      RETURNING *
+    `;
+    return row ? readRecord(row) : undefined;
+  }
+
   async activate(
     appId: string,
     now: Date,
@@ -448,6 +506,7 @@ export class PostgresPrivateCalendarClientStore implements PrivateCalendarClient
       SET state = 'active', map_state = 'present'
       WHERE app_id = ${appId}
         AND state = 'pending'
+        AND map_state = 'bootstrap'
         AND expires_at > ${now}
         AND created_at > ${new Date(now.getTime() - PRIVATE_CALENDAR_CLIENT_LIMITS.pendingLifetimeMs)}
       RETURNING *
@@ -500,6 +559,10 @@ export class DisabledPrivateCalendarClientStore implements PrivateCalendarClient
     return Object.freeze([]);
   }
 
+  async beginBootstrap(): Promise<undefined> {
+    return undefined;
+  }
+
   async activate(): Promise<undefined> {
     return undefined;
   }
@@ -524,7 +587,7 @@ async function expireRows(sql: Sql, now: Date, appId?: string): Promise<void> {
         revoked_at = COALESCE(revoked_at, ${now}),
         map_state = CASE WHEN map_state = 'removed' THEN 'removed' ELSE 'cleanup-pending' END
     WHERE (${appId ?? null}::text IS NULL OR app_id = ${appId ?? null})
-      AND ((state = 'active' AND expires_at <= ${now})
+      AND ((state IN ('active', 'pending') AND expires_at <= ${now})
         OR (state = 'pending' AND created_at <= ${pendingBefore}))
   `;
 }

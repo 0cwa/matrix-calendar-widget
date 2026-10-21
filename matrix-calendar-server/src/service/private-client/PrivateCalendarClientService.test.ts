@@ -23,7 +23,10 @@ import {
 } from '../../model/IPrivateCalendarClientStore';
 import { IUserContext } from '../../model/IUserContext';
 import { PrivateCalendarClientService } from './PrivateCalendarClientService';
-import { isExactMap } from './RadicalePrivateClientMapClient';
+import {
+  isExactMap,
+  RadicalePrivateClientMapClient,
+} from './RadicalePrivateClientMapClient';
 
 const USER_ID = '@alice:example.test';
 const CALENDAR_URL = 'http://radicale.example.test/alice/personal/';
@@ -100,11 +103,17 @@ function configuration(
 function createStore(): {
   store: PrivateCalendarClientStore;
   row: PrivateCalendarClientRecord | undefined;
-  calls: { create: jest.Mock; activate: jest.Mock; revoke: jest.Mock };
+  calls: {
+    create: jest.Mock;
+    beginBootstrap: jest.Mock;
+    activate: jest.Mock;
+    revoke: jest.Mock;
+  };
 } {
   let row: PrivateCalendarClientRecord | undefined;
   const calls = {
     create: jest.fn(),
+    beginBootstrap: jest.fn(),
     activate: jest.fn(),
     revoke: jest.fn(),
   };
@@ -117,9 +126,17 @@ function createStore(): {
     }),
     getByAppId: jest.fn(async () => row),
     listForTarget: jest.fn(async () => (row ? [row] : [])),
+    beginBootstrap: jest.fn(async () => {
+      calls.beginBootstrap();
+      if (!row || row.state !== 'pending' || row.mapState !== 'pending') {
+        return undefined;
+      }
+      row = { ...row, mapState: 'bootstrap' };
+      return row;
+    }),
     activate: jest.fn(async () => {
       calls.activate();
-      if (!row) return undefined;
+      if (!row || row.mapState !== 'bootstrap') return undefined;
       row = { ...row, state: 'active', mapState: 'present' };
       return row;
     }),
@@ -166,12 +183,16 @@ function mapRecord(accepted: boolean): Record<string, unknown> {
   };
 }
 
-function response(value: unknown): Response {
+function response(
+  value: unknown,
+  contentType = 'application/json',
+  status = 200,
+): Response {
   const bytes = new TextEncoder().encode(JSON.stringify(value));
   return {
-    status: 200,
+    status,
     headers: new Headers({
-      'Content-Type': 'application/json',
+      'Content-Type': contentType,
       'Content-Length': String(bytes.byteLength),
     }),
     body: new ReadableStream<Uint8Array>({
@@ -184,6 +205,52 @@ function response(value: unknown): Response {
 }
 
 describe('PrivateCalendarClientService', () => {
+  it('accepts Radicale 3.8 native sharing responses with text/json', async () => {
+    const fetch = jest.fn(async () =>
+      response({ Status: 'success' }, 'text/json; charset=utf-8'),
+    );
+    const mapClient = new RadicalePrivateClientMapClient(
+      'http://radicale.example.test',
+      fetch as unknown as typeof globalThis.fetch,
+    );
+
+    await expect(
+      mapClient.createForClient('/alice/personal/', APP_ID, {
+        async getRequestHeaders() {
+          return { Authorization: 'Basic synthetic-owner-credential' };
+        },
+      }),
+    ).resolves.toBeUndefined();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses pending read-only PROPFIND to distinguish an absent home from a collision', async () => {
+    const fetch = jest
+      .fn()
+      .mockResolvedValueOnce(response({}, 'application/xml', 404))
+      .mockResolvedValueOnce(response({}, 'application/xml', 207));
+    const mapClient = new RadicalePrivateClientMapClient(
+      'http://radicale.example.test',
+      fetch as unknown as typeof globalThis.fetch,
+    );
+    const credential = {
+      async getRequestHeaders() {
+        return { Authorization: 'Basic synthetic-client-credential' };
+      },
+    };
+
+    await expect(
+      mapClient.assertPrincipalHomeAbsent(APP_ID, credential),
+    ).resolves.toBeUndefined();
+    await expect(
+      mapClient.assertPrincipalHomeAbsent(APP_ID, credential),
+    ).rejects.toMatchObject({ code: 'conflict' });
+    const [input, init] = fetch.mock.calls[0];
+    expect(new URL(String(input)).pathname).toBe(`/${APP_ID}/`);
+    expect(init).toMatchObject({ method: 'PROPFIND', redirect: 'manual' });
+    expect(new Headers(init?.headers).get('Depth')).toBe('0');
+  });
+
   it('distinguishes pending, accepted, and owner-cleanup map validation', () => {
     const pending = mapRecord(false);
     const accepted = mapRecord(true);
@@ -273,6 +340,14 @@ describe('PrivateCalendarClientService', () => {
         const authorization =
           new Headers(init?.headers).get('Authorization') ?? '';
         requests.push({ path: url.pathname, authorization, body });
+        if (url.pathname === `/${APP_ID}/`) {
+          expect(init?.method).toBe('PROPFIND');
+          expect(new Headers(init?.headers).get('Depth')).toBe('0');
+          expect(authorization).toBe(
+            `Basic ${Buffer.from(`${APP_ID}:${SECRET}`).toString('base64')}`,
+          );
+          return response({}, 'application/xml', 404);
+        }
         if (url.pathname.endsWith('/map/list')) {
           return response(
             accepted
@@ -337,18 +412,72 @@ describe('PrivateCalendarClientService', () => {
       `https://api.example.test/${APP_ID}/calendar/`,
     );
     expect(calls.activate).toHaveBeenCalledTimes(1);
+    expect(calls.beginBootstrap).toHaveBeenCalledTimes(1);
     expect(state.row).toMatchObject({ state: 'active', mapState: 'present' });
     expect(state.row).not.toHaveProperty('secret');
     expect(state.row?.secretVerifier).not.toBe(SECRET);
     expect(JSON.stringify(created.client)).not.toContain('secretVerifier');
     expect(requests.map(({ path }) => path)).toEqual([
       '/.sharing/v1/map/list',
+      `/${APP_ID}/`,
       '/.sharing/v1/map/create',
       '/.sharing/v1/map/list',
       '/.sharing/v1/map/enable',
       '/.sharing/v1/map/unhide',
       '/.sharing/v1/map/list',
     ]);
+  });
+
+  it('tombstones and refuses a pre-existing synthetic principal home', async () => {
+    const state = createStore();
+    const { store, calls } = state;
+    const fetchImpl = jest.fn(async (input: string | URL | Request) => {
+      const path = new URL(String(input)).pathname;
+      if (path === '/.sharing/v1/map/list') {
+        return response({ Status: 'not-found', Content: [] });
+      }
+      if (path === `/${APP_ID}/`) {
+        return response({}, 'application/xml', 207);
+      }
+      throw new Error(`Unexpected request ${path}`);
+    });
+    const service = new PrivateCalendarClientService(
+      configuration(),
+      { canManageCalendars: jest.fn().mockResolvedValue(true) } as never,
+      {
+        forRequest: jest.fn().mockReturnValue({
+          getRequestHeaders: async () => ({
+            Authorization: 'Basic owner-proof',
+          }),
+        }),
+        forPrincipal: jest.fn(),
+      } as never,
+      {} as never,
+      store,
+      fetchImpl as typeof fetch,
+      (size) => Buffer.alloc(size),
+      () => new Date(NOW),
+    );
+
+    await expect(
+      service.create(userContext, openIdCredential, {
+        target: 'personal',
+        calendarId: CALENDAR_URL,
+      }),
+    ).rejects.toMatchObject({
+      status: 409,
+      response: { code: 'private-calendar-client-principal-conflict' },
+    });
+
+    expect(state.row).toMatchObject({
+      state: 'revoked',
+      mapState: 'removed',
+      secretVerifier: undefined,
+    });
+    expect(calls.beginBootstrap).not.toHaveBeenCalled();
+    expect(
+      fetchImpl.mock.calls.map(([input]) => new URL(String(input)).pathname),
+    ).toEqual(['/.sharing/v1/map/list', `/${APP_ID}/`]);
   });
 
   it('compensates an accepted native map when database activation fails', async () => {
@@ -362,6 +491,9 @@ describe('PrivateCalendarClientService', () => {
       async (input: string | URL | Request, init?: RequestInit) => {
         const url = new URL(String(input));
         requests.push(url.pathname);
+        if (url.pathname === `/${APP_ID}/`) {
+          return response({}, 'application/xml', 404);
+        }
         if (url.pathname.endsWith('/map/list')) {
           return response({
             Status: 'success',
@@ -422,6 +554,7 @@ describe('PrivateCalendarClientService', () => {
     expect(mapPresent).toBe(false);
     expect(requests).toEqual([
       '/.sharing/v1/map/list',
+      `/${APP_ID}/`,
       '/.sharing/v1/map/create',
       '/.sharing/v1/map/list',
       '/.sharing/v1/map/enable',
@@ -534,6 +667,7 @@ describe('PrivateCalendarClientService', () => {
       createdAt: NOW,
       expiresAt: new Date(NOW.getTime() + 60_000),
     });
+    await store.beginBootstrap(APP_ID, NOW);
     await store.activate(APP_ID, NOW);
     let mapPresent = true;
     const fetchImpl = jest.fn(
@@ -606,6 +740,7 @@ describe('PrivateCalendarClientService', () => {
         createdAt: NOW,
         expiresAt: new Date(NOW.getTime() + 60_000),
       });
+      await store.beginBootstrap(APP_ID, NOW);
       await store.activate(APP_ID, NOW);
       const fetchImpl = jest.fn(async (_input: string | URL | Request) =>
         response({

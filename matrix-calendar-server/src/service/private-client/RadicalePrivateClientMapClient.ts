@@ -94,6 +94,53 @@ export class RadicalePrivateClientMapClient {
     return Object.freeze(records as RadicalePrivateClientMapRecord[]);
   }
 
+  async assertPrincipalHomeAbsent(
+    appId: string,
+    clientCredential: CalDavCredentialProvider,
+  ): Promise<void> {
+    if (!APP_ID_PATTERN.test(appId)) {
+      throw new RadicalePrivateClientMapError('invalid-response');
+    }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      let response: Response;
+      try {
+        const headers = new Headers(await clientCredential.getRequestHeaders());
+        headers.set('Accept', 'application/xml');
+        headers.set('Content-Type', 'application/xml; charset=utf-8');
+        headers.set('Depth', '0');
+        response = await this.fetchImpl(new URL(`/${appId}/`, this.baseUrl), {
+          method: 'PROPFIND',
+          redirect: 'manual',
+          signal: controller.signal,
+          headers,
+          body: '<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>',
+        });
+      } catch {
+        throw new RadicalePrivateClientMapError('unavailable');
+      }
+
+      if (response.status >= 300 && response.status < 400) {
+        await cancelResponse(response);
+        throw new RadicalePrivateClientMapError('redirected');
+      }
+      if (response.status === 401 || response.status === 403) {
+        await cancelResponse(response);
+        throw new RadicalePrivateClientMapError('unauthorized');
+      }
+      const status = response.status;
+      await cancelResponse(response);
+      if (status === 404) return;
+      if (status === 207) {
+        throw new RadicalePrivateClientMapError('conflict');
+      }
+      throw new RadicalePrivateClientMapError('unavailable');
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   async createForClient(
     canonicalPath: string,
     appId: string,
@@ -219,7 +266,8 @@ export class RadicalePrivateClientMapClient {
         throw new RadicalePrivateClientMapError('unavailable');
       }
       const contentType = response.headers.get('Content-Type') ?? '';
-      if (!/^application\/json(?:\s*;|$)/iu.test(contentType)) {
+      // Radicale 3.8's native sharing API responds with text/json.
+      if (!/^(?:application|text)\/json(?:\s*;|$)/iu.test(contentType)) {
         await cancelResponse(response);
         throw new RadicalePrivateClientMapError('invalid-response');
       }

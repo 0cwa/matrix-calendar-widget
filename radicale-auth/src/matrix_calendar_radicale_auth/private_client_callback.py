@@ -138,7 +138,7 @@ class PrivateClientCallbackClient:
         if not isinstance(result, dict) or set(result) != {"rights"}:
             return ""
         rights = result["rights"]
-        if rights not in {"", "R", "r", "rw"}:
+        if rights not in {"", "R", "r", "rw", "RWdD"}:
             return ""
         return rights
 

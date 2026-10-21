@@ -27,6 +27,7 @@ export type PrivateCalendarClientTarget =
 export type PrivateCalendarClientState = 'pending' | 'active' | 'revoked';
 export type PrivateCalendarClientMapState =
   | 'pending'
+  | 'bootstrap'
   | 'present'
   | 'cleanup-pending'
   | 'removed';
@@ -80,6 +81,12 @@ export interface PrivateCalendarClientStore {
     personalOwnerUserId: string,
     now: Date,
   ): Promise<readonly PrivateCalendarClientRecord[]>;
+
+  /** Advance a collision-checked pending client to Radicale home bootstrap. */
+  beginBootstrap(
+    appId: string,
+    now: Date,
+  ): Promise<PrivateCalendarClientRecord | undefined>;
 
   activate(
     appId: string,
