@@ -111,6 +111,7 @@
     "pending": "The calendar collection is reserved but could not yet be verified. Run !calendar setup again later.",
     "unavailable": "Room calendar setup is temporarily unavailable. Try again later.",
     "unsupported-room": "Room setup is available only when the room is confirmed to be unencrypted.",
+    "widget-installed": "The room calendar was already ready; its widget has now been added.",
     "widget-pending": "The calendar is ready, but its widget could not be added. Run !calendar setup again later.",
     "widget-power-required": "The calendar bot needs permission to add the calendar widget in this room."
   },
