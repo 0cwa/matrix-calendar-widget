@@ -138,6 +138,12 @@ with tempfile.TemporaryDirectory(prefix='mcw-public-feed-contract-') as raw_temp
         status, _, _ = request(port, 'GET', '/alice/team/')
         assert status in {401, 403}, ('private canonical URL was reachable without proof', status)
 
+        status, empty_list_headers, empty_list_body = request(port, 'POST', '/.sharing/v1/token/list', body=json.dumps({'PathMapped': '/alice/team/'}).encode(), auth=owner, headers={'Content-Type': 'application/json', 'Accept': 'application/json'})
+        assert status == 200, ('list shares before first create', status, empty_list_body[:500])
+        assert 'json' in empty_list_headers.get('Content-Type', '').lower(), ('empty share list content type', empty_list_headers)
+        empty_list = json.loads(empty_list_body)
+        assert empty_list.get('Status') == 'not-found' and empty_list.get('Content') == [], ('empty share list response', empty_list)
+
         create = json.dumps({'PathMapped': '/alice/team/', 'Permissions': 'r', 'Conversion': 'none', 'Enabled': True, 'Hidden': False, 'Properties': {'D:displayname': 'Matrix Calendar Widget public feed'}}).encode()
         status, create_headers, create_body = request(port, 'POST', '/.sharing/v1/token/create', body=create, auth=owner, headers={'Content-Type': 'application/json', 'Accept': 'application/json'})
         assert status == 200, ('create share', status, create_body[:500])

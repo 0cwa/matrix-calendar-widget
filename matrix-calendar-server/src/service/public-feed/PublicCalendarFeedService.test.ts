@@ -17,6 +17,7 @@
 import { ConflictException } from '@nestjs/common';
 import { IAppConfiguration } from '../../IAppConfiguration';
 import { MatrixOpenIdCalDavCredentialProviderFactory } from '../../caldav/MatrixOpenIdCalDavCredentialProviderFactory';
+import { PublicCalendarFeedPublicationController } from '../../controller/PublicCalendarFeedPublicationController';
 import { IMatrixOpenIdCredential } from '../../model/IMatrixOpenIdCredential';
 import { IUserContext } from '../../model/IUserContext';
 import { MatrixCalendarAuthorizationFactory } from '../MatrixCalendarAuthorization';
@@ -47,6 +48,50 @@ const MIXED_FEED = Buffer.from(
 );
 
 describe('PublicCalendarFeedService', () => {
+  it('reports an empty native share list as unpublished and then publishes through management API', async () => {
+    const fixture = createFixture({ emptyListUsesNotFound: true });
+    const controller = new PublicCalendarFeedPublicationController(
+      fixture.service,
+    );
+
+    await expect(
+      controller.get(
+        OWNER,
+        OPENID_CREDENTIAL,
+        'personal',
+        CALENDAR_URL,
+        undefined,
+      ),
+    ).resolves.toEqual({ enabled: true, published: false });
+
+    await expect(
+      controller.publish(OWNER, OPENID_CREDENTIAL, {
+        target: 'personal',
+        calendarId: CALENDAR_URL,
+        confirmed: true,
+      }),
+    ).resolves.toMatchObject({
+      enabled: true,
+      published: true,
+      url: expect.stringMatching(
+        /^https:\/\/feeds\.example\.test\/v1\/public-calendar-feeds\//u,
+      ),
+    });
+
+    await expect(
+      controller.get(
+        OWNER,
+        OPENID_CREDENTIAL,
+        'personal',
+        CALENDAR_URL,
+        undefined,
+      ),
+    ).resolves.toMatchObject({ enabled: true, published: true });
+    expect(
+      fixture.calls.filter((call) => call.path === '/.sharing/v1/token/create'),
+    ).toHaveLength(1);
+  });
+
   it.each(['%1F', '%7F'])(
     'rejects personal calendar path segments containing encoded control character %s',
     async (encodedControl) => {
@@ -211,6 +256,7 @@ function createFixture(
     feed?: Buffer;
     roomMode?: boolean;
     loseCreateResponse?: boolean;
+    emptyListUsesNotFound?: boolean;
   } = {},
 ) {
   const key = Buffer.alloc(32, 0x5a);
@@ -271,11 +317,20 @@ function createFixture(
     calls.push({ path: url.pathname, method, body, authorization });
 
     if (url.pathname === '/.sharing/v1/token/list') {
+      const matchingShares = shares.filter(
+        (share) => share.PathMapped === body?.PathMapped,
+      );
+      if (options.emptyListUsesNotFound && matchingShares.length === 0) {
+        return jsonResponse({
+          ApiVersion: 1,
+          Lines: 0,
+          Status: 'not-found',
+          Content: [],
+        });
+      }
       return jsonResponse({
         Status: 'success',
-        Content: shares.filter(
-          (share) => share.PathMapped === body?.PathMapped,
-        ),
+        Content: matchingShares,
       });
     }
     if (url.pathname === '/.sharing/v1/token/create') {
