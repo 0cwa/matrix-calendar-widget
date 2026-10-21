@@ -19,5 +19,6 @@ USER radicale
 FROM image-base AS test
 COPY --chown=radicale:radicale tests /opt/radicale-auth/tests
 RUN /app/bin/python -m unittest discover -s /opt/radicale-auth/tests -v
+RUN /app/bin/python /opt/radicale-auth/tests/public_feed_contract.py
 
 FROM image-base AS runtime

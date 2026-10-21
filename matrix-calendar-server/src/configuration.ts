@@ -16,6 +16,7 @@
  */
 
 import Joi from 'joi';
+import { readFileSync } from 'node:fs';
 import { isIP } from 'node:net';
 import { IAppConfiguration } from './IAppConfiguration';
 import {
@@ -75,6 +76,84 @@ const validateOpenIdUserInfoOrigin: Joi.CustomValidator<string> = (
 const openIdUserInfoOriginSchema = Joi.string()
   .empty('')
   .custom(validateOpenIdUserInfoOrigin);
+
+const validatePublicCalendarFeedOrigin: Joi.CustomValidator<string> = (
+  value,
+  helpers,
+) => {
+  const match = value.match(/^https?:\/\/([^/?#]+)\/?$/iu);
+  if (value !== value.trim() || !match || match[1].includes('@')) {
+    return helpers.error('any.invalid');
+  }
+
+  let origin: URL;
+  try {
+    origin = new URL(value);
+  } catch {
+    return helpers.error('any.invalid');
+  }
+
+  if (
+    origin.origin === 'null' ||
+    origin.pathname !== '/' ||
+    origin.search !== '' ||
+    origin.hash !== '' ||
+    origin.username !== '' ||
+    origin.password !== '' ||
+    (origin.protocol === 'http:' && !isLoopbackAddress(origin.hostname))
+  ) {
+    return helpers.error('any.invalid');
+  }
+
+  return origin.origin;
+};
+
+const publicCalendarFeedOriginSchema = Joi.string()
+  .empty('')
+  .custom(validatePublicCalendarFeedOrigin);
+
+function decodePublicCalendarFeedSigningKey(
+  directValue: string | undefined,
+  filePath: string | undefined,
+): Buffer | undefined {
+  if (directValue && filePath) {
+    throw new Error(
+      'Configure only one public calendar feed signing key source',
+    );
+  }
+  if (!directValue && !filePath) return undefined;
+
+  let encodedKey = directValue;
+  if (filePath) {
+    try {
+      encodedKey = readFileSync(filePath, 'utf8').replace(/\r?\n$/u, '');
+    } catch {
+      throw new Error('Public calendar feed signing key file is unavailable');
+    }
+  }
+  if (!encodedKey || !/^[A-Za-z0-9_-]{43}$/u.test(encodedKey)) {
+    throw new Error('Public calendar feed signing key is invalid');
+  }
+
+  const key = Buffer.from(encodedKey, 'base64url');
+  if (key.byteLength !== 32 || key.toString('base64url') !== encodedKey) {
+    throw new Error('Public calendar feed signing key is invalid');
+  }
+  return key;
+}
+
+function validatePublicCalendarFeedConfiguration(
+  value: Record<string, unknown>,
+): boolean {
+  const hasOrigin =
+    typeof value.MATRIX_CALENDAR_PUBLIC_FEED_ORIGIN === 'string';
+  const hasDirectKey =
+    typeof value.MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY === 'string';
+  const hasFileKey =
+    typeof value.MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY_FILE === 'string';
+  if (hasDirectKey && hasFileKey) return false;
+  return hasOrigin === (hasDirectKey || hasFileKey);
+}
 
 function isValidRoomCalendarSetupServerName(value: string): boolean {
   if (value === '*' || !isMatrixServerName(value)) {
@@ -150,6 +229,17 @@ function toNumber(
 }
 
 function createConfiguration() {
+  const publicCalendarFeedOrigin = optionalEnvironmentValue(
+    process.env.MATRIX_CALENDAR_PUBLIC_FEED_ORIGIN,
+  );
+  const publicCalendarFeedSigningKey = decodePublicCalendarFeedSigningKey(
+    optionalEnvironmentValue(
+      process.env.MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY,
+    ),
+    optionalEnvironmentValue(
+      process.env.MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY_FILE,
+    ),
+  );
   const config: IAppConfiguration = {
     port: toNumber(process.env.PORT),
 
@@ -159,6 +249,11 @@ function createConfiguration() {
       process.env.MATRIX_OPENID_USERINFO_URL,
     ),
     radicale_url: process.env.RADICALE_URL,
+    public_calendar_feed_origin: publicCalendarFeedOrigin,
+    public_calendar_feed_signing_key: publicCalendarFeedSigningKey,
+    public_calendar_feed_enabled: Boolean(
+      publicCalendarFeedOrigin && publicCalendarFeedSigningKey,
+    ),
     caldav_max_event_response_bytes: toNumber(
       process.env.MATRIX_CALENDAR_CALDAV_MAX_EVENT_RESPONSE_BYTES,
       DEFAULT_CALDAV_EVENT_RESPONSE_MAX_BYTES,
@@ -313,6 +408,11 @@ export const ValidationSchema = Joi.object({
   HOMESERVER_URL: Joi.string().required().uri(),
   MATRIX_OPENID_USERINFO_URL: openIdUserInfoOriginSchema,
   RADICALE_URL: Joi.string().uri(),
+  MATRIX_CALENDAR_PUBLIC_FEED_ORIGIN: publicCalendarFeedOriginSchema,
+  MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY: Joi.string()
+    .empty('')
+    .pattern(/^[A-Za-z0-9_-]{43}$/u),
+  MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY_FILE: Joi.string().empty(''),
   MATRIX_CALENDAR_CALDAV_MAX_EVENT_RESPONSE_BYTES: Joi.number()
     .integer()
     .min(1)
@@ -410,6 +510,10 @@ export const ValidationSchema = Joi.object({
   GUEST_USER_PREFIX: Joi.string(),
   GUEST_USER_DEFAULT_POWER_LEVEL: Joi.number(),
   GUEST_USER_DELETE_POWER_LEVEL_ON_LEAVE: Joi.boolean(),
-});
+}).custom((value, helpers) =>
+  validatePublicCalendarFeedConfiguration(value)
+    ? value
+    : helpers.error('any.invalid'),
+);
 
 export default createConfiguration;
