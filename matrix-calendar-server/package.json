@@ -32,7 +32,7 @@
     "generate-disclaimer": "cp ../LICENSE ./lib/LICENSE.txt && cp NOTICE ./lib/NOTICE.txt && yarn licenses generate-disclaimer --prod >> ./lib/NOTICE.txt && yarn licenses list --prod --json --no-progress > ./lib/licenses.json"
   },
   "engines": {
-    "node": ">=20",
+    "node": "^22.22.3",
     "yarn": ">=1.22.1 <2.0.0"
   },
   "dependencies": {
