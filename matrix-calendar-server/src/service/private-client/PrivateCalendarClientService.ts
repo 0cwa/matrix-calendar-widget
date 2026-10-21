@@ -42,6 +42,7 @@ import {
   privateCalendarClientSecretVerifier,
 } from './PrivateCalendarClientCredentials';
 import {
+  type PrivateClientMapExpectation,
   RadicalePrivateClientMapClient,
   RadicalePrivateClientMapError,
   type RadicalePrivateClientMapRecord,
@@ -185,7 +186,7 @@ export class PrivateCalendarClientService {
             resolved.ownerCredential,
           );
         const created = findUniqueMap(beforeAcceptance, alias);
-        if (!created || !isExpectedMap(created, resolved, appId, false)) {
+        if (!created || !isExpectedMap(created, resolved, appId, 'pending')) {
           throw new RadicalePrivateClientMapError('invalid-response');
         }
 
@@ -195,7 +196,10 @@ export class PrivateCalendarClientService {
           resolved.ownerCredential,
         );
         const activeMap = findUniqueMap(afterAcceptance, alias);
-        if (!activeMap || !isExpectedMap(activeMap, resolved, appId, true)) {
+        if (
+          !activeMap ||
+          !isExpectedMap(activeMap, resolved, appId, 'accepted')
+        ) {
           throw new RadicalePrivateClientMapError('invalid-response');
         }
 
@@ -285,7 +289,7 @@ export class PrivateCalendarClientService {
           const record = findUniqueMap(records, clientAlias(appId));
           if (!record) {
             await store.markMapRemoved(appId);
-          } else if (isExpectedMap(record, resolved, appId, false)) {
+          } else if (isExpectedMap(record, resolved, appId, 'cleanup')) {
             await this.requireMapClient().deleteExact(
               record,
               revoked.canonicalPath,
@@ -426,7 +430,7 @@ export class PrivateCalendarClientService {
       const map = findUniqueMap(records, clientAlias(appId));
       if (!map) {
         await store.markMapRemoved(appId);
-      } else if (isExpectedMap(map, target, appId, false)) {
+      } else if (isExpectedMap(map, target, appId, 'cleanup')) {
         await this.requireMapClient().deleteExact(
           map,
           target.canonicalPath,
@@ -547,14 +551,14 @@ function isExpectedMap(
   record: RadicalePrivateClientMapRecord,
   target: ResolvedTarget,
   appId: string,
-  accepted: boolean,
+  expectation: PrivateClientMapExpectation,
 ): boolean {
   return isExactMap(
     record,
     target.canonicalPath,
     appId,
     target.nativeOwner,
-    accepted,
+    expectation,
   );
 }
 

@@ -155,12 +155,10 @@ describe('private CalDAV DAV gateway', () => {
     expect(Buffer.from(init?.body as Uint8Array)).toEqual(VEVENT);
   });
 
-  it('preserves a client-supplied stale precondition and native 412 response', async () => {
-    fetchImpl
-      .mockResolvedValueOnce(
-        upstreamResponse(VEVENT, 200, { ETag: '"version-2"' }),
-      )
-      .mockResolvedValueOnce(upstreamResponse(undefined, 412));
+  it('evaluates a client-supplied stale precondition before native mutation', async () => {
+    fetchImpl.mockResolvedValueOnce(
+      upstreamResponse(VEVENT, 200, { ETag: '"version-2"' }),
+    );
 
     const response = await send('PUT', eventUrl('event.ics'), VEVENT, {
       'Content-Type': 'text/calendar',
@@ -168,9 +166,126 @@ describe('private CalDAV DAV gateway', () => {
     });
 
     expect(response.statusCode).toBe(412);
-    expect(
-      new Headers(fetchImpl.mock.calls[1][1]?.headers).get('If-Match'),
-    ).toBe('"stale"');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses weak comparison for If-None-Match and blocks an existing resource', async () => {
+    fetchImpl.mockResolvedValueOnce(
+      upstreamResponse(VEVENT, 200, { ETag: '"version-2"' }),
+    );
+
+    const response = await send('DELETE', eventUrl('event.ics'), undefined, {
+      'If-None-Match': 'W/"version-2"',
+    });
+
+    expect(response.statusCode).toBe(412);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('evaluates a valid If-Match list and forwards the exact preflight ETag', async () => {
+    fetchImpl
+      .mockResolvedValueOnce(
+        upstreamResponse(VEVENT, 200, { ETag: '"version-2"' }),
+      )
+      .mockResolvedValueOnce(upstreamResponse(undefined, 204));
+
+    const response = await send('PUT', eventUrl('event.ics'), VEVENT, {
+      'Content-Type': 'text/calendar',
+      'If-Match': '"stale", "version-2"',
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const mutationHeaders = new Headers(fetchImpl.mock.calls[1][1]?.headers);
+    expect(mutationHeaders.get('If-Match')).toBe('"version-2"');
+    expect(mutationHeaders.has('If-None-Match')).toBe(false);
+  });
+
+  it('rejects date-based conditions on mutations before native DAV', async () => {
+    const response = await send('PUT', eventUrl('event.ics'), VEVENT, {
+      'Content-Type': 'text/calendar',
+      'If-Unmodified-Since': 'Wed, 21 Oct 2026 10:00:00 GMT',
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['PUT', 'If-Match', '*'],
+    ['PUT', 'If-None-Match', '"unrelated"'],
+    ['DELETE', 'If-Match', '*'],
+  ] as const)(
+    'pins a preflight VEVENT ETag when %s carries %s: %s during a mixed-resource race',
+    async (method, conditionName, conditionValue) => {
+      let resource: { body: Buffer; etag: string } = {
+        body: VEVENT,
+        etag: '"version-1"',
+      };
+      let raced = false;
+      fetchImpl.mockImplementation(async (_input, init) => {
+        if (init?.method === 'GET') {
+          const observed = resource;
+          if (!raced) {
+            raced = true;
+            resource = { body: MIXED_RESOURCE, etag: '"version-2"' };
+          }
+          return upstreamResponse(observed.body, 200, { ETag: observed.etag });
+        }
+        const headers = new Headers(init?.headers);
+        if (headers.get('If-Match') !== resource.etag) {
+          return upstreamResponse(undefined, 412);
+        }
+        if (init?.method === 'PUT') resource = { body: VEVENT, etag: '"new"' };
+        else resource = { body: Buffer.alloc(0), etag: '' };
+        return upstreamResponse(undefined, 204);
+      });
+
+      const response = await send(
+        method,
+        eventUrl('event.ics'),
+        method === 'PUT' ? VEVENT : undefined,
+        {
+          ...(method === 'PUT' ? { 'Content-Type': 'text/calendar' } : {}),
+          [conditionName]: conditionValue,
+        },
+      );
+
+      expect(response.statusCode).toBe(412);
+      expect(resource.body).toEqual(MIXED_RESOURCE);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      const mutationHeaders = new Headers(fetchImpl.mock.calls[1][1]?.headers);
+      expect(mutationHeaders.get('If-Match')).toBe('"version-1"');
+      expect(mutationHeaders.has('If-None-Match')).toBe(false);
+    },
+  );
+
+  it('guards a missing-resource create when a concurrent writer inserts a mixed object', async () => {
+    let resource: { body: Buffer; etag: string } | undefined;
+    fetchImpl.mockImplementation(async (_input, init) => {
+      if (init?.method === 'GET') {
+        resource = { body: MIXED_RESOURCE, etag: '"concurrent"' };
+        return upstreamResponse(undefined, 404);
+      }
+      const headers = new Headers(init?.headers);
+      if (resource && headers.get('If-None-Match') === '*') {
+        return upstreamResponse(undefined, 412);
+      }
+      resource = { body: Buffer.from(init?.body as Uint8Array), etag: '"new"' };
+      return upstreamResponse(undefined, 201);
+    });
+
+    const response = await send('PUT', eventUrl('event.ics'), VEVENT, {
+      'Content-Type': 'text/calendar',
+      'If-None-Match': '"old-version"',
+    });
+
+    expect(response.statusCode).toBe(412);
+    expect(resource?.body).toEqual(MIXED_RESOURCE);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const mutationHeaders = new Headers(fetchImpl.mock.calls[1][1]?.headers);
+    expect(mutationHeaders.get('If-None-Match')).toBe('*');
+    expect(mutationHeaders.has('If-Match')).toBe(false);
   });
 
   it.each(['PUT', 'DELETE'] as const)(

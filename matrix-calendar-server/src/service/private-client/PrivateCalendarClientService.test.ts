@@ -23,6 +23,7 @@ import {
 } from '../../model/IPrivateCalendarClientStore';
 import { IUserContext } from '../../model/IUserContext';
 import { PrivateCalendarClientService } from './PrivateCalendarClientService';
+import { isExactMap } from './RadicalePrivateClientMapClient';
 
 const USER_ID = '@alice:example.test';
 const CALENDAR_URL = 'http://radicale.example.test/alice/personal/';
@@ -134,7 +135,11 @@ function createStore(): {
       };
       return row;
     }),
-    markMapRemoved: jest.fn(async () => undefined),
+    markMapRemoved: jest.fn(async () => {
+      if (!row) return undefined;
+      row = { ...row, mapState: 'removed' };
+      return row;
+    }),
   } as unknown as PrivateCalendarClientStore;
   return {
     store,
@@ -179,6 +184,79 @@ function response(value: unknown): Response {
 }
 
 describe('PrivateCalendarClientService', () => {
+  it('distinguishes pending, accepted, and owner-cleanup map validation', () => {
+    const pending = mapRecord(false);
+    const accepted = mapRecord(true);
+    const disabledByOwner = {
+      ...accepted,
+      EnabledByOwner: false,
+      HiddenByOwner: true,
+    };
+
+    expect(
+      isExactMap(
+        pending as never,
+        '/alice/personal/',
+        APP_ID,
+        'alice',
+        'pending',
+      ),
+    ).toBe(true);
+    expect(
+      isExactMap(
+        accepted as never,
+        '/alice/personal/',
+        APP_ID,
+        'alice',
+        'accepted',
+      ),
+    ).toBe(true);
+    expect(
+      isExactMap(
+        accepted as never,
+        '/alice/personal/',
+        APP_ID,
+        'alice',
+        'pending',
+      ),
+    ).toBe(false);
+    expect(
+      isExactMap(
+        pending as never,
+        '/alice/personal/',
+        APP_ID,
+        'alice',
+        'accepted',
+      ),
+    ).toBe(false);
+    expect(
+      isExactMap(
+        disabledByOwner as never,
+        '/alice/personal/',
+        APP_ID,
+        'alice',
+        'cleanup',
+      ),
+    ).toBe(true);
+    for (const changed of [
+      { Owner: 'mallory' },
+      { User: 'sibling-app' },
+      { PathMapped: '/alice/other/' },
+      { Permissions: 'r' },
+      { Conversion: 'other' },
+    ]) {
+      expect(
+        isExactMap(
+          { ...accepted, ...changed } as never,
+          '/alice/personal/',
+          APP_ID,
+          'alice',
+          'cleanup',
+        ),
+      ).toBe(false);
+    }
+  });
+
   it('stores only a verifier and activates after owner map verification and client acceptance', async () => {
     const state = createStore();
     const { store, calls } = state;
@@ -273,6 +351,88 @@ describe('PrivateCalendarClientService', () => {
     ]);
   });
 
+  it('compensates an accepted native map when database activation fails', async () => {
+    const state = createStore();
+    const { store } = state;
+    jest.spyOn(store, 'activate').mockResolvedValueOnce(undefined);
+    let mapPresent = false;
+    let accepted = false;
+    const requests: string[] = [];
+    const fetchImpl = jest.fn(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(String(input));
+        requests.push(url.pathname);
+        if (url.pathname.endsWith('/map/list')) {
+          return response({
+            Status: 'success',
+            Content: mapPresent ? [mapRecord(accepted)] : [],
+          });
+        }
+        if (url.pathname.endsWith('/map/create')) {
+          mapPresent = true;
+          return response({ Status: 'success' });
+        }
+        if (
+          url.pathname.endsWith('/map/enable') ||
+          url.pathname.endsWith('/map/unhide')
+        ) {
+          if (url.pathname.endsWith('/map/unhide')) accepted = true;
+          return response({ Status: 'success' });
+        }
+        if (url.pathname.endsWith('/map/delete')) {
+          expect(JSON.parse(String(init?.body))).toEqual({
+            PathOrToken: `/${APP_ID}/calendar/`,
+          });
+          mapPresent = false;
+          return response({ Status: 'success' });
+        }
+        throw new Error(`Unexpected map request ${url.pathname}`);
+      },
+    );
+    const service = new PrivateCalendarClientService(
+      configuration(),
+      { canManageCalendars: jest.fn().mockResolvedValue(true) } as never,
+      {
+        forRequest: jest.fn().mockReturnValue({
+          getRequestHeaders: async () => ({
+            Authorization: 'Basic owner-proof',
+          }),
+        }),
+        forPrincipal: jest.fn(),
+      } as never,
+      {} as never,
+      store,
+      fetchImpl as typeof fetch,
+      (size) => Buffer.alloc(size),
+      () => new Date(NOW),
+    );
+
+    await expect(
+      service.create(userContext, openIdCredential, {
+        target: 'personal',
+        calendarId: CALENDAR_URL,
+      }),
+    ).rejects.toMatchObject({ status: 503 });
+
+    expect(state.row).toMatchObject({
+      state: 'revoked',
+      mapState: 'removed',
+      secretVerifier: undefined,
+    });
+    expect(mapPresent).toBe(false);
+    expect(requests).toEqual([
+      '/.sharing/v1/map/list',
+      '/.sharing/v1/map/create',
+      '/.sharing/v1/map/list',
+      '/.sharing/v1/map/enable',
+      '/.sharing/v1/map/unhide',
+      '/.sharing/v1/map/list',
+      '/.sharing/v1/map/list',
+      '/.sharing/v1/map/delete',
+      '/.sharing/v1/map/list',
+    ]);
+  });
+
   it('rejects a non-owner personal target before any map operation', async () => {
     const { store, calls } = createStore();
     const fetchImpl = jest.fn();
@@ -360,6 +520,133 @@ describe('PrivateCalendarClientService', () => {
     expect(calls.revoke).toHaveBeenCalledTimes(1);
     expect(forRequest).toHaveBeenCalledTimes(1);
   });
+
+  it('removes the exact accepted map during owner-authenticated revocation', async () => {
+    const state = createStore();
+    const { store } = state;
+    await store.createPending({
+      appId: APP_ID,
+      createdBy: USER_ID,
+      target: { target: 'personal', calendarId: CALENDAR_URL },
+      canonicalPath: '/alice/personal/',
+      secretVerifier: 'one-way-verifier',
+      credentialEpochHash: 'epoch-hash',
+      createdAt: NOW,
+      expiresAt: new Date(NOW.getTime() + 60_000),
+    });
+    await store.activate(APP_ID, NOW);
+    let mapPresent = true;
+    const fetchImpl = jest.fn(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(String(input));
+        if (url.pathname.endsWith('/map/list')) {
+          return response({
+            Status: 'success',
+            Content: mapPresent ? [mapRecord(true)] : [],
+          });
+        }
+        if (url.pathname.endsWith('/map/delete')) {
+          expect(JSON.parse(String(init?.body))).toEqual({
+            PathOrToken: `/${APP_ID}/calendar/`,
+          });
+          mapPresent = false;
+          return response({ Status: 'success' });
+        }
+        throw new Error(`Unexpected map request ${url.pathname}`);
+      },
+    );
+    const credentialProviderFactory = {
+      forRequest: jest.fn().mockReturnValue({
+        getRequestHeaders: async () => ({ Authorization: 'Basic owner-proof' }),
+      }),
+      forPrincipal: jest.fn(),
+    };
+    const service = new PrivateCalendarClientService(
+      configuration(),
+      { canManageCalendars: jest.fn().mockResolvedValue(true) } as never,
+      credentialProviderFactory as never,
+      {} as never,
+      store,
+      fetchImpl as typeof fetch,
+      undefined,
+      () => new Date(NOW),
+    );
+
+    const revoked = await service.revoke(userContext, openIdCredential, APP_ID);
+
+    expect(revoked).toMatchObject({ state: 'revoked', mapState: 'removed' });
+    expect(mapPresent).toBe(false);
+    expect(
+      fetchImpl.mock.calls.map(([input]) => new URL(String(input)).pathname),
+    ).toEqual([
+      '/.sharing/v1/map/list',
+      '/.sharing/v1/map/delete',
+      '/.sharing/v1/map/list',
+    ]);
+  });
+
+  it.each([
+    ['wrong owner', { Owner: 'mallory' }],
+    ['sibling app ID', { User: 'sibling-app' }],
+    ['wrong mapped path', { PathMapped: '/alice/other/' }],
+    ['changed permissions', { Permissions: 'r' }],
+    ['changed conversion', { Conversion: 'other' }],
+  ])(
+    'leaves an unrecognized map untouched when cleanup sees %s',
+    async (_name, changed) => {
+      const state = createStore();
+      const { store } = state;
+      await store.createPending({
+        appId: APP_ID,
+        createdBy: USER_ID,
+        target: { target: 'personal', calendarId: CALENDAR_URL },
+        canonicalPath: '/alice/personal/',
+        secretVerifier: 'one-way-verifier',
+        credentialEpochHash: 'epoch-hash',
+        createdAt: NOW,
+        expiresAt: new Date(NOW.getTime() + 60_000),
+      });
+      await store.activate(APP_ID, NOW);
+      const fetchImpl = jest.fn(async (_input: string | URL | Request) =>
+        response({
+          Status: 'success',
+          Content: [{ ...mapRecord(true), ...changed }],
+        }),
+      );
+      const service = new PrivateCalendarClientService(
+        configuration(),
+        { canManageCalendars: jest.fn().mockResolvedValue(true) } as never,
+        {
+          forRequest: jest.fn().mockReturnValue({
+            getRequestHeaders: async () => ({
+              Authorization: 'Basic owner-proof',
+            }),
+          }),
+          forPrincipal: jest.fn(),
+        } as never,
+        {} as never,
+        store,
+        fetchImpl as typeof fetch,
+        undefined,
+        () => new Date(NOW),
+      );
+
+      const revoked = await service.revoke(
+        userContext,
+        openIdCredential,
+        APP_ID,
+      );
+
+      expect(revoked).toMatchObject({
+        state: 'revoked',
+        mapState: 'cleanup-pending',
+      });
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      expect(new URL(String(fetchImpl.mock.calls[0][0])).pathname).toBe(
+        '/.sharing/v1/map/list',
+      );
+    },
+  );
 
   it('keeps capability routes unavailable when the feature flag is omitted', async () => {
     const { store } = createStore();

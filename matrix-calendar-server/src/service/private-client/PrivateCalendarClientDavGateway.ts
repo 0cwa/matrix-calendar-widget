@@ -50,6 +50,13 @@ type ReadBodyResult =
   | Readonly<{ kind: 'timeout' }>
   | Readonly<{ kind: 'failed' }>;
 
+type EntityTag = Readonly<{ weak: boolean; opaque: string }>;
+type EntityTagCondition = Readonly<{
+  wildcard: boolean;
+  tags: readonly EntityTag[];
+}>;
+type WriteConditionResult = 'satisfied' | 'failed' | 'invalid';
+
 /** Narrow same-origin CalDAV proxy for the reserved private-client namespace. */
 export class PrivateCalendarClientDavGateway {
   constructor(
@@ -96,6 +103,8 @@ export class PrivateCalendarClientDavGateway {
         'depth',
         'if-match',
         'if-none-match',
+        'if-modified-since',
+        'if-unmodified-since',
       ].some((name) => hasDuplicateHeader(request, name))
     ) {
       this.respondEmpty(response, 400);
@@ -173,6 +182,13 @@ export class PrivateCalendarClientDavGateway {
     }
 
     if (davMethod === 'PUT' || davMethod === 'DELETE') {
+      if (
+        upstreamHeaders.has('If-Modified-Since') ||
+        upstreamHeaders.has('If-Unmodified-Since')
+      ) {
+        this.respondEmpty(response, 400);
+        return;
+      }
       const safe = await this.checkExistingResource(
         upstreamUrl,
         authorization ?? '',
@@ -181,27 +197,41 @@ export class PrivateCalendarClientDavGateway {
         this.respondEmpty(response, 409);
         return;
       }
+      if (safe.kind === 'failed') {
+        this.respondEmpty(response, 502);
+        return;
+      }
+      const conditions = evaluateWriteConditions(
+        upstreamHeaders.get('If-Match'),
+        upstreamHeaders.get('If-None-Match'),
+        safe.kind === 'safe',
+        safe.kind === 'safe' ? safe.etag : undefined,
+      );
+      if (conditions === 'invalid') {
+        this.respondEmpty(response, 400);
+        return;
+      }
+      if (conditions === 'failed') {
+        this.respondEmpty(response, 412);
+        return;
+      }
       if (safe.kind === 'missing') {
         if (davMethod === 'DELETE') {
           this.respondEmpty(response, 404);
           return;
         }
-        if (
-          !upstreamHeaders.has('If-Match') &&
-          !upstreamHeaders.has('If-None-Match')
-        ) {
-          upstreamHeaders.set('If-None-Match', '*');
-        }
+        // The client condition was evaluated against the observed missing
+        // resource. Replace it with an atomic create guard so a concurrent
+        // writer cannot insert unsupported data between preflight and PUT.
+        upstreamHeaders.delete('If-Match');
+        upstreamHeaders.set('If-None-Match', '*');
       } else if (safe.kind === 'safe') {
-        if (
-          !upstreamHeaders.has('If-Match') &&
-          !upstreamHeaders.has('If-None-Match')
-        ) {
-          upstreamHeaders.set('If-Match', safe.etag);
-        }
-      } else {
-        this.respondEmpty(response, 502);
-        return;
+        // Evaluate any client wildcard/list condition above, then pin the
+        // mutation to this exact preflight representation. Forwarding the
+        // client's broader condition here would reopen a race with a mixed
+        // VEVENT+VTODO/JOURNAL replacement.
+        upstreamHeaders.delete('If-None-Match');
+        upstreamHeaders.set('If-Match', safe.etag);
       }
     }
 
@@ -296,7 +326,7 @@ export class PrivateCalendarClientDavGateway {
       }
       const bytes = await readBoundedResponse(response, MAX_REQUEST_BODY_BYTES);
       const etag = response.headers.get('ETag');
-      if (!bytes || !etag || etag.trim() !== etag || etag.includes(',')) {
+      if (!bytes || !etag || etag.trim() !== etag || !isStrongEntityTag(etag)) {
         return { kind: 'failed' };
       }
       try {
@@ -598,6 +628,105 @@ function hasDuplicateHeader(request: Request, name: string): boolean {
     if (rawHeaders[index].toLowerCase() === name) matches += 1;
   }
   return matches > 1;
+}
+
+function evaluateWriteConditions(
+  ifMatchValue: string | null,
+  ifNoneMatchValue: string | null,
+  resourceExists: boolean,
+  currentEtag: string | undefined,
+): WriteConditionResult {
+  const ifMatch =
+    ifMatchValue === null ? undefined : parseEntityTagCondition(ifMatchValue);
+  const ifNoneMatch =
+    ifNoneMatchValue === null
+      ? undefined
+      : parseEntityTagCondition(ifNoneMatchValue);
+  if (
+    (ifMatchValue !== null && !ifMatch) ||
+    (ifNoneMatchValue !== null && !ifNoneMatch)
+  ) {
+    return 'invalid';
+  }
+  if (!resourceExists) {
+    return ifMatch ? 'failed' : 'satisfied';
+  }
+  if (!currentEtag || !isStrongEntityTag(currentEtag)) return 'invalid';
+  const current = parseEntityTagCondition(currentEtag);
+  if (!current || current.wildcard || current.tags.length !== 1) {
+    return 'invalid';
+  }
+  const currentTag = current.tags[0];
+  if (ifMatch && !conditionMatches(ifMatch, currentTag, true)) return 'failed';
+  if (ifNoneMatch && conditionMatches(ifNoneMatch, currentTag, false)) {
+    return 'failed';
+  }
+  return 'satisfied';
+}
+
+function conditionMatches(
+  condition: EntityTagCondition,
+  current: EntityTag,
+  strong: boolean,
+): boolean {
+  if (condition.wildcard) return true;
+  return condition.tags.some(
+    (candidate) =>
+      candidate.opaque === current.opaque &&
+      (!strong || (!candidate.weak && !current.weak)),
+  );
+}
+
+function isStrongEntityTag(value: string): boolean {
+  const condition = parseEntityTagCondition(value);
+  return (
+    condition !== undefined &&
+    !condition.wildcard &&
+    condition.tags.length === 1 &&
+    !condition.tags[0].weak
+  );
+}
+
+function parseEntityTagCondition(
+  value: string,
+): EntityTagCondition | undefined {
+  let index = skipOptionalWhitespace(value, 0);
+  if (value[index] === '*') {
+    index = skipOptionalWhitespace(value, index + 1);
+    return index === value.length ? { wildcard: true, tags: [] } : undefined;
+  }
+
+  const tags: EntityTag[] = [];
+  while (index < value.length) {
+    index = skipOptionalWhitespace(value, index);
+    let weak = false;
+    if (value.startsWith('W/', index)) {
+      weak = true;
+      index += 2;
+    }
+    if (value[index] !== '"') return undefined;
+    index += 1;
+    const opaqueStart = index;
+    while (index < value.length && value[index] !== '"') {
+      const code = value.charCodeAt(index);
+      if (code < 0x21 || code === 0x7f || code > 0xff) return undefined;
+      index += 1;
+    }
+    if (index === value.length) return undefined;
+    tags.push({ weak, opaque: value.slice(opaqueStart, index) });
+    index = skipOptionalWhitespace(value, index + 1);
+    if (index === value.length) break;
+    if (value[index] !== ',') return undefined;
+    index += 1;
+    if (skipOptionalWhitespace(value, index) === value.length) return undefined;
+  }
+  return tags.length > 0 ? { wildcard: false, tags } : undefined;
+}
+
+function skipOptionalWhitespace(value: string, start: number): number {
+  let index = start;
+  while (value[index] === ' ' || value[index] === '\t') index += 1;
+  return index;
 }
 
 function isCalendarContentType(value: string | null): boolean {

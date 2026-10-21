@@ -33,6 +33,8 @@ export type RadicalePrivateClientMapRecord = Readonly<{
   HiddenByUser: boolean;
 }>;
 
+export type PrivateClientMapExpectation = 'pending' | 'accepted' | 'cleanup';
+
 export class RadicalePrivateClientMapError extends Error {
   constructor(
     readonly code:
@@ -146,7 +148,7 @@ export class RadicalePrivateClientMapClient {
     ownerCredential: CalDavCredentialProvider,
   ): Promise<void> {
     assertCanonicalCollectionPath(canonicalPath);
-    if (!isExactMap(record, canonicalPath, appId, nativeOwner, false)) {
+    if (!isExactMap(record, canonicalPath, appId, nativeOwner, 'cleanup')) {
       throw new RadicalePrivateClientMapError('invalid-response');
     }
     const response = await this.requestJson(
@@ -252,20 +254,30 @@ export function isExactMap(
   canonicalPath: string,
   appId: string,
   nativeOwner: string,
-  requireAccepted: boolean,
+  expectation: PrivateClientMapExpectation,
 ): boolean {
-  return (
+  const exactIdentity =
     record.PathOrToken === clientAlias(appId) &&
     record.PathMapped === canonicalPath &&
     record.Owner === nativeOwner &&
     record.User === appId &&
     record.Permissions === 'rw' &&
-    record.Conversion === 'none' &&
+    record.Conversion === 'none';
+  if (!exactIdentity) return false;
+  if (expectation === 'cleanup') return true;
+  if (expectation === 'pending') {
+    return (
+      record.EnabledByOwner === true &&
+      record.HiddenByOwner === false &&
+      record.EnabledByUser === false &&
+      record.HiddenByUser === true
+    );
+  }
+  return (
     record.EnabledByOwner === true &&
-    (!requireAccepted ||
-      (record.EnabledByUser === true && record.HiddenByUser === false)) &&
     record.HiddenByOwner === false &&
-    (requireAccepted || record.EnabledByUser === false)
+    record.EnabledByUser === true &&
+    record.HiddenByUser === false
   );
 }
 
