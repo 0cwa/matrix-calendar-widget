@@ -62,6 +62,12 @@ const SUITE_IDS = new Map([
   ],
   [
     suitePath(
+      'matrix-calendar-server/src/controller/HealthCheckController.test.ts',
+    ),
+    'health-check-controller',
+  ],
+  [
+    suitePath(
       'matrix-calendar-server/src/controller/RoomCalendarTarget.test.ts',
     ),
     'room-calendar-target',
@@ -274,6 +280,26 @@ const CASE_IDS = new Map([
   [
     'calendar-gateway-http-setup\0keeps CORS headers on the existing request-body limit response',
     'calendar-gateway-body-limit-before-auth',
+  ],
+  [
+    'health-check-controller\0maps liveness to the health live route',
+    'health-live-route',
+  ],
+  [
+    'health-check-controller\0reports process liveness without contacting the homeserver',
+    'health-live-no-upstream',
+  ],
+  [
+    'health-check-controller\0preserves the dependency-aware homeserver health response',
+    'health-dependency-response',
+  ],
+  [
+    'health-check-controller\0keeps liveness available when the homeserver is down',
+    'health-live-on-upstream-failure',
+  ],
+  [
+    'health-check-controller\0preserves status and response body when health fails',
+    'health-failure-status-body',
   ],
 ]);
 
