@@ -55,7 +55,11 @@ feed contract with both map and token sharing enabled; and exercise a
 standards-based CalDAV client through principal/home discovery, scoped
 collection listing, read/create/update/delete, stale ETag conflict, unknown
 VEVENT-property preservation, credential revocation, and current room-power
-loss. The app-owned PostgreSQL store requires an integration round trip that
-proves active credentials and permanent tombstones survive restart. None of
-these contracts authorize a production rollout; the feature remains default
-off until the complete set passes.
+loss. The tracked [PostgreSQL store integration contract](../../matrix-calendar-server/src/service/PostgresPrivateCalendarClientStore.integration.test.ts)
+proves pending and active credentials, expiration, verifier clearing, and
+permanent tombstones across adapter restart. After a custom-format dump/restore,
+run it with `MATRIX_CALENDAR_PRIVATE_CLIENT_STORE_VERIFY_RESTORED=true`; the
+read-only verification checks restored rows and proves that rotating the
+external private epoch rejects a restored credential. None of these contracts
+authorize a production rollout; the feature remains default off until the
+complete set passes.
