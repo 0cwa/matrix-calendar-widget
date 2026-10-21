@@ -16,11 +16,12 @@ permissions:
 
 concurrency:
   group: readme-gallery-publish
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   screenshots:
     name: Render and publish gallery
+    if: github.event_name == 'push' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
