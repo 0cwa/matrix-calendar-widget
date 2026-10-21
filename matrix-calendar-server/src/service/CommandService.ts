@@ -23,6 +23,10 @@ import { ModuleProviderToken } from '../ModuleProviderToken';
 import { TranslatableError } from '../error/TranslatableError';
 import { IRoomEvent } from '../matrix/event/IRoomEvent';
 import { StateEventName } from '../model/StateEventName';
+import {
+  formatCalendarCommandHelp,
+  type CalendarCommandHelp,
+} from './CalendarCommandHelp';
 import { CalendarCommandService } from './CalendarCommandService';
 import { CalendarCommandTrafficLimiter } from './CalendarCommandTrafficLimiter';
 import type {
@@ -182,11 +186,12 @@ export class CommandService {
     const [commandName, ...extraArgs] = commandText.split(/\s+/);
     if (commandName === 'help' && extraArgs.length === 0) {
       const lng: string = await this.detectLocale(roomId);
-      const text: string = i18next.t('calendarCommandHelp', {
+      const help = i18next.t('calendarCommandHelp', {
         lng,
-        joinArrays: '\n',
-      });
-      await this.sendCalendarReply(roomId, event, text);
+        returnObjects: true,
+      }) as unknown as CalendarCommandHelp;
+      const { body, formattedBody } = formatCalendarCommandHelp(help);
+      await this.sendCalendarReply(roomId, event, body, formattedBody);
       return;
     }
     if (commandName === 'help') {
@@ -370,10 +375,12 @@ export class CommandService {
     roomId: string,
     event: IRoomEvent<MessageEventContent>,
     text: string,
+    formattedBody?: string,
   ): Promise<void> {
     // The room can become encrypted while CalDAV work is in flight. Recheck
-    // current state immediately before sending, then keep the SDK's encrypted
-    // send path and emit plain text with explicit empty mention metadata.
+    // current state immediately before sending and keep the SDK's encryption-
+    // aware path with explicit empty mention metadata. Help may add Matrix's
+    // formatted-body companion; the plain body remains the fallback.
     if (!(await this.isCalendarRoomSafeToSend(roomId))) {
       return;
     }
@@ -389,6 +396,12 @@ export class CommandService {
     await this.matrixClient.sendMessage(roomId, {
       msgtype: 'm.text',
       body: text,
+      ...(formattedBody !== undefined
+        ? {
+            format: 'org.matrix.custom.html',
+            formatted_body: formattedBody,
+          }
+        : {}),
       'm.mentions': {},
       ...replyRelation,
     });

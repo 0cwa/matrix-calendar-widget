@@ -1,6 +1,6 @@
 # Project status
 
-_Last updated: 2026-10-20._
+_Last updated: 2026-10-21._
 
 _Frozen application candidate: `99d4c9f9f36aa0b0861a13499a7f7cd512c56920` (application tree `97022a9d2351655d2aae0a50a44a14bd81daacc9`), accepted from merged PR #294. Exact-source protected checks, CodeQL, PostgreSQL and both-mode CalDAV contracts, standalone Desktop, and normal-bot plus appservice Web/Desktop acceptance passed. Strict ordinary 0/25-event timings passed in both profiles; two trusted Element-origin opening errors per profile met the existing diagnostic predicate, with causes unknown. The prior refresh failure was not reproduced on this source. Trusted workflow run [38913010664](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38913010664) produced and verified the source-bound three-image archive (artifact SHA-256 `3e71a5edea6b2a021a539f792f6abf7522b331b6620765f7ecff28b1b306a49f`; manifest SHA-256 `d0315e465e33e38f093fe4de2faf0e5eb0f57afc6fec7e0c2aa325a727d9ae49`), whose three application images were subsequently imported and verified against their exact configuration IDs and platform. The run also completed the enabled operator rehearsal success path. That is derived runner-completion evidence; separate per-check runtime values were not captured. Pinned database and helper images, native tools, and a dedicated backup account are prepared; private runtime configuration remains pending. Pilot services remain unstarted. Protected credential staging, final operator recording, live calendar/room canary validation, the first real paired backup, isolated gateway restore, and daily activation remain pending in the private operator phase. See the sanitized [release gate](./RELEASE.md)._
 
@@ -48,11 +48,20 @@ and full normal-bot Element Web/Desktop acceptance. The separate appservice
 Element Web run failed in G6 member-B room context: Element stayed in
 `SYNCING` without a room heading before the bounded wait ended. Its cause is
 unknown; appservice browser certification remains deferred for the controlled
-pilot. The moderator setup contract calls the production setup service
-directly, so it does not establish Matrix sync delivery for `!calendar setup`
-or browser acceptance of the new setup flow. This qualification is source-only
-and does not establish deployment or pilot readiness. The current doc-only
-integration candidate still requires fresh checks on its exact source.
+pilot. The local normal-bot contract now drives actual Matrix sync through the
+production MatrixServer, CommandController, and CommandService implementations
+inside a test Nest microservice against a synthetic Synapse/Radicale fixture.
+The bot autojoins an invited room, replies to real `!calendar help` and first
+`!calendar setup` events, and refuses setup from a joined member without
+calendar-manage power before binding, widget, OpenID, or CalDAV effects. The
+repeat-setup assertion calls the service directly; a second command event and
+its `already-ready` reply are not covered. The test module supplies constructed
+services and does not verify the deployed AppModule provider graph. This is
+automated source-contract evidence only; it does not establish Element/browser
+behavior, human pilot-room acceptance, a production host, or operator
+deployment readiness. The 14-test local contract and focused format/lint checks
+pass for this source; hosted checks and human/browser acceptance remain separate
+gates.
 
 These changes are outside the frozen application candidate above and require
 fresh source qualification.
@@ -65,7 +74,7 @@ The prior exact-source operator/image rehearsal [38892200863](https://github.com
 
 PR #247's hosted evidence is tied to source `acc535dfe69001403c67853b2171672e74056f51`, tree `784aaeac9f6cf733ed7f38b50eb46bcc4b77c333`; merge commit `20dd7357d833238ac23d817bd29bdb0a9f6d4761` has that same tree. The [Element run](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532436) passed for appservice and normal-bot profiles; the [Real Radicale contract](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532535), [CI](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532444), [Desktop workflow](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532500), [PostgreSQL contract](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532435), and [CodeQL](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38458532479) also passed. These runs validate that source tree, not a fresh run of the later merge commit. Independent review cleared the exact source. CodeRabbit reported workflow success while its review was skipped because the PR was draft; this is not a CodeRabbit approval. The two trusted opening errors are diagnostic only under the explicit opening-stage predicate after every startup, authentication, CRUD, Desktop, reminder, restore, and timing gate passes; unknown, widget-origin, or later errors remain failures.
 
-The bounded local Stage B rehearsal now passes on accepted application source `99d4c9f9f36aa0b0861a13499a7f7cd512c56920` using helper commit `61e4cf7b4285b8fbc986d89e8a25337f407a6f89`. The closed receipt records source and fixture binding, API authorization/CRUD, reminder initial and restart behavior, paired-store restore, owned cleanup, and foreign-state preservation as passed. It used a network-enabled synthetic microsandbox guest without a host-directory mount, forwarded host Docker socket, or host credentials; the guest is stopped and the run-owned containers, volumes, networks, and task files were removed. The earlier failed attempt remains recorded as failed with cleanup marked unverified in its receipt; its separately verified cleanup is not attributed to that receipt. This establishes local rehearsal only. Operator readiness still requires target-specific ingress, DNS/TLS/proxy, account-ownership, Matrix Authentication Service (MAS), credential-issuance, and secret facts; encrypted off-server Restic-compatible S3 backup with daily scheduling and up to 30 populated-calendar-day recovery points (missed runs leave gaps), independent recovery-key custody, repository-wide prune authority and I/O budget, a dedicated pilot repository or prefix, and paired Radicale/PostgreSQL restore evidence; and a concrete install/disable/rollback rehearsal. No private server, domain, account, provider, or credential details are recorded here.
+The bounded local Stage B rehearsal now passes on accepted application source `99d4c9f9f36aa0b0861a13499a7f7cd512c56920` using helper commit `61e4cf7b4285b8fbc986d89e8a25337f407a6f89`. The closed receipt records source and fixture binding, API authorization/CRUD, reminder initial and restart behavior, paired-store restore, owned cleanup, and foreign-state preservation as passed. It used a network-enabled synthetic microsandbox guest without a host-directory mount, forwarded host Docker socket, or host credentials; the guest is stopped and the run-owned containers, volumes, networks, and task files were removed. The earlier failed attempt remains recorded as failed with cleanup marked unverified in its receipt; its separately verified cleanup is not attributed to that receipt. This establishes local rehearsal only. The existing production backup and meaningful restore predate the enabled room-setup configuration; deployment files and runtime inputs outside the data volumes were not included. The source backup coordinator now supports explicit, bounded host restore-input capture and verification, but a new meaningful snapshot and isolated restore using the complete allowlist remain pending. The daily timer stays disabled until that coverage gate passes and fresh trusted approval is obtained. Operator readiness also requires target-specific ingress, DNS/TLS/proxy, account-ownership, Matrix Authentication Service (MAS), credential-issuance, and secret facts; encrypted off-server Restic-compatible S3 backup with daily scheduling and up to 30 populated-calendar-day recovery points (missed runs leave gaps), independent recovery-key custody, repository-wide prune authority and I/O budget, a dedicated pilot repository or prefix, and a concrete install/disable/rollback rehearsal. No private server, domain, account, provider, or credential details are recorded here.
 
 The first opt-in hosted Docker rehearsal exposed an endpoint-mode mismatch: the
 hosted runner's Docker CLI uses its default endpoint, while the local prebuilt
@@ -299,6 +308,12 @@ PR #196 implements bounded `!calendar upcoming`, `event`, `create`, and `delete`
 
 ### M8 — gateway and transport controls
 
+The server build preserves the `src/static/images` layout used by compiled
+`WidgetClient` and runs a packaged-avatar smoke through the actual compiled
+`getMeetingWidgetEventContentAsync` method with a local upload stub. This
+source check does not qualify a new exact-source candidate or change any
+operator/deployment or publication gate.
+
 PR #181 limits `/v1/calendar` before OpenID validation to 120 requests per 60 seconds per TCP peer by default, with at most 10,000 in-memory source entries and a generic 429 with `Retry-After`. It ignores forwarded-address headers and resets on restart. PR #189 bounds event responses (16 MiB default, configurable up to 64 MiB) and refuses redirects; PR #191 bounds discovery XML and confines resource paths. Express JSON and urlencoded request bodies remain capped at 100 KiB.
 
 PR #184 adds a synthetic projection benchmark, not a production latency or capacity guarantee. PR #186 adds keyboard and automated accessibility coverage. PR #195 adds a production-preview Chromium fixture; the hosted job passed all eight list/month cases at four viewport sizes on tested tree `c368aacfb32a5b9b57bcb964cb119bdacd20b243`. This validates the standalone component fixture only. Actual Element Web/Desktop/mobile, screen-reader, and production layout results are not claimed.
@@ -409,7 +424,7 @@ loading, memory, and actual clients remain unmeasured.
   records isolated application behavior only. Private operator readiness,
   target-specific deployment and recovery validation, and any rollout decision
   remain open. No production host or configuration was inspected.
-- **Operator readiness:** homeserver/proxy behavior, OpenID query-token log redaction, selected Radicale image/configuration, PostgreSQL endpoint TLS/CA and role, backups/restores, secrets, network exposure, and rollback remain to be verified. The beta baseline uses the project-owned Radicale image and its own store; replacing an existing service or reusing its `/data` is optional and would require additional image/data-path compatibility and recovery evidence. The Compose sidecar does not migrate another service's data.
+- **Operator readiness:** a fresh backup and isolated restore must cover the enabled deployment's exact host restore inputs in addition to paired application data; the previous successful restore predates room setup. Only after that coverage gate passes may the daily timer be considered, and its separate trusted approval is still pending. Homeserver/proxy behavior, OpenID query-token log redaction, selected Radicale image/configuration, PostgreSQL endpoint TLS/CA and role, secrets, network exposure, and rollback also remain to be verified. The beta baseline uses the project-owned Radicale image and its own store; replacing an existing service or reusing its `/data` is optional and would require additional image/data-path compatibility and recovery evidence. The Compose sidecar does not migrate another service's data.
 - **Release/deployment:** the project remains pre-alpha. Build and contract evidence do not authorize image/chart publication or a live deployment.
 - **Historical source-bound image archive:** trusted main workflow run
   [37952560924](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37952560924)

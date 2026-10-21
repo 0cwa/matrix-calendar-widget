@@ -90,6 +90,7 @@ describe('test CommandService', () => {
       format?: string;
       formatted_body?: string;
       'm.mentions'?: Record<string, unknown>;
+      'm.relates_to'?: { 'm.in_reply_to': { event_id: string } };
     };
 
   const captureCalendarText = () => captureCalendarMessage().body;
@@ -194,14 +195,31 @@ describe('test CommandService', () => {
     await commandService.handleRoomMessage(ROOM_ID, event);
 
     verify(matrixClientMock.sendHtmlText(ROOM_ID, anyString())).never();
-    const txt = captureCalendarText();
-    expect(txt).toContain('!calendar help');
-    expect(txt).toContain('!calendar upcoming [count] [--tz IANA]');
-    expect(txt).toContain('server write gate');
+    const message = captureCalendarMessage();
+    const txt = message.body;
+    expect(txt).toContain('Find and read events');
+    expect(txt).toContain('Create and delete events');
+    expect(txt).toContain('Set up this room');
+    expect(txt).toContain('!calendar upcoming 3 --tz Europe/Stockholm');
+    expect(txt).toContain('!calendar event team-planning.ics');
+    expect(txt).toContain('!calendar create 2026-10-22T10:00');
+    expect(txt).toContain('Read events: calendar access must be enabled');
+    expect(txt).toContain(
+      'Room setup is separate and must be enabled by the server',
+    );
     expect(txt).not.toContain('<li>');
-    expect(txt).toContain('!calendar event <resource-id>');
-    expect(captureCalendarMessage().formatted_body).toBeUndefined();
-    expect(captureCalendarMessage()['m.mentions']).toEqual({});
+    expect(message.format).toBe('org.matrix.custom.html');
+    expect(message.formatted_body).toContain('<h2>Room calendar commands</h2>');
+    expect(message.formatted_body).toContain('<h3>Find and read events</h3>');
+    expect(message.formatted_body).toContain(
+      '<ul><li><code>!calendar help</code>',
+    );
+    expect(message.formatted_body).toContain('&lt;resource-id&gt;');
+    expect(message.formatted_body).not.toContain('<resource-id>');
+    expect(message['m.mentions']).toEqual({});
+    expect(message['m.relates_to']).toEqual({
+      'm.in_reply_to': { event_id: 'some_event_id' },
+    });
   });
 
   test('calendar setup sends only room and sender to the setup service and replies with a localized safe status', async () => {
@@ -583,9 +601,9 @@ describe('test CommandService', () => {
     await commandService.handleRoomMessage(ROOM_ID, event);
 
     const txt = captureCalendarText();
-    expect(txt).toContain('Raumkalender-Befehle');
+    expect(txt).toContain('Befehle für den Raumkalender');
     expect(txt).toContain('!calendar help');
-    expect(txt).toContain('Clients, die Widgets unterstützen');
+    expect(txt).toContain('sofern dein Client Widgets unterstützt');
   });
 
   test('calendar command without a subcommand asks for help', async () => {

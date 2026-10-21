@@ -576,9 +576,12 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       dedicated backup account are prepared; private runtime configuration
       remains pending. Pilot services remain unstarted. Protected credential
       staging, final operator recording, live calendar/room canary validation,
-      first real paired backup, isolated gateway restore, disable/rollback,
-      and daily activation
-      remain pending. Issue #255 is closed after completion of the public
+      a fresh encrypted snapshot and isolated restore that include the exact
+      allowlisted deployment restore inputs, disable/rollback, and daily
+      activation remain pending. The earlier meaningful restore predates room
+      setup and does not cover the newly required host inputs. The daily timer
+      remains disabled until the new coverage gate passes and fresh trusted
+      approval is obtained. Issue #255 is closed after completion of the public
       candidate evidence ledger; issue #251 remains open. No wider rollout or
       publication is authorized.
 - [x] Add an explicit `--profile local-microsandbox --manifest PATH` authoring
@@ -604,10 +607,17 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
       establishes local rehearsal only. Issue #255 is closed after completion
       of its public evidence ledger. Issue #251 and the separate production
       target, owner-input, canary, backup, and restore gates remain open.
-- [ ] Issues #275 and #276 were explicitly re-scoped for bounded pre-pilot
-      source cleanup. Issue #277 remains separately gated after the pilot. This
-      source cleanup does not change the frozen application candidate or pilot
-      gates, and any candidate incorporating it requires fresh qualification.
+- [x] Complete the bounded pre-pilot source cleanup for issues #275 and #276,
+      as explicitly re-scoped. Issue #277 remains separately gated after the
+      pilot. This cleanup does not change the frozen application candidate or
+      pilot gates; any candidate incorporating these source changes requires
+      fresh source-bound qualification.
+- [ ] After the verified #251 pilot and completion of #277, complete issue
+      #278's inventory-backed cleanup of obsolete dependencies, workflows,
+      fixtures, localization, assets, package/docs metadata, and test
+      boundaries. Preserve required calendar, security, and Element evidence
+      and attribution; record before/after dependency, bundle, and test/typecheck
+      measures.
 
 - [x] Wire a separate Chromium calendar-component fixture at 320, 390, 768, and
       1280 CSS pixels, with measured overflow, keyboard focus, and axe checks.
@@ -728,6 +738,11 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
 - [x] Container images and deployment docs use fork-owned names. This covers
       repository-owned image builds and documented operator-run deployment
       boundaries, not a live etke-host deployment or recovery validation.
+  - [x] Preserve the server's `src/static/images` layout in compiled output so
+        `WidgetClient` can read its calendar avatar. The post-copy build smoke
+        calls the compiled method with a local upload stub and verifies the
+        bundled PNG. This source check does not qualify a candidate or live
+        operator image.
   - [x] Document the current Docker build/runtime contracts and the generic operator-run etke/MDAD compatibility boundary.
   - [x] Add non-publishing CI image-build smoke checks with fork-owned local tags; PR #102 run 36316604092 passed both image build steps at `0da7f3345e603e808231a24cc2ed6d979bea987a` without publishing.
 - [x] Generate and verify a short-lived, source-bound image archive for the
@@ -1004,6 +1019,11 @@ encryption/send prerequisites, and bounded command limits without implying
 that inviting the bot alone creates a calendar. Setup must not enable ordinary
 room access, event writes, or reminders.
 
+- [x] Refine `!calendar help` with localized command groups, parser-valid
+      examples, and concise room/setup prerequisites. The reply includes Matrix
+      custom HTML and a readable plain-text fallback; human pilot-room
+      acceptance remains a separate open item below.
+
 - [x] Accept ADR043 and implement the default-off command, durable binding
       store/registry, CalDAV reconciliation, widget installation, and shared
       binding resolution in the gateway, commands, event operations, and
@@ -1011,12 +1031,22 @@ room access, event writes, or reminders.
       test, and workspace-build checks pass; exact suite counts and the still-
       pending hosted/real-service gates are recorded in `docs/STATUS.md`.
 
+- [x] Exercise normal-bot command delivery through real Matrix sync on a
+      synthetic Synapse/Radicale fixture. The bot autojoins an invitation,
+      replies to `!calendar help` and the first `!calendar setup` event, creates
+      a ready binding/widget with verified OpenID/CalDAV access, and refuses a
+      joined member without calendar-manage power before setup side effects.
+      Repeated setup is verified by a direct service call, not a second command
+      event or an `already-ready` reply. This is automated source-contract
+      evidence; it does not establish a human pilot-room, Element/browser, or
+      production/operator acceptance.
 - [ ] Validate the empty-room guidance for unconfigured and configured rooms,
       and test multiple distinct room bindings while preserving cross-room
       authorization.
-- [ ] Verify `!calendar help` and supported calendar commands in the pilot
-      room through the normal bot account, including a safe reply when the
-      unencrypted-room state request returns the expected Matrix 404.
+- [ ] Verify `!calendar help` and supported calendar commands in a human-
+      accepted pilot room through the normal bot account, including a safe
+      reply when the unencrypted-room state request returns the expected
+      Matrix 404.
 - [ ] Keep membership, power, binding, encryption, and default-off checks in
       the server path; UI guidance and documentation do not grant access.
 - [x] Qualify the integrated source with focused tests and the complete local
