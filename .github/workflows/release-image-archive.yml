@@ -279,7 +279,7 @@ jobs:
           if-no-files-found: error
           overwrite: false
           retention-days: 7
-          compression-level: 0
+          compression-level: 6
 
       - name: Upload the small per-run provenance manifest
         id: provenance
