@@ -169,7 +169,7 @@ The repository has the calendar domain and repository seam, widget CRUD, user-sc
 
 ### M4 — calendar management
 
-Calendar visibility, VEVENT-only creation, rename, safe deletion, description and color operations, mixed-collection safeguards, and manager-only CalDAV diagnostics are implemented. Existing VTODO/VJOURNAL data is not promoted to a first-class UI and mixed resources are preserved by supported edits. Collection `Calendar.timezone` editing remains deferred; issue #5 remains open for broader collection-management acceptance.
+Calendar visibility, VEVENT-only creation, rename, safe deletion, description and color operations, and mixed-collection safeguards are implemented. The manager-authorized CalDAV diagnostics endpoint remains available to support tooling; raw deployment-specific collection URLs are not exposed in the widget UI. Existing VTODO/VJOURNAL data is not promoted to a first-class UI and mixed resources are preserved by supported edits. Collection `Calendar.timezone` editing remains deferred; issue #5 remains open for broader collection-management acceptance.
 
 ### M5 — bounded recurrence and iCalendar support
 
