@@ -24,6 +24,7 @@ export type RoomCalendarSetupRequest = Readonly<{
 export type RoomCalendarSetupStatus =
   | 'created'
   | 'already-ready'
+  | 'widget-installed'
   | 'pending'
   | 'widget-pending'
   | 'disabled'

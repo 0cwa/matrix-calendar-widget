@@ -354,6 +354,7 @@ export class CommandService {
      * IMPORTANT: These bounded status keys are extracted by i18next-cli.
      * t('calendarSetupStatus.created')
      * t('calendarSetupStatus.already-ready')
+     * t('calendarSetupStatus.widget-installed')
      * t('calendarSetupStatus.pending')
      * t('calendarSetupStatus.widget-pending')
      * t('calendarSetupStatus.disabled')
