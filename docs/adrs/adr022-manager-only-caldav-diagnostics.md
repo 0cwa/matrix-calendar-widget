@@ -24,9 +24,10 @@ boundary from ADR006 and ADR010.
 3. Do not return credentials, access tokens, authorization headers, raw
    discovery responses, or raw CalDAV errors. Report a generic unavailable
    result for service/configuration failures.
-4. Render collection URLs as selectable plain text in the widget. Do not make
-   them links or navigate to them. Provide an explicit copy action; show copy
-   success only after the browser clipboard operation resolves successfully.
+4. Do not display or copy raw collection URLs in the normal widget UI. The
+   manager-authorized gateway response may be used by explicit support tooling;
+   such tooling must not imply that a deployment-internal address is usable by
+   calendar clients.
 
 This decision does not change ADR010's personal and room-owned principal
 model, establish any new CalDAV authentication capability, or allow a Matrix
@@ -34,11 +35,17 @@ sender value to substitute for validated OpenID identity.
 
 ## Consequences
 
-- The gateway performs the manager check before contacting Radicale, and the
-  widget has no authorization role beyond exposing a diagnostics action.
-- Collection URLs are disclosed only to an authenticated joined room member
-  with manager power and remain subject to the configured Radicale base URL.
-- Operators can copy a useful collection path without exposing principal or
-  service roots, credentials, or navigable destinations in the widget.
-- Clipboard denial is visible as a failure; the widget does not claim success
-  before the browser confirms the copy operation.
+- The gateway performs the manager check before contacting Radicale. The normal
+  widget UI does not request or display its raw collection URL response.
+- Explicit support tooling remains subject to the existing authenticated,
+  joined-room manager check and configured Radicale base URL.
+- The UI does not suggest that a discovered collection URL is a public or
+  client-usable sharing address.
+
+## Update — 2026-10-21
+
+The initial widget copy affordance was removed after recognizing that the
+configured CalDAV address can be deployment-internal and unusable to calendar
+users. This changes only the widget presentation; the manager-authorized
+gateway diagnostics endpoint and its existing authorization and response
+constraints remain available to explicit support tooling.

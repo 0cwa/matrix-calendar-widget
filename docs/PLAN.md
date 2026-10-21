@@ -78,7 +78,9 @@ PR #60's password-authenticated discovery contract is historical evidence about 
 - [x] Detect mixed collections and expose an advanced compatibility notice.
 - [x] Hide VJOURNAL-only collections.
 - [x] Leave VTODO-only collections untouched and hidden from the main calendar UI.
-- [x] Add manager-only CalDAV URL/copy diagnostics (#5; ADR022; PR #113).
+- [x] Add manager-authorized CalDAV diagnostics endpoint for support tooling
+      (#5; ADR022; PR #113); keep deployment-specific collection URLs out of
+      the normal widget UI.
 
 Calendar creation (#94), lightweight visibility controls (#96), rename (#99), and safe deletion of explicitly writable VEVENT-only calendars (#100 / PR #101) are merged. Issue #100 is closed; the M4.4 deletion slice merged in `6faa1d1fdc773aa50798f3678ef77ae61a786144`. Description is implemented through its own operation; continue to avoid a generic metadata patch framework, and keep color and timezone as separate work.
 
@@ -89,10 +91,11 @@ VEVENT, CalDAV discovery keeps it out of the main calendar list. Regression
 coverage verifies both VJOURNAL-only and VTODO-only collections stay untouched
 and hidden; mixed collections that support VEVENT remain available.
 
-CalDAV URL diagnostics require validated widget identity, joined-room
-membership, and manager power before Radicale discovery. The gateway returns
-only safe in-base collection names and URLs; the widget displays URLs as plain
-text and offers an explicit copy action.
+CalDAV diagnostics require validated widget identity, joined-room membership,
+and manager power before Radicale discovery. The manager-authorized endpoint
+remains available to support tooling; the widget does not display or copy raw
+collection URLs because configured CalDAV addresses may be deployment-internal
+and unusable by calendar users.
 
 Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor extension. The hosted set/read/clear contract passed against pinned Radicale 3.8.0.0, confirming compatibility with that release only; it does not establish universal CalDAV support or support by other servers. Timezone editing remains separate and unchecked.
 
@@ -738,6 +741,11 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
 - [x] Container images and deployment docs use fork-owned names. This covers
       repository-owned image builds and documented operator-run deployment
       boundaries, not a live etke-host deployment or recovery validation.
+  - [x] Preserve the server's `src/static/images` layout in compiled output so
+        `WidgetClient` can read its calendar avatar. The post-copy build smoke
+        calls the compiled method with a local upload stub and verifies the
+        bundled PNG. This source check does not qualify a candidate or live
+        operator image.
   - [x] Document the current Docker build/runtime contracts and the generic operator-run etke/MDAD compatibility boundary.
   - [x] Add non-publishing CI image-build smoke checks with fork-owned local tags; PR #102 run 36316604092 passed both image build steps at `0da7f3345e603e808231a24cc2ed6d979bea987a` without publishing.
 - [x] Generate and verify a short-lived, source-bound image archive for the
@@ -1031,10 +1039,11 @@ room access, event writes, or reminders.
       replies to `!calendar help` and the first `!calendar setup` event, creates
       a ready binding/widget with verified OpenID/CalDAV access, and refuses a
       joined member without calendar-manage power before setup side effects.
-      Repeated setup is verified by a direct service call, not a second command
-      event or an `already-ready` reply. This is automated source-contract
-      evidence; it does not establish a human pilot-room, Element/browser, or
-      production/operator acceptance.
+      Repeated setup is verified by direct service and command tests: an
+      existing widget reports `already-ready`, while a retry that adds a
+      missing widget reports a localized `widget-installed` reply. This is
+      automated source-contract evidence; it does not establish a human
+      pilot-room, Element/browser, or production/operator acceptance.
 - [ ] Validate the empty-room guidance for unconfigured and configured rooms,
       and test multiple distinct room bindings while preserving cross-room
       authorization.
