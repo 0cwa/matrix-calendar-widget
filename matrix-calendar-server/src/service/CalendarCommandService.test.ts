@@ -425,7 +425,7 @@ describe('CalendarCommandService', () => {
     const result = await service.execute(
       ROOM_ID,
       SENDER_ID,
-      'upcoming --ids',
+      'upcoming 10 --ids --tz UTC',
       safeTranslator(),
     );
 
