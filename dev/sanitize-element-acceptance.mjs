@@ -235,6 +235,14 @@ const PUBLIC_FEED_BROWSER_STATUS_FIELDS = [
   'publicFeedRevokedGetStatus',
   'publicFeedRevokedHeadStatus',
 ];
+const PUBLIC_FEED_BROWSER_ERROR_FIELDS = ['publicFeedManagementErrorCode'];
+const PUBLIC_FEED_BROWSER_ERROR_CODES = new Set([
+  'public-calendar-feed-upstream-unavailable',
+  'public-calendar-feeds-disabled',
+  'room-calendar-authorization-unavailable',
+  'room-calendar-caldav-disabled',
+  'unclassified',
+]);
 const PUBLIC_FEED_BROWSER_BOOLEAN_FIELDS = [
   'publicConsentGateObserved',
   'publicManagerPublishSucceeded',
@@ -1238,6 +1246,7 @@ const ALLOWED_KEYS = new Set([
   'targetSettingsReadback',
   'allDayScheduleReadback',
   ...PUBLIC_FEED_BROWSER_STATUS_FIELDS,
+  ...PUBLIC_FEED_BROWSER_ERROR_FIELDS,
   ...PUBLIC_FEED_BROWSER_BOOLEAN_FIELDS,
   'canaryDelivered',
   'roomMentioned',
@@ -2822,6 +2831,16 @@ export function sanitizeElementAcceptance(input, sourceSha) {
             record[key] < 100 ||
             record[key] > 599),
       ) ||
+      (Object.hasOwn(record, 'publicFeedManagementErrorCode') &&
+        (record.phase !== 'public-feed-browser-lifecycle' ||
+          record.publicFeedManagementGetStatus !== 503 ||
+          !PUBLIC_FEED_BROWSER_ERROR_CODES.has(
+            record.publicFeedManagementErrorCode,
+          ))) ||
+      (record.phase === 'public-feed-browser-lifecycle' &&
+        record.status === 'failed' &&
+        record.publicFeedManagementGetStatus === 503 &&
+        !Object.hasOwn(record, 'publicFeedManagementErrorCode')) ||
       (record.phase === 'public-feed-browser-lifecycle' &&
         record.status === 'passed' &&
         (record.publicFeedManagementGetStatus !== 200 ||
@@ -4072,6 +4091,11 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           (letter) => `_${letter.toLowerCase()}`,
         );
         fields.push(`${outputKey}=${record[key]}`);
+      }
+      if (Object.hasOwn(record, 'publicFeedManagementErrorCode')) {
+        fields.push(
+          `public_feed_management_error_code=${record.publicFeedManagementErrorCode}`,
+        );
       }
     }
     for (const key of G6_NUMERIC_FIELDS_BY_PHASE.get(phase) ?? []) {

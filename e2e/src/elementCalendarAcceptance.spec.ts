@@ -174,6 +174,7 @@ type ReminderConfigurationObservation = {
 
 type PublicFeedBrowserObservation = {
   publicFeedManagementGetStatus?: number;
+  publicFeedManagementErrorCode?: PublicFeedManagementErrorCode;
   publicFeedPublishStatus?: number;
   publicFeedGetStatus?: number;
   publicFeedHeadStatus?: number;
@@ -189,6 +190,32 @@ type PublicFeedBrowserObservation = {
   anonymousGetDeniedAfterUnpublish: boolean;
   anonymousHeadDeniedAfterUnpublish: boolean;
 };
+
+const PUBLIC_FEED_MANAGEMENT_ERROR_CODES = [
+  'public-calendar-feed-upstream-unavailable',
+  'public-calendar-feeds-disabled',
+  'room-calendar-authorization-unavailable',
+  'room-calendar-caldav-disabled',
+] as const;
+
+type PublicFeedManagementErrorCode =
+  | (typeof PUBLIC_FEED_MANAGEMENT_ERROR_CODES)[number]
+  | 'unclassified';
+
+const PUBLIC_FEED_MANAGEMENT_ERROR_CODE_SET = new Set<string>(
+  PUBLIC_FEED_MANAGEMENT_ERROR_CODES,
+);
+
+function classifyPublicFeedManagementErrorCode(
+  state: unknown,
+): PublicFeedManagementErrorCode {
+  if (!isRecord(state) || typeof state.code !== 'string') {
+    return 'unclassified';
+  }
+  return PUBLIC_FEED_MANAGEMENT_ERROR_CODE_SET.has(state.code)
+    ? (state.code as PublicFeedManagementErrorCode)
+    : 'unclassified';
+}
 
 type AnonymousPublicFeedResponse = {
   status?: number;
@@ -6041,6 +6068,10 @@ async function verifyPublicFeedBrowserLifecycle(
     let managementState: unknown = await settingsResponse
       .json()
       .catch(() => null);
+    if (settingsResponse.status() === 503) {
+      observation.publicFeedManagementErrorCode =
+        classifyPublicFeedManagementErrorCode(managementState);
+    }
 
     const calendarSelect = dialog.getByRole('combobox', {
       name: 'Calendar',
@@ -6061,6 +6092,10 @@ async function verifyPublicFeedBrowserLifecycle(
       const response = await targetSettingsResponse;
       observation.publicFeedManagementGetStatus = response.status();
       managementState = await response.json().catch(() => null);
+      if (response.status() === 503) {
+        observation.publicFeedManagementErrorCode =
+          classifyPublicFeedManagementErrorCode(managementState);
+      }
     }
 
     const managerCanPublish =

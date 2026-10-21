@@ -928,6 +928,102 @@ test('sanitizes the manager-consented anonymous public feed lifecycle', () => {
   );
 });
 
+test('reports only closed backend codes for public-feed management 503 responses', () => {
+  const failedLifecycle = {
+    phase: 'public-feed-browser-lifecycle',
+    status: 'failed',
+    publicFeedManagementGetStatus: 503,
+    publicFeedManagementErrorCode: 'room-calendar-authorization-unavailable',
+    publicConsentGateObserved: false,
+    publicManagerPublishSucceeded: false,
+    publicUrlOriginAndRouteMatch: false,
+    anonymousGetContainsCanonicalEvent: false,
+    anonymousHeadMatchesGet: false,
+    unpublishSucceeded: false,
+    anonymousGetDeniedAfterUnpublish: false,
+    anonymousHeadDeniedAfterUnpublish: false,
+  };
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(failedLifecycle),
+    sourceSha,
+  );
+
+  assert.match(
+    summary,
+    /public_feed_management_error_code=room-calendar-authorization-unavailable/u,
+  );
+  assert.match(
+    sanitizeElementAcceptance(
+      JSON.stringify({
+        ...failedLifecycle,
+        publicFeedManagementErrorCode: 'unclassified',
+      }),
+      sourceSha,
+    ),
+    /public_feed_management_error_code=unclassified/u,
+  );
+
+  for (const errorCode of [
+    'Authorization: Bearer private-value',
+    'calendar title or hostname',
+  ]) {
+    assert.throws(
+      () =>
+        sanitizeElementAcceptance(
+          JSON.stringify({
+            phase: 'public-feed-browser-lifecycle',
+            status: 'failed',
+            publicFeedManagementGetStatus: 503,
+            publicFeedManagementErrorCode: errorCode,
+            publicConsentGateObserved: false,
+            publicManagerPublishSucceeded: false,
+            publicUrlOriginAndRouteMatch: false,
+            anonymousGetContainsCanonicalEvent: false,
+            anonymousHeadMatchesGet: false,
+            unpublishSucceeded: false,
+            anonymousGetDeniedAfterUnpublish: false,
+            anonymousHeadDeniedAfterUnpublish: false,
+          }),
+          sourceSha,
+        ),
+      /invalid element acceptance summary/u,
+    );
+  }
+
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify({
+          phase: 'public-feed-browser-lifecycle',
+          status: 'failed',
+          publicFeedManagementGetStatus: 503,
+          publicConsentGateObserved: false,
+          publicManagerPublishSucceeded: false,
+          publicUrlOriginAndRouteMatch: false,
+          anonymousGetContainsCanonicalEvent: false,
+          anonymousHeadMatchesGet: false,
+          unpublishSucceeded: false,
+          anonymousGetDeniedAfterUnpublish: false,
+          anonymousHeadDeniedAfterUnpublish: false,
+        }),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify({
+          ...failedLifecycle,
+          publicFeedManagementGetStatus: 500,
+        }),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+});
+
 test('sanitizes the fixed reminder option failure boundary', () => {
   const summary = sanitizeElementAcceptance(
     JSON.stringify(missingReminderOptionObservation()),
