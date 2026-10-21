@@ -25,7 +25,6 @@ import {
   waitFor,
   within,
 } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { PropsWithChildren } from 'react';
 import { CalendarRepositoryProvider } from '../../calendar';
 import { CalendarToolbar } from './CalendarToolbar';
@@ -127,7 +126,9 @@ describe('<CalendarToolbar />', () => {
     ).toBeInTheDocument();
   });
 
-  it('shows diagnostics as non-navigating text with an explicit copy action', async () => {
+  it('keeps calendar management available without exposing collection URLs', async () => {
+    const internalCollectionUrl =
+      'http://caldav-internal.invalid:5232/room/calendar/';
     const repository = Object.assign(
       new InMemoryCalendarRepository({ calendars }),
       {
@@ -135,7 +136,7 @@ describe('<CalendarToolbar />', () => {
           calendars: [
             {
               name: 'Team calendar',
-              url: 'https://radicale.example.test/alice/team/',
+              url: internalCollectionUrl,
             },
           ],
         }),
@@ -157,20 +158,13 @@ describe('<CalendarToolbar />', () => {
     );
 
     expect(
-      await screen.findByRole('button', { name: 'CalDAV collection URLs' }),
-    ).toBeInTheDocument();
-    await userEvent.click(
-      screen.getByRole('button', { name: 'CalDAV collection URLs' }),
-    );
-
-    expect(
-      await screen.findByText('https://radicale.example.test/alice/team/'),
+      await screen.findByRole('button', { name: 'Create calendar' }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Copy URL' }),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole('link')).toBeNull();
-    expect(repository.getCalendarDiagnostics).toHaveBeenCalledOnce();
+      screen.queryByRole('button', { name: 'CalDAV collection URLs' }),
+    ).toBeNull();
+    expect(screen.queryByText(internalCollectionUrl)).toBeNull();
+    expect(repository.getCalendarDiagnostics).not.toHaveBeenCalled();
   });
 
   it('offers only explicitly writable calendars for deletion', async () => {

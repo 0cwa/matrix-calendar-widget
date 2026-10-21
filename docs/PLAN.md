@@ -78,7 +78,9 @@ PR #60's password-authenticated discovery contract is historical evidence about 
 - [x] Detect mixed collections and expose an advanced compatibility notice.
 - [x] Hide VJOURNAL-only collections.
 - [x] Leave VTODO-only collections untouched and hidden from the main calendar UI.
-- [x] Add manager-only CalDAV URL/copy diagnostics (#5; ADR022; PR #113).
+- [x] Add manager-authorized CalDAV diagnostics endpoint for support tooling
+      (#5; ADR022; PR #113); keep deployment-specific collection URLs out of
+      the normal widget UI.
 
 Calendar creation (#94), lightweight visibility controls (#96), rename (#99), and safe deletion of explicitly writable VEVENT-only calendars (#100 / PR #101) are merged. Issue #100 is closed; the M4.4 deletion slice merged in `6faa1d1fdc773aa50798f3678ef77ae61a786144`. Description is implemented through its own operation; continue to avoid a generic metadata patch framework, and keep color and timezone as separate work.
 
@@ -89,10 +91,11 @@ VEVENT, CalDAV discovery keeps it out of the main calendar list. Regression
 coverage verifies both VJOURNAL-only and VTODO-only collections stay untouched
 and hidden; mixed collections that support VEVENT remain available.
 
-CalDAV URL diagnostics require validated widget identity, joined-room
-membership, and manager power before Radicale discovery. The gateway returns
-only safe in-base collection names and URLs; the widget displays URLs as plain
-text and offers an explicit copy action.
+CalDAV diagnostics require validated widget identity, joined-room membership,
+and manager power before Radicale discovery. The manager-authorized endpoint
+remains available to support tooling; the widget does not display or copy raw
+collection URLs because configured CalDAV addresses may be deployment-internal
+and unusable by calendar users.
 
 Calendar color uses Apple's `http://apple.com/ns/ical/` `calendar-color` vendor extension. The hosted set/read/clear contract passed against pinned Radicale 3.8.0.0, confirming compatibility with that release only; it does not establish universal CalDAV support or support by other servers. Timezone editing remains separate and unchecked.
 
