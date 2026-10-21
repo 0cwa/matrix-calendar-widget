@@ -397,7 +397,7 @@ function ordinaryReportWithVerifiedHostError(version = 13) {
 
 test('publishes only closed exception classes in the current report version', () => {
   const error = new TypeError(
-    'Cannot read properties of undefined (reading \'roomId\') for @member:example.test at https://element.invalid/path?access_token=private-value',
+    "Cannot read properties of undefined (reading 'roomId') for @member:example.test at https://element.invalid/path?access_token=private-value",
   );
   const details = safePerformancePageErrorDetails(error);
   assert.deepEqual(details, {
@@ -417,15 +417,18 @@ test('publishes only closed exception classes in the current report version', ()
 
   const report = ordinaryReportWithVerifiedHostError(14);
   const observation = report.pageErrorObservations[0];
-  Object.assign(observation, safePerformancePageErrorDetails(error));
+  assert.deepEqual(
+    {
+      safeErrorName: observation.safeErrorName,
+      safeErrorMessageClass: observation.safeErrorMessageClass,
+    },
+    { safeErrorName: 'Error', safeErrorMessageClass: 'other' },
+  );
   const summary = sanitizeElementAcceptance(
     JSON.stringify(ordinaryStage('failed', report, 'performance-page-error')),
     sourceSha,
   );
-  assert.match(
-    summary,
-    /exception_name=TypeError exception_message_class=cannot-read-nullish-property/u,
-  );
+  assert.match(summary, /exception_name=Error exception_message_class=other/u);
   assert.doesNotMatch(
     summary,
     /roomId|member|private-value|access_token|example\.test|https?:\/\//u,
@@ -822,16 +825,13 @@ test('accepts the verified opening Element diagnostic in report version 14', () 
   assert.doesNotMatch(summary, /private error text|https?:\/\//u);
 
   for (const futureVersion of [15, 999]) {
-    assert.throws(
-      () => {
-        const futureReport = ordinaryReportWithVerifiedHostError(futureVersion);
-        sanitizeElementAcceptance(
-          JSON.stringify(ordinaryStage('passed', futureReport)),
-          sourceSha,
-        );
-      },
-      /invalid element acceptance summary/u,
-    );
+    assert.throws(() => {
+      const futureReport = ordinaryReportWithVerifiedHostError(futureVersion);
+      sanitizeElementAcceptance(
+        JSON.stringify(ordinaryStage('passed', futureReport)),
+        sourceSha,
+      );
+    }, /invalid element acceptance summary/u);
   }
 });
 

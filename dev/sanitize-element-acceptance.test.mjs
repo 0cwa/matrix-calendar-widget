@@ -76,18 +76,21 @@ function reminderConfigurationObservation(overrides = {}) {
     count: 1,
     reminderEnabled: true,
     reminderStep: 'complete',
-    notifyButtonCount: 1,
-    notifyButtonVisible: true,
+    reminderSettingsButtonCount: 1,
+    reminderSettingsButtonVisible: true,
     reminderOptionsGetCount: 1,
     reminderOptionsGetStatus: 200,
     reminderConfigGetCount: 1,
     reminderConfigGetStatus: 200,
-    reminderEligibleOptionCount: 1,
-    reminderOptionCheckedBefore: false,
-    reminderOptionCheckAttempted: true,
+    reminderDestinationControlCount: 1,
+    recipientKind: 'room',
+    recipientSelectionAttempted: true,
+    selectedMemberKeyboardFlow: false,
+    reminderTargetMatches: true,
+    allDayScheduleMatches: true,
+    narrowSidePanelSafe: true,
     reminderPutCount: 1,
     reminderPutStatus: 200,
-    reminderOptionCheckedAfter: true,
     ...overrides,
   };
 }
@@ -98,19 +101,22 @@ function missingReminderOptionObservation() {
     status: 'failed',
     httpStatus: 200,
     reminderEnabled: false,
-    reminderStep: 'eligible-option',
-    notifyButtonCount: 1,
-    notifyButtonVisible: true,
+    reminderStep: 'destination-control',
+    reminderSettingsButtonCount: 1,
+    reminderSettingsButtonVisible: true,
     reminderOptionsGetCount: 1,
     reminderOptionsGetStatus: 200,
     reminderConfigGetCount: 1,
     reminderConfigGetStatus: 200,
-    reminderEligibleOptionCount: 0,
-    reminderOptionCheckedBefore: false,
-    reminderOptionCheckAttempted: false,
+    reminderDestinationControlCount: 0,
+    recipientKind: 'unknown',
+    recipientSelectionAttempted: false,
+    selectedMemberKeyboardFlow: false,
+    reminderTargetMatches: false,
+    allDayScheduleMatches: false,
+    narrowSidePanelSafe: false,
     reminderPutCount: 0,
     reminderPutStatus: 0,
-    reminderOptionCheckedAfter: false,
   };
 }
 
@@ -595,6 +601,8 @@ test('requires UI, Matrix delivery, and timeline evidence for reminder recovery'
         count: 1,
         relativeAlarmReadback: true,
         reminderEnabled: true,
+        targetSettingsReadback: true,
+        allDayScheduleReadback: true,
       }),
       JSON.stringify({
         phase: 'reminder-initial-delivery',
@@ -603,6 +611,10 @@ test('requires UI, Matrix delivery, and timeline evidence for reminder recovery'
         count: 1,
         canaryDelivered: true,
         roomMentioned: true,
+        selectedMemberMentioned: false,
+        targetMentioned: true,
+        expectedRoomRecipient: true,
+        expectedSelectedRecipient: false,
         deliveredAfterDue: true,
         allMarkersOnce: true,
       }),
@@ -620,6 +632,10 @@ test('requires UI, Matrix delivery, and timeline evidence for reminder recovery'
         count: 2,
         canaryDelivered: true,
         roomMentioned: true,
+        selectedMemberMentioned: false,
+        targetMentioned: true,
+        expectedRoomRecipient: true,
+        expectedSelectedRecipient: false,
         deliveredAfterDue: true,
         allMarkersOnce: true,
       }),
@@ -644,6 +660,10 @@ test('requires UI, Matrix delivery, and timeline evidence for reminder recovery'
         count: 3,
         canaryDelivered: true,
         roomMentioned: true,
+        selectedMemberMentioned: false,
+        targetMentioned: true,
+        expectedRoomRecipient: true,
+        expectedSelectedRecipient: false,
         deliveredAfterDue: true,
         allMarkersOnce: true,
       }),
@@ -673,11 +693,11 @@ test('requires UI, Matrix delivery, and timeline evidence for reminder recovery'
   );
   assert.match(
     summary,
-    /phase=reminder-room-configuration-enabled status=passed reminder_step=complete notify_button_count=1 notify_button_visible=true options_get_count=1 options_http_status=200 configuration_get_count=1 configuration_http_status=200 eligible_option_count=1 option_checked_before=false option_check_attempted=true put_count=1 put_http_status=200 option_checked_after=true/u,
+    /phase=reminder-room-configuration-enabled status=passed reminder_step=complete reminder_settings_button_count=1 reminder_settings_button_visible=true options_get_count=1 options_http_status=200 configuration_get_count=1 configuration_http_status=200 destination_control_count=1 recipient_kind=room recipient_selection_attempted=true selected_member_keyboard_flow=false reminder_target_matches=true all_day_schedule_matches=true narrow_side_panel_safe=true put_count=1 put_http_status=200/u,
   );
   assert.match(
     summary,
-    /phase=reminder-initial-delivery status=passed http_status=200 count=1 canary_delivered=true room_mentioned=true delivered_after_due=true all_markers_once=true/u,
+    /phase=reminder-initial-delivery status=passed http_status=200 count=1 canary_delivered=true room_mentioned=true selected_member_mentioned=false target_mentioned=true expected_room_recipient=true expected_selected_recipient=false delivered_after_due=true all_markers_once=true/u,
   );
   assert.match(
     summary,
@@ -750,6 +770,28 @@ test('requires UI, Matrix delivery, and timeline evidence for reminder recovery'
     },
     reminderConfigurationObservation({ reminderOptionsGetStatus: 999 }),
     reminderConfigurationObservation({ reminderPutCount: 3 }),
+    reminderConfigurationObservation({
+      recipientKind: 'selected',
+      selectedMemberKeyboardFlow: false,
+    }),
+    reminderConfigurationObservation({
+      recipientKind: 'selected',
+      narrowSidePanelSafe: false,
+    }),
+    {
+      phase: 'reminder-initial-delivery',
+      status: 'passed',
+      httpStatus: 200,
+      count: 1,
+      canaryDelivered: true,
+      roomMentioned: true,
+      selectedMemberMentioned: false,
+      targetMentioned: true,
+      expectedRoomRecipient: false,
+      expectedSelectedRecipient: true,
+      deliveredAfterDue: true,
+      allMarkersOnce: true,
+    },
     reminderConfigurationObservation({ accessToken: 'private-test-token' }),
   ]) {
     assert.throws(
@@ -759,6 +801,70 @@ test('requires UI, Matrix delivery, and timeline evidence for reminder recovery'
   }
 });
 
+test('sanitizes selected-member reminder configuration with keyboard and narrow-panel evidence', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(
+      reminderConfigurationObservation({
+        recipientKind: 'selected',
+        selectedMemberKeyboardFlow: true,
+      }),
+    ),
+    sourceSha,
+  );
+
+  assert.match(
+    summary,
+    /recipient_kind=selected recipient_selection_attempted=true selected_member_keyboard_flow=true reminder_target_matches=true all_day_schedule_matches=true narrow_side_panel_safe=true/u,
+  );
+  assert.doesNotMatch(summary, /user_id|matrix_id|https?:/iu);
+});
+
+test('requires selected-user Matrix mentions to exclude a room broadcast', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'reminder-initial-delivery',
+      status: 'passed',
+      httpStatus: 200,
+      count: 1,
+      canaryDelivered: true,
+      roomMentioned: false,
+      selectedMemberMentioned: true,
+      targetMentioned: true,
+      expectedRoomRecipient: false,
+      expectedSelectedRecipient: true,
+      deliveredAfterDue: true,
+      allMarkersOnce: true,
+    }),
+    sourceSha,
+  );
+
+  assert.match(
+    summary,
+    /selected_member_mentioned=true target_mentioned=true expected_room_recipient=false expected_selected_recipient=true/u,
+  );
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify({
+          phase: 'reminder-initial-delivery',
+          status: 'passed',
+          httpStatus: 200,
+          count: 1,
+          canaryDelivered: true,
+          roomMentioned: true,
+          selectedMemberMentioned: false,
+          targetMentioned: true,
+          expectedRoomRecipient: false,
+          expectedSelectedRecipient: true,
+          deliveredAfterDue: true,
+          allMarkersOnce: true,
+        }),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+});
+
 test('sanitizes the fixed reminder option failure boundary', () => {
   const summary = sanitizeElementAcceptance(
     JSON.stringify(missingReminderOptionObservation()),
@@ -766,7 +872,7 @@ test('sanitizes the fixed reminder option failure boundary', () => {
   );
   assert.match(
     summary,
-    /phase=reminder-room-configuration-enabled status=failed reminder_step=eligible-option notify_button_count=1 notify_button_visible=true options_get_count=1 options_http_status=200 configuration_get_count=1 configuration_http_status=200 eligible_option_count=0 option_checked_before=false option_check_attempted=false put_count=0 put_http_status=0 option_checked_after=false/u,
+    /phase=reminder-room-configuration-enabled status=failed reminder_step=destination-control reminder_settings_button_count=1 reminder_settings_button_visible=true options_get_count=1 options_http_status=200 configuration_get_count=1 configuration_http_status=200 destination_control_count=0 recipient_kind=unknown recipient_selection_attempted=false selected_member_keyboard_flow=false reminder_target_matches=false all_day_schedule_matches=false narrow_side_panel_safe=false put_count=0 put_http_status=0/u,
   );
   assert.doesNotMatch(summary, /https?:|access_token|event_id|error_text/iu);
 });

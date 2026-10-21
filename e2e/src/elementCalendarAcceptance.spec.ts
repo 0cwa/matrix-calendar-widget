@@ -30,8 +30,8 @@ import { randomUUID } from 'node:crypto';
 import {
   appendFileSync,
   mkdirSync,
-  realpathSync,
   readFileSync,
+  realpathSync,
   writeFileSync,
 } from 'node:fs';
 import { arch, platform, release, tmpdir } from 'node:os';
@@ -54,6 +54,7 @@ import {
   advanceOrdinaryPageErrorStage,
   capturePerformancePageError,
   isVerifiedOpeningHostDiagnostic,
+  safePerformancePageErrorDetails,
   summarizeDefaultWaitObservation,
   type PerformanceDefaultWaitFailureSnapshot,
   type PerformanceDefaultWaitObservation,
@@ -121,37 +122,53 @@ type Fixture = {
 };
 
 type ReminderFlow = 'initial' | 'restart' | 'restore';
+type ReminderRecipient = 'room' | 'selected';
+type ReminderPlan = Readonly<{
+  recipient: ReminderRecipient;
+  allDay: boolean;
+  allDaySchedule?: Readonly<{
+    daysBefore: number;
+    localTime: string;
+    timezone: string;
+  }>;
+}>;
 
 type ReminderTimelineSnapshot = {
   httpStatus: number | null;
   complete: boolean;
   markerCounts: number[];
-  markerMentions: boolean[];
+  markerTargetsMatch: boolean[];
+  markerRoomMentions: boolean[];
+  markerSelectedMemberMentions: boolean[];
   markerTimestamps: Array<number | null>;
 };
 
 type ReminderConfigurationStep =
   | 'event-details'
-  | 'notify-control'
+  | 'settings-control'
   | 'options-load'
-  | 'eligible-option'
+  | 'destination-control'
+  | 'recipient-selection'
   | 'put-response'
   | 'complete';
 
 type ReminderConfigurationObservation = {
   reminderStep: ReminderConfigurationStep;
-  notifyButtonCount: number;
-  notifyButtonVisible: boolean;
+  reminderSettingsButtonCount: number;
+  reminderSettingsButtonVisible: boolean;
   reminderOptionsGetCount: number;
   reminderOptionsGetStatus: number;
   reminderConfigGetCount: number;
   reminderConfigGetStatus: number;
-  reminderEligibleOptionCount: number;
-  reminderOptionCheckedBefore: boolean;
-  reminderOptionCheckAttempted: boolean;
+  reminderDestinationControlCount: number;
+  recipientKind: 'room' | 'selected' | 'unknown';
+  recipientSelectionAttempted: boolean;
+  selectedMemberKeyboardFlow: boolean;
+  reminderTargetMatches: boolean;
+  allDayScheduleMatches: boolean;
+  narrowSidePanelSafe: boolean;
   reminderPutCount: number;
   reminderPutStatus: number;
-  reminderOptionCheckedAfter: boolean;
 };
 
 type G6Phase =
@@ -373,6 +390,15 @@ const REMINDER_SCAN_DEADLINE_MS = 30_000;
 const REMINDER_POST_DUE_SCAN_ALLOWANCE_MS =
   REMINDER_SCAN_INTERVAL_MS + REMINDER_SCAN_DEADLINE_MS;
 const REMINDER_TIMELINE_POLL_MS = 5_000;
+const REMINDER_ALL_DAY_TIMEZONE = 'Europe/Stockholm';
+
+function reminderPlanForMarkerIndex(index: number): ReminderPlan {
+  if (index === 1) return { recipient: 'selected', allDay: true };
+  if (index === 0 || index === 2) {
+    return { recipient: 'room', allDay: false };
+  }
+  throw new Error('Reminder acceptance marker plan is unavailable');
+}
 
 type Phase =
   | 'member-a-authenticated'
@@ -2538,7 +2564,7 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
           );
           privatePageErrorCaptureCount += 1;
         }
-        const observation = capturePerformancePageError(
+        const capturedObservation = capturePerformancePageError(
           report,
           error,
           caseReport.profile,
@@ -2548,9 +2574,13 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
             widgetUrl: fixture.widgetUrl,
           },
         );
-        if (!observation) {
+        if (!capturedObservation) {
           return;
         }
+        const observation = Object.assign(
+          capturedObservation,
+          safePerformancePageErrorDetails(error),
+        );
         const frames =
           observation.errorSource === 'element' &&
           pageErrorStage === 'widget-open'
@@ -3146,7 +3176,7 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
   }
 });
 
-test('Element Web delivers a relative room reminder across restart and restore', async ({
+test('Element Web delivers room-timed and selected-member all-day reminders across restart and restore', async ({
   browser,
 }) => {
   test.setTimeout(360_000);
@@ -3228,6 +3258,12 @@ test('Element Web delivers a relative room reminder across restart and restore',
     const frame = await openCalendarWidget(element, page, {
       expectWidgetWarning: false,
     });
+    if (flow === 'restart') {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await expect(
+        frame.getByRole('button', { name: 'Create event', exact: true }),
+      ).toBeVisible();
+    }
     const contextResult = await reminderContextResponseObserver.response;
     failureHttpStatus = contextResult.status();
     const contextPayload: unknown = await contextResult
@@ -3257,16 +3293,19 @@ test('Element Web delivers a relative room reminder across restart and restore',
       activePhase = 'reminder-ui-readback';
       const existingReadback = await readBackReminderMarkers(
         frame,
-        page,
         eventTitles,
       );
       if (
         !existingReadback.relativeAlarmReadback ||
-        !existingReadback.reminderEnabled
+        !existingReadback.reminderEnabled ||
+        !existingReadback.targetSettingsReadback ||
+        !existingReadback.allDayScheduleReadback
       ) {
         record(activePhase, 'failed', undefined, existingReadback.count, {
           relativeAlarmReadback: existingReadback.relativeAlarmReadback,
           reminderEnabled: existingReadback.reminderEnabled,
+          targetSettingsReadback: existingReadback.targetSettingsReadback,
+          allDayScheduleReadback: existingReadback.allDayScheduleReadback,
         });
         failureAlreadyRecorded = true;
         throw new Error('Persisted reminder settings did not reload');
@@ -3274,6 +3313,8 @@ test('Element Web delivers a relative room reminder across restart and restore',
       record(activePhase, 'passed', undefined, existingReadback.count, {
         relativeAlarmReadback: existingReadback.relativeAlarmReadback,
         reminderEnabled: existingReadback.reminderEnabled,
+        targetSettingsReadback: existingReadback.targetSettingsReadback,
+        allDayScheduleReadback: existingReadback.allDayScheduleReadback,
       });
 
       activePhase =
@@ -3285,7 +3326,7 @@ test('Element Web delivers a relative room reminder across restart and restore',
         const markersOnce =
           timeline.complete &&
           timeline.markerCounts.every((count) => count === 1) &&
-          timeline.markerMentions.every(Boolean);
+          timeline.markerTargetsMatch.every(Boolean);
         if (timeline.httpStatus !== 200 || !markersOnce) {
           record(
             activePhase,
@@ -3310,7 +3351,7 @@ test('Element Web delivers a relative room reminder across restart and restore',
         const markersOnce =
           timeline.complete &&
           timeline.markerCounts.every((count) => count === 1) &&
-          timeline.markerMentions.every(Boolean);
+          timeline.markerTargetsMatch.every(Boolean);
         if (timeline.httpStatus !== 200 || !markersOnce) {
           record(
             activePhase,
@@ -3331,15 +3372,28 @@ test('Element Web delivers a relative room reminder across restart and restore',
     }
 
     const markerTitle = `Reminder acceptance ${randomUUID()}`;
-    const dueAt = await createAndConfigureReminder(frame, page, markerTitle);
+    const markerPlan = reminderPlanForMarkerIndex(eventTitles.length);
+    const dueAt = await createAndConfigureReminder(
+      frame,
+      page,
+      markerTitle,
+      markerPlan,
+    );
     eventTitles.push(markerTitle);
 
     activePhase = 'reminder-ui-readback';
-    const allReadback = await readBackReminderMarkers(frame, page, eventTitles);
-    if (!allReadback.relativeAlarmReadback || !allReadback.reminderEnabled) {
+    const allReadback = await readBackReminderMarkers(frame, eventTitles);
+    if (
+      !allReadback.relativeAlarmReadback ||
+      !allReadback.reminderEnabled ||
+      !allReadback.targetSettingsReadback ||
+      !allReadback.allDayScheduleReadback
+    ) {
       record(activePhase, 'failed', undefined, allReadback.count, {
         relativeAlarmReadback: allReadback.relativeAlarmReadback,
         reminderEnabled: allReadback.reminderEnabled,
+        targetSettingsReadback: allReadback.targetSettingsReadback,
+        allDayScheduleReadback: allReadback.allDayScheduleReadback,
       });
       failureAlreadyRecorded = true;
       throw new Error('Reminder settings did not reload after configuration');
@@ -3347,6 +3401,8 @@ test('Element Web delivers a relative room reminder across restart and restore',
     record(activePhase, 'passed', undefined, allReadback.count, {
       relativeAlarmReadback: allReadback.relativeAlarmReadback,
       reminderEnabled: allReadback.reminderEnabled,
+      targetSettingsReadback: allReadback.targetSettingsReadback,
+      allDayScheduleReadback: allReadback.allDayScheduleReadback,
     });
 
     const deliveryPhase =
@@ -3363,11 +3419,20 @@ test('Element Web delivers a relative room reminder across restart and restore',
       dueAt,
     );
     const allMarkersOnce =
-      delivery.complete && delivery.markerCounts.every((count) => count === 1);
+      delivery.complete &&
+      delivery.markerCounts.every((count) => count === 1) &&
+      delivery.markerTargetsMatch.every(Boolean);
+    const targetMentioned = delivery.markerTargetsMatch.at(-1) === true;
+    const roomMentioned = delivery.markerRoomMentions.at(-1) === true;
+    const selectedMemberMentioned =
+      delivery.markerSelectedMemberMentions.at(-1) === true;
     const deliveryPassed =
       delivery.httpStatus === 200 &&
       delivery.markerCounts.at(-1) === 1 &&
-      delivery.markerMentions.at(-1) === true &&
+      targetMentioned &&
+      (markerPlan.recipient === 'room'
+        ? roomMentioned && !selectedMemberMentioned
+        : selectedMemberMentioned && !roomMentioned) &&
       delivery.deliveredAfterDue &&
       allMarkersOnce;
     if (!deliveryPassed) {
@@ -3378,7 +3443,11 @@ test('Element Web delivers a relative room reminder across restart and restore',
         eventTitles.length,
         {
           canaryDelivered: delivery.markerCounts.at(-1) === 1,
-          roomMentioned: delivery.markerMentions.at(-1) === true,
+          roomMentioned,
+          selectedMemberMentioned,
+          targetMentioned,
+          expectedRoomRecipient: markerPlan.recipient === 'room',
+          expectedSelectedRecipient: markerPlan.recipient === 'selected',
           deliveredAfterDue: delivery.deliveredAfterDue,
           allMarkersOnce,
         },
@@ -3393,7 +3462,11 @@ test('Element Web delivers a relative room reminder across restart and restore',
       eventTitles.length,
       {
         canaryDelivered: true,
-        roomMentioned: true,
+        roomMentioned,
+        selectedMemberMentioned,
+        targetMentioned: true,
+        expectedRoomRecipient: markerPlan.recipient === 'room',
+        expectedSelectedRecipient: markerPlan.recipient === 'selected',
         deliveredAfterDue: true,
         allMarkersOnce: true,
       },
@@ -3408,7 +3481,7 @@ test('Element Web delivers a relative room reminder across restart and restore',
       const markersOnce =
         afterScan.complete &&
         afterScan.markerCounts.every((count) => count === 1) &&
-        afterScan.markerMentions.every(Boolean);
+        afterScan.markerTargetsMatch.every(Boolean);
       if (afterScan.httpStatus !== 200 || !markersOnce) {
         record(
           activePhase,
@@ -5058,6 +5131,7 @@ async function createAndConfigureReminder(
   frame: FrameLocator,
   page: Page,
   title: string,
+  markerPlan: ReminderPlan,
 ): Promise<number> {
   activePhase = 'reminder-event-create-dialog';
   record(activePhase, 'started');
@@ -5067,27 +5141,48 @@ async function createAndConfigureReminder(
   const editor = frame.getByRole('dialog').last();
   await expect(editor).toBeVisible({ timeout: 15_000 });
 
-  const startAt =
+  const dueAt =
     Math.ceil((Date.now() + REMINDER_START_LEAD_MS) / 60_000) * 60_000;
-  const dueAt = startAt - REMINDER_ALARM_OFFSET_MS;
-  const startValue = localDateTimeInput(startAt, 'Europe/Stockholm');
+  const startAt = markerPlan.allDay ? dueAt : dueAt + REMINDER_ALARM_OFFSET_MS;
+  const startValue = localDateTimeInput(startAt, REMINDER_ALL_DAY_TIMEZONE);
   const endValue = localDateTimeInput(
     startAt + 60 * 60_000,
-    'Europe/Stockholm',
+    REMINDER_ALL_DAY_TIMEZONE,
   );
+  const eventStartDate = markerPlan.allDay
+    ? addCalendarDays(startValue.slice(0, 10), 1)
+    : undefined;
+  const eventEndDate = eventStartDate
+    ? addCalendarDays(eventStartDate, 1)
+    : undefined;
+  const markerSchedule = markerPlan.allDay
+    ? {
+        daysBefore: 1,
+        localTime: startValue.slice(11, 16),
+        timezone: REMINDER_ALL_DAY_TIMEZONE,
+      }
+    : undefined;
+  const completePlan: ReminderPlan = {
+    ...markerPlan,
+    ...(markerSchedule ? { allDaySchedule: markerSchedule } : {}),
+  };
   await editor.getByRole('combobox', { name: 'Calendar' }).selectOption({
     value: `matrix-calendar-target://room/${encodeURIComponent(fixture.calendarId)}`,
   });
   await editor.getByRole('textbox', { name: 'Title' }).fill(title);
-  await editor.getByRole('textbox', { name: 'Start' }).fill(startValue);
-  await editor.getByRole('textbox', { name: 'End' }).fill(endValue);
-  await editor
-    .getByRole('textbox', { name: 'Time zone' })
-    .fill('Europe/Stockholm');
   const alarmToggle = editor.getByLabel('CalDAV reminder');
-  if (!(await alarmToggle.isChecked())) await alarmToggle.check();
-  await editor.getByRole('radio', { name: 'Before the event' }).check();
-  await editor.getByRole('spinbutton', { name: 'Minutes before' }).fill('1');
+  if (await alarmToggle.isChecked()) await alarmToggle.uncheck();
+  if (markerPlan.allDay) {
+    await editor.getByLabel('All day').check();
+    await editor.getByRole('textbox', { name: 'Start' }).fill(eventStartDate!);
+    await editor.getByRole('textbox', { name: 'End' }).fill(eventEndDate!);
+  } else {
+    await editor.getByRole('textbox', { name: 'Start' }).fill(startValue);
+    await editor.getByRole('textbox', { name: 'End' }).fill(endValue);
+    await editor
+      .getByRole('textbox', { name: 'Time zone' })
+      .fill(REMINDER_ALL_DAY_TIMEZONE);
+  }
   record(activePhase, 'passed');
 
   activePhase = 'reminder-event-created';
@@ -5122,23 +5217,38 @@ async function createAndConfigureReminder(
   record(activePhase, 'passed', status, 1);
 
   activePhase = 'reminder-alarm-ui-readback';
-  const alarmReadback = await readBackRelativeAlarm(frame, title);
+  const alarmRouteReady = await addCalDavAlarmFromReminderSettings(
+    frame,
+    page,
+    title,
+  );
+  const alarmReadback =
+    alarmRouteReady && (await readBackRelativeAlarm(frame, title));
   if (!alarmReadback) {
     record(activePhase, 'failed', undefined, 1, {
       relativeAlarmReadback: false,
     });
-    activeReminderFailureRecorded = true;
     throw new Error('The relative alarm did not reload from the event');
   }
   record(activePhase, 'passed', undefined, 1, { relativeAlarmReadback: true });
 
   activePhase = 'reminder-room-configuration-enabled';
-  await setRoomReminder(frame, page, title, true);
+  await setRoomReminder(frame, page, title, completePlan);
 
   const titles = readReminderEventTitles();
   titles.push(title);
   writeReminderEventTitles(titles);
   return dueAt;
+}
+
+function addCalendarDays(date: string, days: number): string {
+  const [year, month, day] = date.split('-').map(Number);
+  const next = new Date(Date.UTC(year, month - 1, day + days));
+  return [
+    String(next.getUTCFullYear()).padStart(4, '0'),
+    String(next.getUTCMonth() + 1).padStart(2, '0'),
+    String(next.getUTCDate()).padStart(2, '0'),
+  ].join('-');
 }
 
 function localDateTimeInput(
@@ -5183,45 +5293,74 @@ async function readBackRelativeAlarm(
   return alarmEnabled && relativeSelected && minutesBefore === '1';
 }
 
+async function addCalDavAlarmFromReminderSettings(
+  frame: FrameLocator,
+  page: Page,
+  title: string,
+): Promise<boolean> {
+  const row = frame.getByRole('listitem', { name: title });
+  await expect(row).toBeVisible();
+  await row.click();
+  const details = frame.getByRole('dialog').last();
+  await expect(details).toBeVisible();
+  await details
+    .getByRole('button', { name: 'Reminder settings', exact: true })
+    .click();
+  const editCalDavButton = details.getByRole('button', {
+    name: 'Edit CalDAV reminder',
+    exact: true,
+  });
+  await expect(editCalDavButton).toBeVisible({ timeout: 20_000 });
+  await editCalDavButton.click();
+
+  const editor = frame.getByRole('dialog').last();
+  await expect(editor).toBeVisible();
+  const alarmToggle = editor.getByLabel('CalDAV reminder');
+  if (!(await alarmToggle.isChecked())) await alarmToggle.check();
+  await editor.getByRole('radio', { name: 'Before the event' }).check();
+  await editor.getByRole('spinbutton', { name: 'Minutes before' }).fill('1');
+  const saveResponse = page.waitForResponse(
+    (response) => {
+      const url = new URL(response.url());
+      return (
+        url.origin === new URL(fixture.gatewayUrl).origin &&
+        url.pathname === '/v1/calendar/events' &&
+        response.request().method() === 'PATCH'
+      );
+    },
+    { timeout: 30_000 },
+  );
+  await editor.getByRole('button', { name: 'Save', exact: true }).click();
+  const response = await saveResponse;
+  await expect(editor).toBeHidden({ timeout: 20_000 });
+  return response.status() >= 200 && response.status() < 300;
+}
+
 async function setRoomReminder(
   frame: FrameLocator,
   page: Page,
   title: string,
-  enable: boolean,
+  plan: ReminderPlan,
 ): Promise<{ enabled: boolean; httpStatus: number | null }> {
   const row = frame.getByRole('listitem', { name: title });
   const details = frame.getByRole('dialog').last();
-  const option = details.getByRole('checkbox', {
-    name: /relative to event start$/u,
-  });
-
-  if (!enable) {
-    await expect(row).toBeVisible();
-    await row.click();
-    await expect(details).toBeVisible();
-    await details
-      .getByRole('button', { name: 'Notify room', exact: true })
-      .click();
-    await expect(option).toBeVisible({ timeout: 20_000 });
-    const enabled = await option.isChecked();
-    await details.getByRole('button', { name: 'Close', exact: true }).click();
-    return { enabled, httpStatus: null };
-  }
-
   const observation: ReminderConfigurationObservation = {
     reminderStep: 'event-details',
-    notifyButtonCount: 0,
-    notifyButtonVisible: false,
+    reminderSettingsButtonCount: 0,
+    reminderSettingsButtonVisible: false,
     reminderOptionsGetCount: 0,
     reminderOptionsGetStatus: 0,
     reminderConfigGetCount: 0,
     reminderConfigGetStatus: 0,
-    reminderEligibleOptionCount: 0,
-    reminderOptionCheckedBefore: false,
-    reminderOptionCheckAttempted: false,
+    reminderDestinationControlCount: 0,
+    recipientKind: 'unknown',
+    recipientSelectionAttempted: false,
+    selectedMemberKeyboardFlow: false,
+    reminderTargetMatches: false,
+    allDayScheduleMatches: false,
+    narrowSidePanelSafe: false,
     reminderPutCount: 0,
     reminderPutStatus: 0,
-    reminderOptionCheckedAfter: false,
   };
   const roomPath = `/v1/calendar/rooms/${fixture.teamRoomId}/reminders`;
   const gatewayOrigin = new URL(fixture.gatewayUrl).origin;
@@ -5261,6 +5400,33 @@ async function setRoomReminder(
         observation.reminderPutCount + 1,
         2,
       );
+      try {
+        const body: unknown = request.postDataJSON();
+        const target =
+          isRecord(body) && isRecord(body.target) ? body.target : undefined;
+        if (target?.kind === 'room') {
+          observation.reminderTargetMatches = plan.recipient === 'room';
+        } else if (target?.kind === 'users' && Array.isArray(target.userIds)) {
+          observation.reminderTargetMatches =
+            plan.recipient === 'selected' &&
+            target.userIds.length === 1 &&
+            target.userIds[0] === fixture.users.memberB.userId;
+        }
+        const allDaySchedule = isRecord(body) ? body.allDaySchedule : undefined;
+        if (plan.allDay) {
+          observation.allDayScheduleMatches =
+            Boolean(plan.allDaySchedule) &&
+            isRecord(allDaySchedule) &&
+            allDaySchedule.daysBefore === plan.allDaySchedule?.daysBefore &&
+            allDaySchedule.localTime === plan.allDaySchedule?.localTime &&
+            allDaySchedule.timezone === plan.allDaySchedule?.timezone;
+        } else {
+          observation.allDayScheduleMatches = allDaySchedule === null;
+        }
+      } catch {
+        observation.reminderTargetMatches = false;
+        observation.allDayScheduleMatches = false;
+      }
     }
   };
   const onResponse = (response: Response) => {
@@ -5274,9 +5440,6 @@ async function setRoomReminder(
     }
   };
   const writeFailure = async () => {
-    observation.reminderOptionCheckedAfter = await option
-      .isChecked()
-      .catch(() => false);
     const httpStatus =
       observation.reminderPutStatus ||
       observation.reminderOptionsGetStatus ||
@@ -5284,7 +5447,7 @@ async function setRoomReminder(
       undefined;
     record(activePhase, 'failed', httpStatus, undefined, {
       ...observation,
-      reminderEnabled: observation.reminderOptionCheckedAfter,
+      reminderEnabled: false,
     });
     activeReminderFailureRecorded = true;
   };
@@ -5295,38 +5458,97 @@ async function setRoomReminder(
     await expect(row).toBeVisible();
     await row.click();
     await expect(details).toBeVisible();
-    observation.reminderStep = 'notify-control';
-    const notifyButton = details.getByRole('button', {
-      name: 'Notify room',
+    observation.reminderStep = 'settings-control';
+    const settingsButton = details.getByRole('button', {
+      name: 'Reminder settings',
       exact: true,
     });
-    observation.notifyButtonCount = Math.min(await notifyButton.count(), 2);
-    observation.notifyButtonVisible =
-      observation.notifyButtonCount === 1 &&
-      (await notifyButton.isVisible().catch(() => false));
-    if (!observation.notifyButtonVisible) {
-      throw new Error('Room reminder control is unavailable');
+    observation.reminderSettingsButtonCount = Math.min(
+      await settingsButton.count(),
+      2,
+    );
+    observation.reminderSettingsButtonVisible =
+      observation.reminderSettingsButtonCount === 1 &&
+      (await settingsButton.isVisible().catch(() => false));
+    if (!observation.reminderSettingsButtonVisible) {
+      throw new Error('Reminder settings control is unavailable');
     }
 
     observation.reminderStep = 'options-load';
-    await notifyButton.click();
-    await option.waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {});
-    observation.reminderEligibleOptionCount = Math.min(await option.count(), 2);
-    observation.reminderOptionCheckedBefore =
-      observation.reminderEligibleOptionCount === 1 &&
-      (await option.isChecked().catch(() => false));
+    await settingsButton.click();
+    const destination = details.getByRole('combobox', {
+      name: 'Matrix destination',
+    });
+    await destination
+      .waitFor({ state: 'visible', timeout: 20_000 })
+      .catch(() => {});
+    observation.reminderDestinationControlCount = Math.min(
+      await destination.count(),
+      2,
+    );
     if (
-      observation.reminderEligibleOptionCount !== 1 ||
+      observation.reminderDestinationControlCount !== 1 ||
       observation.reminderOptionsGetCount === 0 ||
       observation.reminderConfigGetCount === 0 ||
       observation.reminderOptionsGetStatus < 200 ||
       observation.reminderOptionsGetStatus >= 300 ||
       observation.reminderConfigGetStatus < 200 ||
-      observation.reminderConfigGetStatus >= 300 ||
-      observation.reminderOptionCheckedBefore
+      observation.reminderConfigGetStatus >= 300
     ) {
-      observation.reminderStep = 'eligible-option';
-      throw new Error('Expected reminder alarm option is unavailable');
+      observation.reminderStep = 'destination-control';
+      throw new Error('Matrix reminder destination control is unavailable');
+    }
+
+    const narrowLayout = await details.evaluate((element) => {
+      const viewportWidth = document.documentElement.clientWidth;
+      const elementWidth = element.getBoundingClientRect().width;
+      return (
+        viewportWidth >= 320 &&
+        viewportWidth <= 420 &&
+        elementWidth <= viewportWidth + 1 &&
+        element.scrollWidth <= element.clientWidth + 1 &&
+        document.documentElement.scrollWidth <= viewportWidth + 1
+      );
+    });
+    observation.narrowSidePanelSafe = narrowLayout;
+
+    observation.reminderStep = 'recipient-selection';
+    observation.recipientSelectionAttempted = true;
+    observation.recipientKind = plan.recipient;
+    await destination.click();
+    await details
+      .getByRole('option', {
+        name: plan.recipient === 'room' ? 'Whole room' : 'Selected people',
+        exact: true,
+      })
+      .click();
+    let selectedMemberKeyboardFlow = false;
+    if (plan.recipient === 'selected') {
+      const memberInput = details.getByRole('combobox', {
+        name: 'Selected people',
+      });
+      await memberInput.fill(fixture.users.memberB.userId);
+      const memberOption = details.getByRole('option').first();
+      await memberOption.waitFor({ state: 'visible', timeout: 15_000 });
+      await expect(details.getByRole('option')).toHaveCount(1);
+      await memberInput.press('ArrowDown');
+      await memberInput.press('Enter');
+      await memberInput.press('Escape');
+      selectedMemberKeyboardFlow =
+        (await details.locator('.MuiAutocomplete-tag').count()) === 1;
+      observation.selectedMemberKeyboardFlow = selectedMemberKeyboardFlow;
+    }
+
+    if (plan.allDay && plan.allDaySchedule) {
+      await details
+        .getByRole('spinbutton', { name: 'Days before event' })
+        .fill(String(plan.allDaySchedule.daysBefore));
+      await details
+        .getByLabel('Local time')
+        .fill(plan.allDaySchedule.localTime);
+      await details
+        .getByRole('textbox', { name: 'Time zone (IANA)' })
+        .fill(plan.allDaySchedule.timezone);
     }
 
     observation.reminderStep = 'put-response';
@@ -5338,22 +5560,61 @@ async function setRoomReminder(
         { timeout: 15_000 },
       )
       .catch(() => undefined);
-    observation.reminderOptionCheckAttempted = true;
-    await option.click();
+    await details
+      .getByRole('button', { name: 'Save Matrix destination', exact: true })
+      .click();
     const response = await putResponse;
     if (response) observation.reminderPutStatus = response.status();
-    observation.reminderOptionCheckedAfter = await option
-      .isChecked()
-      .catch(() => false);
     if (
       observation.reminderPutCount !== 1 ||
       observation.reminderPutStatus < 200 ||
       observation.reminderPutStatus >= 300 ||
-      !observation.reminderOptionCheckedAfter
+      !observation.reminderTargetMatches ||
+      !observation.allDayScheduleMatches ||
+      (plan.recipient === 'selected' && !selectedMemberKeyboardFlow) ||
+      (plan.recipient === 'selected' && !observation.narrowSidePanelSafe)
     ) {
-      throw new Error('Room reminder configuration was not saved');
+      throw new Error('Matrix reminder configuration did not match its target');
     }
 
+    await details
+      .getByRole('button', { name: 'Close reminder settings', exact: true })
+      .click();
+    await settingsButton.click();
+    await destination.waitFor({ state: 'visible', timeout: 20_000 });
+    const savedDestination = (await destination.innerText()).trim();
+    const expectedDestination =
+      plan.recipient === 'room' ? 'Whole room' : 'Selected people';
+    const savedTargetMatches =
+      savedDestination === expectedDestination &&
+      (await details
+        .getByText(
+          plan.recipient === 'room'
+            ? 'Matrix pings the whole room.'
+            : 'Matrix pings the selected people.',
+          { exact: true },
+        )
+        .isVisible()
+        .catch(() => false));
+    const savedScheduleMatches = plan.allDay
+      ? (await details
+          .getByRole('spinbutton', { name: 'Days before event' })
+          .inputValue()) === String(plan.allDaySchedule?.daysBefore) &&
+        (await details.getByLabel('Local time').inputValue()) ===
+          plan.allDaySchedule?.localTime &&
+        (await details
+          .getByRole('textbox', { name: 'Time zone (IANA)' })
+          .inputValue()) === plan.allDaySchedule?.timezone
+      : true;
+    observation.reminderTargetMatches &&= savedTargetMatches;
+    observation.allDayScheduleMatches &&= savedScheduleMatches;
+    if (!savedTargetMatches || !savedScheduleMatches) {
+      throw new Error('Saved Matrix reminder settings did not reload');
+    }
+
+    await details
+      .getByRole('button', { name: 'Close reminder settings', exact: true })
+      .click();
     await details.getByRole('button', { name: 'Close', exact: true }).click();
     observation.reminderStep = 'complete';
     record(activePhase, 'passed', observation.reminderPutStatus, 1, {
@@ -5372,25 +5633,101 @@ async function setRoomReminder(
 
 async function readBackReminderMarkers(
   frame: FrameLocator,
-  page: Page,
   titles: readonly string[],
 ): Promise<{
   count: number;
   relativeAlarmReadback: boolean;
   reminderEnabled: boolean;
+  targetSettingsReadback: boolean;
+  allDayScheduleReadback: boolean;
 }> {
   let relativeAlarmReadback = true;
   let reminderEnabled = true;
-  for (const title of titles) {
+  let targetSettingsReadback = true;
+  let allDayScheduleReadback = true;
+  for (const [index, title] of titles.entries()) {
+    const plan = reminderPlanForMarkerIndex(index);
     relativeAlarmReadback =
       (await readBackRelativeAlarm(frame, title)) && relativeAlarmReadback;
-    const current = await setRoomReminder(frame, page, title, false);
-    reminderEnabled = current.enabled && reminderEnabled;
+    const settings = await readBackMatrixReminder(frame, title, plan);
+    reminderEnabled = settings.enabled && reminderEnabled;
+    targetSettingsReadback = settings.targetMatches && targetSettingsReadback;
+    allDayScheduleReadback =
+      settings.allDayScheduleMatches && allDayScheduleReadback;
   }
   return {
     count: titles.length,
     relativeAlarmReadback,
     reminderEnabled,
+    targetSettingsReadback,
+    allDayScheduleReadback,
+  };
+}
+
+async function readBackMatrixReminder(
+  frame: FrameLocator,
+  title: string,
+  plan: ReminderPlan,
+): Promise<{
+  enabled: boolean;
+  targetMatches: boolean;
+  allDayScheduleMatches: boolean;
+}> {
+  const row = frame.getByRole('listitem', { name: title });
+  await expect(row).toBeVisible();
+  await row.click();
+  const details = frame.getByRole('dialog').last();
+  await expect(details).toBeVisible();
+  await details
+    .getByRole('button', { name: 'Reminder settings', exact: true })
+    .click();
+  const destination = details.getByRole('combobox', {
+    name: 'Matrix destination',
+  });
+  const available = await destination
+    .waitFor({ state: 'visible', timeout: 20_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (!available) {
+    await details.getByRole('button', { name: 'Close', exact: true }).click();
+    return {
+      enabled: false,
+      targetMatches: false,
+      allDayScheduleMatches: !plan.allDay,
+    };
+  }
+  const destinationLabel = (await destination.innerText()).trim();
+  const expectedDestination =
+    plan.recipient === 'room' ? 'Whole room' : 'Selected people';
+  const targetMatches = destinationLabel === expectedDestination;
+  const savedState = await details
+    .getByText(
+      plan.recipient === 'room'
+        ? 'Matrix pings the whole room.'
+        : 'Matrix pings the selected people.',
+      { exact: true },
+    )
+    .isVisible()
+    .catch(() => false);
+  const allDayScheduleMatches = plan.allDay
+    ? (await details
+        .getByRole('spinbutton', { name: 'Days before event' })
+        .inputValue()) === '1' &&
+      /^\d{2}:\d{2}$/u.test(
+        await details.getByLabel('Local time').inputValue(),
+      ) &&
+      (await details
+        .getByRole('textbox', { name: 'Time zone (IANA)' })
+        .inputValue()) === REMINDER_ALL_DAY_TIMEZONE
+    : true;
+  await details
+    .getByRole('button', { name: 'Close reminder settings', exact: true })
+    .click();
+  await details.getByRole('button', { name: 'Close', exact: true }).click();
+  return {
+    enabled: targetMatches && savedState,
+    targetMatches: targetMatches && savedState,
+    allDayScheduleMatches,
   };
 }
 
@@ -5401,7 +5738,9 @@ async function inspectReminderTimeline(
     httpStatus: null,
     complete: false,
     markerCounts: titles.map(() => 0),
-    markerMentions: titles.map(() => false),
+    markerTargetsMatch: titles.map(() => false),
+    markerRoomMentions: titles.map(() => false),
+    markerSelectedMemberMentions: titles.map(() => false),
     markerTimestamps: titles.map(() => null),
   };
   let response: Awaited<ReturnType<typeof fetch>>;
@@ -5446,30 +5785,51 @@ async function inspectReminderTimeline(
 
   const events = chunk.filter(isRecord);
   const markerCounts: number[] = [];
-  const markerMentions: boolean[] = [];
+  const markerTargetsMatch: boolean[] = [];
+  const markerRoomMentions: boolean[] = [];
+  const markerSelectedMemberMentions: boolean[] = [];
   const markerTimestamps: Array<number | null> = [];
-  for (const title of titles) {
+  for (const [index, title] of titles.entries()) {
     const matching = events.filter((event) => {
       const content = isRecord(event.content) ? event.content : undefined;
       return (
-        event.sender === fixture.serviceSender.userId &&
         event.type === 'm.room.message' &&
         content?.msgtype === 'm.text' &&
         content.body === `Reminder: ${title}`
       );
     });
     markerCounts.push(Math.min(matching.length, 2));
+    const serviceEvent =
+      matching.length === 1 &&
+      matching[0].sender === fixture.serviceSender.userId;
     const content =
-      matching.length === 1 && isRecord(matching[0].content)
+      serviceEvent && isRecord(matching[0].content)
         ? matching[0].content
         : undefined;
     const mentions =
       content && isRecord(content['m.mentions'])
         ? content['m.mentions']
         : undefined;
-    markerMentions.push(matching.length === 1 && mentions?.room === true);
-    const timestamp =
-      matching.length === 1 ? matching[0].origin_server_ts : undefined;
+    const userIds = mentions?.user_ids;
+    const plan = reminderPlanForMarkerIndex(index);
+    const roomMention =
+      serviceEvent &&
+      mentions?.room === true &&
+      (!Object.hasOwn(mentions, 'user_ids') ||
+        (Array.isArray(userIds) && userIds.length === 0));
+    const selectedMemberMention =
+      serviceEvent &&
+      mentions !== undefined &&
+      (!Object.hasOwn(mentions, 'room') || mentions.room === false) &&
+      Array.isArray(userIds) &&
+      userIds.length === 1 &&
+      userIds[0] === fixture.users.memberB.userId;
+    markerRoomMentions.push(roomMention);
+    markerSelectedMemberMentions.push(selectedMemberMention);
+    markerTargetsMatch.push(
+      plan.recipient === 'room' ? roomMention : selectedMemberMention,
+    );
+    const timestamp = serviceEvent ? matching[0].origin_server_ts : undefined;
     markerTimestamps.push(
       typeof timestamp === 'number' && Number.isSafeInteger(timestamp)
         ? timestamp
@@ -5480,7 +5840,9 @@ async function inspectReminderTimeline(
     httpStatus: response.status,
     complete: true,
     markerCounts,
-    markerMentions,
+    markerTargetsMatch,
+    markerRoomMentions,
+    markerSelectedMemberMentions,
     markerTimestamps,
   };
 }
@@ -8234,8 +8596,14 @@ function record(
     reminderEnabled?: boolean;
     canaryDelivered?: boolean;
     roomMentioned?: boolean;
+    selectedMemberMentioned?: boolean;
+    targetMentioned?: boolean;
+    expectedRoomRecipient?: boolean;
+    expectedSelectedRecipient?: boolean;
     deliveredAfterDue?: boolean;
     allMarkersOnce?: boolean;
+    targetSettingsReadback?: boolean;
+    allDayScheduleReadback?: boolean;
     canManageReminders?: boolean;
   } & Partial<ReminderConfigurationObservation> &
     Partial<Omit<G6StageRecord, 'phase' | 'status' | 'httpStatus' | 'count'>>,

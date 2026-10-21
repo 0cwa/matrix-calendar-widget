@@ -231,18 +231,53 @@ const PHASE_BOOLEAN_FIELDS = new Map([
   ['reminder-widget-context', ['canManageReminders']],
   ['reminder-alarm-ui-readback', ['relativeAlarmReadback']],
   ['reminder-room-configuration-enabled', ['reminderEnabled']],
-  ['reminder-ui-readback', ['relativeAlarmReadback', 'reminderEnabled']],
+  [
+    'reminder-ui-readback',
+    [
+      'relativeAlarmReadback',
+      'reminderEnabled',
+      'targetSettingsReadback',
+      'allDayScheduleReadback',
+    ],
+  ],
   [
     'reminder-initial-delivery',
-    ['canaryDelivered', 'roomMentioned', 'deliveredAfterDue', 'allMarkersOnce'],
+    [
+      'canaryDelivered',
+      'roomMentioned',
+      'selectedMemberMentioned',
+      'targetMentioned',
+      'expectedRoomRecipient',
+      'expectedSelectedRecipient',
+      'deliveredAfterDue',
+      'allMarkersOnce',
+    ],
   ],
   [
     'reminder-restart-scheduler-scan',
-    ['canaryDelivered', 'roomMentioned', 'deliveredAfterDue', 'allMarkersOnce'],
+    [
+      'canaryDelivered',
+      'roomMentioned',
+      'selectedMemberMentioned',
+      'targetMentioned',
+      'expectedRoomRecipient',
+      'expectedSelectedRecipient',
+      'deliveredAfterDue',
+      'allMarkersOnce',
+    ],
   ],
   [
     'reminder-restore-scheduler-scan',
-    ['canaryDelivered', 'roomMentioned', 'deliveredAfterDue', 'allMarkersOnce'],
+    [
+      'canaryDelivered',
+      'roomMentioned',
+      'selectedMemberMentioned',
+      'targetMentioned',
+      'expectedRoomRecipient',
+      'expectedSelectedRecipient',
+      'deliveredAfterDue',
+      'allMarkersOnce',
+    ],
   ],
   ['reminder-restart-no-duplicate', ['allMarkersOnce']],
   ['reminder-restart-prior-state', ['allMarkersOnce']],
@@ -350,6 +385,35 @@ const PHASE_BOOLEAN_FIELDS = new Map([
   ],
   ['g6-browser-egress', ['browserEgressClear']],
   ['g6-resource-cleanup', ['allOwnedResourcesRemoved']],
+]);
+const PHASE_REQUIRED_TRUE_FIELDS = new Map([
+  [
+    'reminder-initial-delivery',
+    [
+      'canaryDelivered',
+      'targetMentioned',
+      'deliveredAfterDue',
+      'allMarkersOnce',
+    ],
+  ],
+  [
+    'reminder-restart-scheduler-scan',
+    [
+      'canaryDelivered',
+      'targetMentioned',
+      'deliveredAfterDue',
+      'allMarkersOnce',
+    ],
+  ],
+  [
+    'reminder-restore-scheduler-scan',
+    [
+      'canaryDelivered',
+      'targetMentioned',
+      'deliveredAfterDue',
+      'allMarkersOnce',
+    ],
+  ],
 ]);
 const G6_NUMERIC_FIELDS_BY_PHASE = new Map([
   ['g6-fixture-ready', ['httpStatus', 'count']],
@@ -636,6 +700,11 @@ const REMINDER_DELIVERY_PHASES = new Set([
   'reminder-delivery-snapshot',
   'reminder-restart-delivery-row',
   'restore-delivery-row',
+]);
+const REMINDER_TARGET_DELIVERY_PHASES = new Set([
+  'reminder-initial-delivery',
+  'reminder-restart-scheduler-scan',
+  'reminder-restore-scheduler-scan',
 ]);
 const REMINDER_TIMELINE_COUNTS = new Map([
   ['reminder-initial-delivery', 1],
@@ -1037,32 +1106,36 @@ const POST_CREATE_VISIBILITY_COUNTER_FIELDS = [
 ];
 const REMINDER_CONFIGURATION_STEPS = new Set([
   'event-details',
-  'notify-control',
+  'settings-control',
   'options-load',
-  'eligible-option',
+  'destination-control',
+  'recipient-selection',
   'put-response',
   'complete',
 ]);
 const REMINDER_CONFIGURATION_FIELDS = [
   'reminderStep',
-  'notifyButtonCount',
-  'notifyButtonVisible',
+  'reminderSettingsButtonCount',
+  'reminderSettingsButtonVisible',
   'reminderOptionsGetCount',
   'reminderOptionsGetStatus',
   'reminderConfigGetCount',
   'reminderConfigGetStatus',
-  'reminderEligibleOptionCount',
-  'reminderOptionCheckedBefore',
-  'reminderOptionCheckAttempted',
+  'reminderDestinationControlCount',
+  'recipientKind',
+  'recipientSelectionAttempted',
+  'selectedMemberKeyboardFlow',
+  'reminderTargetMatches',
+  'allDayScheduleMatches',
+  'narrowSidePanelSafe',
   'reminderPutCount',
   'reminderPutStatus',
-  'reminderOptionCheckedAfter',
 ];
 const REMINDER_CONFIGURATION_COUNTER_FIELDS = [
-  'notifyButtonCount',
+  'reminderSettingsButtonCount',
   'reminderOptionsGetCount',
   'reminderConfigGetCount',
-  'reminderEligibleOptionCount',
+  'reminderDestinationControlCount',
   'reminderPutCount',
 ];
 const REMINDER_CONFIGURATION_STATUS_FIELDS = [
@@ -1141,8 +1214,14 @@ const ALLOWED_KEYS = new Set([
   'attemptCountUnchanged',
   'relativeAlarmReadback',
   'reminderEnabled',
+  'targetSettingsReadback',
+  'allDayScheduleReadback',
   'canaryDelivered',
   'roomMentioned',
+  'selectedMemberMentioned',
+  'targetMentioned',
+  'expectedRoomRecipient',
+  'expectedSelectedRecipient',
   'deliveredAfterDue',
   'allMarkersOnce',
   'attemptCount',
@@ -2117,43 +2196,45 @@ function validReminderConfigurationObservation(record) {
         (record[key] === 0 || (record[key] >= 100 && record[key] <= 599)),
     ) &&
     [
-      'notifyButtonVisible',
-      'reminderOptionCheckedBefore',
-      'reminderOptionCheckAttempted',
-      'reminderOptionCheckedAfter',
+      'reminderSettingsButtonVisible',
+      'recipientSelectionAttempted',
+      'selectedMemberKeyboardFlow',
+      'reminderTargetMatches',
+      'allDayScheduleMatches',
+      'narrowSidePanelSafe',
     ].every((key) => typeof record[key] === 'boolean') &&
-    (!record.notifyButtonVisible || record.notifyButtonCount === 1) &&
+    ['room', 'selected', 'unknown'].includes(record.recipientKind) &&
+    (!record.reminderSettingsButtonVisible ||
+      record.reminderSettingsButtonCount === 1) &&
     (record.reminderOptionsGetCount > 0 ||
       record.reminderOptionsGetStatus === 0) &&
     (record.reminderConfigGetCount > 0 ||
       record.reminderConfigGetStatus === 0) &&
     (record.reminderPutCount > 0 || record.reminderPutStatus === 0) &&
-    (!record.reminderOptionCheckedBefore ||
-      record.reminderEligibleOptionCount === 1) &&
-    (!record.reminderOptionCheckAttempted ||
-      (record.reminderEligibleOptionCount === 1 &&
-        !record.reminderOptionCheckedBefore)) &&
-    (!record.reminderOptionCheckedAfter ||
-      record.reminderEligibleOptionCount === 1) &&
     (!Object.hasOwn(record, 'count') ||
       (record.status === 'passed' && record.count === 1)) &&
     (record.status !== 'passed' ||
       (record.reminderStep === 'complete' &&
-        record.notifyButtonCount === 1 &&
-        record.notifyButtonVisible &&
+        record.reminderSettingsButtonCount === 1 &&
+        record.reminderSettingsButtonVisible &&
         record.reminderOptionsGetCount >= 1 &&
         record.reminderOptionsGetStatus >= 200 &&
         record.reminderOptionsGetStatus < 300 &&
         record.reminderConfigGetCount >= 1 &&
         record.reminderConfigGetStatus >= 200 &&
         record.reminderConfigGetStatus < 300 &&
-        record.reminderEligibleOptionCount === 1 &&
-        !record.reminderOptionCheckedBefore &&
-        record.reminderOptionCheckAttempted &&
+        record.reminderDestinationControlCount === 1 &&
+        ['room', 'selected'].includes(record.recipientKind) &&
+        record.recipientSelectionAttempted &&
+        record.reminderTargetMatches &&
+        record.allDayScheduleMatches &&
+        (record.recipientKind !== 'selected' ||
+          (record.selectedMemberKeyboardFlow && record.narrowSidePanelSafe)) &&
+        (record.recipientKind !== 'room' ||
+          !record.selectedMemberKeyboardFlow) &&
         record.reminderPutCount === 1 &&
         record.reminderPutStatus >= 200 &&
         record.reminderPutStatus < 300 &&
-        record.reminderOptionCheckedAfter &&
         record.reminderEnabled &&
         record.httpStatus === record.reminderPutStatus &&
         record.count === 1))
@@ -2675,6 +2756,29 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     }
 
     const phaseBooleans = PHASE_BOOLEAN_FIELDS.get(record.phase) ?? [];
+    const targetObservationFields = [
+      'roomMentioned',
+      'selectedMemberMentioned',
+      'targetMentioned',
+      'expectedRoomRecipient',
+      'expectedSelectedRecipient',
+    ];
+    const hasTargetObservation = targetObservationFields.some((key) =>
+      Object.hasOwn(record, key),
+    );
+    const validTargetObservation =
+      !REMINDER_TARGET_DELIVERY_PHASES.has(record.phase) ||
+      record.status === 'started' ||
+      (!hasTargetObservation && record.status === 'failed') ||
+      (targetObservationFields.every((key) => Object.hasOwn(record, key)) &&
+        ((record.expectedRoomRecipient === true &&
+          record.expectedSelectedRecipient === false) ||
+          (record.expectedRoomRecipient === false &&
+            record.expectedSelectedRecipient === true)) &&
+        record.targetMentioned ===
+          (record.expectedRoomRecipient
+            ? record.roomMentioned && !record.selectedMemberMentioned
+            : record.selectedMemberMentioned && !record.roomMentioned));
     if (
       [...PHASE_BOOLEAN_FIELDS.values()]
         .flat()
@@ -2684,7 +2788,10 @@ export function sanitizeElementAcceptance(input, sourceSha) {
             (!phaseBooleans.includes(key) || typeof record[key] !== 'boolean'),
         ) ||
       (record.status === 'passed' &&
-        phaseBooleans.some((key) => record[key] !== true))
+        (PHASE_REQUIRED_TRUE_FIELDS.get(record.phase) ?? phaseBooleans).some(
+          (key) => record[key] !== true,
+        )) ||
+      !validTargetObservation
     ) {
       throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
@@ -3579,18 +3686,21 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           `phase=${phase}`,
           `status=${record.status}`,
           `reminder_step=${record.reminderStep}`,
-          `notify_button_count=${record.notifyButtonCount}`,
-          `notify_button_visible=${record.notifyButtonVisible}`,
+          `reminder_settings_button_count=${record.reminderSettingsButtonCount}`,
+          `reminder_settings_button_visible=${record.reminderSettingsButtonVisible}`,
           `options_get_count=${record.reminderOptionsGetCount}`,
           `options_http_status=${record.reminderOptionsGetStatus}`,
           `configuration_get_count=${record.reminderConfigGetCount}`,
           `configuration_http_status=${record.reminderConfigGetStatus}`,
-          `eligible_option_count=${record.reminderEligibleOptionCount}`,
-          `option_checked_before=${record.reminderOptionCheckedBefore}`,
-          `option_check_attempted=${record.reminderOptionCheckAttempted}`,
+          `destination_control_count=${record.reminderDestinationControlCount}`,
+          `recipient_kind=${record.recipientKind}`,
+          `recipient_selection_attempted=${record.recipientSelectionAttempted}`,
+          `selected_member_keyboard_flow=${record.selectedMemberKeyboardFlow}`,
+          `reminder_target_matches=${record.reminderTargetMatches}`,
+          `all_day_schedule_matches=${record.allDayScheduleMatches}`,
+          `narrow_side_panel_safe=${record.narrowSidePanelSafe}`,
           `put_count=${record.reminderPutCount}`,
           `put_http_status=${record.reminderPutStatus}`,
-          `option_checked_after=${record.reminderOptionCheckedAfter}`,
         ].join(' '),
       );
       continue;
@@ -3689,16 +3799,6 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           fields.push(`${outputKey}=${record[key]}`);
         }
       }
-    }
-    for (const [key, name] of [
-      ['relativeAlarmReadback', 'relative_alarm_readback'],
-      ['reminderEnabled', 'reminder_enabled'],
-      ['canaryDelivered', 'canary_delivered'],
-      ['roomMentioned', 'room_mentioned'],
-      ['deliveredAfterDue', 'delivered_after_due'],
-      ['allMarkersOnce', 'all_markers_once'],
-    ]) {
-      if (Object.hasOwn(record, key)) fields.push(`${name}=${record[key]}`);
     }
     if (Object.hasOwn(record, 'controlVisible')) {
       fields.push(`control_visible=${record.controlVisible}`);
