@@ -1,3 +1,4 @@
+import argparse
 import base64
 import configparser
 import http.client
@@ -17,8 +18,18 @@ import radicale
 
 AUTH_SRC = pathlib.Path(__file__).resolve().parents[1] / 'src'
 assert radicale.VERSION == '3.8.0', ('pinned Radicale version', radicale.VERSION)
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    '--radicale-config',
+    type=pathlib.Path,
+    default=pathlib.Path(__file__).resolve().parents[1] / 'config',
+)
+args = parser.parse_args()
 project_config = configparser.ConfigParser()
-project_config.read(pathlib.Path(__file__).resolve().parents[1] / 'config')
+if not project_config.read(args.radicale_config):
+    raise FileNotFoundError(
+        f'Radicale config could not be read: {args.radicale_config}'
+    )
 assert project_config.get('rights', 'type') == 'owner_only', ('project rights config', project_config.get('rights', 'type', fallback=None))
 expected_sharing_config = {
     'type': 'files',

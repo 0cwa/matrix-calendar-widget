@@ -305,12 +305,22 @@ export function CalendarPublicFeedDialog({
           )}
 
           {!loading && publication?.published && !publication.url && (
-            <Alert severity="warning">
-              {t(
-                'calendarPublicFeed.urlUnavailable',
-                'This calendar is published, but the server cannot provide its public URL. Unpublish it here or ask the server administrator to restore feed configuration.',
-              )}
-            </Alert>
+            <Stack spacing={1}>
+              <Alert severity="warning">
+                {t(
+                  'calendarPublicFeed.urlUnavailable',
+                  'This calendar is published, but the server cannot provide its public URL. Unpublish it here or ask the server administrator to restore feed configuration.',
+                )}
+              </Alert>
+              <Button
+                color="error"
+                disabled={busy}
+                onClick={() => void unpublish()}
+                variant="outlined"
+              >
+                {t('calendarPublicFeed.unpublish', 'Unpublish')}
+              </Button>
+            </Stack>
           )}
 
           {!loading &&

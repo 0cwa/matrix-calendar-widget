@@ -47,6 +47,26 @@ const MIXED_FEED = Buffer.from(
 );
 
 describe('PublicCalendarFeedService', () => {
+  it.each(['%1F', '%7F'])(
+    'rejects personal calendar path segments containing encoded control character %s',
+    async (encodedControl) => {
+      const fixture = createFixture();
+
+      await expect(
+        fixture.service.publish(
+          OWNER,
+          OPENID_CREDENTIAL,
+          {
+            target: 'personal',
+            calendarId: `https://radicale.example.test/alice/team${encodedControl}/`,
+          },
+          true,
+        ),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(fixture.calls).toHaveLength(0);
+    },
+  );
+
   it('creates one native read-only publication and returns only the external signed URL', async () => {
     const fixture = createFixture();
     const result = await fixture.service.publish(

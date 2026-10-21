@@ -626,7 +626,7 @@ function decodeSafePathSegments(pathname: string): string[] {
       !decoded ||
       decoded === '.' ||
       decoded === '..' ||
-      /[\/\\\u0000-\u001f\u007f]/u.test(decoded)
+      containsForbiddenPathCharacter(decoded)
     ) {
       throw invalidTarget();
     }
@@ -634,6 +634,20 @@ function decodeSafePathSegments(pathname: string): string[] {
   });
   if (segments.length < 1) throw invalidTarget();
   return segments;
+}
+
+function containsForbiddenPathCharacter(value: string): boolean {
+  for (const character of value) {
+    const codePoint = character.codePointAt(0);
+    if (
+      character === '/' ||
+      character === '\\' ||
+      (codePoint !== undefined && (codePoint < 0x20 || codePoint === 0x7f))
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function parseRootRadicaleUrl(value: string): URL {

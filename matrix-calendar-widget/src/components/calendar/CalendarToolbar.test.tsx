@@ -176,6 +176,62 @@ describe('<CalendarToolbar />', () => {
     expect(publishPublication).not.toHaveBeenCalled();
   });
 
+  it('can unpublish without a public URL and hides native error details', async () => {
+    const unpublishPublication = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('private native token path'))
+      .mockResolvedValue({ enabled: false, published: false });
+    const repository = Object.assign(
+      new InMemoryCalendarRepository({ calendars }),
+      {
+        getPublicCalendarFeedPublication: vi
+          .fn()
+          .mockResolvedValue({ enabled: false, published: true }),
+        publishPublicCalendarFeed: vi.fn(),
+        unpublishPublicCalendarFeed: unpublishPublication,
+      },
+    );
+
+    render(
+      <CalendarToolbar
+        filters={{
+          startDate: '2026-09-01T00:00:00Z',
+          endDate: '2026-10-01T00:00:00Z',
+        }}
+        onRangeChange={vi.fn()}
+        onSearchChange={vi.fn()}
+        onViewChange={vi.fn()}
+        view="month"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Public feed' }));
+    expect(
+      await screen.findByText(/server cannot provide its public URL/i),
+    ).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Unpublish' }));
+    expect(
+      await screen.findByText(
+        'Could not unpublish this calendar. Check your permissions and try again.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText('private native token path'),
+    ).not.toBeInTheDocument();
+    expect(unpublishPublication).toHaveBeenCalledWith('writable');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Unpublish' }));
+    await waitFor(() => {
+      expect(unpublishPublication).toHaveBeenCalledTimes(2);
+    });
+    expect(
+      screen.queryByText(/server cannot provide its public URL/i),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Unpublish' })).toBeNull();
+  });
+
   it('allows retrying when publication settings fail to load', async () => {
     const getPublication = vi
       .fn()
