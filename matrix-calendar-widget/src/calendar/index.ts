@@ -49,6 +49,11 @@ export {
   visibleRangeForView,
 } from './calendarEventPresentation';
 export {
+  isCalendarPublicFeedRepository,
+  type CalendarPublicFeedPublication,
+  type CalendarPublicFeedRepository,
+} from './CalendarPublicFeedRepository';
+export {
   CalendarRepositoryProvider,
   useCalendarRepository,
   useCalendarRepositoryRevision,

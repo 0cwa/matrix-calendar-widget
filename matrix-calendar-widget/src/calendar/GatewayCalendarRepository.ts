@@ -31,6 +31,10 @@ import {
 import { DateTime } from 'luxon';
 import type { CalendarDiagnostics } from './CalendarDiagnosticsRepository';
 import type {
+  CalendarPublicFeedPublication,
+  CalendarPublicFeedRepository,
+} from './CalendarPublicFeedRepository';
+import type {
   CalendarRoomReminderAlarmOption,
   CalendarRoomReminderAllDaySchedule,
   CalendarRoomReminderConfiguration,
@@ -94,7 +98,8 @@ export class GatewayCalendarRepository
     CalendarRepository,
     CalendarEventDiagnosticsRepository,
     CalendarTargetAvailabilityRepository,
-    CalendarRoomReminderRepository
+    CalendarRoomReminderRepository,
+    CalendarPublicFeedRepository
 {
   private readonly calendarReferences = new Map<
     CalendarId,
@@ -221,6 +226,60 @@ export class GatewayCalendarRepository
       );
     }
     return { ...capabilities, roomId: context.roomId };
+  }
+
+  async getPublicCalendarFeedPublication(
+    calendarId: CalendarId,
+  ): Promise<CalendarPublicFeedPublication> {
+    const reference = this.referenceForCalendar(calendarId);
+    return this.transport.requestJson<CalendarPublicFeedPublication>(
+      this.transport.url('/v1/calendar-feeds/publication', {
+        target: reference.target,
+        calendarId: reference.calendarId,
+        ...(reference.target === 'room' ? { roomId: this.options.roomId } : {}),
+      }),
+      { cache: 'no-store' },
+    );
+  }
+
+  async publishPublicCalendarFeed(
+    calendarId: CalendarId,
+    confirmed: boolean,
+  ): Promise<CalendarPublicFeedPublication> {
+    const reference = this.referenceForCalendar(calendarId);
+    return this.transport.requestJson<CalendarPublicFeedPublication>(
+      this.transport.url('/v1/calendar-feeds/publication', {}),
+      {
+        method: 'PUT',
+        body: JSON.stringify({
+          target: reference.target,
+          calendarId: reference.calendarId,
+          ...(reference.target === 'room'
+            ? { roomId: this.options.roomId }
+            : {}),
+          confirmed,
+        }),
+      },
+    );
+  }
+
+  async unpublishPublicCalendarFeed(
+    calendarId: CalendarId,
+  ): Promise<CalendarPublicFeedPublication> {
+    const reference = this.referenceForCalendar(calendarId);
+    return this.transport.requestJson<CalendarPublicFeedPublication>(
+      this.transport.url('/v1/calendar-feeds/publication', {}),
+      {
+        method: 'DELETE',
+        body: JSON.stringify({
+          target: reference.target,
+          calendarId: reference.calendarId,
+          ...(reference.target === 'room'
+            ? { roomId: this.options.roomId }
+            : {}),
+        }),
+      },
+    );
   }
 
   async listRoomReminderAlarmOptions(

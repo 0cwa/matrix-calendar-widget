@@ -238,6 +238,29 @@
     "chooseMonth": "Wähle einen Monat, der gewählte Monat ist {{date, datetime}}",
     "label": "{{date, datetime}}"
   },
+  "calendarPublicFeed": {
+    "action": "Öffentlicher Feed",
+    "additionalComponents": "Dieser Kalender enthält weitere Komponententypen als VEVENT, etwa Aufgaben oder Journaleinträge, oder gibt die VEVENT-Unterstützung nicht an. Öffentliche Feeds setzen ausschließlich VEVENT-Inhalte voraus; der Server prüft den Feed vor der Veröffentlichung und bei jedem Abruf.",
+    "calendar": "Kalender",
+    "confirm": "Ich verstehe, dass alle Personen mit dem Link diesen Kalender lesen können.",
+    "copied": "Kopiert",
+    "copy": "URL kopieren",
+    "copyFailed": "Kopieren fehlgeschlagen. Markiere und kopiere die Feed-URL oben.",
+    "disabled": "Öffentliche Feeds sind auf diesem Server nicht aktiviert.",
+    "loadFailed": "Die Einstellungen für den öffentlichen Feed konnten nicht geladen werden. Prüfe deine Verbindung und deine Berechtigung, diesen Kalender zu verwalten, und versuche es erneut.",
+    "loading": "Feed-Einstellungen werden geladen…",
+    "publicWarning": "Alle, die den Link haben, können alle Termine in diesem Kalender lesen. Der Feed ist nicht auf Mitglieder des Matrix-Raums beschränkt. Das Aufheben der Veröffentlichung blockiert zukünftige Abrufe, kann aber bereits heruntergeladene Kopien nicht zurückrufen.",
+    "publish": "Feed veröffentlichen",
+    "publishFailed": "Dieser Kalender konnte nicht veröffentlicht werden. Prüfe deine Berechtigungen und versuche es erneut.",
+    "retry": "Erneut versuchen",
+    "subscribe": "In einer Kalender-App abonnieren",
+    "title": "Öffentlicher Kalender-Feed",
+    "unpublish": "Veröffentlichung aufheben",
+    "unpublishFailed": "Die Veröffentlichung dieses Kalenders konnte nicht aufgehoben werden. Prüfe deine Berechtigungen und versuche es erneut.",
+    "unsupportedComponents": "Dieser Kalender enthält andere Komponenten als Termine. Öffentliche Feeds setzen ausschließlich VEVENT-Einträge voraus. Der Server hat die Veröffentlichung abgelehnt.",
+    "url": "URL des öffentlichen Feeds",
+    "urlUnavailable": "Dieser Kalender ist veröffentlicht, aber der Server kann die öffentliche URL nicht bereitstellen. Hebe die Veröffentlichung hier auf oder bitte die Serveradministration, die Feed-Konfiguration wiederherzustellen."
+  },
   "calendars": {
     "color": {
       "action": "Kalenderfarbe bearbeiten",
@@ -293,6 +316,9 @@
     "label": "{{range, daterange}}"
   },
   "cancel": "Abbrechen",
+  "common": {
+    "close": "Schließen"
+  },
   "copyableTextButton": {
     "copied": "Kopiert",
     "copy-to-clipboard": "In die Zwischenablage kopieren"

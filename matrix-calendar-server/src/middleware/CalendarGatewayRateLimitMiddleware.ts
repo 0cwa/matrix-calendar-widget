@@ -116,7 +116,9 @@ export class BoundedFixedWindowSourceRateLimiter {
 }
 
 export function isCalendarGatewayPath(path: string): boolean {
-  return /^\/v1\/calendar(?:\/|$)/i.test(path);
+  return /^\/v1\/(?:calendar(?:\/|$)|calendar-feeds(?:\/|$)|public-calendar-feeds(?:\/|$))/i.test(
+    path,
+  );
 }
 
 /**

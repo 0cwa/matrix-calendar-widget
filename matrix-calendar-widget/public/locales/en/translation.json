@@ -238,6 +238,29 @@
     "chooseMonth": "Choose month, selected month is {{date, datetime}}",
     "label": "{{date, datetime}}"
   },
+  "calendarPublicFeed": {
+    "action": "Public feed",
+    "additionalComponents": "This calendar reports component types beyond VEVENT, such as tasks or journal entries, or does not advertise VEVENT support. Public feeds require VEVENT-only content; the server checks the feed before publishing and on every read.",
+    "calendar": "Calendar",
+    "confirm": "I understand that anyone with the link can read this calendar.",
+    "copied": "Copied",
+    "copy": "Copy URL",
+    "copyFailed": "Copy failed. Select and copy the feed URL above.",
+    "disabled": "Public feeds are not enabled by this server.",
+    "loadFailed": "Could not load public feed settings. Check your connection and your permission to manage this calendar, then try again.",
+    "loading": "Loading feed settings…",
+    "publicWarning": "Anyone with the link can read every event in this calendar. The feed is not limited to Matrix room members. Unpublishing blocks future requests but cannot retract copies already downloaded.",
+    "publish": "Publish feed",
+    "publishFailed": "Could not publish this calendar. Check your permissions and try again.",
+    "retry": "Try again",
+    "subscribe": "Subscribe in a calendar app",
+    "title": "Public calendar feed",
+    "unpublish": "Unpublish",
+    "unpublishFailed": "Could not unpublish this calendar. Check your permissions and try again.",
+    "unsupportedComponents": "This calendar contains components other than events. Public feeds require a VEVENT-only calendar, so the server refused to publish it.",
+    "url": "Public feed URL",
+    "urlUnavailable": "This calendar is published, but the server cannot provide its public URL. Unpublish it here or ask the server administrator to restore feed configuration."
+  },
   "calendars": {
     "color": {
       "action": "Edit calendar color",
@@ -293,6 +316,9 @@
     "label": "{{range, daterange}}"
   },
   "cancel": "Cancel",
+  "common": {
+    "close": "Close"
+  },
   "copyableTextButton": {
     "copied": "Copied",
     "copy-to-clipboard": "Copy to clipboard"

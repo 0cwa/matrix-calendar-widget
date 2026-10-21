@@ -188,6 +188,70 @@ describe('GatewayCalendarRepository', () => {
     ]);
   });
 
+  it('uses the same authenticated publication API for namespaced personal and room calendars', async () => {
+    const personalFetch = mockFetch(
+      jsonResponse([{ id: calendarId, name: 'Personal', readOnly: false }]),
+      jsonResponse({ enabled: true, published: false }),
+      jsonResponse({
+        enabled: true,
+        published: true,
+        url: 'https://feeds.example.test/v1/public-calendar-feeds/capability',
+      }),
+    );
+    const personalRepository = createRepository(personalFetch);
+    const [personalCalendar] = await personalRepository.listCalendars();
+
+    await personalRepository.getPublicCalendarFeedPublication(
+      personalCalendar.id,
+    );
+    const personalStateUrl = new URL(personalFetch.mock.calls[1][0] as string);
+    expect(personalStateUrl.pathname).toBe('/v1/calendar-feeds/publication');
+    expect(personalStateUrl.searchParams.get('target')).toBe('personal');
+    expect(personalStateUrl.searchParams.get('calendarId')).toBe(calendarId);
+    expect(personalFetch.mock.calls[1][1]?.cache).toBe('no-store');
+
+    await personalRepository.publishPublicCalendarFeed(
+      personalCalendar.id,
+      true,
+    );
+    expect(personalFetch.mock.calls[2][1]?.method).toBe('PUT');
+    expect(JSON.parse(String(personalFetch.mock.calls[2][1]?.body))).toEqual({
+      target: 'personal',
+      calendarId,
+      confirmed: true,
+    });
+
+    const roomFetch = mockFetch(
+      jsonResponse([{ id: calendarId, name: 'Personal', readOnly: false }]),
+      jsonResponse([
+        {
+          id: 'team-calendar',
+          name: 'Room calendar',
+          readOnly: true,
+          operatorManaged: true,
+        },
+      ]),
+      jsonResponse({ enabled: true, published: false }),
+    );
+    const roomRepository = createRepository(roomFetch, 'UTC', () => ({
+      calendarId: 'team-calendar',
+      canReadEvents: true,
+      canWriteEvents: false,
+      canManageReminders: false,
+    }));
+    const roomCalendars = await roomRepository.listCalendars();
+    const roomCalendar = roomCalendars.find(
+      (calendar) => calendar.operatorManaged,
+    );
+    if (!roomCalendar) throw new Error('Expected a room calendar');
+
+    await roomRepository.getPublicCalendarFeedPublication(roomCalendar.id);
+    const roomStateUrl = new URL(roomFetch.mock.calls[2][0] as string);
+    expect(roomStateUrl.searchParams.get('target')).toBe('room');
+    expect(roomStateUrl.searchParams.get('calendarId')).toBe('team-calendar');
+    expect(roomStateUrl.searchParams.get('roomId')).toBe('!team:example.test');
+  });
+
   it('keeps room and personal resources separately namespaced and scoped', async () => {
     const roomCalendar = {
       id: calendarId,

@@ -96,18 +96,38 @@ Per-user bot calendars remain deferred.
 
 ## Source-of-truth boundaries
 
-| Concern                        | Canonical store                                                                   |
-| ------------------------------ | --------------------------------------------------------------------------------- |
-| calendar collection            | CalDAV/Radicale                                                                   |
-| VEVENT fields                  | iCalendar object in Radicale                                                      |
-| UID, SEQUENCE, recurrence      | iCalendar object                                                                  |
-| organizer/attendees            | iCalendar object                                                                  |
-| VALARM                         | iCalendar object                                                                  |
-| calendar display properties    | CalDAV properties where supported                                                 |
-| Matrix room ↔ calendar binding | static server configuration plus optional app-owned binding store (ADR015/ADR043) |
-| Matrix reminder configuration  | gateway sidecar state, separate from iCalendar                                    |
-| reminder delivery history      | app-owned PostgreSQL store when enabled                                           |
-| Matrix permissions             | room state plus configured gateway policy for room-owned operations               |
+| Concern                           | Canonical store                                                                    |
+| --------------------------------- | ---------------------------------------------------------------------------------- |
+| calendar collection               | CalDAV/Radicale                                                                    |
+| VEVENT fields                     | iCalendar object in Radicale                                                       |
+| UID, SEQUENCE, recurrence         | iCalendar object                                                                   |
+| organizer/attendees               | iCalendar object                                                                   |
+| VALARM                            | iCalendar object                                                                   |
+| calendar display properties       | CalDAV properties where supported                                                  |
+| Matrix room ↔ calendar binding    | static server configuration plus optional app-owned binding store (ADR015/ADR043)  |
+| Matrix reminder configuration     | gateway sidecar state, separate from iCalendar                                     |
+| reminder delivery history         | app-owned PostgreSQL store when enabled                                            |
+| Matrix permissions                | room state plus configured gateway policy for room-owned operations                |
+| public feed shares and revocation | Radicale's native token-sharing store below its persistent `/data` volume (ADR045) |
+
+## Public calendar feeds
+
+[ADR045](./adrs/adr045-public-calendar-feeds.md) defines opt-in public ICS
+subscriptions. The authenticated gateway management API resolves the current
+personal owner or exact room binding and manager authorization before creating
+a native Radicale read-only token. The public `GET`/`HEAD` route verifies a
+signed envelope and validates the complete current VEVENT-only response on each
+request, then returns Radicale's canonical bytes without persisting a second
+calendar projection. The external origin is a gateway route; the Radicale
+origin and sharing administration endpoints remain private.
+
+Public links intentionally outlive Matrix membership and manager-power
+changes. Unpublish or native token revocation ends future reads. The current
+room-binding registry is append-only at runtime; operators must unpublish
+before changing or removing a static binding, and any future binding deletion
+path must revoke its share first. The Radicale share store and dedicated
+signing key must be restored together. Public feeds do not provide private ICS
+editing; private editing must use CalDAV.
 
 ## Collection profile
 

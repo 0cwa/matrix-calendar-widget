@@ -14,6 +14,18 @@ configured Matrix SDK file store and may also contain crypto state if that
 feature is enabled. Treat both archives as sensitive, restrict access, and
 protect them at rest.
 
+When [public calendar feeds](./adrs/adr045-public-calendar-feeds.md) are
+enabled, Radicale 3.8.0 stores native share tokens below
+`/data/collections/collection-db/files/token`, within the complete `radicale-data`
+volume captured here. Preserve the configured public-feed signing key in the
+same protected recovery point: if the key is file-backed, add the exact key
+file to the encrypted `restoreInputs` allowlist; if it comes from an environment
+file, include that file only where secret-backup policy permits. The signing
+key is required to keep existing signed URLs valid after recovery. Restoring
+the Radicale volume without its matching key, or the key without the matching
+volume, does not preserve those URLs. Keep the signing key in separate secret
+custody from the Restic repository password and object-store credentials.
+
 The volume capture below is a cold, consistent copy. The recommended off-host
 storage layer is a Restic repository on S3-compatible storage. Restic encrypts
 and deduplicates the captured files; the repository password must be kept

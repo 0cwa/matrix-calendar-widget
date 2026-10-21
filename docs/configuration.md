@@ -62,6 +62,21 @@ HOMESERVER_URL=https://synapse.example.com
 # the base URL of the Radicale/CalDAV service
 RADICALE_URL=https://calendar.example.com
 
+# optional - public ICS subscriptions stay disabled unless both values are set.
+# Use the externally reachable gateway origin whose proxy routes
+# GET/HEAD /v1/public-calendar-feeds/<envelope> to this server.
+# This must be an origin only (no path, query, or fragment); it may use an
+# existing public API origin. Keep RADICALE_URL and Radicale's /.token/ and
+# /.sharing/ routes network-private; the signed envelope can be decoded to its
+# native bearer token, so public reads must pass through the gateway.
+# MATRIX_CALENDAR_PUBLIC_FEED_ORIGIN=https://calendar.example.com
+# Set one dedicated persistent 32-byte random key, encoded as 43 unpadded
+# base64url characters. Store it in deployment secret management; never reuse
+# Matrix, OpenID, or CalDAV credentials. The key may instead come from a
+# mounted one-line key file, but do not set both variables.
+# MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY=<43-character-base64url-secret>
+# MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY_FILE=/run/secrets/public-feed-key
+
 # optional - maximum streamed REPORT/GET response size for CalDAV event requests
 # defaults to 16777216 bytes (16 MiB); valid range is 1 through 67108864 bytes (64 MiB)
 # MATRIX_CALENDAR_CALDAV_MAX_EVENT_RESPONSE_BYTES=16777216
@@ -272,6 +287,14 @@ GUEST_USER_DEFAULT_POWER_LEVEL=0
 GUEST_USER_DELETE_POWER_LEVEL_ON_LEAVE=true
 #
 ```
+
+Public feeds are opt-in per calendar and anyone with the link can read every
+VEVENT in that calendar. Configure and verify the exact external route and its
+access-log redaction before setting the origin and key. The gateway reads
+Radicale's canonical VEVENT data through native read-only token sharing; it
+rejects mixed VEVENT/VTODO/VJOURNAL/VFREEBUSY responses. See
+[ADR045](./adrs/adr045-public-calendar-feeds.md) for authorization, token,
+logging, and lifecycle behavior.
 
 `ROOM_CALENDAR_REMINDER_DELIVERY_ENABLED` defaults to `false`. Before enabling it,
 review [ADR028](./adrs/adr028-room-reminder-configuration-and-delivery.md) and
