@@ -1,320 +1,285 @@
 # Configuration
 
-Runtime configuration can be performed via environment variables.
+[Documentation](./README.md) · [Deployment](./deployment-docker.md) · [Room setup](./bot-calendar.md)
 
-- You can configure the environment variables at the container for production
-- You can configure an [`.env` file](https://create-react-app.dev/docs/adding-custom-environment-variables/#adding-development-environment-variables-in-env) for local development.
+Use this reference to configure the widget, calendar gateway/bot, and optional
+features. For a local development stack, start with the
+[development guide](./DEVELOPMENT.md); for an operator deployment, follow the
+[Docker guide](./deployment-docker.md) and its configuration preflight.
 
-## Environment Variables
+The authoritative server settings and validation rules are in
+[`configuration.ts`](../matrix-calendar-server/src/configuration.ts). Supply
+server secrets through deployment secret management. Widget settings are
+public: never put access tokens, OpenID assertions, database URLs, or CalDAV
+credentials in a `REACT_APP_*` variable or widget URL.
 
-### Widget Container
+**On this page**
 
-These environment variables apply to the widget container:
+- [Choose the settings for your deployment](#choose-the-settings-for-your-deployment)
+- [Widget container](#widget-container)
+- [Server connections and widget URL](#server-connections-and-widget-url)
+- [Room calendars and capability gates](#room-calendars-and-capability-gates)
+- [Public calendar subscriptions](#public-calendar-subscriptions)
+- [Application PostgreSQL stores](#application-postgresql-stores)
+- [Request and response limits](#request-and-response-limits)
+- [Matrix runtime and storage](#matrix-runtime-and-storage)
+- [Inherited meeting configuration](#inherited-meeting-configuration)
+
+## Choose the settings for your deployment
+
+1. Configure the widget's public gateway URL and the server's Matrix/Radicale
+   connections.
+2. Select one room principal and configure room bindings if you need shared
+   room calendars. Enable each capability separately.
+3. Add application PostgreSQL only for the binding/reminder features you use.
+4. Enable public subscriptions only after reviewing their public-data,
+   ingress, logging, and recovery requirements.
+5. Keep inherited meeting settings at their calendar-only defaults. A few
+   legacy URL names are still required by startup validation; they are listed
+   explicitly below.
+
+## Widget container
+
+The widget uses Vite with the historical `REACT_APP_` prefix retained for
+compatibility. Local `.env` files belong in `matrix-calendar-widget/` and are
+read when Vite starts. The container's widget-server base supplies runtime
+configuration. Restart the relevant process after changing settings; see
+[`vite.config.ts`](../matrix-calendar-widget/vite.config.ts) and the
+[widget Dockerfile](../matrix-calendar-widget/Dockerfile).
+
+| Setting                     | Purpose                                                                                                                                                             |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `REACT_APP_API_BASE_URL`    | Public HTTPS origin of the calendar gateway, for example `https://calendar-api.example.org`. An explicit `meetings_bot_base_url` widget parameter takes precedence. |
+| `REACT_APP_BOT_USER_ID`     | Matrix ID of the calendar bot, for example `@calendar:example.org`.                                                                                                 |
+| `REACT_APP_HOME_SERVER_URL` | Public Matrix homeserver URL; also used in the container's content-security policy.                                                                                 |
+| `REACT_APP_ELEMENT_URL`     | Element client URL used by the inherited toolkit integration.                                                                                                       |
+| `REACT_APP_PRIMARY_COLOR`   | Optional theme color, for example `#b0131d`. Quote the value in a shell or `.env` file.                                                                             |
+
+Additional theme options are documented by
+[@matrix-widget-toolkit/mui](https://www.npmjs.com/package/@matrix-widget-toolkit/mui#customization).
+Meeting-duration, breakout, and old meeting-list settings are listed in
+[Inherited meeting configuration](#inherited-meeting-configuration).
+
+## Server connections and widget URL
+
+| Setting                                                    | Requirement and behavior                                                                                                                                                                                                                                                  |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `HOMESERVER_URL`                                           | Required Matrix Client-Server API URL, reachable by the server.                                                                                                                                                                                                           |
+| `ACCESS_TOKEN`                                             | Required token for the normal calendar bot account. Keep it server-side; an application-service token is not a substitute.                                                                                                                                                |
+| `MATRIX_OPENID_USERINFO_URL`                               | Optional fixed origin for widget OpenID userinfo verification only. Omission uses `HOMESERVER_URL`. No path, query, fragment, or credentials; HTTPS is required except for loopback HTTP in isolated tests. It does not change Client-Server requests or identity checks. |
+| `RADICALE_URL`                                             | CalDAV service URL, required for calendar operations. It must point directly to the canonical endpoint; redirects are refused. Public feeds additionally require a private root origin.                                                                                   |
+| `MEETINGWIDGET_URL`                                        | Required calendar widget URL. The inherited setting name is retained. Moderator setup requires an explicit safe `meetings_bot_base_url` and raw `matrix_room_id=$matrix_room_id` parameter.                                                                               |
+| `MEETINGWIDGET_NAME`                                       | Widget display name; defaults to `Matrix Calendar`.                                                                                                                                                                                                                       |
+| `MEETINGWIDGET_COCKPIT_URL`, `BREAKOUT_SESSION_WIDGET_URL` | **Still required by server startup validation**, despite the retired widget routes. Set these compatible URL placeholders as shown in the deployment examples; they do not enable meeting or breakout features.                                                           |
+
+A calendar widget URL template looks like this. Preserve the literal `$`
+placeholders with single quotes when using a shell or Compose environment file:
 
 ```sh
-# the base url of the Matrix Calendar bot API
-REACT_APP_API_BASE_URL=http://meetings-widget-bot.example.com
-
-# the userid of the bot user
-REACT_APP_BOT_USER_ID=@meetings-bot:example.com
-
-# the base url of the matrix homeserver
-REACT_APP_HOME_SERVER_URL=https://synapse.example.com
-
-# the base url of the element client
-REACT_APP_ELEMENT_URL=https://element.example.com
-
-# optional - the primary color of the theme
-REACT_APP_PRIMARY_COLOR=#b0131d
-
-# optional - the preselected length of a new meeting
-REACT_APP_DEFAULT_MEETING_MINUTES=60
-
-# optional - the preselected length of a new breakoutsession
-REACT_APP_DEFAULT_BREAKOUT_SESSION_MINUTES=15
-
-# optional - the full minutes a preselected start time is rounded to. 10:37 becomes 10:45
-REACT_APP_DEFAULT_MINUTES_TO_ROUND=15
-
-# optional - the power level that should be set as "no messaging allowed". Defaults to 100.
-REACT_APP_MESSAGING_NOT_ALLOWED_POWER_LEVEL=100
-
-# optional - shows meetings from all rooms
-REACT_APP_DISPLAY_ALL_MEETINGS=true
+MEETINGWIDGET_URL='https://calendar.example.org/#/?meetings_bot_base_url=https://calendar-api.example.org&theme=$org.matrix.msc2873.client_theme&matrix_user_id=$matrix_user_id&matrix_display_name=$matrix_display_name&matrix_avatar_url=$matrix_avatar_url&matrix_room_id=$matrix_room_id&matrix_client_id=$org.matrix.msc2873.client_id&matrix_client_language=$org.matrix.msc2873.client_language&matrix_device_id=$org.matrix.msc3819.matrix_device_id&matrix_base_url=$org.matrix.msc4039.matrix_base_url'
 ```
 
-### Bot Container
+The image's fallback gateway setting is not visible to server-side room setup.
+Provide the gateway URL in `MEETINGWIDGET_URL` even if the image also sets it.
+See the [deployment environment examples](../deploy/etke-sidecar.env.example)
+for the remaining required URL values.
 
-These environment variables apply to the bot container:
+## Room calendars and capability gates
+
+`ROOM_CALENDAR_PRINCIPAL_MODE` selects the server-side CalDAV and scheduled
+reminder identity for the whole process:
+
+| Mode                   | Identity and required configuration                                                                                                                                                                                                                                                 |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `appservice` (default) | Dedicated application-service identity from `MATRIX_APPLICATION_SERVICE_USER_ID` and `MATRIX_APPLICATION_SERVICE_TOKEN`. Its localpart must be one literal CalDAV home segment: 1–255 ASCII letters, digits, dots, underscores, equals signs, or hyphens; dot segments are refused. |
+| `bot-account`          | Normal bot identity verified by the SDK client using `ACCESS_TOKEN`. Do not configure a separate claimed user ID.                                                                                                                                                                   |
+
+Changing mode selects another Radicale home; it does not migrate calendars.
+Neither mode enables capabilities by itself. See
+[ADR041](./adrs/adr041-optional-normal-bot-account-for-room-operations.md) and
+[principal provisioning](./deployment-docker.md#room-principal-and-collection-provisioning).
+
+Each gate below defaults to `false`. Matrix membership, action-specific power,
+and exact binding checks apply server-side on every relevant operation.
+
+| Gate                                             | Enables                                                          | Additional requirements                                                                                                                                                          |
+| ------------------------------------------------ | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ROOM_CALENDAR_ACCESS_ENABLED`                   | Room calendar reads                                              | Valid selected principal, room/calendar binding, homeserver, and Radicale configuration.                                                                                         |
+| `ROOM_CALENDAR_EVENT_WRITES_ENABLED`             | Room event create/update/delete                                  | Room access enabled and current event-write authorization.                                                                                                                       |
+| `ROOM_CALENDAR_SETUP_ENABLED`                    | Exact `!calendar setup` command                                  | Current calendar-manage permission, setup actor allowlist, bot membership/widget power, verified unencrypted room, safe widget URL, and binding store for a new dynamic binding. |
+| `MATRIX_CALENDAR_REMINDER_CONFIGURATION_ENABLED` | Supported room reminder settings                                 | Room access and app-owned reminder database. Does not start delivery.                                                                                                            |
+| `ROOM_CALENDAR_REMINDER_DELIVERY_ENABLED`        | Scheduled whole-room mentions                                    | Room access, selected principal, binding, canonical supported alarm, reminder database, unencrypted room, and current mention permission.                                        |
+| `ROOM_CALENDAR_ACTION_MESSAGES_ENABLED`          | Best-effort notices after successful room widget event mutations | An authorized successful mutation and safe Matrix sending. Failure does not roll back the CalDAV change.                                                                         |
+
+### Bindings and setup actors
+
+`ROOM_CALENDAR_BINDINGS` is an optional server-only JSON array. Each canonical
+room ID and app-owned calendar ID must be unique:
 
 ```sh
-# the base url of the matrix homeserver
-HOMESERVER_URL=https://synapse.example.com
-
-# optional - fixed origin used only for widget OpenID userinfo verification
-# The endpoint path is fixed by the server. HTTPS is required except for
-# loopback HTTP in isolated local tests; do not include a path, query, or
-# fragment. When unset or empty, the existing HOMESERVER_URL behavior remains.
-# It does not change bearer Client-Server requests or Matrix identity checks.
-# MATRIX_OPENID_USERINFO_URL=https://synapse.example.com
-
-# optional at startup; required by the authenticated calendar discovery endpoint
-# the base URL of the Radicale/CalDAV service
-RADICALE_URL=https://calendar.example.com
-
-# optional - public ICS subscriptions stay disabled unless both values are set.
-# Use the externally reachable gateway origin whose proxy routes
-# GET/HEAD /v1/public-calendar-feeds/<envelope> to this server.
-# This must be an origin only (no path, query, or fragment); it may use an
-# existing public API origin. Keep RADICALE_URL and Radicale's /.token/ and
-# /.sharing/ routes network-private; the signed envelope can be decoded to its
-# native bearer token, so public reads must pass through the gateway.
-# MATRIX_CALENDAR_PUBLIC_FEED_ORIGIN=https://calendar.example.com
-# Set one dedicated persistent 32-byte random key, encoded as 43 unpadded
-# base64url characters. Store it in deployment secret management; never reuse
-# Matrix, OpenID, or CalDAV credentials. The key may instead come from a
-# mounted one-line key file, but do not set both variables.
-# MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY=<43-character-base64url-secret>
-# MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY_FILE=/run/secrets/public-feed-key
-
-# optional - maximum streamed REPORT/GET response size for CalDAV event requests
-# defaults to 16777216 bytes (16 MiB); valid range is 1 through 67108864 bytes (64 MiB)
-# MATRIX_CALENDAR_CALDAV_MAX_EVENT_RESPONSE_BYTES=16777216
-
-# The gateway's JSON and urlencoded HTTP request bodies are capped at 100kb.
-# This is fixed to the existing Express parser default and is not configurable.
-
-# optional server-managed room-to-calendar bindings (JSON array)
-# Each room ID and app-owned calendar ID must be canonical and unique.
-# ROOM_CALENDAR_BINDINGS='[{"roomId":"!room-hash:example.org","calendarId":"team-calendar"}]'
-
-# Optional moderator-driven setup. This mutation gate defaults to false.
-# Setup still requires the actor's current joined membership and
-# calendar-manage power, the bot's room membership and widget power, and a
-# confirmed unencrypted room. See ADR043 before enabling it.
-# ROOM_CALENDAR_SETUP_ENABLED=false
-
-# Setup actors are limited to one Matrix server by default: the server name
-# from the normal calendar bot's MXID. To permit moderators from other servers,
-# set a comma-separated list of validated Matrix server names. This overrides
-# the default only for !calendar setup; it does not change ordinary access.
-# Wildcards are not accepted. Ports and bracketed IPv6 server names are allowed.
-# ROOM_CALENDAR_SETUP_ALLOWED_ACTOR_SERVER_NAMES=team.example.org,example.net:8448
-
-# Optional app-owned PostgreSQL store for dynamic room bindings. Keep the
-# setup feature gate off until the database role, TLS mode, and migrations are
-# ready. Binding and reminder URLs are independent and may point to the same
-# app-owned database; their adapters own separate schemas. Omitting either URL
-# disables only that store, with no fallback between stores. If they point to
-# different databases, ensure both are covered by backup and recovery.
-# MATRIX_CALENDAR_BINDING_DATABASE_URL=<application-owned-postgres-url>
-# MATRIX_CALENDAR_BINDING_DATABASE_TLS_MODE=verify-full
-
-# Process-wide room CalDAV/reminder principal; omitted defaults to appservice.
-# bot-account uses the identity verified by the same Matrix SDK client as ACCESS_TOKEN;
-# do not configure a separate claimed user ID. This setting does not enable room features.
-# Switching modes selects a different Radicale home; existing calendars are not migrated.
-# ROOM_CALENDAR_PRINCIPAL_MODE=appservice
-# See ADR041 for the principal contract and mode-switch consequences.
-
-# Application-service identity for explicitly bound room-calendar access in appservice mode.
-# Room access remains disabled unless explicitly enabled, and must stay off
-# until the M6 authorization, room-isolation, and deployment gates are accepted.
-# Store the token using deployment secret management; never put it in a widget.
-# ROOM_CALENDAR_ACCESS_ENABLED=false
-# Room event creation, updates, and deletion have a separate default-off gate.
-# Enable only after the real Synapse/Radicale write and cross-room contracts pass.
-# ROOM_CALENDAR_EVENT_WRITES_ENABLED=false
-# This gate is independent of ROOM_CALENDAR_ACCESS_ENABLED and cannot enable
-# access by itself. Keep both off unless the corresponding read/write room
-# contracts and deployment gates have passed.
-# Its localpart must be one literal CalDAV home segment: 1..255 ASCII
-# letters, digits, dot, underscore, equals, or hyphen; dot segments are denied.
-# MATRIX_APPLICATION_SERVICE_USER_ID=@_matrix_calendar_service:example.org
-# MATRIX_APPLICATION_SERVICE_TOKEN=<secret>
-
-# Optional, defaults to false. The room reminder settings API additionally
-# requires ROOM_CALENDAR_ACCESS_ENABLED and MATRIX_CALENDAR_REMINDER_DATABASE_URL.
-# Keep this off until the settings API authorization and CalDAV contracts are
-# accepted. Enabling it does not enable reminder scheduling or delivery.
-# MATRIX_CALENDAR_REMINDER_CONFIGURATION_ENABLED=false
-
-# Optional, defaults to false. Starts bounded scheduled room reminders only
-# when ROOM_CALENDAR_ACCESS_ENABLED and the app-owned reminder store are also
-# ready. This native Matrix sender supports unencrypted rooms only; encrypted
-# or unknown room state is refused. Stable transaction IDs do not guarantee
-# exactly-once delivery. See ADR028 for the authorization, limits, and policy.
-# ROOM_CALENDAR_REMINDER_DELIVERY_ENABLED=false
-
-# Optional, defaults to false. Send best-effort Matrix notices after successful
-# room-calendar create, update, and delete operations. This is independent of
-# the room access and event-write gates. Encrypted rooms require the bot's
-# encryption-aware Matrix sender to confirm room encryption. Failures are
-# best-effort and do not change a committed CalDAV result; the pinned SDK's
-# default request timeout is 60 seconds and is not overridden here. See ADR032.
-# ROOM_CALENDAR_ACTION_MESSAGES_ENABLED=false
-
-# optional - maximum calendar gateway requests allowed from one TCP source
-# per fixed window. Defaults to 120 requests per 60000 ms.
-MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_REQUESTS=120
-MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_WINDOW_MS=60000
-
-# optional - maximum distinct source keys held in the in-memory limiter
-# Defaults to 10000 and cannot be configured above 10000.
-MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_MAX_KEYS=10000
-
-# The key comes from the server-side TCP peer address. Forwarded-address
-# headers are ignored. When all configured source slots are occupied, unseen
-# sources receive a generic 429 with Retry-After until expired entries are
-# cleaned up. Behind a reverse proxy, all callers seen from that proxy share
-# one quota; tune the request limit or add an upstream per-client limit.
-
-# optional - enables durable Matrix reminder state in an app-owned PostgreSQL database
-# use a database and least-privilege role for Matrix Calendar; never use Synapse's database
-# this can share a database with MATRIX_CALENDAR_BINDING_DATABASE_URL; each store owns its schema
-# migrations run at server startup; omit this setting to keep reminders disabled
-# supply this URL through deployment secret management and do not log it
-MATRIX_CALENDAR_REMINDER_DATABASE_URL='postgresql://matrix_calendar:password@postgres.example.com:5432/matrix_calendar'
-
-# Room reminder delivery remains disabled unless all required gates, service
-# credentials, bindings, homeserver/CalDAV configuration, and the store are
-# available. Review [ADR028](./adrs/adr028-room-reminder-configuration-and-delivery.md)
-# and [deployment notes](./deployment-docker.md) before enabling it.
-
-# defaults to verified certificate-chain and hostname checks
-# only disable TLS on an operator-controlled isolated database network
-# MATRIX_CALENDAR_REMINDER_DATABASE_TLS_MODE=trusted-private-network
-
-# the access token of the matrix user of the bot
-ACCESS_TOKEN=syt_...
-
-# the url to the Matrix Calendar widget that will be added to the planning room
-# Include the public calendar gateway URL explicitly for moderator setup. The
-# widget image fallback is not visible to the server-side setup preflight.
-MEETINGWIDGET_URL='http://meetings-widget.example.com/#/?meetings_bot_base_url=http://meetings-widget-bot.example.com&theme=$org.matrix.msc2873.client_theme&matrix_user_id=$matrix_user_id&matrix_display_name=$matrix_display_name&matrix_avatar_url=$matrix_avatar_url&matrix_room_id=$matrix_room_id&matrix_client_id=$org.matrix.msc2873.client_id&matrix_client_language=$org.matrix.msc2873.client_language&matrix_device_id=$org.matrix.msc3819.matrix_device_id&matrix_base_url=$org.matrix.msc4039.matrix_base_url'
-
-# optional - the name of the Matrix Calendar widget that will be added to the planning room
-MEETINGWIDGET_NAME='Matrix Calendar'
-
-# the url to the cockpit widget that will be added to the meeting rooms
-MEETINGWIDGET_COCKPIT_URL='http://meetings-widget.example.com/cockpit/#/?theme=$org.matrix.msc2873.client_theme&matrix_user_id=$matrix_user_id&matrix_display_name=$matrix_display_name&matrix_avatar_url=$matrix_avatar_url&matrix_room_id=$matrix_room_id&matrix_client_id=$org.matrix.msc2873.client_id&matrix_client_language=$org.matrix.msc2873.client_language&matrix_device_id=$org.matrix.msc3819.matrix_device_id&matrix_base_url=$org.matrix.msc4039.matrix_base_url'
-
-# optional - the name of the cockpit widget that will be added to the meeting rooms
-MEETINGWIDGET_COCKPIT_NAME='Calendar Details'
-
-# the url to the breakout sessions widget that will be added to the meeting rooms
-BREAKOUT_SESSION_WIDGET_URL='http://meetings-widget.example.com/#/?theme=$org.matrix.msc2873.client_theme&matrix_user_id=$matrix_user_id&matrix_display_name=$matrix_display_name&matrix_avatar_url=$matrix_avatar_url&matrix_room_id=$matrix_room_id&matrix_client_id=$org.matrix.msc2873.client_id&matrix_client_language=$org.matrix.msc2873.client_language&matrix_device_id=$org.matrix.msc3819.matrix_device_id&matrix_base_url=$org.matrix.msc4039.matrix_base_url'
-
-# optional - the name of the breakout sessions widget that will be added to the meeting rooms
-BREAKOUT_SESSION_WIDGET_NAME='Breakout Sessions'
-
-# optional - the name of the 1:1 chat room, when a user initiates a chat with the bot.
-CALENDAR_ROOM_NAME='Matrix Calendar'
-
-# optional - the log level (one of silent, fatal, error, warn, info, debug, trace)
-LOG_LEVEL=error
-
-# optional - the port on which the bot listens for http connections
-PORT=3000
-
-# optional - the number of minutes after the meeting that the meeting should be deleted (example: 60)
-AUTO_DELETION_OFFSET=
-
-# optional - a json file that contains an array of state events as initial state for a new meeting room (see section below for examples)
-DEFAULT_EVENTS_CONFIG='conf/default_events.json'
-
-# optional - a json file that contains different widget layouts that should be added to the room when certain widgets are activated (see section below for examples)
-DEFAULT_WIDGET_LAYOUTS_CONFIG='conf/default_widget_layouts.json'
-
-# optional - if defined, the bot will assign the display name to its user on startup
-BOT_DISPLAYNAME=
-
-# optional - the maximum age of matrix events in minutes to be handled by the bot. all older messages are ignored on startup.
-MATRIX_SERVER_EVENT_MAX_AGE_MINUTES=5
-
-# optional - the folder where the bot stores local data like a persisted sessions
-STORAGE_FILE_DATA_PATH=storage
-
-# optional - enables the bot to create end-to-end encrypted rooms for meetings and control rooms
-ENABLE_CRYPTO=false
-
-# optional - the folder where the bot stores local encryption data. This is relative to the storage path above, ie 'storage/crypto'
-CRYPTO_DATA_PATH=crypto
-
-# optional - the json file with the session information inside the storage folder
-STORAGE_FILE_FILENAME=bot.json
-
-# optional - the base URL used to form links to a room. might be set to a known element installation with ex: 'https://elment.example.com/#/room/'
-MATRIX_LINK_SHARE='https://matrix.to/#/'
-
-# optional - if true, the bot uses a filter in the sync-process to limit the number of events that need to be processed to reduce the risk of getting a "limited" sync where the homeserver skips events that will then not be registered by the bot.
-MATRIX_FILTER_APPLY=true
-
-# optional - configure the maximum number of events in the sync response. use a higher limit to reduce the risk of getting a "limited" sync where the homeserver skips events that will then not be registered by the bot.
-MATRIX_FILTER_TIMELINE_LIMIT=50
-
-# optional legacy workflow - creates a private help room when the bot is invited to a non-direct room. Disabled by default for the calendar-only pilot; setting this to true opts into the legacy help flow.
-ENABLE_WELCOME_WORKFLOW=false
-
-# optional - default locale for bot-to-user communication
-WELCOME_WORKFLOW_DEFAULT_LOCALE=en
-
-# optional - migrate old control rooms that were created by a older version of the bot to a 1:1 calendar room.
-ENABLE_CONTROL_ROOM_MIGRATION=false
-
-# optional legacy error reporting - create or reuse a private error room with the sender of an RPC event when processing fails. Disabled by default for the calendar-only pilot; setting this to true opts into legacy private-room notifications.
-ENABLE_PRIVATE_ROOM_ERROR_SENDING=false
-
-# optional - configure a url where the bot can request dial-in numbers (ex: http://jitsi-dialin.example.com/dialin.json)
-JITSI_DIAL_IN_JSON_URL=
-
-# optional - configure a url where the bot can request a pin to be entered when calling the jitsi dial-in number for a specific conference. Use {base32_room_name} as a template parameter (ex: "http://jitsi-dialin.example.com/pin?conference={base32_room_name}")
-JITSI_PIN_URL=
-
-# optional - configure a Open-Xchange link that can be used to open the calendar room in their calendar application. use the {{id}} and {{folder}} as a template parameter (ex: "http://ox.example.com/appsuite/#app=io.ox/calendar&id={{id}}&folder={{folder}}")
-OPEN_XCHANGE_MEETING_URL_TEMPLATE=
-
-# optional - enables changing of power level of the guest users when they join the room. This case requires that the user's default power level is higher than the guest user's and that the bot has rights to change power levels, otherwise no change occurs.
-ENABLE_GUEST_USER_POWER_LEVEL_CHANGE=false
-
-# optional - configure guest user id prefix that is used to match guest users.
-GUEST_USER_PREFIX=@guest-
-
-# optional - configure guest user power level
-GUEST_USER_DEFAULT_POWER_LEVEL=0
-
-# optional - if true, bot deletes guest user power level from power level event when guest user leaves the room. It makes sure power level is cleaned up if guest user is deactivated later.
-GUEST_USER_DELETE_POWER_LEVEL_ON_LEAVE=true
-#
+ROOM_CALENDAR_BINDINGS='[{"roomId":"!room-hash:example.org","calendarId":"team-calendar"}]'
 ```
 
-Public feeds are opt-in per calendar and anyone with the link can read every
-VEVENT in that calendar. Configure and verify the exact external route and its
-access-log redaction before setting the origin and key. The gateway reads
-Radicale's canonical VEVENT data through native read-only token sharing; it
-rejects mixed VEVENT/VTODO/VJOURNAL/VFREEBUSY responses. See
-[ADR045](./adrs/adr045-public-calendar-feeds.md) for authorization, token,
-logging, and lifecycle behavior.
+Static bindings require an existing matching collection. With
+`MATRIX_CALENDAR_BINDING_DATABASE_URL` configured, moderator setup can reserve
+and create a new binding. Static entries remain authoritative for their rooms;
+only verified ready dynamic rows grant access. There is no runtime unlink or
+rebind operation.
 
-`ROOM_CALENDAR_REMINDER_DELIVERY_ENABLED` defaults to `false`. Before enabling it,
-review [ADR028](./adrs/adr028-room-reminder-configuration-and-delivery.md) and
-[deployment notes](./deployment-docker.md): delivery also requires room access,
-a valid selected-principal/binding configuration, and the app-owned reminder
-database. Appservice mode remains the default and requires its own token and
-sender ID when room access is enabled; bot-account mode uses the normal bot
-identity from `ACCESS_TOKEN`.
-The native scheduled sender only supports unencrypted rooms and refuses
-unknown encryption state. Stable transaction IDs do not guarantee exactly-once
-Matrix delivery. `ROOM_CALENDAR_ACTION_MESSAGES_ENABLED` is a separate,
-default-off, best-effort post-success notice gate; see
-[ADR032](./adrs/adr032-room-calendar-action-messages.md). A notice failure does
-not change an already committed CalDAV mutation.
+`ROOM_CALENDAR_SETUP_ALLOWED_ACTOR_SERVER_NAMES` optionally sets a comma-separated
+allowlist such as `team.example.org,example.net:8448`. The default is the normal
+bot account's Matrix server name. Wildcards are refused; validated ports and
+bracketed IPv6 names are allowed. This list applies only to setup and does not
+change ordinary read/write authorization. See [room setup](./bot-calendar.md)
+and [ADR043](./adrs/adr043-moderator-room-calendar-setup.md).
 
-#### `DEFAULT_EVENTS_CONFIG`
+### Reminder and action-message limits
+
+Scheduled Matrix delivery currently targets the whole room with
+`m.mentions.room`; selected-user targets and all-day local-time scheduling are
+not part of the merged implementation. Encrypted or unknown room state is
+refused. Claims and stable Matrix transaction IDs support retries but do not
+guarantee exactly-once delivery. Scheduling assumes one server replica.
+
+Action notices are separate from scheduled reminders. They suppress automatic
+mentions and use the SDK encryption-aware path where available. The SDK's
+60-second default request timeout is not overridden for notices. Review
+[ADR028](./adrs/adr028-room-reminder-configuration-and-delivery.md) and
+[ADR032](./adrs/adr032-room-calendar-action-messages.md) before enabling either
+capability.
+
+## Public calendar subscriptions
+
+Public ICS subscriptions are opt-in per calendar. Anyone with the link can
+read all canonical VEVENT data in that calendar, including details preserved
+but not displayed by the widget. They provide read-only subscription access;
+private external CalDAV editing is not implemented by this feature.
+
+| Setting                                        | Requirement                                                                                                                                |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `MATRIX_CALENDAR_PUBLIC_FEED_ORIGIN`           | Externally reachable gateway origin routing `GET`/`HEAD /v1/public-calendar-feeds/<envelope>` to this server. No path, query, or fragment. |
+| `MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY`      | Dedicated persistent random 32-byte key, encoded as 43 unpadded base64url characters. Never reuse Matrix/OpenID/CalDAV secrets.            |
+| `MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY_FILE` | Alternative one-line key file mounted into the server. Set this **or** the inline key, never both.                                         |
+
+Publication requires the origin and one key source; leave all three absent to
+keep it disabled. Configure and verify the exact external route and access-log
+redaction before enabling it. Keep `RADICALE_URL`, `/.token/`, and `/.sharing/`
+network-private: a signed envelope can be decoded to its native bearer token,
+so every public read must pass through the gateway's validation and limits.
+
+A user must confirm publication in the widget; personal calendars require the
+owner, and room calendars require current calendar-manage authorization. The
+gateway serves Radicale's canonical bytes and rejects mixed
+VEVENT/VTODO/VJOURNAL/VFREEBUSY responses on each read. Public reads do not
+recheck Matrix membership; unpublish or revoke the native token to stop future
+reads. Previously downloaded copies may remain. Unpublish before changing a
+static room binding.
+
+Back up the dedicated signing key with the matching complete Radicale `/data`
+store. See [ADR045](./adrs/adr045-public-calendar-feeds.md),
+[backup and recovery](./backup-recovery.md), and the
+[public-feed deployment notes](./deployment-docker.md#public-calendar-feed-ingress-and-recovery).
+
+## Application PostgreSQL stores
+
+The two stores are independently optional and use separate schemas. Omitting
+one URL disables that store only; there is no fallback to the other URL. They
+may share an application-owned database, but must never use Synapse's database.
+
+| Purpose                               | Connection                              | TLS mode                                     |
+| ------------------------------------- | --------------------------------------- | -------------------------------------------- |
+| Dynamic room bindings                 | `MATRIX_CALENDAR_BINDING_DATABASE_URL`  | `MATRIX_CALENDAR_BINDING_DATABASE_TLS_MODE`  |
+| Reminder settings and delivery claims | `MATRIX_CALENDAR_REMINDER_DATABASE_URL` | `MATRIX_CALENDAR_REMINDER_DATABASE_TLS_MODE` |
+
+Supply PostgreSQL URLs through secret management. Both stores default to
+`verify-full`, which verifies the certificate chain and hostname. Use
+`trusted-private-network` only for an explicitly controlled isolated database
+network. Startup migrations require a least-privilege application role with
+schema/table permissions, not a superuser. Store and migration failures stop
+the configured capability; do not substitute Synapse credentials.
+
+Capture and restore every configured database alongside the matching CalDAV
+recovery point. If the URLs point to different databases, both need coverage.
+See [database deployment](./deployment-docker.md#optional-reminder-postgresql-database)
+and [upgrade behavior](./upgrade-migration.md#data-stores-and-migration-behavior).
+
+## Request and response limits
+
+| Setting                                           | Default             | Allowed range / behavior                                                           |
+| ------------------------------------------------- | ------------------- | ---------------------------------------------------------------------------------- |
+| `MATRIX_CALENDAR_CALDAV_MAX_EVENT_RESPONSE_BYTES` | `16777216` (16 MiB) | Integer bytes from 1 through `67108864` (64 MiB); streamed event REPORT/GET limit. |
+| `MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_REQUESTS`     | `120`               | 1–100,000 requests per source per fixed window.                                    |
+| `MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_WINDOW_MS`    | `60000`             | 1–86,400,000 milliseconds.                                                         |
+| `MATRIX_CALENDAR_GATEWAY_RATE_LIMIT_MAX_KEYS`     | `10000`             | 1–10,000 distinct in-memory source keys.                                           |
+
+The HTTP limiter uses the TCP peer address and ignores forwarded-address
+headers. Behind a reverse proxy, callers seen from that proxy share a quota.
+An unseen source is rejected with generic `429` and `Retry-After` when the key
+table is full. Counters are process-local and reset on restart; they are not
+a distributed abuse control.
+
+JSON and URL-encoded request bodies have a fixed `100kb` parser limit before
+Matrix authentication. Public feed transport has its own fixed size and time
+bounds under ADR045. See the [threat model](./threat-model.md).
+
+## Matrix runtime and storage
+
+| Setting                               | Behavior                                                                                                        |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `PORT`                                | HTTP listener port; deployment examples use `3000`.                                                             |
+| `LOG_LEVEL`                           | One of `silent`, `fatal`, `error`, `warn`, `info`, `debug`, `trace`. Never enable secret-bearing request dumps. |
+| `BOT_DISPLAYNAME`                     | Optional bot display name applied on startup.                                                                   |
+| `STORAGE_FILE_DATA_PATH`              | Matrix SDK storage directory; default `storage`. Persist it in a deployment.                                    |
+| `STORAGE_FILE_FILENAME`               | SDK session-store filename; default `bot.json`.                                                                 |
+| `ENABLE_CRYPTO`                       | Default `false`. Enables retained SDK crypto support; it does not add encrypted scheduled reminders.            |
+| `CRYPTO_DATA_PATH`                    | Crypto directory relative to the storage path; default `crypto`.                                                |
+| `MATRIX_SERVER_EVENT_MAX_AGE_MINUTES` | Maximum age of incoming events handled after startup; default `5`.                                              |
+| `MATRIX_FILTER_APPLY`                 | Apply the bot sync filter; default `true`.                                                                      |
+| `MATRIX_FILTER_TIMELINE_LIMIT`        | Sync timeline limit; default `50`.                                                                              |
+| `MATRIX_LINK_SHARE`                   | Base for room links; default `https://matrix.to/#/`.                                                            |
+| `WELCOME_WORKFLOW_DEFAULT_LOCALE`     | Fallback locale for bot communication; default `en`.                                                            |
+
+## Inherited meeting configuration
+
+These names remain for compatibility with code inherited from NeoDateFix. They
+are not calendar feature switches. Legacy meeting-management routes are
+blocked by the calendar-only server guard, and retired widget deep links
+redirect to calendar home. See [legacy entry points](./legacy-entry-points.md)
+and the [server inventory](./legacy-server-inventory.md) before changing them.
+
+| Setting                                       | Inherited behavior / default                                                  |
+| --------------------------------------------- | ----------------------------------------------------------------------------- |
+| `REACT_APP_DEFAULT_MEETING_MINUTES`           | Initial meeting duration, `60`.                                               |
+| `REACT_APP_DEFAULT_BREAKOUT_SESSION_MINUTES`  | Initial breakout duration, `15`.                                              |
+| `REACT_APP_DEFAULT_MINUTES_TO_ROUND`          | Start-time rounding interval, `15` minutes.                                   |
+| `REACT_APP_MESSAGING_NOT_ALLOWED_POWER_LEVEL` | Meeting messaging restriction level, `100`.                                   |
+| `REACT_APP_DISPLAY_ALL_MEETINGS`              | Old multi-room meeting-list switch.                                           |
+| `MEETINGWIDGET_COCKPIT_NAME`                  | Legacy detail-widget name, `Calendar Details`.                                |
+| `BREAKOUT_SESSION_WIDGET_NAME`                | Legacy breakout-widget name, `Breakout Sessions`.                             |
+| `CALENDAR_ROOM_NAME`                          | Legacy bot direct-room name, `Matrix Calendar`.                               |
+| `AUTO_DELETION_OFFSET`                        | Optional minutes after a meeting before legacy deletion.                      |
+| `DEFAULT_EVENTS_CONFIG`                       | Meeting initial-state template file, `conf/default_events.json`.              |
+| `DEFAULT_WIDGET_LAYOUTS_CONFIG`               | Meeting widget-layout template file, `conf/default_widget_layouts.json`.      |
+| `ENABLE_WELCOME_WORKFLOW`                     | Legacy private help-room creation; default `false`.                           |
+| `ENABLE_CONTROL_ROOM_MIGRATION`               | Legacy Matrix control-room migration; default `false`.                        |
+| `ENABLE_PRIVATE_ROOM_ERROR_SENDING`           | Legacy private error-room creation; default `false`.                          |
+| `JITSI_DIAL_IN_JSON_URL`                      | Optional inherited Jitsi dial-in endpoint.                                    |
+| `JITSI_PIN_URL`                               | Optional Jitsi PIN endpoint with `{base32_room_name}` placeholder.            |
+| `OPEN_XCHANGE_MEETING_URL_TEMPLATE`           | Optional inherited calendar link with `{{id}}` and `{{folder}}` placeholders. |
+| `ENABLE_GUEST_USER_POWER_LEVEL_CHANGE`        | Legacy guest power adjustment; default `false`.                               |
+| `GUEST_USER_PREFIX`                           | Guest user-ID prefix, `@guest-`.                                              |
+| `GUEST_USER_DEFAULT_POWER_LEVEL`              | Guest power level, `0`.                                                       |
+| `GUEST_USER_DELETE_POWER_LEVEL_ON_LEAVE`      | Remove the guest's explicit power on departure, `true`.                       |
+
+Keep private-room creation and control-room migration disabled for ordinary
+calendar operation. The following templates are retained as compatibility
+reference, not instructions to enable meeting functionality.
+
+### `DEFAULT_EVENTS_CONFIG`
 
 The `DEFAULT_EVENTS_CONFIG` JSON file contains room and state events that the bot sends into a meeting room when it is created.
 This can be used to e.g. automatically enable certain widgets to the room.
-Note that all `im.vector.modular.widgets` events can also be enabled/disabled later via the [API](./data-model.md#bot-api).
+These are inherited meeting-room templates. The calendar-only server rejects the legacy meeting-management API; see the [legacy data-model reference](./archive/neodate-data-model.md).
 
 The content of the events can be templated using [mustache templates](https://www.npmjs.com/package/mustache).
 The following content is available:
@@ -327,7 +292,7 @@ The following content is available:
 - `encodeURIComponent()`: a function to encode any value to make it URL-safe  
   Usage: `{{#encodeURIComponent}}my-text{{/encodeURIComponent}}`
 
-##### Content
+#### Content
 
 | Field                      | Type      | Description                                   |
 | -------------------------- | --------- | --------------------------------------------- |
@@ -340,7 +305,7 @@ The following content is available:
 | `room_events[].type`       | `string`  | The type of event.                            |
 | `room_events[].content`    | `object`  | The content of the event.                     |
 
-##### Example
+#### Example
 
 ```json
 {
@@ -379,12 +344,12 @@ The following content is available:
 }
 ```
 
-#### `DEFAULT_WIDGET_LAYOUTS_CONFIG`
+### `DEFAULT_WIDGET_LAYOUTS_CONFIG`
 
 The `DEFAULT_WIDGET_LAYOUTS_CONFIG` JSON file contains different widget layout configurations for different widget combinations that are installed into a meeting room.
 It will update the `io.element.widgets.layout` when creating or updating the meeting room.
 
-##### Content
+#### Content
 
 | Field                        | Type       | Description                                                                                                   |
 | ---------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------- |
@@ -396,7 +361,7 @@ It will update the `io.element.widgets.layout` when creating or updating the mee
 | `[].layouts.[key].width`     | `number`   | Percentage (integer) for relative width of the container to consume. The total width should not exceed `100`. |
 | `[].layouts.[key].height`    | `number`   | Percentage (integer) for relative height of the container.                                                    |
 
-##### Example
+#### Example
 
 ```json
 [
@@ -410,7 +375,7 @@ It will update the `io.element.widgets.layout` when creating or updating the mee
         "height": 100
       }
     }
-  }
+  },
   {
     "widgetIds": ["jitsi", "poll"],
     "layouts": {
@@ -431,14 +396,13 @@ It will update the `io.element.widgets.layout` when creating or updating the mee
 ]
 ```
 
-### Customization
+### Legacy Synapse invitation configuration
 
-More environment variables for UI customization [@matrix-widget-toolkit/mui](https://www.npmjs.com/package/@matrix-widget-toolkit/mui#customization).
-
-## Synapse Configuration
-
-The widget requires some specific homeserver configuration changes so it has user
-directory search for all users enabled and the information needed to render invitations properly.
+The inherited meeting/invitation workflow used the settings below for user
+directory search and invitation state. They are **not requirements for the
+calendar widget**. Do not broaden a homeserver's user directory or prejoin
+state merely to run the calendar; review them only when maintaining an
+explicitly retained legacy workflow.
 
 ```yaml
 user_directory:

@@ -1,7 +1,18 @@
 # ADR028: Configure room reminders against canonical calendar alarms
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
 - Status: Accepted
 - Date: 2026-10-03
+
+> **Later implementation (2026-10-21):** These configuration and delivery paths
+> are implemented and remain separately disabled by default. The original
+> appservice/static-binding references below are extended by
+> [ADR041](./adr041-optional-normal-bot-account-for-room-operations.md) for the
+> selected room principal and [ADR043](./adr043-moderator-room-calendar-setup.md)
+> for ready dynamic bindings. Actor, binding, encryption, alarm-source, and
+> delivery-time authorization checks still apply. Current source supports
+> whole-room targets only; see [status](../STATUS.md) for pending extensions.
 
 ## Context
 

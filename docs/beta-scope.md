@@ -1,12 +1,28 @@
 # Controlled beta scope and acceptance
 
-_Status: bounded scope defined; acceptance evidence is not complete._
+[Documentation](./README.md) · [Project status](./STATUS.md) · [Release ledger](./RELEASE.md)
+
+_Scope contract: use the [release ledger](./RELEASE.md) for exact-source results and outstanding operator evidence._
 
 This document defines a controlled beta candidate for later team-server use,
 using the currently implemented product subset. It separates candidate
 readiness from the broader M4, M5, and M8 milestones. Passing these gates does
 not publish an artifact, authorize a live rollout, or establish compatibility
 with a team host, every Matrix client, or every CalDAV resource.
+
+This scope remains distinct from current `main`: moderator-driven room setup
+(ADR043), public calendar feeds (ADR045), and later source work do not become
+part of the older frozen candidate merely because they are merged. Adding a
+capability to a replacement candidate requires its own scoped qualification.
+The frozen candidate's isolated application acceptance is recorded in the
+ledger; target deployment and recovery remain separate.
+
+**On this page**
+
+- [Intended pilot](#intended-pilot)
+- [Supported behavior and limits](#supported-behavior-and-limits)
+- [Required acceptance evidence](#required-acceptance-evidence)
+- [Beta readiness decision](#beta-readiness-decision)
 
 ## Intended pilot
 
@@ -96,8 +112,7 @@ forms the projector diagnoses, the widget shows an affected-event
 compatibility warning; it does not guarantee every unsupported form will be
 diagnosed. The original resource remains in CalDAV. A calendar view with no
 visible warning is not a general-purpose CalDAV export or proof that every
-resource is understood. Beta material and operator handoff must state this
-limit clearly.
+resource is understood. User guidance and deployment records must state this limit clearly.
 
 The beta does not include arbitrary RRULE or recurrence editing, general
 RECURRENCE-ID property editing, collection-timezone editing, broad

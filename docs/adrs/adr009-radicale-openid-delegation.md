@@ -1,5 +1,7 @@
 # ADR009: Delegate Matrix OpenID to Radicale without Matrix passwords
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
 - Status: Accepted
 - Date: 2026-09-23
 
