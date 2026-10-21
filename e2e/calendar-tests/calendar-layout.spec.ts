@@ -288,7 +288,8 @@ test('room manager sees writable event controls at a narrow width', async ({
   await expect(page.getByRole('option')).toHaveCount(1);
   await people.press('ArrowDown');
   await people.press('Enter');
-  await people.press('Escape');
+  await expect(dialog).toBeVisible();
+  await expect(page.getByRole('listbox')).toBeHidden();
   await expect(dialog.locator('.MuiAutocomplete-tag')).toHaveText(['Bob']);
   await dialog
     .getByRole('button', { name: 'Save Matrix destination', exact: true })
