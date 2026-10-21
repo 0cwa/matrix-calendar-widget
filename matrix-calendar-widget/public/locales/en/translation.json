@@ -206,6 +206,7 @@
     "calendar": "Calendar",
     "calendarHelp": "Each app access entry works with one calendar.",
     "capacity": "This calendar has reached its app access limit. Revoke an unused entry and try again.",
+    "cleanupFailed": "App access created for “{{calendar}}” on {{date}} may still be active. Open that calendar’s app access settings and check for an entry created then; revoke it if present.",
     "confirmRevoke": "Revoke access",
     "copied": "Copied",
     "copyFailed": "Copy failed. Select and copy the value above.",
@@ -239,6 +240,7 @@
     "statusLabel": "Status: {{status}}",
     "title": "Calendar app access",
     "unavailable": "Calendar app access is not available on this server.",
+    "unknownCalendar": "the selected calendar",
     "url": "CalDAV URL",
     "username": "Username"
   },

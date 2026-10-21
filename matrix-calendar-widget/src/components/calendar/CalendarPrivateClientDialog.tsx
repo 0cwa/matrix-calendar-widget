@@ -37,7 +37,13 @@ import {
   Typography,
 } from '@mui/material';
 import type { TFunction } from 'i18next';
-import { useCallback, useEffect, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   isCalendarPrivateClientRepository,
@@ -48,6 +54,10 @@ import {
 type CalendarPrivateClientDialogProps = {
   calendars: Calendar[];
   onClose: () => void;
+  onStaleClientCleanupFailed: (details: {
+    calendarName: string;
+    createdAt: string;
+  }) => void;
   open: boolean;
 };
 
@@ -64,6 +74,7 @@ type CopiedCredentialField = 'url' | 'username' | 'password';
 export function CalendarPrivateClientDialog({
   calendars,
   onClose,
+  onStaleClientCleanupFailed,
   open,
 }: CalendarPrivateClientDialogProps) {
   const { t } = useTranslation();
@@ -87,6 +98,7 @@ export function CalendarPrivateClientDialog({
   const [confirmationAppId, setConfirmationAppId] = useState<string>();
   const [copiedField, setCopiedField] = useState<CopiedCredentialField>();
   const [loadAttempt, setLoadAttempt] = useState(0);
+  const operationGeneration = useRef(0);
   const clearOneTimeDetails = useCallback(() => {
     setCreatedClient(undefined);
     setCopiedField(undefined);
@@ -94,6 +106,28 @@ export function CalendarPrivateClientDialog({
   const selectedCalendar = calendars.find(
     (calendar) => calendar.id === calendarId,
   );
+  const selectedCalendarContext = selectedCalendar
+    ? JSON.stringify({
+        id: selectedCalendar.id,
+        name: selectedCalendar.name,
+        operatorManaged: selectedCalendar.operatorManaged,
+        readOnly: selectedCalendar.readOnly,
+      })
+    : '';
+
+  useLayoutEffect(() => {
+    operationGeneration.current += 1;
+    setBusy(false);
+    setLoading(false);
+    setClients(undefined);
+    setError(undefined);
+    setConfirmationAppId(undefined);
+    clearOneTimeDetails();
+
+    return () => {
+      operationGeneration.current += 1;
+    };
+  }, [clearOneTimeDetails, open, repository, selectedCalendarContext]);
 
   useEffect(() => {
     if (!calendars.some((calendar) => calendar.id === calendarId)) {
@@ -103,9 +137,14 @@ export function CalendarPrivateClientDialog({
   }, [calendarId, calendars, clearOneTimeDetails]);
 
   useEffect(() => {
-    if (!open || !clientRepository || !calendarId) return;
+    if (!open || !clientRepository) return;
+    if (!calendarId || !selectedCalendarContext) {
+      setLoading(false);
+      return;
+    }
 
     let current = true;
+    const generation = operationGeneration.current;
     setLoading(true);
     setClients(undefined);
     setError(undefined);
@@ -114,11 +153,13 @@ export function CalendarPrivateClientDialog({
     void clientRepository
       .listPrivateCalendarClients(calendarId)
       .then((result) => {
-        if (current) setClients(result);
+        if (current && operationGeneration.current === generation) {
+          setClients(result);
+        }
         return result;
       })
       .catch((caught: unknown) => {
-        if (current) {
+        if (current && operationGeneration.current === generation) {
           setError(
             caught instanceof CalendarRepositoryError &&
               caught.code === 'capability-unavailable'
@@ -128,15 +169,25 @@ export function CalendarPrivateClientDialog({
         }
       })
       .finally(() => {
-        if (current) setLoading(false);
+        if (current && operationGeneration.current === generation) {
+          setLoading(false);
+        }
       });
 
     return () => {
       current = false;
     };
-  }, [calendarId, clearOneTimeDetails, clientRepository, loadAttempt, open]);
+  }, [
+    calendarId,
+    clearOneTimeDetails,
+    clientRepository,
+    loadAttempt,
+    open,
+    selectedCalendarContext,
+  ]);
 
   const close = () => {
+    operationGeneration.current += 1;
     clearOneTimeDetails();
     setClients(undefined);
     setError(undefined);
@@ -145,6 +196,7 @@ export function CalendarPrivateClientDialog({
   };
 
   const selectCalendar = (nextCalendarId: CalendarId) => {
+    operationGeneration.current += 1;
     clearOneTimeDetails();
     setClients(undefined);
     setError(undefined);
@@ -154,12 +206,40 @@ export function CalendarPrivateClientDialog({
 
   const create = async () => {
     if (!clientRepository || !calendarId || busy) return;
+    const requestGeneration = operationGeneration.current;
+    const requestRepository = clientRepository;
+    const requestCalendarId = calendarId;
+    const requestCalendarName = selectedCalendar?.name ?? '';
     setBusy(true);
     setError(undefined);
     clearOneTimeDetails();
     try {
       const result =
-        await clientRepository.createPrivateCalendarClient(calendarId);
+        await requestRepository.createPrivateCalendarClient(requestCalendarId);
+      if (operationGeneration.current !== requestGeneration) {
+        try {
+          const revoked = await requestRepository.revokePrivateCalendarClient(
+            result.client.appId,
+          );
+          if (
+            revoked.appId !== result.client.appId ||
+            revoked.state !== 'revoked'
+          ) {
+            throw new Error('Stale app access cleanup was not confirmed');
+          }
+        } catch {
+          onStaleClientCleanupFailed?.({
+            calendarName:
+              requestCalendarName ||
+              t(
+                'calendarPrivateClient.unknownCalendar',
+                'the selected calendar',
+              ),
+            createdAt: formatPrivateClientDate(result.client.createdAt),
+          });
+        }
+        return;
+      }
       setClients((current) =>
         current
           ? [
@@ -174,37 +254,52 @@ export function CalendarPrivateClientDialog({
         password: result.secret,
       });
     } catch (caught) {
-      setError(privateClientError(caught, 'create'));
+      if (operationGeneration.current === requestGeneration) {
+        setError(privateClientError(caught, 'create'));
+      }
     } finally {
-      setBusy(false);
+      if (operationGeneration.current === requestGeneration) {
+        setBusy(false);
+      }
     }
   };
 
   const revoke = async (appId: string) => {
     if (!clientRepository || busy) return;
+    const requestGeneration = operationGeneration.current;
+    const requestRepository = clientRepository;
     setBusy(true);
     setError(undefined);
     try {
-      const revoked = await clientRepository.revokePrivateCalendarClient(appId);
+      const revoked =
+        await requestRepository.revokePrivateCalendarClient(appId);
       if (revoked.appId !== appId)
         throw new Error('Unexpected access identity');
+      if (operationGeneration.current !== requestGeneration) return;
       setClients((current) =>
         current?.map((client) => (client.appId === appId ? revoked : client)),
       );
       setConfirmationAppId(undefined);
     } catch (caught) {
-      setError(privateClientError(caught, 'revoke'));
+      if (operationGeneration.current === requestGeneration) {
+        setError(privateClientError(caught, 'revoke'));
+      }
     } finally {
-      setBusy(false);
+      if (operationGeneration.current === requestGeneration) {
+        setBusy(false);
+      }
     }
   };
 
   const copy = async (field: CopiedCredentialField, value: string) => {
+    const requestGeneration = operationGeneration.current;
     try {
       await navigator.clipboard.writeText(value);
+      if (operationGeneration.current !== requestGeneration) return;
       setCopiedField(field);
       setError(undefined);
     } catch {
+      if (operationGeneration.current !== requestGeneration) return;
       setCopiedField(undefined);
       setError('copy');
     }

@@ -19,7 +19,13 @@ import {
   CalendarRepository,
   InMemoryCalendarRepository,
 } from '@matrix-calendar-widget/calendar';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import { useState } from 'react';
 import { CalendarRepositoryProvider } from '../../calendar';
 import { CalendarPrivateClientDialog } from './CalendarPrivateClientDialog';
@@ -42,9 +48,14 @@ function createWrapper(repository: CalendarRepository) {
 function ControlledDialog({
   calendars: dialogCalendars = calendars,
   onClose = vi.fn(),
+  onStaleClientCleanupFailed = vi.fn(),
 }: {
   calendars?: Calendar[];
   onClose?: () => void;
+  onStaleClientCleanupFailed?: (details: {
+    calendarName: string;
+    createdAt: string;
+  }) => void;
 }) {
   const [open, setOpen] = useState(true);
   return (
@@ -60,9 +71,31 @@ function ControlledDialog({
           onClose();
           setOpen(false);
         }}
+        onStaleClientCleanupFailed={onStaleClientCleanupFailed}
         open={open}
       />
     </>
+  );
+}
+
+function contextualDialog(
+  repository: CalendarRepository,
+  dialogCalendars: Calendar[],
+  open: boolean,
+  onStaleClientCleanupFailed?: (details: {
+    calendarName: string;
+    createdAt: string;
+  }) => void,
+) {
+  return (
+    <CalendarRepositoryProvider repository={repository}>
+      <CalendarPrivateClientDialog
+        calendars={dialogCalendars}
+        onClose={vi.fn()}
+        onStaleClientCleanupFailed={onStaleClientCleanupFailed ?? vi.fn()}
+        open={open}
+      />
+    </CalendarRepositoryProvider>
   );
 }
 
@@ -193,6 +226,192 @@ describe('<CalendarPrivateClientDialog />', () => {
     ).toBeNull();
     expect(revokeClient).toHaveBeenCalledTimes(2);
   });
+
+  it('revokes a late create through its original repository and reports nonsecret recovery if cleanup fails', async () => {
+    const appId = `mcwpc~${'e'.repeat(48)}`;
+    const secret = 'late-secret-that-must-not-be-shown';
+    const createRequest = deferred<{
+      client: ReturnType<typeof activeClient>;
+      secret: string;
+      calendarUrl: string;
+    }>();
+    const onStaleClientCleanupFailed = vi.fn();
+    const listClients = vi.fn().mockResolvedValue([]);
+    const createClient = vi.fn().mockReturnValue(createRequest.promise);
+    const revokeClient = vi
+      .fn()
+      .mockRejectedValue(new Error('private URL and credential details'));
+    const repository = Object.assign(
+      new InMemoryCalendarRepository({ calendars }),
+      {
+        listPrivateCalendarClients: listClients,
+        createPrivateCalendarClient: createClient,
+        revokePrivateCalendarClient: revokeClient,
+      },
+    );
+
+    const view = render(
+      contextualDialog(
+        repository,
+        [calendars[0], calendars[1]],
+        true,
+        onStaleClientCleanupFailed,
+      ),
+    );
+    expect(
+      await screen.findByText(/No calendar app access has been created/),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Create app access' }));
+    expect(createClient).toHaveBeenCalledWith('personal-one');
+
+    view.rerender(
+      contextualDialog(
+        repository,
+        [calendars[1]],
+        true,
+        onStaleClientCleanupFailed,
+      ),
+    );
+    await waitFor(() => {
+      expect(listClients).toHaveBeenCalledWith('personal-two');
+    });
+
+    await act(async () => {
+      createRequest.resolve({
+        client: activeClient(appId, 'personal-one'),
+        secret,
+        calendarUrl: `https://widget-api.example.test/${appId}/calendar/`,
+      });
+      await createRequest.promise;
+    });
+
+    await waitFor(() => expect(revokeClient).toHaveBeenCalledWith(appId));
+    expect(onStaleClientCleanupFailed).toHaveBeenCalledWith(
+      expect.objectContaining({ calendarName: 'Personal calendar' }),
+    );
+    expect(screen.queryByDisplayValue(secret)).not.toBeInTheDocument();
+    expect(screen.queryByText(secret)).not.toBeInTheDocument();
+    expect(screen.queryByText(appId)).not.toBeInTheDocument();
+    expect(
+      screen.queryByDisplayValue(
+        `https://widget-api.example.test/${appId}/calendar/`,
+      ),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('private URL and credential details'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('cleans up a create from the original repository after repository change and close/reopen', async () => {
+    const appId = `mcwpc~${'f'.repeat(48)}`;
+    const secret = 'late-reopened-secret';
+    const createRequest = deferred<{
+      client: ReturnType<typeof activeClient>;
+      secret: string;
+      calendarUrl: string;
+    }>();
+    const revokeOriginal = vi.fn().mockResolvedValue({
+      ...activeClient(appId, 'personal-one'),
+      state: 'revoked',
+      mapState: 'removed',
+    });
+    const originalRepository = Object.assign(
+      new InMemoryCalendarRepository({ calendars }),
+      {
+        listPrivateCalendarClients: vi.fn().mockResolvedValue([]),
+        createPrivateCalendarClient: vi
+          .fn()
+          .mockReturnValue(createRequest.promise),
+        revokePrivateCalendarClient: revokeOriginal,
+      },
+    );
+    const revokeCurrent = vi.fn();
+    const currentRepository = Object.assign(
+      new InMemoryCalendarRepository({ calendars }),
+      {
+        listPrivateCalendarClients: vi.fn().mockResolvedValue([]),
+        createPrivateCalendarClient: vi.fn(),
+        revokePrivateCalendarClient: revokeCurrent,
+      },
+    );
+
+    const view = render(
+      contextualDialog(originalRepository, [calendars[0]], true),
+    );
+    expect(
+      await screen.findByText(/No calendar app access has been created/),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Create app access' }));
+
+    view.rerender(contextualDialog(currentRepository, [calendars[0]], false));
+    view.rerender(contextualDialog(currentRepository, [calendars[0]], true));
+    expect(
+      await screen.findByText(/No calendar app access has been created/),
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      createRequest.resolve({
+        client: activeClient(appId, 'personal-one'),
+        secret,
+        calendarUrl: `https://widget-api.example.test/${appId}/calendar/`,
+      });
+      await createRequest.promise;
+    });
+
+    await waitFor(() => expect(revokeOriginal).toHaveBeenCalledWith(appId));
+    expect(revokeCurrent).not.toHaveBeenCalled();
+    expect(screen.queryByDisplayValue(secret)).not.toBeInTheDocument();
+    expect(screen.queryByText(secret)).not.toBeInTheDocument();
+    expect(screen.queryByText(appId)).not.toBeInTheDocument();
+  });
+
+  it('ignores a create error returned after the dialog context changes', async () => {
+    const createRequest = deferred<{
+      client: ReturnType<typeof activeClient>;
+      secret: string;
+      calendarUrl: string;
+    }>();
+    const listClients = vi.fn().mockResolvedValue([]);
+    const repository = Object.assign(
+      new InMemoryCalendarRepository({ calendars }),
+      {
+        listPrivateCalendarClients: listClients,
+        createPrivateCalendarClient: vi
+          .fn()
+          .mockReturnValue(createRequest.promise),
+        revokePrivateCalendarClient: vi.fn(),
+      },
+    );
+
+    const view = render(contextualDialog(repository, [calendars[0]], true));
+    expect(
+      await screen.findByText(/No calendar app access has been created/),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Create app access' }));
+
+    view.rerender(contextualDialog(repository, [calendars[0]], false));
+    view.rerender(contextualDialog(repository, [calendars[0]], true));
+    expect(
+      await screen.findByText(/No calendar app access has been created/),
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      createRequest.reject(new Error('stale private path and credential'));
+      await createRequest.promise.catch(() => undefined);
+    });
+
+    expect(
+      screen.queryByText(
+        'Could not create app access. Check your permissions and try again.',
+      ),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('stale private path and credential'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/No calendar app access has been created/),
+    ).toBeInTheDocument();
+  });
 });
 
 function activeClient(appId: string, calendarId: string) {
@@ -204,4 +423,14 @@ function activeClient(appId: string, calendarId: string) {
     createdAt: '2026-10-21T10:00:00.000Z',
     expiresAt: '2027-01-19T10:00:00.000Z',
   };
+}
+
+function deferred<T>() {
+  let resolveDeferred!: (value: T) => void;
+  let rejectDeferred!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolve, reject) => {
+    resolveDeferred = resolve;
+    rejectDeferred = reject;
+  });
+  return { promise, resolve: resolveDeferred, reject: rejectDeferred };
 }

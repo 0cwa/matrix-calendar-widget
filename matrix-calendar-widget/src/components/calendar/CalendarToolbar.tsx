@@ -17,8 +17,16 @@
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
-import { Box, Button, Stack, useMediaQuery, useTheme } from '@mui/material';
-import { useState } from 'react';
+import {
+  Alert,
+  Box,
+  Button,
+  Snackbar,
+  Stack,
+  useMediaQuery,
+  useTheme,
+} from '@mui/material';
+import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   CalendarFilters,
@@ -48,6 +56,11 @@ type CalendarToolbarProps = {
   onViewChange: (view: CalendarSurfaceView) => void;
 };
 
+type StalePrivateClientRecovery = {
+  calendarName: string;
+  createdAt: string;
+};
+
 export function CalendarToolbar({
   filters,
   view,
@@ -72,6 +85,18 @@ export function CalendarToolbar({
   const [colorOpen, setColorOpen] = useState(false);
   const [publicFeedOpen, setPublicFeedOpen] = useState(false);
   const [privateClientOpen, setPrivateClientOpen] = useState(false);
+  const [privateClientRecovery, setPrivateClientRecovery] = useState<
+    StalePrivateClientRecovery[]
+  >([]);
+  const reportPrivateClientRecovery = useCallback(
+    (details: StalePrivateClientRecovery) => {
+      setPrivateClientRecovery((current) => [...current, details]);
+    },
+    [],
+  );
+  const dismissPrivateClientRecovery = () => {
+    setPrivateClientRecovery((current) => current.slice(1));
+  };
   const writableCalendars = calendars.data.filter(
     (calendar) => calendar.readOnly === false,
   );
@@ -241,9 +266,27 @@ export function CalendarToolbar({
         <CalendarPrivateClientDialog
           calendars={calendars.data}
           onClose={() => setPrivateClientOpen(false)}
+          onStaleClientCleanupFailed={reportPrivateClientRecovery}
           open={privateClientOpen}
         />
       )}
+
+      <Snackbar
+        anchorOrigin={{ horizontal: 'center', vertical: 'bottom' }}
+        onClose={(_, reason) => {
+          if (reason !== 'clickaway') dismissPrivateClientRecovery();
+        }}
+        open={privateClientRecovery.length > 0}
+      >
+        <Alert onClose={dismissPrivateClientRecovery} severity="warning">
+          {t('calendarPrivateClient.cleanupFailed', {
+            calendar: privateClientRecovery[0]?.calendarName ?? '',
+            date: privateClientRecovery[0]?.createdAt ?? '',
+            defaultValue:
+              'App access created for “{{calendar}}” on {{date}} may still be active. Open that calendar’s app access settings and check for an entry created then; revoke it if present.',
+          })}
+        </Alert>
+      </Snackbar>
 
       <CalendarEventEditorDialog
         calendars={calendars.data}

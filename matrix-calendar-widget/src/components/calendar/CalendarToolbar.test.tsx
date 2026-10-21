@@ -16,17 +16,19 @@
 
 import {
   Calendar,
+  CalendarRepository,
   CalendarRepositoryError,
   InMemoryCalendarRepository,
 } from '@matrix-calendar-widget/calendar';
 import {
+  act,
   fireEvent,
   render,
   screen,
   waitFor,
   within,
 } from '@testing-library/react';
-import { PropsWithChildren } from 'react';
+import { PropsWithChildren, useState } from 'react';
 import { CalendarRepositoryProvider } from '../../calendar';
 import { CalendarToolbar } from './CalendarToolbar';
 
@@ -62,6 +64,35 @@ function createWrapper(repository: InMemoryCalendarRepository) {
       </CalendarRepositoryProvider>
     );
   };
+}
+
+function ContextSwitchingToolbar({
+  initialRepository,
+  nextRepository,
+}: {
+  initialRepository: CalendarRepository;
+  nextRepository: CalendarRepository;
+}) {
+  const [repository, setRepository] = useState(initialRepository);
+  return (
+    <>
+      <button onClick={() => setRepository(nextRepository)} type="button">
+        Switch repository context
+      </button>
+      <CalendarRepositoryProvider repository={repository}>
+        <CalendarToolbar
+          filters={{
+            startDate: '2026-09-01T00:00:00Z',
+            endDate: '2026-10-01T00:00:00Z',
+          }}
+          onRangeChange={vi.fn()}
+          onSearchChange={vi.fn()}
+          onViewChange={vi.fn()}
+          view="month"
+        />
+      </CalendarRepositoryProvider>
+    </>
+  );
 }
 
 describe('<CalendarToolbar />', () => {
@@ -113,6 +144,110 @@ describe('<CalendarToolbar />', () => {
     expect(
       screen.queryByRole('button', { name: 'Create app access' }),
     ).toBeNull();
+  });
+
+  it('shows a nonsecret recovery warning when stale creation cleanup fails after a repository switch', async () => {
+    const appId = `mcwpc~${'e'.repeat(48)}`;
+    const secret = 'stale-secret-hidden-from-current-context';
+    let resolveCreate!: (value: {
+      client: {
+        appId: string;
+        target: { target: 'personal'; calendarId: string };
+        state: 'active';
+        mapState: 'present';
+        createdAt: string;
+        expiresAt: string;
+      };
+      secret: string;
+      calendarUrl: string;
+    }) => void;
+    const createRequest = new Promise<{
+      client: {
+        appId: string;
+        target: { target: 'personal'; calendarId: string };
+        state: 'active';
+        mapState: 'present';
+        createdAt: string;
+        expiresAt: string;
+      };
+      secret: string;
+      calendarUrl: string;
+    }>((resolve) => {
+      resolveCreate = resolve;
+    });
+    const revokeOriginal = vi
+      .fn()
+      .mockRejectedValue(new Error('radicale.internal secret credential'));
+    const listOriginal = vi.fn().mockResolvedValue([]);
+    const originalRepository = Object.assign(
+      new InMemoryCalendarRepository({ calendars }),
+      {
+        listPrivateCalendarClients: listOriginal,
+        createPrivateCalendarClient: vi.fn().mockReturnValue(createRequest),
+        revokePrivateCalendarClient: revokeOriginal,
+      },
+    );
+    const revokeCurrent = vi.fn();
+    const listCurrent = vi.fn().mockResolvedValue([]);
+    const currentRepository = Object.assign(
+      new InMemoryCalendarRepository({ calendars }),
+      {
+        listPrivateCalendarClients: listCurrent,
+        createPrivateCalendarClient: vi.fn(),
+        revokePrivateCalendarClient: revokeCurrent,
+      },
+    );
+
+    render(
+      <ContextSwitchingToolbar
+        initialRepository={originalRepository}
+        nextRepository={currentRepository}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Calendar app access' }),
+    );
+    expect(
+      await screen.findByText(/No calendar app access has been created/),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Create app access' }));
+    expect(listOriginal).toHaveBeenCalledWith('writable');
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        hidden: true,
+        name: 'Switch repository context',
+      }),
+    );
+    await waitFor(() => expect(listCurrent).toHaveBeenCalledWith('writable'));
+
+    await act(async () => {
+      resolveCreate({
+        client: {
+          appId,
+          target: { target: 'personal', calendarId: 'writable' },
+          state: 'active',
+          mapState: 'present',
+          createdAt: '2026-10-21T10:00:00.000Z',
+          expiresAt: '2027-01-19T10:00:00.000Z',
+        },
+        secret,
+        calendarUrl: `https://widget-api.example.test/${appId}/calendar/`,
+      });
+      await createRequest;
+    });
+
+    expect(
+      await screen.findByText(/App access created for “Writable calendar”/),
+    ).toHaveTextContent(/may still be active/);
+    expect(revokeOriginal).toHaveBeenCalledWith(appId);
+    expect(revokeCurrent).not.toHaveBeenCalled();
+    expect(screen.queryByText(secret)).not.toBeInTheDocument();
+    expect(screen.queryByText(appId)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('radicale.internal secret credential'),
+    ).not.toBeInTheDocument();
   });
 
   it('requires public link consent before publishing and offers a standard subscribe URL', async () => {

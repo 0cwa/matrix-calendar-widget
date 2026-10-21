@@ -206,6 +206,7 @@
     "calendar": "Kalender",
     "calendarHelp": "Jeder App-Zugriff gilt für einen Kalender.",
     "capacity": "Dieser Kalender hat die Höchstzahl an App-Zugriffen erreicht. Widerrufe einen nicht mehr verwendeten Zugang und versuche es erneut.",
+    "cleanupFailed": "Der am {{date}} für „{{calendar}}“ erstellte App-Zugriff ist möglicherweise noch aktiv. Öffne die App-Zugriffseinstellungen dieses Kalenders, prüfe den Eintrag mit diesem Erstellungsdatum und widerrufe ihn, falls er noch vorhanden ist.",
     "confirmRevoke": "Zugriff widerrufen",
     "copied": "Kopiert",
     "copyFailed": "Kopieren fehlgeschlagen. Markiere und kopiere den Wert oben.",
@@ -239,6 +240,7 @@
     "statusLabel": "Status: {{status}}",
     "title": "Kalender-App-Zugriff",
     "unavailable": "Kalender-App-Zugriff ist auf diesem Server nicht verfügbar.",
+    "unknownCalendar": "der ausgewählte Kalender",
     "url": "CalDAV-URL",
     "username": "Benutzername"
   },
