@@ -222,7 +222,7 @@ const galleryEvents: CalendarEvent[] = [
     location: 'Video call',
     description: 'Share project updates with contributors.',
   },
-].map(({ id, title, day, start, end, location, description }) => ({
+].map(({ id, title, day, start, end, location, description }): CalendarEvent => ({
   id: 'gallery-' + id,
   uid: 'gallery-' + id + '@example.test',
   calendarId: galleryCalendar.id,
