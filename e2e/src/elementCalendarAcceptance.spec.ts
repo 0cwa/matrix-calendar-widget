@@ -126,6 +126,7 @@ type ReminderRecipient = 'room' | 'selected';
 type ReminderPlan = Readonly<{
   recipient: ReminderRecipient;
   allDay: boolean;
+  allDayEventDate?: string;
   allDaySchedule?: Readonly<{
     daysBefore: number;
     localTime: string;
@@ -5155,16 +5156,9 @@ async function createAndConfigureReminder(
   const eventEndDate = eventStartDate
     ? addCalendarDays(eventStartDate, 1)
     : undefined;
-  const markerSchedule = markerPlan.allDay
-    ? {
-        daysBefore: 1,
-        localTime: startValue.slice(11, 16),
-        timezone: REMINDER_ALL_DAY_TIMEZONE,
-      }
-    : undefined;
   const completePlan: ReminderPlan = {
     ...markerPlan,
-    ...(markerSchedule ? { allDaySchedule: markerSchedule } : {}),
+    ...(eventStartDate ? { allDayEventDate: eventStartDate } : {}),
   };
   await editor.getByRole('combobox', { name: 'Calendar' }).selectOption({
     value: `matrix-calendar-target://room/${encodeURIComponent(fixture.calendarId)}`,
@@ -5233,12 +5227,17 @@ async function createAndConfigureReminder(
   record(activePhase, 'passed', undefined, 1, { relativeAlarmReadback: true });
 
   activePhase = 'reminder-room-configuration-enabled';
-  await setRoomReminder(frame, page, title, completePlan);
+  const reminderConfiguration = await setRoomReminder(
+    frame,
+    page,
+    title,
+    completePlan,
+  );
 
   const titles = readReminderEventTitles();
   titles.push(title);
   writeReminderEventTitles(titles);
-  return dueAt;
+  return markerPlan.allDay ? reminderConfiguration.dueAt! : dueAt;
 }
 
 function addCalendarDays(date: string, days: number): string {
@@ -5341,7 +5340,11 @@ async function setRoomReminder(
   page: Page,
   title: string,
   plan: ReminderPlan,
-): Promise<{ enabled: boolean; httpStatus: number | null }> {
+): Promise<{
+  enabled: boolean;
+  httpStatus: number | null;
+  dueAt?: number;
+}> {
   const row = frame.getByRole('listitem', { name: title });
   const details = frame.getByRole('dialog').last();
   const observation: ReminderConfigurationObservation = {
@@ -5362,6 +5365,8 @@ async function setRoomReminder(
     reminderPutCount: 0,
     reminderPutStatus: 0,
   };
+  let effectivePlan = plan;
+  let dueAt: number | undefined;
   const roomPath = `/v1/calendar/rooms/${fixture.teamRoomId}/reminders`;
   const gatewayOrigin = new URL(fixture.gatewayUrl).origin;
   const classifyRequest = (urlValue: string, method: string) => {
@@ -5413,13 +5418,15 @@ async function setRoomReminder(
             target.userIds[0] === fixture.users.memberB.userId;
         }
         const allDaySchedule = isRecord(body) ? body.allDaySchedule : undefined;
-        if (plan.allDay) {
+        if (effectivePlan.allDay) {
           observation.allDayScheduleMatches =
-            Boolean(plan.allDaySchedule) &&
+            Boolean(effectivePlan.allDaySchedule) &&
             isRecord(allDaySchedule) &&
-            allDaySchedule.daysBefore === plan.allDaySchedule?.daysBefore &&
-            allDaySchedule.localTime === plan.allDaySchedule?.localTime &&
-            allDaySchedule.timezone === plan.allDaySchedule?.timezone;
+            allDaySchedule.daysBefore ===
+              effectivePlan.allDaySchedule?.daysBefore &&
+            allDaySchedule.localTime ===
+              effectivePlan.allDaySchedule?.localTime &&
+            allDaySchedule.timezone === effectivePlan.allDaySchedule?.timezone;
         } else {
           observation.allDayScheduleMatches = allDaySchedule === null;
         }
@@ -5539,16 +5546,32 @@ async function setRoomReminder(
       observation.selectedMemberKeyboardFlow = selectedMemberKeyboardFlow;
     }
 
-    if (plan.allDay && plan.allDaySchedule) {
+    if (plan.allDay && plan.allDayEventDate) {
+      dueAt =
+        Math.ceil((Date.now() + REMINDER_START_LEAD_MS) / 60_000) * 60_000;
+      const scheduleValue = localDateTimeInput(
+        dueAt,
+        REMINDER_ALL_DAY_TIMEZONE,
+      );
+      const schedule = {
+        daysBefore: 1,
+        localTime: scheduleValue.slice(11, 16),
+        timezone: REMINDER_ALL_DAY_TIMEZONE,
+      };
+      if (
+        addCalendarDays(plan.allDayEventDate, -schedule.daysBefore) !==
+        scheduleValue.slice(0, 10)
+      ) {
+        throw new Error('All-day reminder schedule date is no longer future');
+      }
+      effectivePlan = { ...plan, allDaySchedule: schedule };
       await details
         .getByRole('spinbutton', { name: 'Days before event' })
-        .fill(String(plan.allDaySchedule.daysBefore));
-      await details
-        .getByLabel('Local time')
-        .fill(plan.allDaySchedule.localTime);
+        .fill(String(schedule.daysBefore));
+      await details.getByLabel('Local time').fill(schedule.localTime);
       await details
         .getByRole('textbox', { name: 'Time zone (IANA)' })
-        .fill(plan.allDaySchedule.timezone);
+        .fill(schedule.timezone);
     }
 
     observation.reminderStep = 'put-response';
@@ -5596,15 +5619,15 @@ async function setRoomReminder(
         )
         .isVisible()
         .catch(() => false));
-    const savedScheduleMatches = plan.allDay
+    const savedScheduleMatches = effectivePlan.allDay
       ? (await details
           .getByRole('spinbutton', { name: 'Days before event' })
-          .inputValue()) === String(plan.allDaySchedule?.daysBefore) &&
+          .inputValue()) === String(effectivePlan.allDaySchedule?.daysBefore) &&
         (await details.getByLabel('Local time').inputValue()) ===
-          plan.allDaySchedule?.localTime &&
+          effectivePlan.allDaySchedule?.localTime &&
         (await details
           .getByRole('textbox', { name: 'Time zone (IANA)' })
-          .inputValue()) === plan.allDaySchedule?.timezone
+          .inputValue()) === effectivePlan.allDaySchedule?.timezone
       : true;
     observation.reminderTargetMatches &&= savedTargetMatches;
     observation.allDayScheduleMatches &&= savedScheduleMatches;
@@ -5621,7 +5644,11 @@ async function setRoomReminder(
       ...observation,
       reminderEnabled: true,
     });
-    return { enabled: true, httpStatus: observation.reminderPutStatus };
+    return {
+      enabled: true,
+      httpStatus: observation.reminderPutStatus,
+      ...(dueAt === undefined ? {} : { dueAt }),
+    };
   } catch {
     if (!activeReminderFailureRecorded) await writeFailure();
     throw new Error('Room reminder configuration could not be confirmed');
