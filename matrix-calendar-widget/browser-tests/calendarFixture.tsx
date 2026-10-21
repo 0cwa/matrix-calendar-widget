@@ -350,7 +350,7 @@ function CalendarFixture({
                 <Button onClick={() => setView('list')}>List</Button>
                 <Button onClick={() => setView('month')}>Month</Button>
               </Stack>
-            )
+            )}
             <CalendarToolbar
               filters={filters}
               onRangeChange={(startDate, endDate) =>
