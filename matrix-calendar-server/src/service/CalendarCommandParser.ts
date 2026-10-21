@@ -39,6 +39,7 @@ export type CalendarCommandRequest =
       kind: 'upcoming';
       count: number;
       timeZone: string;
+      includeIds: boolean;
     }
   | {
       kind: 'event';
@@ -241,8 +242,18 @@ function parseUpcoming(tokens: CommandToken[]): CalendarCommandRequest {
     optionStart = 1;
   }
 
-  const { timeZone } = parseTimeZoneOption(tokens.slice(optionStart));
-  return { kind: 'upcoming', count, timeZone };
+  const timeZoneTokens: CommandToken[] = [];
+  let includeIds = false;
+  for (const token of tokens.slice(optionStart)) {
+    if (token.value === '--ids' && !token.quoted && !includeIds) {
+      includeIds = true;
+    } else {
+      timeZoneTokens.push(token);
+    }
+  }
+
+  const { timeZone } = parseTimeZoneOption(timeZoneTokens);
+  return { kind: 'upcoming', count, timeZone, includeIds };
 }
 
 function parseEvent(tokens: CommandToken[]): CalendarCommandRequest {

@@ -1044,6 +1044,16 @@ room access, event writes, or reminders.
       missing widget reports a localized `widget-installed` reply. This is
       automated source-contract evidence; it does not establish a human
       pilot-room, Element/browser, or production/operator acceptance.
+
+- [x] Implement the source slice for [issue #382](https://github.com/0cwa/matrix-calendar-widget/issues/382).
+      Upcoming bot replies put the title first, use localized dates and times
+      with an explicit timezone for timed events, show inclusive all-day ranges,
+      and hide resource IDs unless `--ids` is requested.
+      Keep the canonical `.ics` ID available for event and delete commands,
+      include it after details in explicit event replies, and escape Matrix
+      formatted HTML while preserving equivalent plain text. Focused parser,
+      formatter, and command-delivery tests cover the output; human pilot-room
+      acceptance remains a separate open item below.
 - [ ] Validate the empty-room guidance for unconfigured and configured rooms,
       and test multiple distinct room bindings while preserving cross-room
       authorization.

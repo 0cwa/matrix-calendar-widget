@@ -32,6 +32,7 @@ export interface CalendarCommandEventLabels {
   description: string;
   untitled: string;
   timeUnavailable: string;
+  allDay: string;
 }
 
 /** Keep untrusted CalDAV text to one plain, direction-safe Matrix line. */
@@ -78,6 +79,8 @@ export function formatCalendarEventWhen(
   timing: CalendarEventTiming,
   timeZone: string,
   unavailable: string,
+  locale = 'en',
+  allDayLabel = 'All day',
 ): string {
   if (timing.type === 'all-day') {
     const start = DateTime.fromISO(timing.startDate, { zone: 'UTC' });
@@ -87,9 +90,14 @@ export function formatCalendarEventWhen(
     }
 
     const lastDay = end.minus({ days: 1 });
+    const formattedStart = formatLocalizedDate(start.toJSDate(), locale, 'UTC');
+    const formattedEnd = formatLocalizedDate(lastDay.toJSDate(), locale, 'UTC');
+    if (!formattedStart || !formattedEnd) {
+      return unavailable;
+    }
     return start.hasSame(lastDay, 'day')
-      ? (start.toISODate() ?? unavailable)
-      : `${start.toISODate()} – ${lastDay.toISODate()}`;
+      ? `${allDayLabel} · ${formattedStart}`
+      : `${allDayLabel} · ${formattedStart} – ${formattedEnd}`;
   }
 
   const start = calendarEventTimedDateTimeToDateTime(timing.start, timeZone);
@@ -98,11 +106,39 @@ export function formatCalendarEventWhen(
     return unavailable;
   }
 
-  const formattedStart = start.toFormat('yyyy-LL-dd HH:mm');
-  const formattedEnd = end.hasSame(start, 'day')
-    ? end.toFormat('HH:mm')
-    : end.toFormat('yyyy-LL-dd HH:mm');
-  return `${formattedStart} – ${formattedEnd}`;
+  const formattedStartDate = formatLocalizedDate(
+    start.toJSDate(),
+    locale,
+    timeZone,
+  );
+  const formattedEndDate = formatLocalizedDate(
+    end.toJSDate(),
+    locale,
+    timeZone,
+  );
+  const formattedStartTime = formatLocalizedTime(
+    start.toJSDate(),
+    locale,
+    timeZone,
+  );
+  const formattedEndTime = formatLocalizedTime(
+    end.toJSDate(),
+    locale,
+    timeZone,
+  );
+  if (
+    !formattedStartDate ||
+    !formattedEndDate ||
+    !formattedStartTime ||
+    !formattedEndTime
+  ) {
+    return unavailable;
+  }
+
+  const interval = start.hasSame(end, 'day')
+    ? `${formattedStartDate} · ${formattedStartTime}–${formattedEndTime}`
+    : `${formattedStartDate}, ${formattedStartTime} – ${formattedEndDate}, ${formattedEndTime}`;
+  return `${interval} (${timeZone})`;
 }
 
 export function formatCalendarEventDetails(
@@ -110,9 +146,9 @@ export function formatCalendarEventDetails(
   resourceId: string,
   timeZone: string,
   labels: CalendarCommandEventLabels,
+  locale = 'en',
 ): string {
   const lines = [
-    `${labels.id}: ${resourceId}`,
     `${labels.title}: ${sanitizeCalendarDisplayText(
       event.title,
       MAX_CALENDAR_EVENT_TITLE_LENGTH,
@@ -122,6 +158,8 @@ export function formatCalendarEventDetails(
       event.timing,
       timeZone,
       labels.timeUnavailable,
+      locale,
+      labels.allDay,
     )}`,
   ];
   const description = sanitizeCalendarDisplayText(
@@ -132,6 +170,7 @@ export function formatCalendarEventDetails(
   if (description) {
     lines.push(`${labels.description}: ${description}`);
   }
+  lines.push(`${labels.id}: ${resourceId}`);
   return lines.join('\n');
 }
 
@@ -139,7 +178,12 @@ export function formatCalendarEventOccurrence(
   event: CalendarEvent,
   resourceId: string,
   timeZone: string,
-  labels: Pick<CalendarCommandEventLabels, 'untitled' | 'timeUnavailable'>,
+  labels: Pick<
+    CalendarCommandEventLabels,
+    'id' | 'untitled' | 'timeUnavailable' | 'allDay'
+  >,
+  locale = 'en',
+  includeResourceId = false,
 ): string {
   const title = sanitizeCalendarDisplayText(
     event.title,
@@ -150,6 +194,54 @@ export function formatCalendarEventOccurrence(
     event.timing,
     timeZone,
     labels.timeUnavailable,
+    locale,
+    labels.allDay,
   );
-  return `${resourceId} — ${when} — ${title}`;
+  return [
+    title,
+    `  ${when}`,
+    ...(includeResourceId ? [`  ${labels.id}: ${resourceId}`] : []),
+  ].join('\n');
+}
+
+function formatLocalizedDate(
+  value: Date,
+  locale: string,
+  timeZone: string,
+): string | undefined {
+  return formatLocalizedValue(value, locale, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone,
+  });
+}
+
+function formatLocalizedTime(
+  value: Date,
+  locale: string,
+  timeZone: string,
+): string | undefined {
+  return formatLocalizedValue(value, locale, {
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone,
+  });
+}
+
+function formatLocalizedValue(
+  value: Date,
+  locale: string,
+  options: Intl.DateTimeFormatOptions,
+): string | undefined {
+  try {
+    return new Intl.DateTimeFormat(locale, options).format(value);
+  } catch {
+    try {
+      return new Intl.DateTimeFormat('en', options).format(value);
+    } catch {
+      return undefined;
+    }
+  }
 }

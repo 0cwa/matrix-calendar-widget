@@ -25,6 +25,7 @@ import { IRoomEvent } from '../matrix/event/IRoomEvent';
 import { StateEventName } from '../model/StateEventName';
 import {
   formatCalendarCommandHelp,
+  formatCalendarCommandReply,
   type CalendarCommandHelp,
 } from './CalendarCommandHelp';
 import { CalendarCommandService } from './CalendarCommandService';
@@ -233,6 +234,7 @@ export class CommandService {
      * t('calendarCommandReplies.descriptionLabel')
      * t('calendarCommandReplies.untitled')
      * t('calendarCommandReplies.timeUnavailable')
+     * t('calendarCommandReplies.allDay')
      */
     const text = await this.calendarCommandService.execute(
       roomId,
@@ -240,8 +242,14 @@ export class CommandService {
       commandText,
       (key, parameters) =>
         i18next.t(key, { lng, ...parameters }) as unknown as string,
+      lng,
     );
-    await this.sendCalendarReply(roomId, event, text);
+    await this.sendCalendarReply(
+      roomId,
+      event,
+      text,
+      text.includes('\n') ? formatCalendarCommandReply(text) : undefined,
+    );
   }
 
   private async processCommand(
@@ -380,8 +388,9 @@ export class CommandService {
   ): Promise<void> {
     // The room can become encrypted while CalDAV work is in flight. Recheck
     // current state immediately before sending and keep the SDK's encryption-
-    // aware path with explicit empty mention metadata. Help may add Matrix's
-    // formatted-body companion; the plain body remains the fallback.
+    // aware path with explicit empty mention metadata. Calendar command text
+    // may add Matrix's escaped formatted-body companion; plain text remains
+    // the equivalent fallback.
     if (!(await this.isCalendarRoomSafeToSend(roomId))) {
       return;
     }
