@@ -57,13 +57,18 @@ not weaken the existing `owner_only` rights backend.
    the bounded, canonical envelope with a timing-safe signature comparison
    before making any upstream request. Unsigned, malformed, or modified links
    receive the same generic not-found response; raw Radicale token paths are
-   never accepted by the gateway.
+   never accepted by the gateway. The envelope is integrity-protected, not
+   encrypted: anyone holding a link can decode its native token path. Radicale
+   and its token route must remain unreachable from untrusted networks so the
+   gateway remains the public validation, method, rate-limit, and revocation
+   boundary.
 5. **Expose only public reads through the gateway.** The public route accepts
    only `GET` and `HEAD` at `/v1/public-calendar-feeds/<envelope>`. It fetches
    the native token route from the server-only Radicale origin; it does not
    proxy arbitrary URLs, the Radicale sharing API, or CalDAV credentials. The
-   internal `RADICALE_URL` must be a root HTTP(S) origin in this initial
-   implementation. Redirects fail closed. Requests time out after five
+   internal `RADICALE_URL` must be a root HTTP(S) origin reachable only by the
+   server and trusted operators in this initial implementation. Redirects fail
+   closed. Requests time out after five
    seconds, native calendar bodies are capped at 16 MiB, and sharing API JSON
    responses are capped at 1 MiB. Public requests use the existing bounded,
    process-local calendar gateway limiter.

@@ -128,6 +128,36 @@ describe('PublicCalendarFeedService', () => {
     ).toBe(true);
   });
 
+  it('reconciles an exact marked share when create commits but its response is lost', async () => {
+    const fixture = createFixture({ loseCreateResponse: true });
+    const foreignShare: RadicaleNativeTokenShare = {
+      PathOrToken: tokenPath('Z'),
+      PathMapped: '/alice/team/',
+      Permissions: 'r',
+      Conversion: 'none',
+      EnabledByOwner: true,
+      Properties: { 'D:displayname': 'another native share' },
+    };
+    fixture.shares.push(foreignShare);
+
+    await expect(
+      fixture.service.publish(
+        OWNER,
+        OPENID_CREDENTIAL,
+        { target: 'personal', calendarId: CALENDAR_URL },
+        true,
+      ),
+    ).rejects.toMatchObject({ status: 503 });
+
+    expect(fixture.shares).toEqual([foreignShare]);
+    const deleteCalls = fixture.calls.filter(
+      (call) => call.path === '/.sharing/v1/token/delete',
+    );
+    expect(deleteCalls.map((call) => call.body?.PathOrToken)).toEqual([
+      tokenPath('A'),
+    ]);
+  });
+
   it('requires current room-manager authorization and removes only marked shares on unpublish', async () => {
     const fixture = createFixture({ roomMode: true });
     const roomTarget = {
@@ -156,7 +186,13 @@ describe('PublicCalendarFeedService', () => {
   });
 });
 
-function createFixture(options: { feed?: Buffer; roomMode?: boolean } = {}) {
+function createFixture(
+  options: {
+    feed?: Buffer;
+    roomMode?: boolean;
+    loseCreateResponse?: boolean;
+  } = {},
+) {
   const key = Buffer.alloc(32, 0x5a);
   const appConfig = {
     radicale_url: 'https://radicale.example.test',
@@ -234,6 +270,9 @@ function createFixture(options: { feed?: Buffer; roomMode?: boolean } = {}) {
         EnabledByOwner: body?.Enabled === true,
         Properties: body?.Properties as Record<string, string>,
       });
+      if (options.loseCreateResponse) {
+        throw new Error('Synthetic response lost after Radicale committed');
+      }
       return jsonResponse({ Status: 'success', PathOrToken });
     }
     if (url.pathname === '/.sharing/v1/token/delete') {

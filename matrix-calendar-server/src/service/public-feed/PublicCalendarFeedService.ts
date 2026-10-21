@@ -221,6 +221,20 @@ export class PublicCalendarFeedService {
           } catch {
             // Preserve the original error; cleanup is best effort and bounded.
           }
+        } else {
+          // The native create request may commit before its response is lost or
+          // malformed. The target lock and deterministic marker let us find
+          // only this feature's newly-created share without risking unrelated
+          // owner shares.
+          try {
+            const afterFailedCreate = await this.listShares(resolved);
+            await this.deleteMarkedShares(
+              this.markedShares(afterFailedCreate, resolved),
+              resolved,
+            );
+          } catch {
+            // Preserve the original error; reconciliation is best effort.
+          }
         }
         throw mapPublicFeedError(error);
       }
