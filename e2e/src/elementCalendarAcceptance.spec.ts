@@ -27,9 +27,15 @@ import {
 } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
-import { arch, platform, release } from 'node:os';
-import { isAbsolute, resolve, sep } from 'node:path';
+import {
+  appendFileSync,
+  mkdirSync,
+  realpathSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
+import { arch, platform, release, tmpdir } from 'node:os';
+import { dirname, isAbsolute, resolve, sep } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import {
   extractElementBundleFrames,
@@ -590,6 +596,8 @@ type PerformancePageErrorObservation = PerformancePageErrorClassification &
   ElementErrorSourcePointer & {
     profile: OrdinaryPerformanceProfile;
     stage: PerformancePageErrorStage;
+    safeErrorName: string;
+    safeErrorMessageClass: string;
   };
 
 type OrdinaryPerformanceProfile = 'empty' | 'events-25';
@@ -762,7 +770,7 @@ type OrdinaryPerformanceCase = {
   detailSamples: PerformanceDetailsSample[];
 };
 type OrdinaryPerformanceReport = {
-  version: 13;
+  version: 14;
   viewportWidth: 1280;
   viewportHeight: 800;
   calendarDays: 7;
@@ -1319,7 +1327,7 @@ function makeEmptyOrdinaryPerformanceReport(initialDate: {
   month: number;
 }): OrdinaryPerformanceReport {
   return {
-    version: 13,
+    version: 14,
     viewportWidth: 1280,
     viewportHeight: 800,
     calendarDays: 7,
@@ -2513,6 +2521,7 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
     let page: Page | undefined;
     let observer: PerformanceApiObserver | undefined;
     let pageErrorStage: PerformancePageErrorStage = 'case-setup';
+    let privatePageErrorCaptureCount = 0;
     const pageErrorSourceProfiles = new Set<OrdinaryPerformanceProfile>();
     const pageErrorSourceLookups: Array<{
       page: Page;
@@ -2521,6 +2530,14 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
     }> = [];
     context.on('page', (openedPage) => {
       openedPage.on('pageerror', (error) => {
+        if (privatePageErrorCaptureCount < 8) {
+          capturePrivatePerformancePageError(
+            error,
+            caseReport.profile,
+            pageErrorStage,
+          );
+          privatePageErrorCaptureCount += 1;
+        }
         const observation = capturePerformancePageError(
           report,
           error,
@@ -8255,6 +8272,51 @@ function recordPerformancePilot(
     })}\n`,
     { encoding: 'utf8', mode: 0o600 },
   );
+}
+
+function capturePrivatePerformancePageError(
+  error: Error,
+  profile: OrdinaryPerformanceProfile,
+  stage: PerformancePageErrorStage,
+): void {
+  // This is an opt-in local synthetic-run aid. CI never writes raw exception
+  // text, and the file is never attached to acceptance artifacts.
+  if (process.env.CI || process.env.GITHUB_ACTIONS) return;
+  const configuredPath =
+    process.env.ELEMENT_ACCEPTANCE_PRIVATE_ERROR_CAPTURE_PATH;
+  if (!configuredPath || !isAbsolute(configuredPath)) return;
+  const capturePath = resolve(configuredPath);
+  const privateRoot = realpathSync(tmpdir()) + sep;
+  if (!capturePath.startsWith(privateRoot)) return;
+
+  try {
+    mkdirSync(dirname(capturePath), { recursive: true, mode: 0o700 });
+    const captureParent = realpathSync(dirname(capturePath));
+    if (
+      captureParent !== realpathSync(tmpdir()) &&
+      !captureParent.startsWith(privateRoot)
+    ) {
+      return;
+    }
+    const bounded = (value: unknown, maxLength: number): string | null =>
+      typeof value === 'string' ? value.slice(0, maxLength) : null;
+    const payload = `${JSON.stringify({
+      profile,
+      stage,
+      name: bounded(error.name, 128),
+      message: bounded(error.message, 4_096),
+      stack: bounded(error.stack, 32_768),
+    })}\n`;
+    if (Buffer.byteLength(payload, 'utf8') > 40_000) return;
+    // Exclusive create refuses existing files and symlinks; first error wins.
+    writeFileSync(capturePath, payload, {
+      encoding: 'utf8',
+      flag: 'wx',
+      mode: 0o600,
+    });
+  } catch {
+    // Diagnostics must never replace the original acceptance failure.
+  }
 }
 
 function recordMemberASessionObservation(

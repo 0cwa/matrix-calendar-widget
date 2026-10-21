@@ -6,6 +6,7 @@ import {
   capturePerformancePageError,
   classifyPerformancePageError,
   isVerifiedOpeningHostDiagnostic,
+  safePerformancePageErrorDetails,
   summarizeDefaultWaitObservation,
 } from './element-acceptance-performance-evidence.mjs';
 import { sanitizeElementAcceptance } from './sanitize-element-acceptance.mjs';
@@ -374,9 +375,9 @@ function verifiedHostObservation(overrides = {}) {
   };
 }
 
-function ordinaryReportWithVerifiedHostError() {
+function ordinaryReportWithVerifiedHostError(version = 13) {
   const report = ordinaryReport();
-  report.version = 13;
+  report.version = version;
   const error = new Error('private error text');
   error.stack =
     'Error: private error text\n' +
@@ -393,6 +394,61 @@ function ordinaryReportWithVerifiedHostError() {
   });
   return report;
 }
+
+test('publishes only closed exception classes in the current report version', () => {
+  const error = new TypeError(
+    'Cannot read properties of undefined (reading \'roomId\') for @member:example.test at https://element.invalid/path?access_token=private-value',
+  );
+  const details = safePerformancePageErrorDetails(error);
+  assert.deepEqual(details, {
+    safeErrorName: 'TypeError',
+    safeErrorMessageClass: 'cannot-read-nullish-property',
+  });
+
+  assert.deepEqual(
+    safePerformancePageErrorDetails(
+      Object.assign(
+        new Error('private title at https://private.example.test/path'),
+        { name: 'short-secret' },
+      ),
+    ),
+    { safeErrorName: 'Error', safeErrorMessageClass: 'other' },
+  );
+
+  const report = ordinaryReportWithVerifiedHostError(14);
+  const observation = report.pageErrorObservations[0];
+  Object.assign(observation, safePerformancePageErrorDetails(error));
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(ordinaryStage('failed', report, 'performance-page-error')),
+    sourceSha,
+  );
+  assert.match(
+    summary,
+    /exception_name=TypeError exception_message_class=cannot-read-nullish-property/u,
+  );
+  assert.doesNotMatch(
+    summary,
+    /roomId|member|private-value|access_token|example\.test|https?:\/\//u,
+  );
+
+  for (const [key, value] of [
+    ['safeErrorName', 'private-hostname'],
+    ['safeErrorMessageClass', 'private calendar title'],
+  ]) {
+    const invalidReport = ordinaryReportWithVerifiedHostError(14);
+    invalidReport.pageErrorObservations[0][key] = value;
+    assert.throws(
+      () =>
+        sanitizeElementAcceptance(
+          JSON.stringify(
+            ordinaryStage('failed', invalidReport, 'performance-page-error'),
+          ),
+          sourceSha,
+        ),
+      /invalid element acceptance summary/u,
+    );
+  }
+});
 
 function ordinaryStage(status, report, failureCode) {
   return {

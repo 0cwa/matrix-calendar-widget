@@ -40,8 +40,11 @@ import en from '../public/locales/en/translation.json';
 import type {
   CalendarRoomCapabilities,
   CalendarRoomReminderAlarmOption,
+  CalendarRoomReminderAllDaySchedule,
+  CalendarRoomReminderConfiguration,
   CalendarRoomReminderIdentity,
   CalendarRoomReminderRepository,
+  CalendarRoomReminderTarget,
   CalendarTargetAvailabilityRepository,
 } from '../src/calendar';
 import { CalendarRepositoryProvider } from '../src/calendar';
@@ -128,6 +131,9 @@ const roomAlarmOption: CalendarRoomReminderAlarmOption = {
   eventUid: roomEvent.uid,
   recurrenceId: null,
   alarmUid: 'synthetic-room-alarm',
+  timingType: 'timed',
+  supported: true,
+  requiresAllDaySchedule: false,
   relatedTo: 'start',
   trigger: {
     weeks: 0,
@@ -294,7 +300,7 @@ class SyntheticRoomCalendarRepository
   private readonly capabilities: CalendarRoomCapabilities;
   private readonly reminderConfigurations = new Map<
     string,
-    CalendarRoomReminderIdentity
+    CalendarRoomReminderConfiguration
   >();
 
   constructor(private readonly manager: boolean) {
@@ -348,7 +354,7 @@ class SyntheticRoomCalendarRepository
   }
 
   async listRoomReminderConfigurations(): Promise<
-    CalendarRoomReminderIdentity[]
+    CalendarRoomReminderConfiguration[]
   > {
     return [...this.reminderConfigurations.values()];
   }
@@ -358,7 +364,9 @@ class SyntheticRoomCalendarRepository
     eventId: string,
     alarmUid: string,
     recurrenceId: string | null,
-  ): Promise<CalendarRoomReminderIdentity> {
+    target: CalendarRoomReminderTarget,
+    allDaySchedule: CalendarRoomReminderAllDaySchedule | null,
+  ): Promise<CalendarRoomReminderConfiguration> {
     const event = await super.getEvent(calendarId, eventId);
     if (
       !this.manager ||
@@ -367,9 +375,16 @@ class SyntheticRoomCalendarRepository
     ) {
       throw new Error('Synthetic room reminder is unavailable');
     }
-    const identity = { eventUid: event.uid, alarmUid, recurrenceId };
-    this.reminderConfigurations.set(alarmUid, identity);
-    return identity;
+    const configuration: CalendarRoomReminderConfiguration = {
+      eventUid: event.uid,
+      alarmUid,
+      recurrenceId,
+      target,
+      allDaySchedule,
+      revision: 1,
+    };
+    this.reminderConfigurations.set(alarmUid, configuration);
+    return configuration;
   }
 
   async disableRoomReminder(
