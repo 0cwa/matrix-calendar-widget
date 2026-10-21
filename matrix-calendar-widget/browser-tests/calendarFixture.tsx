@@ -310,7 +310,9 @@ function CalendarFixture({
   const galleryMode = roomMode === 'gallery';
   const roomRepository = useMemo(
     () =>
-      roomMode === 'room-read-only' || roomMode === 'room-manager' || galleryMode
+      roomMode === 'room-read-only' ||
+      roomMode === 'room-manager' ||
+      galleryMode
         ? new SyntheticRoomCalendarRepository(
             roomMode !== 'room-read-only',
             galleryMode
