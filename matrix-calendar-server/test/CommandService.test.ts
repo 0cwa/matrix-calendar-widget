@@ -256,6 +256,29 @@ describe('test CommandService', () => {
     expect(captureCalendarMessage()['m.mentions']).toEqual({});
   });
 
+  test('calendar setup retry replies that the widget was added to the ready calendar', async () => {
+    makeRoomPrivate();
+    const setupRunner: RoomCalendarSetupService = {
+      setup: jest.fn().mockResolvedValue({ status: 'widget-installed' }),
+    };
+    const service = new CommandService(
+      instance(matrixClientMock),
+      instance(welcomeWorkflowService),
+      appConfig,
+      appRuntimeContext,
+      calendarCommandService,
+      setupRunner,
+    );
+    const event = createEvent();
+    event.content.body = '!calendar setup';
+
+    await service.handleRoomMessage(ROOM_ID, event);
+
+    expect(captureCalendarMessage().body).toBe(
+      'The room calendar was already ready; its widget has now been added.',
+    );
+  });
+
   test('calendar setup rejects every argument without invoking the setup service', async () => {
     makeRoomPrivate();
     const setupRunner: RoomCalendarSetupService = {

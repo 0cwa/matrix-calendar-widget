@@ -640,7 +640,7 @@ describe('MatrixRoomCalendarSetupService', () => {
     });
 
     await expect(harness.service.setup(setupRequest)).resolves.toEqual({
-      status: 'already-ready',
+      status: 'widget-installed',
     });
 
     expect(harness.bindingStore.reserve).toHaveBeenCalledWith(
@@ -689,7 +689,7 @@ describe('MatrixRoomCalendarSetupService', () => {
       widgetOutcome: 'installed',
     });
     await expect(retry.service.setup(setupRequest)).resolves.toEqual({
-      status: 'already-ready',
+      status: 'widget-installed',
     });
     expect(retry.bindingStore.reserve).not.toHaveBeenCalled();
     expect(retry.bindingStore.markReady).not.toHaveBeenCalled();

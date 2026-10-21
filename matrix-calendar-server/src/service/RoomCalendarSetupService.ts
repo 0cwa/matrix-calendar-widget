@@ -261,6 +261,7 @@ export class MatrixRoomCalendarSetupService implements RoomCalendarSetupService 
     if (widgetOutcome === 'unavailable') return { status: 'widget-pending' };
 
     if (caldavOutcome === 'created') return { status: 'created' };
+    if (widgetOutcome === 'installed') return { status: 'widget-installed' };
     return { status: 'already-ready' };
   }
 
