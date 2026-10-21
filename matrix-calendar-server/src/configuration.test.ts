@@ -39,6 +39,12 @@ describe('reminder database configuration', () => {
   const originalEnableWelcomeWorkflow = process.env.ENABLE_WELCOME_WORKFLOW;
   const originalEnablePrivateRoomErrorSending =
     process.env.ENABLE_PRIVATE_ROOM_ERROR_SENDING;
+  const originalPublicFeedOrigin =
+    process.env.MATRIX_CALENDAR_PUBLIC_FEED_ORIGIN;
+  const originalPublicFeedKey =
+    process.env.MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY;
+  const originalPublicFeedKeyFile =
+    process.env.MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY_FILE;
 
   afterEach(() => {
     if (originalDatabaseUrl === undefined) {
@@ -85,6 +91,18 @@ describe('reminder database configuration', () => {
       process.env.ENABLE_PRIVATE_ROOM_ERROR_SENDING =
         originalEnablePrivateRoomErrorSending;
     }
+    restoreEnvironmentValue(
+      'MATRIX_CALENDAR_PUBLIC_FEED_ORIGIN',
+      originalPublicFeedOrigin,
+    );
+    restoreEnvironmentValue(
+      'MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY',
+      originalPublicFeedKey,
+    );
+    restoreEnvironmentValue(
+      'MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY_FILE',
+      originalPublicFeedKeyFile,
+    );
   });
 
   it('keeps legacy private-room workflows opt-in by default', () => {
@@ -180,6 +198,83 @@ describe('reminder database configuration', () => {
     ).toBeUndefined();
     expect(
       databaseUrlSchema.validate('https://example.org/database').error,
+    ).toBeDefined();
+  });
+
+  it('keeps public calendar feeds private until origin and signing key are configured', () => {
+    delete process.env.MATRIX_CALENDAR_PUBLIC_FEED_ORIGIN;
+    delete process.env.MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY;
+    delete process.env.MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY_FILE;
+
+    expect(configuration().config).toMatchObject({
+      public_calendar_feed_enabled: false,
+      public_calendar_feed_origin: undefined,
+      public_calendar_feed_signing_key: undefined,
+    });
+  });
+
+  it('loads one canonical external origin and an exact 32-byte signing key', () => {
+    const signingKey = Buffer.alloc(32, 0x41).toString('base64url');
+    process.env.MATRIX_CALENDAR_PUBLIC_FEED_ORIGIN =
+      'https://calendar.example.test/';
+    process.env.MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY = signingKey;
+    delete process.env.MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY_FILE;
+
+    const result = ValidationSchema.validate({
+      ACCESS_TOKEN: 'synthetic-token',
+      HOMESERVER_URL: 'https://matrix.example.test',
+      MEETINGWIDGET_URL: 'https://widget.example.test',
+      BREAKOUT_SESSION_WIDGET_URL: 'https://breakout.example.test',
+      MEETINGWIDGET_COCKPIT_URL: 'https://details.example.test',
+      MATRIX_CALENDAR_PUBLIC_FEED_ORIGIN:
+        process.env.MATRIX_CALENDAR_PUBLIC_FEED_ORIGIN,
+      MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY: signingKey,
+    });
+    expect(result.error).toBeUndefined();
+    expect(configuration().config).toMatchObject({
+      public_calendar_feed_enabled: true,
+      public_calendar_feed_origin: 'https://calendar.example.test/',
+      public_calendar_feed_signing_key: Buffer.from(signingKey, 'base64url'),
+    });
+  });
+
+  it('rejects partial, duplicate, and unsafe public-feed configuration', () => {
+    const base = {
+      ACCESS_TOKEN: 'synthetic-token',
+      HOMESERVER_URL: 'https://matrix.example.test',
+      MEETINGWIDGET_URL: 'https://widget.example.test',
+      BREAKOUT_SESSION_WIDGET_URL: 'https://breakout.example.test',
+      MEETINGWIDGET_COCKPIT_URL: 'https://details.example.test',
+    };
+    const signingKey = Buffer.alloc(32, 0x41).toString('base64url');
+
+    expect(
+      ValidationSchema.validate({
+        ...base,
+        MATRIX_CALENDAR_PUBLIC_FEED_ORIGIN: 'https://calendar.example.test',
+      }).error,
+    ).toBeDefined();
+    expect(
+      ValidationSchema.validate({
+        ...base,
+        MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY: signingKey,
+      }).error,
+    ).toBeDefined();
+    expect(
+      ValidationSchema.validate({
+        ...base,
+        MATRIX_CALENDAR_PUBLIC_FEED_ORIGIN:
+          'https://calendar.example.test/path',
+        MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY: signingKey,
+      }).error,
+    ).toBeDefined();
+    expect(
+      ValidationSchema.validate({
+        ...base,
+        MATRIX_CALENDAR_PUBLIC_FEED_ORIGIN: 'https://calendar.example.test',
+        MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY: signingKey,
+        MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY_FILE: '/tmp/key',
+      }).error,
     ).toBeDefined();
   });
 
@@ -332,6 +427,17 @@ describe('reminder database configuration', () => {
     ).toThrow('requires a single database host');
   });
 });
+
+function restoreEnvironmentValue(
+  name: string,
+  value: string | undefined,
+): void {
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
+}
 
 describe('room reminder configuration API gate', () => {
   const variable = 'MATRIX_CALENDAR_REMINDER_CONFIGURATION_ENABLED';

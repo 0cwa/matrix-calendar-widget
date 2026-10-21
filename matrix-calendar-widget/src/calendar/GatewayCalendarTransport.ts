@@ -90,6 +90,23 @@ export class GatewayCalendarTransport {
     }
 
     if (response.status === 409) {
+      let body: unknown;
+      try {
+        body = await response.clone().json();
+      } catch {
+        // A non-JSON conflict uses the ordinary event-conflict contract.
+      }
+      if (
+        body &&
+        typeof body === 'object' &&
+        'code' in body &&
+        body.code === 'public-calendar-feed-components-unsupported'
+      ) {
+        throw new CalendarRepositoryError(
+          'unsupported-calendar-components',
+          'Public calendar feeds require a VEVENT-only calendar',
+        );
+      }
       throw new CalendarRepositoryError(
         'event-conflict',
         'The event changed on the server',

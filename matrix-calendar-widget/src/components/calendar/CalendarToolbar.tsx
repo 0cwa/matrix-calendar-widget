@@ -20,13 +20,19 @@ import EditIcon from '@mui/icons-material/Edit';
 import { Box, Button, Stack, useMediaQuery, useTheme } from '@mui/material';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CalendarFilters, useCalendars } from '../../calendar';
+import {
+  CalendarFilters,
+  isCalendarPublicFeedRepository,
+  useCalendarRepository,
+  useCalendars,
+} from '../../calendar';
 import { CalendarColorDialog } from './CalendarColorDialog';
 import { CalendarCreateDialog } from './CalendarCreateDialog';
 import { CalendarDeleteDialog } from './CalendarDeleteDialog';
 import { CalendarDescriptionDialog } from './CalendarDescriptionDialog';
 import { CalendarEventEditorDialog } from './CalendarEventEditorDialog';
 import { CalendarNavigation, CalendarSurfaceView } from './CalendarNavigation';
+import { CalendarPublicFeedDialog } from './CalendarPublicFeedDialog';
 import { CalendarRenameDialog } from './CalendarRenameDialog';
 import { CalendarToolbarButtons } from './CalendarToolbar/CalendarToolbarButtons';
 import { CalendarToolbarDatePicker } from './CalendarToolbar/CalendarToolbarDatePicker';
@@ -51,12 +57,16 @@ export function CalendarToolbar({
   const theme = useTheme();
   const showToolbarButtons = useMediaQuery(theme.breakpoints.up('md'));
   const calendars = useCalendars();
+  const calendarRepository = useCalendarRepository();
+  const supportsPublicFeeds =
+    isCalendarPublicFeedRepository(calendarRepository);
   const [createCalendarOpen, setCreateCalendarOpen] = useState(false);
   const [deleteCalendarOpen, setDeleteCalendarOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [descriptionOpen, setDescriptionOpen] = useState(false);
   const [colorOpen, setColorOpen] = useState(false);
+  const [publicFeedOpen, setPublicFeedOpen] = useState(false);
   const writableCalendars = calendars.data.filter(
     (calendar) => calendar.readOnly === false,
   );
@@ -77,6 +87,16 @@ export function CalendarToolbar({
             variant="outlined"
           >
             {t('calendars.create.action', 'Create calendar')}
+          </Button>
+        )}
+
+        {supportsPublicFeeds && (
+          <Button
+            disabled={calendars.loading || calendars.data.length === 0}
+            onClick={() => setPublicFeedOpen(true)}
+            variant="outlined"
+          >
+            {t('calendarPublicFeed.action', 'Public feed')}
           </Button>
         )}
 
@@ -193,6 +213,14 @@ export function CalendarToolbar({
         onClose={() => setDeleteCalendarOpen(false)}
         open={deleteCalendarOpen}
       />
+
+      {supportsPublicFeeds && (
+        <CalendarPublicFeedDialog
+          calendars={calendars.data}
+          onClose={() => setPublicFeedOpen(false)}
+          open={publicFeedOpen}
+        />
+      )}
 
       <CalendarEventEditorDialog
         calendars={calendars.data}

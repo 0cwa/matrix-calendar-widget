@@ -28,6 +28,7 @@ from collections.abc import Callable
 from typing import Any
 
 from radicale.auth import BaseAuth
+from .public_feed_logging import install_public_feed_token_path_filter
 
 MATRIX_OPENID_PREFIX = "matrix-openid:"
 HOMESERVER_URL_ENV = "RADICALE_MATRIX_HOMESERVER_URL"
@@ -262,6 +263,7 @@ class Auth(BaseAuth):
     """Radicale Auth backend that validates only tagged Matrix OpenID proofs."""
 
     def __init__(self, configuration: Any) -> None:
+        install_public_feed_token_path_filter()
         homeserver_url = _configured_homeserver_url()
         matrix_server_name = _configured_matrix_server_name()
         super().__init__(configuration.copy(PLUGIN_CONFIG_SCHEMA))

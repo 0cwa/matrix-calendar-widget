@@ -24,6 +24,9 @@ export interface IAppConfiguration {
   homeserver_url: string;
   matrix_openid_userinfo_origin?: string;
   radicale_url?: string;
+  public_calendar_feed_origin?: string;
+  public_calendar_feed_signing_key?: Buffer;
+  public_calendar_feed_enabled: boolean;
   caldav_max_event_response_bytes?: number;
   room_calendar_bindings: readonly RoomCalendarBinding[];
   room_calendar_principal_mode: RoomCalendarPrincipalMode;

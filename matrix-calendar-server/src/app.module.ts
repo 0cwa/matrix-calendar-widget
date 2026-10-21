@@ -42,6 +42,8 @@ import { ConfigurationController } from './controller/ConfigurationController';
 import { GuestMemberController } from './controller/GuestMemberController';
 import { HealthCheckController } from './controller/HealthCheckController';
 import { MeetingController } from './controller/MeetingController';
+import { PublicCalendarFeedController } from './controller/PublicCalendarFeedController';
+import { PublicCalendarFeedPublicationController } from './controller/PublicCalendarFeedPublicationController';
 import { RoomReminderAlarmOptionsController } from './controller/RoomReminderAlarmOptionsController';
 import { RoomReminderConfigurationController } from './controller/RoomReminderConfigurationController';
 import { WelcomeWorkflowController } from './controller/WelcomeWorkflowController';
@@ -82,6 +84,7 @@ import type { RoomCalendarBindingRegistry } from './service/IRoomCalendarBinding
 import { MatrixCalendarAuthorizationFactory } from './service/MatrixCalendarAuthorization';
 import { MeetingService } from './service/MeetingService';
 import { PostgresRoomCalendarBindingStore } from './service/PostgresRoomCalendarBindingStore';
+import { PublicCalendarFeedService } from './service/public-feed/PublicCalendarFeedService';
 import { RoomCalendarBindingRegistryAdapter } from './service/RoomCalendarBindingRegistryAdapter';
 import { RoomCalendarCalDavAccess } from './service/RoomCalendarCalDavAccess';
 import { RoomCalendarEventAuditService } from './service/RoomCalendarEventAuditService';
@@ -100,6 +103,8 @@ import { DoesWidgetWithIdExistConstraint } from './validator/DoesWidgetWithIdExi
 const logger = new Logger('app.module');
 const appControllers = [
   CalendarGatewayController,
+  PublicCalendarFeedController,
+  PublicCalendarFeedPublicationController,
   CommandController,
   ConfigurationController,
   HealthCheckController,
@@ -347,6 +352,17 @@ const i18nFactory: FactoryProvider<void> = {
           return uuiv4();
         },
         redact: ['req.headers.authorization', 'matrix_event.content'],
+        autoLogging: {
+          // Publication queries contain canonical CalDAV hrefs; public URLs
+          // contain bearer capabilities. Neither path belongs in access logs.
+          ignore: (request) => {
+            const path = request.url ?? '';
+            return (
+              path.startsWith('/v1/calendar-feeds/') ||
+              path.startsWith('/v1/public-calendar-feeds/')
+            );
+          },
+        },
       },
     }),
   ],
@@ -561,6 +577,30 @@ const i18nFactory: FactoryProvider<void> = {
       ],
     },
     MatrixOpenIdCalDavCredentialProviderFactory,
+    {
+      provide: PublicCalendarFeedService,
+      useFactory: (
+        appConfig: IAppConfiguration,
+        authorizationFactory: MatrixCalendarAuthorizationFactory,
+        credentialProviderFactory: MatrixOpenIdCalDavCredentialProviderFactory,
+        roomCalendarCalDavAccess: RoomCalendarCalDavAccess,
+        nativeFetch: typeof fetch,
+      ) =>
+        new PublicCalendarFeedService(
+          appConfig,
+          authorizationFactory,
+          credentialProviderFactory,
+          roomCalendarCalDavAccess,
+          nativeFetch,
+        ),
+      inject: [
+        ModuleProviderToken.APP_CONFIGURATION,
+        MatrixCalendarAuthorizationFactory,
+        MatrixOpenIdCalDavCredentialProviderFactory,
+        ModuleProviderToken.ROOM_CALENDAR_CALDAV_ACCESS,
+        ModuleProviderToken.NATIVE_FETCH,
+      ],
+    },
     MatrixClientAdapter,
     ReactionClient,
     WidgetClient,

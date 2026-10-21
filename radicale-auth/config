@@ -12,5 +12,14 @@ urldecode_username = False
 [rights]
 type = owner_only
 
+[sharing]
+type = files
+collection_by_token = True
+collection_by_map = False
+permit_create_token = True
+permit_create_map = False
+permit_properties_overlay = False
+default_permissions_create_token = r
+
 [storage]
 filesystem_folder = /data/collections

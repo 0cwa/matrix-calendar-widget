@@ -1054,6 +1054,14 @@ room access, event writes, or reminders.
       formatted HTML while preserving equivalent plain text. Focused parser,
       formatter, and command-delivery tests cover the output; human pilot-room
       acceptance remains a separate open item below.
+- [x] Implement opt-in per-calendar public ICS feeds under issue #382 and
+      [ADR045](./adrs/adr045-public-calendar-feeds.md). The gateway uses the
+      pinned Radicale 3.8 native read-only token store, signed public URLs,
+      explicit consent, owner/room-manager authorization, VEVENT-only response
+      validation, revocation, and log redaction. Focused unit and actual-runtime
+      Radicale contracts pass. This source is outside the frozen candidate and
+      still requires review and fresh hosted checks; ingress, proxy logs, and
+      secret backup/recovery remain operator gates.
 - [ ] Validate the empty-room guidance for unconfigured and configured rooms,
       and test multiple distinct room bindings while preserving cross-room
       authorization.
