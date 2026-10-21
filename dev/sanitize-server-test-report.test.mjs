@@ -30,6 +30,13 @@ const reminderDeliverySuitePath = fileURLToPath(
     import.meta.url,
   ),
 );
+const healthCheckSuitePath = fileURLToPath(
+  new URL(
+    '../matrix-calendar-server/src/controller/HealthCheckController.test.ts',
+    import.meta.url,
+  ),
+);
+
 test('emits only allowlisted static suite and case IDs with failed status', () => {
   const report = {
     testResults: [
@@ -181,4 +188,64 @@ test('only reports the closed reminder delivery case ID on failure', () => {
     ].join('\n'),
   );
   assert.equal(output.includes(privateSentinel), false);
+});
+
+test('reports health controller failures using fixed IDs only', () => {
+  const privateSentinel =
+    'secret-like token, homeserver response body, and execution stack';
+  const cases = [
+    ['maps liveness to the health live route', 'health-live-route'],
+    [
+      'reports process liveness without contacting the homeserver',
+      'health-live-no-upstream',
+    ],
+    [
+      'preserves the dependency-aware homeserver health response',
+      'health-dependency-response',
+    ],
+    [
+      'keeps liveness available when the homeserver is down',
+      'health-live-on-upstream-failure',
+    ],
+    [
+      'preserves status and response body when health fails',
+      'health-failure-status-body',
+    ],
+  ];
+
+  for (const [privateTitle, caseId] of cases) {
+    const report = {
+      testResults: [
+        {
+          name: healthCheckSuitePath,
+          status: 'failed',
+          assertionResults: [
+            {
+              title: privateTitle,
+              fullName: `HealthCheckController ${privateTitle}`,
+              status: 'failed',
+              failureMessages: [privateSentinel],
+            },
+          ],
+          testExecError: {
+            message: privateSentinel,
+            stack: privateSentinel,
+          },
+          failureMessage: privateSentinel,
+        },
+      ],
+    };
+
+    const output = formatServerTestFailureSummary(report, 1).join('\n');
+    assert.equal(
+      output,
+      [
+        `contract-case ${caseId} failed`,
+        'contract-suite health-check-controller failed',
+      ].join('\n'),
+    );
+    assert.equal(output.includes(healthCheckSuitePath), false);
+    assert.equal(output.includes(privateTitle), false);
+    assert.equal(output.includes(privateSentinel), false);
+  }
 });

@@ -42,6 +42,7 @@ import {
   appendDesktopJourneyProgress,
   appendDesktopLoginStep,
   appendDesktopRefreshFailureWithFallback,
+  appendDesktopUncaughtError,
   classifyDesktopJourneyErrorClass,
   classifyDesktopLoginFailure,
   collectWebBEventTitleMatches,
@@ -545,6 +546,21 @@ test('Element Desktop room event journey', async ({ browser }) => {
   let loginFieldsBeforeFill = unavailableDesktopLoginFormObservation();
   let failed = false;
   let evidenceInitialized = false;
+  const monitorUncaughtException = (error: Error) => {
+    if (!evidenceInitialized || currentPhase !== 'desktop-a-refresh') return;
+    const sourceSha = process.env.ELEMENT_DESKTOP_SOURCE_SHA;
+    if (!sourceSha) return;
+    try {
+      appendDesktopUncaughtError({
+        ...evidence,
+        sourceSha,
+        errorClass: classifyDesktopJourneyErrorClass(error),
+      });
+    } catch {
+      // Evidence collection must never change Node's uncaught-exception path.
+    }
+  };
+  process.on('uncaughtExceptionMonitor', monitorUncaughtException);
 
   try {
     initializeDesktopJourneyEvidence(evidence);
@@ -1189,6 +1205,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
       }
     }
   } finally {
+    process.off('uncaughtExceptionMonitor', monitorUncaughtException);
     webBEventListReadObserver?.stop();
     desktopEventCreatePostObserver?.stop();
     await Promise.all(
