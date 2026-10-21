@@ -161,17 +161,23 @@ async function expectBothSchemasOwnedByRole(
     { name: 'matrix_calendar_bindings', owner: 'matrix_calendar_app' },
   ]);
 
-  const versions = await sql<{ schema: string; version: number }[]>`
-    SELECT 'matrix_calendar' AS schema, version
+  const versions = await sql<
+    { schema: string; version: number; version_count: number }[]
+  >`
+    SELECT 'matrix_calendar' AS schema,
+           MAX(version) AS version,
+           COUNT(*)::int AS version_count
     FROM matrix_calendar.schema_migrations
     UNION ALL
-    SELECT 'matrix_calendar_bindings' AS schema, version
+    SELECT 'matrix_calendar_bindings' AS schema,
+           MAX(version) AS version,
+           COUNT(*)::int AS version_count
     FROM matrix_calendar_bindings.schema_migrations
     ORDER BY schema
   `;
   expect(versions).toEqual([
-    { schema: 'matrix_calendar', version: 4 },
-    { schema: 'matrix_calendar_bindings', version: 1 },
+    { schema: 'matrix_calendar', version: 4, version_count: 4 },
+    { schema: 'matrix_calendar_bindings', version: 1, version_count: 1 },
   ]);
 }
 
