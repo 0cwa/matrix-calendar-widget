@@ -90,6 +90,48 @@ test('uses rendered heading emphasis while retaining underscores in code', (t) =
   ]);
 });
 
+test('builds formatted heading slugs while preserving link labels and literal code', (t) => {
+  const check = fixture(t, {
+    'README.md': [
+      '# <strong><em>Formatted</em></strong> and `<Widget>`',
+      '# [<span>Linked</span> title](guide.md)',
+      '# <em>Repeated</em>',
+      '# <strong>Repeated</strong>',
+      '# _Read <b>this</b>_',
+      '# Ο<b>Σ</b>',
+      '# Ο!Σ',
+      '# _Read <span title="_">this</span>_',
+      '# <span title="_">Label_</span>',
+      '[Formatted](#formatted-and-widget)',
+      '[Linked](#linked-title)',
+      '[Repeated](#repeated-1)',
+      '[Emphasis across tags](#read-this)',
+      '[Whole-heading Unicode casing](#ος)',
+      '[Punctuation keeps its casing context](#οσ)',
+      '[Attribute does not close emphasis](#read-this-1)',
+      '[Attribute does not open emphasis](#label_)',
+    ].join('\n'),
+    'guide.md': '# Guide',
+  });
+  assert.deepEqual(check().errors, []);
+});
+
+test('keeps literal angle-bracket text and handles quoted tag delimiters', (t) => {
+  const check = fixture(t, {
+    'README.md': [
+      '# Values < 10 and > 5',
+      '# Sources <-> stores',
+      '# <span title="one > two">Heading</span>',
+      "# <span title='one > two'>Another heading</span>",
+      '[Comparison](#values--10-and--5)',
+      '[Arrow](#sources---stores)',
+      '[Double-quoted attribute](#heading)',
+      '[Single-quoted attribute](#another-heading)',
+    ].join('\n'),
+  });
+  assert.deepEqual(check().errors, []);
+});
+
 test('ignores indented code without hiding paragraph or list-continuation links', (t) => {
   const check = fixture(t, {
     'README.md':
