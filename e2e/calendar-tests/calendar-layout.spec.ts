@@ -277,7 +277,7 @@ test('room manager sees writable event controls at a narrow width', async ({
   await expect(page.getByRole('option', { name: 'Whole room' })).toBeVisible();
   await page.getByRole('option', { name: 'Selected people' }).click();
   const people = dialog.getByRole('combobox', { name: 'Selected people' });
-  await people.fill('');
+  await dialog.getByRole('button', { name: 'Open', exact: true }).click();
   await expect(page.getByRole('option', { name: 'Alice' })).toBeVisible();
   await expect(page.getByRole('option', { name: 'Bob' })).toBeVisible();
   await expect(page.getByRole('option', { name: 'Calendar bot' })).toHaveCount(

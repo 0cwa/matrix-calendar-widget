@@ -5562,7 +5562,13 @@ async function setRoomReminder(
     observation.recipientSelectionAttempted = true;
     observation.recipientKind = plan.recipient;
     await destination.click();
-    await details
+    // MUI renders Select and Autocomplete listboxes in a frame-level portal,
+    // outside the event details dialog subtree.
+    const destinationListbox = frame
+      .getByRole('listbox')
+      .filter({ visible: true });
+    await expect(destinationListbox).toHaveCount(1);
+    await destinationListbox
       .getByRole('option', {
         name: plan.recipient === 'room' ? 'Whole room' : 'Selected people',
         exact: true,
@@ -5574,9 +5580,14 @@ async function setRoomReminder(
         name: 'Selected people',
       });
       await memberInput.fill(fixture.users.memberB.userId);
-      const memberOption = details.getByRole('option').first();
+      const memberListbox = frame
+        .getByRole('listbox')
+        .filter({ visible: true });
+      await expect(memberListbox).toHaveCount(1, { timeout: 15_000 });
+      const memberOptions = memberListbox.getByRole('option');
+      const memberOption = memberOptions.first();
       await memberOption.waitFor({ state: 'visible', timeout: 15_000 });
-      await expect(details.getByRole('option')).toHaveCount(1);
+      await expect(memberOptions).toHaveCount(1);
       await memberInput.press('ArrowDown');
       await memberInput.press('Enter');
       await memberInput.press('Escape');
