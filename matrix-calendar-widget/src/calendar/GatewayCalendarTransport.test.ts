@@ -75,6 +75,26 @@ describe('GatewayCalendarTransport', () => {
     },
   );
 
+  it('maps public-feed component rejection separately from event conflicts', async () => {
+    const transport = new GatewayCalendarTransport({
+      baseUrl: 'https://widget-api.example.test',
+      getAuthorizationHeader: async () => undefined,
+      fetchImpl: vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              code: 'public-calendar-feed-components-unsupported',
+            }),
+            { status: 409 },
+          ),
+      ) as typeof fetch,
+    });
+
+    await expect(
+      transport.requestVoid('https://widget-api.example.test/resource'),
+    ).rejects.toMatchObject({ code: 'unsupported-calendar-components' });
+  });
+
   it('retains bounded unsupported-patch details and rejects invalid JSON safely', async () => {
     const unsupportedPatchTransport = new GatewayCalendarTransport({
       baseUrl: 'https://widget-api.example.test',

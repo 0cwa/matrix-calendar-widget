@@ -15,6 +15,20 @@ See the [dated continuation](handoff/2026-10-06/README.md) and
 
 For the owner-approved bounded pilot, the required browser profile is full Element Web/Desktop acceptance in `bot-account` mode with the existing strict 0/25-event ordinary-load limits. Full appservice-mode browser certification remains deferred after beta, although both modes passed on this candidate. Backend, identity/authentication, authorization, and CalDAV contract tests remain mandatory in both modes, and `appservice` remains the default mode. Scoped pilot authority is recorded privately; this is not broader rollout or publication authority.
 
+### Public calendar feeds — new source lane
+
+Issue #382 now includes opt-in public ICS feeds described by
+[ADR045](./adrs/adr045-public-calendar-feeds.md). The implementation uses
+Radicale's native read-only shares, signed gateway URLs, explicit consent,
+current owner/room-manager authorization at publication, VEVENT-only validation
+on every public read, and tested token redaction. Focused server suites pass
+(63 tests); the Radicale auth suite passes 24 tests, including five
+log-redaction cases, and the tracked Radicale 3.8.0 runtime contract passes.
+This source is outside the frozen application candidate; hosted checks,
+independent review, public-route ingress and access-log configuration, and
+protected backup/recovery for the signing key and Radicale `/data` remain open.
+No live calendar was published.
+
 User feedback opened a follow-up for room setup discovery across multiple
 rooms and clearer command-fallback acceptance. Accepted ADR043 and the current
 integration worktree add exact, no-argument `!calendar setup` behind its own

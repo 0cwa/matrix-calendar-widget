@@ -16,6 +16,7 @@
 
 import {
   Calendar,
+  CalendarRepositoryError,
   InMemoryCalendarRepository,
 } from '@matrix-calendar-widget/calendar';
 import {
@@ -64,6 +65,216 @@ function createWrapper(repository: InMemoryCalendarRepository) {
 }
 
 describe('<CalendarToolbar />', () => {
+  it('requires public link consent before publishing and offers a standard subscribe URL', async () => {
+    const publicUrl =
+      'https://feeds.example.test/v1/public-calendar-feeds/signed-capability';
+    const getPublication = vi
+      .fn()
+      .mockResolvedValue({ enabled: true, published: false });
+    const publishPublication = vi.fn().mockResolvedValue({
+      enabled: true,
+      published: true,
+      url: publicUrl,
+    });
+    const repository = Object.assign(
+      new InMemoryCalendarRepository({ calendars }),
+      {
+        getPublicCalendarFeedPublication: getPublication,
+        publishPublicCalendarFeed: publishPublication,
+        unpublishPublicCalendarFeed: vi.fn(),
+      },
+    );
+
+    render(
+      <CalendarToolbar
+        filters={{
+          startDate: '2026-09-01T00:00:00Z',
+          endDate: '2026-10-01T00:00:00Z',
+        }}
+        onRangeChange={vi.fn()}
+        onSearchChange={vi.fn()}
+        onViewChange={vi.fn()}
+        view="month"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Public feed' }));
+    expect(
+      await screen.findByText(/Anyone with the link can read every event/i),
+    ).toBeInTheDocument();
+    expect(getPublication).toHaveBeenCalledWith('writable');
+
+    const publishButton = screen.getByRole('button', { name: 'Publish feed' });
+    expect(publishButton).toBeDisabled();
+    expect(publishPublication).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      screen.getByRole('checkbox', {
+        name: 'I understand that anyone with the link can read this calendar.',
+      }),
+    );
+    expect(publishButton).toBeEnabled();
+    fireEvent.click(publishButton);
+
+    const subscribeLink = await screen.findByRole('link', {
+      name: 'Subscribe in a calendar app',
+    });
+    expect(subscribeLink).toHaveAttribute(
+      'href',
+      publicUrl.replace('https:', 'webcal:'),
+    );
+    expect(screen.getByDisplayValue(publicUrl)).toBeInTheDocument();
+    expect(publishPublication).toHaveBeenCalledWith('writable', true);
+  });
+
+  it('requires consent again after selecting another calendar', async () => {
+    const getPublication = vi
+      .fn()
+      .mockResolvedValue({ enabled: true, published: false });
+    const publishPublication = vi.fn();
+    const repository = Object.assign(
+      new InMemoryCalendarRepository({ calendars }),
+      {
+        getPublicCalendarFeedPublication: getPublication,
+        publishPublicCalendarFeed: publishPublication,
+        unpublishPublicCalendarFeed: vi.fn(),
+      },
+    );
+
+    render(
+      <CalendarToolbar
+        filters={{
+          startDate: '2026-09-01T00:00:00Z',
+          endDate: '2026-10-01T00:00:00Z',
+        }}
+        onRangeChange={vi.fn()}
+        onSearchChange={vi.fn()}
+        onViewChange={vi.fn()}
+        view="month"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Public feed' }));
+    const confirmation = await screen.findByRole('checkbox', {
+      name: 'I understand that anyone with the link can read this calendar.',
+    });
+    fireEvent.click(confirmation);
+    expect(confirmation).toBeChecked();
+
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Calendar' }));
+    fireEvent.click(
+      await screen.findByRole('option', { name: 'Unknown calendar' }),
+    );
+
+    await waitFor(() => {
+      expect(getPublication).toHaveBeenCalledWith('unknown');
+    });
+    expect(confirmation).not.toBeChecked();
+    expect(screen.getByRole('button', { name: 'Publish feed' })).toBeDisabled();
+    expect(publishPublication).not.toHaveBeenCalled();
+  });
+
+  it('allows retrying when publication settings fail to load', async () => {
+    const getPublication = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValue({ enabled: true, published: false });
+    const repository = Object.assign(
+      new InMemoryCalendarRepository({ calendars }),
+      {
+        getPublicCalendarFeedPublication: getPublication,
+        publishPublicCalendarFeed: vi.fn(),
+        unpublishPublicCalendarFeed: vi.fn(),
+      },
+    );
+
+    render(
+      <CalendarToolbar
+        filters={{
+          startDate: '2026-09-01T00:00:00Z',
+          endDate: '2026-10-01T00:00:00Z',
+        }}
+        onRangeChange={vi.fn()}
+        onSearchChange={vi.fn()}
+        onViewChange={vi.fn()}
+        view="month"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Public feed' }));
+    expect(
+      await screen.findByText(
+        'Could not load public feed settings. Check your connection and your permission to manage this calendar, then try again.',
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+
+    expect(
+      await screen.findByRole('checkbox', {
+        name: 'I understand that anyone with the link can read this calendar.',
+      }),
+    ).not.toBeChecked();
+    expect(getPublication).toHaveBeenCalledTimes(2);
+  });
+
+  it('explains when a calendar has unsupported components and the server refuses publication', async () => {
+    const mixedCalendar: Calendar = {
+      id: 'mixed',
+      name: 'Mixed calendar',
+      readOnly: false,
+      supportedComponents: ['VEVENT', 'VTODO', 'VJOURNAL'],
+    };
+    const repository = Object.assign(
+      new InMemoryCalendarRepository({ calendars: [mixedCalendar] }),
+      {
+        getPublicCalendarFeedPublication: vi
+          .fn()
+          .mockResolvedValue({ enabled: true, published: false }),
+        publishPublicCalendarFeed: vi
+          .fn()
+          .mockRejectedValue(
+            new CalendarRepositoryError(
+              'unsupported-calendar-components',
+              'Public calendar feeds require a VEVENT-only calendar',
+            ),
+          ),
+        unpublishPublicCalendarFeed: vi.fn(),
+      },
+    );
+
+    render(
+      <CalendarToolbar
+        filters={{
+          startDate: '2026-09-01T00:00:00Z',
+          endDate: '2026-10-01T00:00:00Z',
+        }}
+        onRangeChange={vi.fn()}
+        onSearchChange={vi.fn()}
+        onViewChange={vi.fn()}
+        view="month"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Public feed' }));
+    expect(
+      await screen.findByText(/reports component types beyond VEVENT/i),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('checkbox', {
+        name: 'I understand that anyone with the link can read this calendar.',
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Publish feed' }));
+
+    expect(
+      await screen.findByText(/server refused to publish it/i),
+    ).toBeInTheDocument();
+  });
+
   it('opens the calendar description editor', async () => {
     const repository = new InMemoryCalendarRepository({ calendars });
 
