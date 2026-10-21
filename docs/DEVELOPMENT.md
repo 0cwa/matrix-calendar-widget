@@ -2,7 +2,7 @@
 
 ## Toolchain
 
-- Node.js: >=22.12.0 for the full-workspace development install and test toolchain. The server production runtime minimum remains `>=20`.
+- Node.js: `^22.22.3` for the full-workspace development install, tests, and server runtime; MSW 3.0.3 requires `>=22.12.0`.
 - Package manager: Yarn 1.22.x.
 - TypeScript monorepo using Yarn workspaces.
 - Widget: React + Vite + Matrix Widget Toolkit + MUI + FullCalendar.
