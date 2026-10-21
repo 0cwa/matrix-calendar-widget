@@ -87,6 +87,14 @@ export interface RoomReminderStore {
   readonly enabled: boolean;
 
   upsertConfiguration(configuration: RoomReminderConfiguration): Promise<void>;
+  /**
+   * Atomically create a missing configuration or replace the exact stored
+   * snapshot supplied by the caller. `undefined` means the row must be absent.
+   */
+  compareAndUpsertConfiguration(
+    configuration: RoomReminderConfiguration,
+    expectedCurrent: RoomReminderConfiguration | undefined,
+  ): Promise<boolean>;
   listConfigurations(
     roomId: string,
     calendarId: string,
@@ -173,6 +181,13 @@ export class DisabledRoomReminderStore implements RoomReminderStore {
   async upsertConfiguration(
     _configuration: RoomReminderConfiguration,
   ): Promise<void> {
+    throw new ReminderStoreDisabledError();
+  }
+
+  async compareAndUpsertConfiguration(
+    _configuration: RoomReminderConfiguration,
+    _expectedCurrent: RoomReminderConfiguration | undefined,
+  ): Promise<boolean> {
     throw new ReminderStoreDisabledError();
   }
 

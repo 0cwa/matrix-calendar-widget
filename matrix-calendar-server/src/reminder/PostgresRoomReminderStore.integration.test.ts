@@ -175,6 +175,85 @@ describeWithDatabase('PostgresRoomReminderStore integration', () => {
     expect(await store.listConfigurations(roomId, calendarId)).toEqual([]);
   });
 
+  it('atomically rejects stale configuration snapshots and duplicate creates', async () => {
+    const identity = {
+      roomId,
+      calendarId,
+      eventUid: 'compare-and-upsert',
+      recurrenceId: null,
+      alarmUid: 'compare-and-upsert-alarm',
+    };
+    const firstSchedule = {
+      daysBefore: 1,
+      localTime: '09:00',
+      timezone: 'Europe/Stockholm',
+    };
+    const changedSchedule = { ...firstSchedule, daysBefore: 2 };
+    await store.upsertConfiguration({
+      ...identity,
+      allDaySchedule: firstSchedule,
+    });
+    const initial = await store.getConfiguration(identity);
+    if (!initial) throw new Error('Initial reminder configuration missing');
+
+    const targetOnly = {
+      ...identity,
+      target: { kind: 'users' as const, userIds: ['@alice:example.test'] },
+      allDaySchedule: firstSchedule,
+    };
+    await expect(
+      store.compareAndUpsertConfiguration(targetOnly, initial),
+    ).resolves.toBe(true);
+    const afterTargetOnly = await store.getConfiguration(identity);
+    if (!afterTargetOnly) {
+      throw new Error('Target-only reminder edit was not stored');
+    }
+
+    await expect(
+      store.compareAndUpsertConfiguration(
+        {
+          ...identity,
+          target: { kind: 'users', userIds: ['@alice:example.test'] },
+          allDaySchedule: firstSchedule,
+        },
+        undefined,
+      ),
+    ).resolves.toBe(false);
+
+    await store.upsertConfiguration({
+      ...identity,
+      target: targetOnly.target,
+      allDaySchedule: changedSchedule,
+    });
+    await expect(
+      store.compareAndUpsertConfiguration(
+        {
+          ...identity,
+          target: { kind: 'room' },
+          allDaySchedule: firstSchedule,
+        },
+        afterTargetOnly,
+      ),
+    ).resolves.toBe(false);
+    await expect(store.getConfiguration(identity)).resolves.toMatchObject({
+      target: targetOnly.target,
+      allDaySchedule: changedSchedule,
+      revision: 3,
+    });
+    await store.deleteConfiguration(identity);
+    await expect(
+      store.compareAndUpsertConfiguration(
+        {
+          ...identity,
+          target: { kind: 'room' },
+          allDaySchedule: firstSchedule,
+        },
+        afterTargetOnly,
+      ),
+    ).resolves.toBe(false);
+    await expect(store.getConfiguration(identity)).resolves.toBeUndefined();
+  });
+
   it('keeps pre-metadata reminder rows on the room and untimed defaults', async () => {
     const legacy = {
       roomId,

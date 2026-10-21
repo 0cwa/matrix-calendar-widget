@@ -90,6 +90,53 @@ describe('InMemoryRoomReminderStore configuration paging', () => {
       normalizeRoomReminderConfiguration(occurrence),
     ]);
   });
+
+  it('rejects a stale configuration snapshot without replacing newer settings', async () => {
+    const store = new InMemoryRoomReminderStore();
+    const identity = {
+      roomId: '!team:example.org',
+      calendarId: 'team',
+      eventUid: 'planning',
+      recurrenceId: null,
+      alarmUid: 'alarm-1',
+    };
+    const firstSchedule = {
+      daysBefore: 1,
+      localTime: '09:00',
+      timezone: 'Europe/Stockholm',
+    };
+    const changedSchedule = { ...firstSchedule, daysBefore: 2 };
+
+    await store.upsertConfiguration({
+      ...identity,
+      allDaySchedule: firstSchedule,
+    });
+    const snapshot = await store.getConfiguration(identity);
+    expect(snapshot).toBeDefined();
+    await store.upsertConfiguration({
+      ...identity,
+      allDaySchedule: changedSchedule,
+    });
+
+    await expect(
+      store.compareAndUpsertConfiguration(
+        {
+          ...identity,
+          target: {
+            kind: 'users',
+            userIds: ['@alice:example.org'],
+          },
+          allDaySchedule: firstSchedule,
+        },
+        snapshot,
+      ),
+    ).resolves.toBe(false);
+    await expect(store.getConfiguration(identity)).resolves.toMatchObject({
+      target: { kind: 'room' },
+      allDaySchedule: changedSchedule,
+      revision: 2,
+    });
+  });
 });
 
 describe('createReminderDeliveryKey', () => {

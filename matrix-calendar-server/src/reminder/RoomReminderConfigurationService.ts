@@ -16,6 +16,7 @@
 
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   ServiceUnavailableException,
   UnauthorizedException,
@@ -35,7 +36,6 @@ import {
   authorizeRoomMentionScheduling,
 } from './RoomMentionPolicy';
 import {
-  RoomReminderConfigurationIdentity,
   RoomReminderConfigurationRecord,
   assertReminderConfigurationCursorScope,
   assertReminderConfigurationIdentity,
@@ -167,25 +167,62 @@ export class RoomReminderConfigurationService {
     const actor = requireCanonicalActor(actorUserId);
     const target = await this.authorize(actor, roomId);
     await this.assertSelectedRecipientsAreJoined(target.roomId, input.target);
-    const identity = await this.resolveSourceIdentity(target, input);
+    const resolution = await this.resolveSourceConfiguration(target, input);
+    const configurationIdentity = {
+      roomId: target.roomId,
+      calendarId: target.calendarId,
+      eventUid: resolution.identity.eventUid,
+      recurrenceId: resolution.identity.recurrenceId,
+      alarmUid: resolution.identity.alarmUid,
+    };
 
+    let expectedCurrent: RoomReminderConfiguration | undefined;
     try {
-      await this.store.upsertConfiguration({
-        roomId: target.roomId,
-        calendarId: target.calendarId,
-        ...identity,
-        target: input.target,
-        allDaySchedule: input.allDaySchedule,
-      });
+      expectedCurrent = await this.store.getConfiguration(
+        configurationIdentity,
+      );
     } catch {
       throw unavailable();
     }
-    try {
-      const current = await this.store.getConfiguration({
-        roomId: target.roomId,
-        calendarId: target.calendarId,
-        ...identity,
+    const allDayScheduleChanged =
+      expectedCurrent === undefined ||
+      !sameAllDayReminderSchedule(
+        expectedCurrent.allDaySchedule,
+        input.allDaySchedule,
+      );
+    if (
+      allDayScheduleChanged &&
+      resolution.allDayReminderDueAt &&
+      !resolution.isRecurringSeries &&
+      resolution.allDayReminderDueAt.getTime() <= this.now()
+    ) {
+      throw new BadRequestException({
+        code: 'room-reminder-time-in-past',
+        message: 'Choose a future Matrix reminder time before saving',
       });
+    }
+
+    let stored: boolean;
+    try {
+      stored = await this.store.compareAndUpsertConfiguration(
+        {
+          ...configurationIdentity,
+          target: input.target,
+          allDaySchedule: input.allDaySchedule,
+        },
+        expectedCurrent,
+      );
+    } catch {
+      throw unavailable();
+    }
+    if (!stored) {
+      throw new ConflictException({
+        code: 'room-reminder-configuration-changed',
+        message: 'Reminder settings changed while saving. Reload and try again',
+      });
+    }
+    try {
+      const current = await this.store.getConfiguration(configurationIdentity);
       if (!current) throw new Error('Reminder configuration was not stored');
       return publicConfiguration(current);
     } catch {
@@ -255,7 +292,7 @@ export class RoomReminderConfigurationService {
     };
   }
 
-  private async resolveSourceIdentity(
+  private async resolveSourceConfiguration(
     target: RoomCalendarTarget,
     input: {
       eventId: string;
@@ -263,7 +300,7 @@ export class RoomReminderConfigurationService {
       alarmUid: string;
       allDaySchedule: RoomReminderConfiguration['allDaySchedule'];
     },
-  ): Promise<RoomReminderConfigurationIdentity> {
+  ): Promise<ReturnType<typeof resolveTriggerableReminderConfiguration>> {
     const resource = await this.readSourceForTarget(target, input.eventId);
 
     let resolution: ReturnType<typeof resolveTriggerableReminderConfiguration>;
@@ -283,21 +320,7 @@ export class RoomReminderConfigurationService {
         message: 'Event reminder source is not supported',
       });
     }
-    if (
-      resolution.allDayReminderDueAt &&
-      !resolution.isRecurringSeries &&
-      resolution.allDayReminderDueAt.getTime() <= this.now()
-    ) {
-      throw new BadRequestException({
-        code: 'room-reminder-time-in-past',
-        message: 'Choose a future Matrix reminder time before saving',
-      });
-    }
-    return {
-      eventUid: resolution.identity.eventUid,
-      recurrenceId: resolution.identity.recurrenceId,
-      alarmUid: resolution.identity.alarmUid,
-    };
+    return resolution;
   }
 
   private async assertSelectedRecipientsAreJoined(
@@ -381,6 +404,20 @@ function publicConfiguration(
     allDaySchedule: normalized.allDaySchedule,
     revision: normalized.revision,
   };
+}
+
+function sameAllDayReminderSchedule(
+  left: RoomReminderConfiguration['allDaySchedule'],
+  right: RoomReminderConfiguration['allDaySchedule'],
+): boolean {
+  const normalizedLeft = left ?? null;
+  const normalizedRight = right ?? null;
+  return normalizedLeft === null
+    ? normalizedRight === null
+    : normalizedRight !== null &&
+        normalizedLeft.daysBefore === normalizedRight.daysBefore &&
+        normalizedLeft.localTime === normalizedRight.localTime &&
+        normalizedLeft.timezone === normalizedRight.timezone;
 }
 
 function unavailable(): ServiceUnavailableException {

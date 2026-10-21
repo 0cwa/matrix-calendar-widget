@@ -330,6 +330,92 @@ export class PostgresRoomReminderStore implements RoomReminderStore {
     `;
   }
 
+  async compareAndUpsertConfiguration(
+    configuration: RoomReminderConfiguration,
+    expectedCurrent: RoomReminderConfiguration | undefined,
+  ): Promise<boolean> {
+    const normalized = normalizeRoomReminderConfiguration(configuration);
+    const targetJson = this.sql.json(normalized.target);
+    const scheduleJson =
+      normalized.allDaySchedule === null
+        ? null
+        : this.sql.json(normalized.allDaySchedule);
+
+    if (expectedCurrent === undefined) {
+      const inserted = await this.sql<{ revision: number }[]>`
+        INSERT INTO matrix_calendar.room_reminder_configurations (
+          room_id, calendar_id, event_uid, recurrence_id, alarm_uid,
+          target_json, all_day_schedule_json, schedule_effective_at, revision
+        ) VALUES (
+          ${normalized.roomId},
+          ${normalized.calendarId},
+          ${normalized.eventUid},
+          ${normalized.recurrenceId ?? ''},
+          ${normalized.alarmUid},
+          ${targetJson},
+          ${scheduleJson},
+          CASE
+            WHEN ${normalized.allDaySchedule === null} THEN NULL
+            ELSE clock_timestamp()
+          END,
+          1
+        )
+        ON CONFLICT (room_id, calendar_id, event_uid, recurrence_id, alarm_uid)
+        DO NOTHING
+        RETURNING revision
+      `;
+      return inserted.length === 1;
+    }
+
+    const expected = normalizeRoomReminderConfiguration(expectedCurrent);
+    if (
+      normalized.roomId !== expected.roomId ||
+      normalized.calendarId !== expected.calendarId ||
+      normalized.eventUid !== expected.eventUid ||
+      normalized.recurrenceId !== expected.recurrenceId ||
+      normalized.alarmUid !== expected.alarmUid
+    ) {
+      return false;
+    }
+
+    const expectedScheduleJson =
+      expected.allDaySchedule === null
+        ? null
+        : this.sql.json(expected.allDaySchedule);
+    const expectedScheduleEffectiveAt = expected.scheduleEffectiveAt ?? null;
+    const updated = await this.sql<{ revision: number }[]>`
+      UPDATE matrix_calendar.room_reminder_configurations
+      SET target_json = ${targetJson},
+          all_day_schedule_json = ${scheduleJson},
+          schedule_effective_at = CASE
+            WHEN all_day_schedule_json IS DISTINCT FROM ${scheduleJson}
+            THEN CASE
+              WHEN ${normalized.allDaySchedule === null} THEN NULL
+              ELSE clock_timestamp()
+            END
+            ELSE schedule_effective_at
+          END,
+          revision = revision + CASE
+            WHEN target_json IS DISTINCT FROM ${targetJson}
+              OR all_day_schedule_json IS DISTINCT FROM ${scheduleJson}
+            THEN 1
+            ELSE 0
+          END
+      WHERE room_id = ${normalized.roomId}
+        AND calendar_id = ${normalized.calendarId}
+        AND event_uid = ${normalized.eventUid}
+        AND recurrence_id = ${normalized.recurrenceId ?? ''}
+        AND alarm_uid = ${normalized.alarmUid}
+        AND revision = ${expected.revision}
+        AND target_json IS NOT DISTINCT FROM ${this.sql.json(expected.target)}
+        AND all_day_schedule_json IS NOT DISTINCT FROM ${expectedScheduleJson}
+        AND date_trunc('milliseconds', schedule_effective_at)
+              IS NOT DISTINCT FROM ${expectedScheduleEffectiveAt}
+      RETURNING revision
+    `;
+    return updated.length === 1;
+  }
+
   async listConfigurations(
     roomId: string,
     calendarId: string,

@@ -66,15 +66,40 @@ export class InMemoryRoomReminderStore implements RoomReminderStore {
     normalized.revision = current
       ? (current.revision ?? 1) + (unchanged ? 0 : 1)
       : 1;
-    normalized.scheduleEffectiveAt =
-      current &&
-      scheduleUnchanged &&
-      current.scheduleEffectiveAt instanceof Date
-        ? new Date(current.scheduleEffectiveAt.getTime())
-        : normalized.allDaySchedule === null
-          ? null
+    if (normalized.allDaySchedule === null) {
+      delete normalized.scheduleEffectiveAt;
+    } else {
+      normalized.scheduleEffectiveAt =
+        current &&
+        scheduleUnchanged &&
+        current.scheduleEffectiveAt instanceof Date
+          ? new Date(current.scheduleEffectiveAt.getTime())
           : new Date();
+    }
     this.configurations.set(key, cloneConfiguration(normalized));
+  }
+
+  async compareAndUpsertConfiguration(
+    configuration: RoomReminderConfiguration,
+    expectedCurrent: RoomReminderConfiguration | undefined,
+  ): Promise<boolean> {
+    const current = this.configurations.get(configurationKey(configuration));
+    if (expectedCurrent === undefined) {
+      if (current) return false;
+    } else {
+      if (
+        configurationKey(expectedCurrent) !== configurationKey(configuration)
+      ) {
+        return false;
+      }
+      const expected = normalizeRoomReminderConfiguration(expectedCurrent);
+      if (!current || !sameConfigurationSnapshot(current, expected)) {
+        return false;
+      }
+    }
+
+    await this.upsertConfiguration(configuration);
+    return true;
   }
 
   async listConfigurations(
@@ -280,6 +305,27 @@ function cloneConfiguration(
         ? new Date(normalized.scheduleEffectiveAt.getTime())
         : normalized.scheduleEffectiveAt,
   };
+}
+
+function sameConfigurationSnapshot(
+  current: RoomReminderConfiguration,
+  expected: RoomReminderConfiguration,
+): boolean {
+  const normalizedCurrent = normalizeRoomReminderConfiguration(current);
+  const normalizedExpected = normalizeRoomReminderConfiguration(expected);
+  const currentEffectiveAt = normalizedCurrent.scheduleEffectiveAt;
+  const expectedEffectiveAt = normalizedExpected.scheduleEffectiveAt;
+  return (
+    normalizedCurrent.revision === normalizedExpected.revision &&
+    JSON.stringify(normalizedCurrent.target) ===
+      JSON.stringify(normalizedExpected.target) &&
+    JSON.stringify(normalizedCurrent.allDaySchedule) ===
+      JSON.stringify(normalizedExpected.allDaySchedule) &&
+    (currentEffectiveAt == null
+      ? expectedEffectiveAt == null
+      : expectedEffectiveAt instanceof Date &&
+        currentEffectiveAt.getTime() === expectedEffectiveAt.getTime())
+  );
 }
 
 function compareConfigurations(
