@@ -237,17 +237,6 @@
       "submit": "Beschreibung speichern",
       "title": "Kalenderbeschreibung bearbeiten"
     },
-    "diagnostics": {
-      "action": "CalDAV-Sammlungs-URLs",
-      "copied": "Kopiert",
-      "copy": "URL kopieren",
-      "copyError": "Die Sammlungs-URL konnte nicht kopiert werden. Prüfe die Zwischenablage-Berechtigung und versuche es erneut.",
-      "description": "Kopiere eine Sammlungs-URL, wenn du Administratoren bei der Diagnose des Kalenderzugriffs hilfst. URLs werden als Text angezeigt und beim Auswählen nicht geöffnet.",
-      "empty": "Es sind keine Kalender-Sammlungs-URLs verfügbar.",
-      "loadError": "CalDAV-Diagnosedaten sind für diesen Raum nicht verfügbar.",
-      "loading": "Kalenderdiagnose wird geladen",
-      "title": "CalDAV-Sammlungsdiagnose"
-    },
     "rename": {
       "action": "Kalender umbenennen",
       "calendar": "Kalender",
@@ -267,7 +256,6 @@
     "label": "{{range, daterange}}"
   },
   "cancel": "Abbrechen",
-  "close": "Schließen",
   "copyableTextButton": {
     "copied": "Kopiert",
     "copy-to-clipboard": "In die Zwischenablage kopieren"
