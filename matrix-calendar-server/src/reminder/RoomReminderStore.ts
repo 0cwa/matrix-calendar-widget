@@ -72,6 +72,9 @@ export type ReminderDeliveryClaim = {
   leaseExpiresAt: Date;
 };
 
+export type ReminderDeliverySkipReason = 'no-current-recipients';
+export type ReminderDeliverySendResult = 'sent' | 'no-current-recipients';
+
 /**
  * Operations that accept a signal must observe abort and settle promptly.
  * Database cancellation is best effort: an aborted caller cannot infer that
@@ -99,6 +102,11 @@ export interface RoomReminderStore {
     configuration: RoomReminderConfiguration,
     signal?: AbortSignal,
   ): Promise<boolean>;
+  /** Read the latest sidecar revision before sending a claimed firing. */
+  getConfiguration(
+    configuration: RoomReminderConfiguration,
+    signal?: AbortSignal,
+  ): Promise<RoomReminderConfiguration | undefined>;
   deleteConfiguration(configuration: RoomReminderConfiguration): Promise<void>;
   deleteEventConfigurations(
     calendarId: string,
@@ -114,6 +122,12 @@ export interface RoomReminderStore {
   markDeliverySent(
     deliveryKey: string,
     claimToken: string,
+    signal?: AbortSignal,
+  ): Promise<boolean>;
+  markDeliverySkipped(
+    deliveryKey: string,
+    claimToken: string,
+    reason: ReminderDeliverySkipReason,
     signal?: AbortSignal,
   ): Promise<boolean>;
   releaseDeliveryClaim(
@@ -183,6 +197,13 @@ export class DisabledRoomReminderStore implements RoomReminderStore {
     throw new ReminderStoreDisabledError();
   }
 
+  async getConfiguration(
+    _configuration: RoomReminderConfiguration,
+    _signal?: AbortSignal,
+  ): Promise<RoomReminderConfiguration | undefined> {
+    throw new ReminderStoreDisabledError();
+  }
+
   async deleteConfiguration(
     _configuration: RoomReminderConfiguration,
   ): Promise<void> {
@@ -211,6 +232,15 @@ export class DisabledRoomReminderStore implements RoomReminderStore {
   async markDeliverySent(
     _deliveryKey: string,
     _claimToken: string,
+    _signal?: AbortSignal,
+  ): Promise<boolean> {
+    throw new ReminderStoreDisabledError();
+  }
+
+  async markDeliverySkipped(
+    _deliveryKey: string,
+    _claimToken: string,
+    _reason: ReminderDeliverySkipReason,
     _signal?: AbortSignal,
   ): Promise<boolean> {
     throw new ReminderStoreDisabledError();
@@ -251,8 +281,11 @@ export function validateRoomReminderConfiguration(
   configuration: RoomReminderConfiguration,
 ): void {
   if (
-    !hasExactKeys(configuration, REMINDER_CONFIGURATION_KEYS) &&
-    !hasExactKeys(configuration, REMINDER_CONFIGURATION_KEYS_WITH_METADATA)
+    !hasRequiredAndOnlyAllowedKeys(
+      configuration,
+      REMINDER_CONFIGURATION_KEYS,
+      REMINDER_CONFIGURATION_KEYS_WITH_METADATA,
+    )
   ) {
     throw new Error('Invalid room reminder configuration: shape');
   }
@@ -275,7 +308,10 @@ export function validateRoomReminderConfiguration(
     throw new Error('Invalid room reminder configuration: recurrenceId');
   }
 
-  const target = configuration.target ?? { kind: 'room' };
+  const target =
+    configuration.target === undefined
+      ? { kind: 'room' as const }
+      : configuration.target;
   if (target.kind === 'room') {
     if (Object.keys(target).length !== 1) {
       throw new Error('Invalid room reminder configuration: target');
@@ -376,6 +412,28 @@ function hasExactKeys(value: object, expectedKeys: readonly string[]): boolean {
   return (
     keys.length === expectedKeys.length &&
     expectedKeys.every((key) => keys.includes(key))
+  );
+}
+
+function hasRequiredAndOnlyAllowedKeys(
+  value: object,
+  requiredKeys: readonly string[],
+  allowedKeys: readonly string[],
+): boolean {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype
+  ) {
+    return false;
+  }
+  const keys = Reflect.ownKeys(value);
+  return (
+    requiredKeys.every((key) => keys.includes(key)) &&
+    keys.every((key) =>
+      typeof key === 'string' ? allowedKeys.includes(key) : false,
+    )
   );
 }
 

@@ -22,6 +22,8 @@ import type { RoomReminderAllDaySchedule } from './RoomReminderStore';
 export const MAX_REMINDER_REPEAT_COUNT = 100;
 export const MAX_REMINDER_TRIGGER_HORIZON_MS = 366 * 24 * 60 * 60 * 1000;
 export const MAX_REMINDER_EVENT_DURATION_MS = 366 * 24 * 60 * 60 * 1000;
+/** Bounds UTC projection differences while preserving local DATE scheduling. */
+export const MAX_REMINDER_TIMEZONE_OFFSET_MARGIN_MS = 32 * 60 * 60 * 1000;
 
 /**
  * Timing for one already-expanded VEVENT occurrence. The caller must pass
@@ -283,9 +285,11 @@ export function isAllDayReminderScheduleWithinLimits(
       lastDueAt &&
       Number.isFinite(eventAnchor) &&
       Math.abs(firstDueAt.getTime() - eventAnchor) <=
-        MAX_REMINDER_TRIGGER_HORIZON_MS &&
+        MAX_REMINDER_TRIGGER_HORIZON_MS +
+          MAX_REMINDER_TIMEZONE_OFFSET_MARGIN_MS &&
       Math.abs(lastDueAt.getTime() - eventAnchor) <=
-        MAX_REMINDER_TRIGGER_HORIZON_MS,
+        MAX_REMINDER_TRIGGER_HORIZON_MS +
+          MAX_REMINDER_TIMEZONE_OFFSET_MARGIN_MS,
     );
   } catch {
     return false;

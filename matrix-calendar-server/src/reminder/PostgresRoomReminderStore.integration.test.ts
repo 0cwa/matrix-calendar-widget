@@ -16,7 +16,10 @@
 
 import { randomUUID } from 'crypto';
 import postgres from 'postgres';
-import { PostgresRoomReminderStore } from './PostgresRoomReminderStore';
+import {
+  createReminderDeliveryKey,
+  PostgresRoomReminderStore,
+} from './PostgresRoomReminderStore';
 import {
   getReminderDatabaseTlsOptions,
   parseReminderDatabaseTlsMode,
@@ -160,11 +163,46 @@ describeWithDatabase('PostgresRoomReminderStore integration', () => {
     await store.upsertConfiguration(config);
     await store.upsertConfiguration(config);
     expect(await store.listConfigurations(roomId, calendarId)).toEqual([
-      config,
+      {
+        ...config,
+        target: { kind: 'room' },
+        allDaySchedule: null,
+        revision: 1,
+      },
     ]);
 
     await store.deleteConfiguration(config);
     expect(await store.listConfigurations(roomId, calendarId)).toEqual([]);
+  });
+
+  it('keeps pre-metadata reminder rows on the room and untimed defaults', async () => {
+    const legacy = {
+      roomId,
+      calendarId,
+      eventUid: 'legacy-v1-reminder',
+      recurrenceId: null,
+      alarmUid: 'legacy-alarm-uid',
+    };
+    await sql`
+      INSERT INTO matrix_calendar.room_reminder_configurations (
+        room_id, calendar_id, event_uid, recurrence_id, alarm_uid
+      ) VALUES (
+        ${legacy.roomId}, ${legacy.calendarId}, ${legacy.eventUid},
+        ${legacy.recurrenceId ?? ''}, ${legacy.alarmUid}
+      )
+    `;
+
+    expect(await store.getConfiguration(legacy)).toEqual({
+      ...legacy,
+      target: { kind: 'room' },
+      allDaySchedule: null,
+      revision: 1,
+    });
+    expect(
+      await sql<{ version: number }[]>`
+        SELECT version FROM matrix_calendar.schema_migrations ORDER BY version
+      `,
+    ).toEqual([{ version: 1 }, { version: 2 }, { version: 3 }]);
   });
 
   it('returns bounded exclusive configuration pages and checks exact existence', async () => {
@@ -370,6 +408,12 @@ describeWithDatabase('PostgresRoomReminderStore integration', () => {
       eventUid: 'restart-planning',
       recurrenceId: null,
       alarmUid: 'alarm-uid',
+      target: { kind: 'users' as const, userIds: ['@alice:example.test'] },
+      allDaySchedule: {
+        daysBefore: 1,
+        localTime: '09:00',
+        timezone: 'Europe/Stockholm',
+      },
     };
     const identity = {
       ...config,
@@ -377,20 +421,40 @@ describeWithDatabase('PostgresRoomReminderStore integration', () => {
     };
 
     await store.upsertConfiguration(config);
+    const deliveryKeyBeforeMetadataEdit = createReminderDeliveryKey(identity);
     const claim = await store.claimDelivery(identity, 60_000);
     expect(claim).toBeDefined();
     expect(
       await store.markDeliverySent(claim!.deliveryKey, claim!.claimToken),
     ).toBe(true);
 
+    await store.upsertConfiguration({
+      ...config,
+      target: { kind: 'users', userIds: ['@bob:example.test'] },
+      allDaySchedule: {
+        daysBefore: 0,
+        localTime: '09:00',
+        timezone: 'Europe/Stockholm',
+      },
+    });
+    const deliveryKeyAfterMetadataEdit = createReminderDeliveryKey(identity);
+    expect(deliveryKeyAfterMetadataEdit).toBe(deliveryKeyBeforeMetadataEdit);
+
     await store.onApplicationShutdown();
     sql = createTestPostgresClient();
     store = new PostgresRoomReminderStore(sql);
     await store.migrate();
 
-    expect(await store.listConfigurations(roomId, calendarId)).toContainEqual(
-      config,
-    );
+    expect(await store.getConfiguration(config)).toEqual({
+      ...config,
+      target: { kind: 'users', userIds: ['@bob:example.test'] },
+      allDaySchedule: {
+        daysBefore: 0,
+        localTime: '09:00',
+        timezone: 'Europe/Stockholm',
+      },
+      revision: 2,
+    });
     expect(await store.claimDelivery(identity, 60_000)).toBeUndefined();
   });
 });

@@ -15,7 +15,11 @@
  */
 
 import { BadRequestException } from '@nestjs/common';
-import type { RoomReminderConfiguration } from './RoomReminderStore';
+import type {
+  RoomReminderAllDaySchedule,
+  RoomReminderConfiguration,
+  RoomReminderTarget,
+} from './RoomReminderStore';
 
 export const MAX_ROOM_REMINDER_CONFIGURATION_PAGE_SIZE = 100;
 export const DEFAULT_ROOM_REMINDER_CONFIGURATION_PAGE_SIZE = 50;
@@ -25,6 +29,13 @@ export type RoomReminderConfigurationIdentity = Pick<
   RoomReminderConfiguration,
   'eventUid' | 'recurrenceId' | 'alarmUid'
 >;
+
+export type RoomReminderConfigurationRecord =
+  RoomReminderConfigurationIdentity & {
+    target: RoomReminderTarget;
+    allDaySchedule: RoomReminderAllDaySchedule | null;
+    revision: number;
+  };
 
 export type RoomReminderConfigurationCursor =
   RoomReminderConfigurationIdentity & {
@@ -37,16 +48,18 @@ export type RoomReminderConfigurationUpsertInput = {
   eventId: string;
   recurrenceId: string | null;
   alarmUid: string;
+  target: RoomReminderTarget;
+  allDaySchedule: RoomReminderAllDaySchedule | null;
 };
 
 export function parseReminderConfigurationUpsertInput(
   input: unknown,
 ): RoomReminderConfigurationUpsertInput {
-  const record = plainRecordWithKeys(input, [
-    'eventId',
-    'recurrenceId',
-    'alarmUid',
-  ]);
+  const record = plainRecordWithOptionalKeys(
+    input,
+    ['eventId', 'recurrenceId', 'alarmUid'],
+    ['eventId', 'recurrenceId', 'alarmUid', 'target', 'allDaySchedule'],
+  );
   const eventId = parseReminderConfigurationEventId(record.eventId);
   if (
     !isValidIdentity(record.alarmUid) ||
@@ -55,10 +68,18 @@ export function parseReminderConfigurationUpsertInput(
     throw invalidRequest();
   }
 
+  const target =
+    record.target === undefined
+      ? { kind: 'room' as const }
+      : parseTarget(record.target);
+  const allDaySchedule = parseAllDaySchedule(record.allDaySchedule);
+
   return {
     eventId,
     recurrenceId: record.recurrenceId,
     alarmUid: record.alarmUid,
+    target,
+    allDaySchedule,
   };
 }
 
@@ -224,6 +245,107 @@ function plainRecordWithKeys(
     throw invalidRequest();
   }
   return record;
+}
+
+function plainRecordWithOptionalKeys(
+  value: unknown,
+  requiredKeys: readonly string[],
+  allowedKeys: readonly string[],
+): Record<string, unknown> {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype
+  ) {
+    throw invalidRequest();
+  }
+  const record = value as Record<string, unknown>;
+  const keys = Reflect.ownKeys(record);
+  if (
+    keys.some((key) => typeof key !== 'string' || !allowedKeys.includes(key)) ||
+    requiredKeys.some(
+      (key) => !Object.prototype.hasOwnProperty.call(record, key),
+    )
+  ) {
+    throw invalidRequest();
+  }
+  return record;
+}
+
+function parseTarget(value: unknown): RoomReminderTarget {
+  if (!isPlainRecord(value)) throw invalidRequest();
+  const keys = Reflect.ownKeys(value);
+  if (value.kind === 'room' && keys.length === 1 && keys[0] === 'kind') {
+    return { kind: 'room' };
+  }
+  if (
+    value.kind !== 'users' ||
+    keys.length !== 2 ||
+    !keys.includes('kind') ||
+    !keys.includes('userIds') ||
+    !Array.isArray(value.userIds) ||
+    value.userIds.length === 0 ||
+    value.userIds.length > 50 ||
+    value.userIds.some((userId) => !isCanonicalMatrixUserId(userId)) ||
+    new Set(value.userIds).size !== value.userIds.length
+  ) {
+    throw invalidRequest();
+  }
+  return { kind: 'users', userIds: [...value.userIds].sort() };
+}
+
+function parseAllDaySchedule(
+  value: unknown,
+): RoomReminderAllDaySchedule | null {
+  if (value === undefined || value === null) return null;
+  if (
+    !isPlainRecord(value) ||
+    Reflect.ownKeys(value).length !== 3 ||
+    Reflect.ownKeys(value).some(
+      (key) => !['daysBefore', 'localTime', 'timezone'].includes(String(key)),
+    ) ||
+    !Number.isSafeInteger(value.daysBefore) ||
+    (value.daysBefore as number) < 0 ||
+    (value.daysBefore as number) > 366 ||
+    typeof value.localTime !== 'string' ||
+    !/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(value.localTime) ||
+    typeof value.timezone !== 'string' ||
+    value.timezone.trim() !== value.timezone ||
+    value.timezone.length === 0 ||
+    value.timezone.length > 64 ||
+    /\s/.test(value.timezone) ||
+    [...value.timezone].some((character) => character.charCodeAt(0) < 0x20)
+  ) {
+    throw invalidRequest();
+  }
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value.timezone });
+  } catch {
+    throw invalidRequest();
+  }
+  return {
+    daysBefore: value.daysBefore as number,
+    localTime: value.localTime,
+    timezone: value.timezone,
+  };
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.getPrototypeOf(value) === Object.prototype
+  );
+}
+
+function isCanonicalMatrixUserId(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length <= 255 &&
+    /^@[^:\s?#]+:[^\s?#]+$/.test(value)
+  );
 }
 
 function isValidEventId(value: unknown): value is string {

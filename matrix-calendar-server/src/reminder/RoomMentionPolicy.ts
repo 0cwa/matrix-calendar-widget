@@ -137,6 +137,8 @@ export interface RoomMentionDeliveryRequest {
   /** Shared server-selected identity; never derived from request input. */
   readonly roomCalendarPrincipalIdentity: RoomCalendarPrincipalIdentity;
   readonly configuredBindings: unknown;
+  /** User-only mentions do not require room-notification power. */
+  readonly mentionTarget?: 'room' | 'users';
 }
 
 /** Re-resolve room binding and current sender authorization for each delivery. */
@@ -146,7 +148,12 @@ export async function authorizeRoomMentionDelivery(
   signal?: AbortSignal,
 ): Promise<RoomCalendarBinding | undefined> {
   const identity = request.roomCalendarPrincipalIdentity;
-  if (signal?.aborted || !isValidPrincipalIdentity(identity)) {
+  if (
+    signal?.aborted ||
+    !isValidPrincipalIdentity(identity) ||
+    (request.mentionTarget !== undefined &&
+      !['room', 'users'].includes(request.mentionTarget))
+  ) {
     return undefined;
   }
 
@@ -186,12 +193,15 @@ export async function authorizeRoomMentionDelivery(
       0,
       roomVersion,
     );
-    const roomMentionPower = effectivePowerLevel(
-      powerLevels?.notifications?.room,
-      undefined,
-      50,
-      roomVersion,
-    );
+    const roomMentionPower =
+      request.mentionTarget === 'users'
+        ? 0
+        : effectivePowerLevel(
+            powerLevels?.notifications?.room,
+            undefined,
+            50,
+            roomVersion,
+          );
 
     if (
       senderPower === undefined ||

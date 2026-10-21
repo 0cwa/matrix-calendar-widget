@@ -19,6 +19,7 @@ import { createReminderDeliveryKey } from './PostgresRoomReminderStore';
 import {
   DisabledRoomReminderStore,
   ReminderStoreDisabledError,
+  normalizeRoomReminderConfiguration,
   validateReminderDeliveryIdentity,
   validateRoomReminderConfiguration,
 } from './RoomReminderStore';
@@ -73,7 +74,7 @@ describe('InMemoryRoomReminderStore configuration paging', () => {
       undefined,
       1,
     );
-    expect(firstPage).toEqual([master]);
+    expect(firstPage).toEqual([normalizeRoomReminderConfiguration(master)]);
 
     const secondPage = await store.listConfigurationPage(
       master.roomId,
@@ -85,7 +86,9 @@ describe('InMemoryRoomReminderStore configuration paging', () => {
       },
       1,
     );
-    expect(secondPage).toEqual([occurrence]);
+    expect(secondPage).toEqual([
+      normalizeRoomReminderConfiguration(occurrence),
+    ]);
   });
 });
 
@@ -104,6 +107,55 @@ describe('createReminderDeliveryKey', () => {
       createReminderDeliveryKey({ ...identity }),
     );
     expect(createReminderDeliveryKey(identity)).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('normalizes legacy configuration rows to room-target timing defaults', () => {
+    expect(
+      normalizeRoomReminderConfiguration({
+        roomId: identity.roomId,
+        calendarId: identity.calendarId,
+        eventUid: identity.eventUid,
+        recurrenceId: null,
+        alarmUid: identity.alarmUid,
+      }),
+    ).toEqual({
+      roomId: identity.roomId,
+      calendarId: identity.calendarId,
+      eventUid: identity.eventUid,
+      recurrenceId: null,
+      alarmUid: identity.alarmUid,
+      target: { kind: 'room' },
+      allDaySchedule: null,
+      revision: 1,
+    });
+  });
+
+  it.each([
+    {
+      target: { kind: 'future-target', extra: true },
+      allDaySchedule: null,
+      revision: 1,
+    },
+    {
+      target: { kind: 'users', userIds: ['@alice:example.test'] },
+      allDaySchedule: {
+        daysBefore: 0,
+        localTime: '09:00',
+        timezone: 'Unknown/Zone',
+      },
+      revision: 1,
+    },
+  ])('fails closed for unknown reminder metadata', (metadata) => {
+    expect(() =>
+      normalizeRoomReminderConfiguration({
+        roomId: identity.roomId,
+        calendarId: identity.calendarId,
+        eventUid: identity.eventUid,
+        recurrenceId: null,
+        alarmUid: identity.alarmUid,
+        ...metadata,
+      } as any),
+    ).toThrow('Invalid room reminder configuration');
   });
 
   it.each([

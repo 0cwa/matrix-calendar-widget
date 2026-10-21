@@ -64,6 +64,23 @@ also rejects a database whose recorded migration version is newer than the
 server supports. Do not hand-edit `schema_migrations`, run copied DDL, or treat
 startup migration failure as permission to downgrade the database.
 
+ADR044 adds reminder-store migrations 2 and 3. Version 2 adds a Matrix target
+with a whole-room default, a nullable all-day schedule, and a configuration
+revision initialized to 1. Existing reminder settings and delivery identities
+remain in place. Version 3 adds a constrained terminal skip reason for
+deliveries whose selected recipients have all left; existing delivery rows
+keep their prior state. The reminder restore acceptance helper snapshots and
+compares recipient targets, all-day schedules, revisions, and delivery skip
+metadata after restore.
+
+Do not run a pre-ADR044 server with reminder delivery enabled while selected-
+user targets exist: older code cannot interpret those destinations and could
+send a whole-room mention. For rollback, disable and quiesce delivery before
+starting older code, keep the forward-migrated database and all reminder rows,
+and leave delivery disabled until compatible code is restored. Prefer a
+compatible forward fix when selected-user reminders must stay active. There is
+no downgrade migration.
+
 Provision a dedicated application-owned database and role before enabling the
 store. The startup role needs permission to create and update this application's
 schema and tables, but must not be a PostgreSQL superuser or have permission to

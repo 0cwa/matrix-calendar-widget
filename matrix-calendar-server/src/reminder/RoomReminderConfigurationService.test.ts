@@ -53,6 +53,7 @@ describe('RoomReminderConfigurationService', () => {
   let configuration: IAppConfiguration;
   let listConfigurationPage: jest.Mock;
   let upsertConfiguration: jest.Mock;
+  let getConfiguration: jest.Mock;
   let deleteConfiguration: jest.Mock;
   let getJoinedRoomMembers: jest.Mock;
   let getPowerLevels: jest.Mock;
@@ -82,11 +83,18 @@ describe('RoomReminderConfigurationService', () => {
 
     listConfigurationPage = jest.fn().mockResolvedValue([]);
     upsertConfiguration = jest.fn().mockResolvedValue(undefined);
+    getConfiguration = jest.fn().mockImplementation(async (identity) => ({
+      ...identity,
+      target: { kind: 'room' },
+      allDaySchedule: null,
+      revision: 1,
+    }));
     deleteConfiguration = jest.fn().mockResolvedValue(undefined);
     const store = {
       enabled: true,
       listConfigurationPage,
       upsertConfiguration,
+      getConfiguration,
       deleteConfiguration,
     } as unknown as RoomReminderStore;
 
@@ -129,7 +137,7 @@ describe('RoomReminderConfigurationService', () => {
     );
   });
 
-  it('returns only canonical identity tuples from a bounded, room-scoped page', async () => {
+  it('returns target and schedule metadata with canonical identities from a bounded page', async () => {
     listConfigurationPage.mockResolvedValue([
       {
         roomId,
@@ -137,7 +145,6 @@ describe('RoomReminderConfigurationService', () => {
         eventUid: 'event@example.test',
         recurrenceId: null,
         alarmUid,
-        privateText: 'must not escape',
       },
     ]);
 
@@ -154,6 +161,9 @@ describe('RoomReminderConfigurationService', () => {
         eventUid: 'event@example.test',
         recurrenceId: null,
         alarmUid,
+        target: { kind: 'room' },
+        allDaySchedule: null,
+        revision: 1,
       },
     ]);
     expect(JSON.stringify(result)).not.toContain('private');
@@ -284,7 +294,7 @@ describe('RoomReminderConfigurationService', () => {
     },
   );
 
-  it('validates the live canonical source before persisting only its identity', async () => {
+  it('validates the live canonical source before persisting its sidecar target and schedule', async () => {
     const result = await service.upsert(actor, roomId, {
       eventId: 'https://dav.example.test/calendar/planning.ics',
       recurrenceId: null,
@@ -311,11 +321,16 @@ describe('RoomReminderConfigurationService', () => {
       eventUid: 'team-planning@example.test',
       recurrenceId: null,
       alarmUid,
+      target: { kind: 'room' },
+      allDaySchedule: null,
     });
     expect(result).toEqual({
       eventUid: 'team-planning@example.test',
       recurrenceId: null,
       alarmUid,
+      target: { kind: 'room' },
+      allDaySchedule: null,
+      revision: 1,
     });
     expect(JSON.stringify(result)).not.toContain('private');
     expect(JSON.stringify(upsertConfiguration.mock.calls)).not.toContain(
@@ -330,6 +345,121 @@ describe('RoomReminderConfigurationService', () => {
     expect(getEventResource.mock.invocationCallOrder[0]).toBeLessThan(
       upsertConfiguration.mock.invocationCallOrder[0],
     );
+    expect(getConfiguration).toHaveBeenCalledWith({
+      roomId,
+      calendarId,
+      eventUid: 'team-planning@example.test',
+      recurrenceId: null,
+      alarmUid,
+    });
+  });
+
+  it('validates selected users against current joined membership before reading CalDAV', async () => {
+    const target = {
+      kind: 'users' as const,
+      userIds: ['@bob:example.test', '@former:example.test'],
+    };
+    getJoinedRoomMembers.mockResolvedValue([
+      actor,
+      '@bob:example.test',
+      '@calendar-service:example.test',
+    ]);
+    getConfiguration.mockResolvedValue({
+      roomId,
+      calendarId,
+      eventUid: 'team-planning@example.test',
+      recurrenceId: null,
+      alarmUid,
+      target,
+      allDaySchedule: null,
+      revision: 2,
+    });
+
+    await expect(
+      service.upsert(actor, roomId, {
+        eventId: 'https://dav.example.test/calendar/planning.ics',
+        recurrenceId: null,
+        alarmUid,
+        target,
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(getJoinedRoomMembers).toHaveBeenCalledTimes(2);
+    expect(forAuthorizedTarget).not.toHaveBeenCalled();
+    expect(getEventResource).not.toHaveBeenCalled();
+    expect(upsertConfiguration).not.toHaveBeenCalled();
+  });
+
+  it('rejects a selected user who left before configuration', async () => {
+    getJoinedRoomMembers
+      .mockResolvedValueOnce([actor])
+      .mockResolvedValueOnce([actor]);
+
+    await expect(
+      service.upsert(actor, roomId, {
+        eventId: 'https://dav.example.test/calendar/planning.ics',
+        recurrenceId: null,
+        alarmUid,
+        target: { kind: 'users', userIds: ['@former:example.test'] },
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      response: {
+        code: 'room-reminder-recipient-not-joined',
+      },
+    });
+    expect(forAuthorizedTarget).not.toHaveBeenCalled();
+    expect(getEventResource).not.toHaveBeenCalled();
+    expect(upsertConfiguration).not.toHaveBeenCalled();
+  });
+
+  it('allows an explicitly scheduled DATE alarm and persists only its schedule sidecar', async () => {
+    const allDayIcalendar = icalendar
+      .replace(
+        'DTSTART;TZID=Europe/Stockholm:20261005T090000',
+        'DTSTART;VALUE=DATE:20261005',
+      )
+      .replace(
+        'DTEND;TZID=Europe/Stockholm:20261005T100000',
+        'DTEND;VALUE=DATE:20261006',
+      );
+    getEventResource.mockResolvedValue({
+      event: { summary: 'private title' },
+      etag: 'private-etag',
+      icalendar: allDayIcalendar,
+    });
+    const allDaySchedule = {
+      daysBefore: 1,
+      localTime: '09:00',
+      timezone: 'Europe/Stockholm',
+    };
+    getConfiguration.mockImplementation(async (identity) => ({
+      ...identity,
+      target: { kind: 'room' },
+      allDaySchedule,
+      revision: 1,
+    }));
+
+    await expect(
+      service.upsert(actor, roomId, {
+        eventId: 'https://dav.example.test/calendar/planning.ics',
+        recurrenceId: null,
+        alarmUid,
+        allDaySchedule,
+      }),
+    ).resolves.toMatchObject({
+      eventUid: 'team-planning@example.test',
+      target: { kind: 'room' },
+      allDaySchedule,
+    });
+    expect(upsertConfiguration).toHaveBeenCalledWith({
+      roomId,
+      calendarId,
+      eventUid: 'team-planning@example.test',
+      recurrenceId: null,
+      alarmUid,
+      target: { kind: 'room' },
+      allDaySchedule,
+    });
   });
 
   it('shares the authorized current-source read with internal alarm-options code', async () => {
