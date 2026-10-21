@@ -108,11 +108,13 @@ These limits are local to one server process. They reset on restart and each
 replica has an independent quota; they are not a distributed abuse or DDoS
 control.
 
-Calendar replies use plain `m.text`, empty `m.mentions`, and an optional reply
-relation containing only the original event ID. They do not quote the command
-or render event HTML. An encrypted room is served only when encryption is
-configured and the SDK confirms encrypted sending. Unknown encryption state or
-unavailable encryption prevents command replies and calendar-data access.
+Calendar replies use `m.text`, empty `m.mentions`, and an optional reply
+relation containing only the original event ID. `!calendar help` also includes
+a localized `org.matrix.custom.html` formatted body; its ordinary-text body
+remains the fallback. Calendar-data replies stay plain text, and no reply
+quotes the original command. An encrypted room is served only when encryption
+is configured and the SDK confirms encrypted sending. Unknown encryption state
+or unavailable encryption prevents command replies and calendar-data access.
 Scheduled Matrix reminders are a separate feature and currently support only
 unencrypted rooms. Errors use fixed localized messages rather than upstream
 exception text.
