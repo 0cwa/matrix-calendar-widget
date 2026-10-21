@@ -32,7 +32,7 @@
     "generate-disclaimer": "cp ../LICENSE ./lib/LICENSE.txt && cp NOTICE ./lib/NOTICE.txt && yarn licenses generate-disclaimer --prod >> ./lib/NOTICE.txt && yarn licenses list --prod --json --no-progress > ./lib/licenses.json"
   },
   "engines": {
-    "node": ">=20",
+    "node": "^22.22.3",
     "yarn": ">=1.22.1 <2.0.0"
   },
   "dependencies": {
@@ -73,7 +73,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
-    "@nestjs/cli": "10.4.9",
+    "@nestjs/cli": "12.0.8",
     "@types/express": "^5.0.6",
     "@types/jest": "^30.0.0",
     "@types/lodash": "^4.17.15",

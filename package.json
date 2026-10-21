@@ -35,7 +35,7 @@
     "yarn-deduplicate": "^6.0.2"
   },
   "engines": {
-    "node": ">=22.12.0",
+    "node": "^22.22.3",
     "yarn": ">=1.22.1 <2.0.0"
   },
   "scripts": {

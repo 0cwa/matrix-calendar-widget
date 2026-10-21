@@ -54,7 +54,7 @@ The source-bound image archive workflow offers an optional `operator_rehearsal` 
 
 ## Development
 
-Node.js 22 and Yarn 1.22 are recommended.
+The supported and tested project line is Node.js 22, version 22.22.3 or newer within the 22.x line; Yarn 1.22 is recommended. CI and the server image target Node 22. Nest CLI dependencies also accept Node `^24.15.0` and `>=26.0.0`, but this project does not claim those lines as tested or supported.
 
 ```bash
 corepack enable
