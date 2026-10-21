@@ -186,9 +186,9 @@ test('room visitor sees read-only event controls at a narrow width', async ({
   );
   await expect(dialog.getByRole('button', { name: 'Edit' })).toBeDisabled();
   await expect(dialog.getByRole('button', { name: 'Delete' })).toBeDisabled();
-  await expect(dialog.getByRole('button', { name: 'Notify room' })).toHaveCount(
-    0,
-  );
+  await expect(
+    dialog.getByRole('button', { name: 'Reminder settings', exact: true }),
+  ).toHaveCount(0);
 
   await waitForDialogTransitions(dialog);
   const dimensions = await readDialogMeasurements(dialog);
@@ -264,36 +264,54 @@ test('room manager sees writable event controls at a narrow width', async ({
   ).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'Edit' })).toBeEnabled();
   await expect(dialog.getByRole('button', { name: 'Delete' })).toBeEnabled();
-  await dialog.getByRole('button', { name: 'Notify room' }).click();
+  await dialog
+    .getByRole('button', { name: 'Reminder settings', exact: true })
+    .click();
+  await expect(
+    dialog.getByText('Alarm 1: −15m relative to event start'),
+  ).toBeVisible();
   const destination = dialog.getByRole('combobox', {
     name: 'Matrix destination',
   });
   await destination.click();
+  await expect(page.getByRole('option', { name: 'Whole room' })).toBeVisible();
   await page.getByRole('option', { name: 'Selected people' }).click();
   const people = dialog.getByRole('combobox', { name: 'Selected people' });
-  await people.click();
+  await people.fill('');
   await expect(page.getByRole('option', { name: 'Alice' })).toBeVisible();
   await expect(page.getByRole('option', { name: 'Bob' })).toBeVisible();
   await expect(page.getByRole('option', { name: 'Calendar bot' })).toHaveCount(
     0,
   );
-  await page.keyboard.press('Escape');
-  await destination.click();
-  await page.getByRole('option', { name: 'Whole room' }).click();
-  const reminder = dialog.getByRole('checkbox', {
-    name: 'Alarm 1: −15m relative to event start',
-  });
-  await expect(reminder).toBeVisible();
-  await reminder.check();
-  await expect(reminder).toBeChecked();
-  await dialog.getByRole('button', { name: 'Close room reminder' }).click();
-  await dialog.getByRole('button', { name: 'Notify room' }).click();
-  await expect(reminder).toBeChecked();
-  await reminder.uncheck();
-  await expect(reminder).not.toBeChecked();
-  await dialog.getByRole('button', { name: 'Close room reminder' }).click();
-  await dialog.getByRole('button', { name: 'Notify room' }).click();
-  await expect(reminder).not.toBeChecked();
+  await people.fill('Bob');
+  await expect(page.getByRole('option', { name: 'Bob' })).toBeVisible();
+  await expect(page.getByRole('option')).toHaveCount(1);
+  await people.press('ArrowDown');
+  await people.press('Enter');
+  await people.press('Escape');
+  await expect(dialog.locator('.MuiAutocomplete-tag')).toHaveText(['Bob']);
+  await dialog
+    .getByRole('button', { name: 'Save Matrix destination', exact: true })
+    .click();
+  await expect(
+    dialog.getByText('Matrix pings the selected people.', { exact: true }),
+  ).toBeVisible();
+  await dialog
+    .getByRole('button', { name: 'Close reminder settings', exact: true })
+    .click();
+  await dialog
+    .getByRole('button', { name: 'Reminder settings', exact: true })
+    .click();
+  await expect(
+    dialog.getByText('Alarm 1: −15m relative to event start'),
+  ).toBeVisible();
+  await expect(
+    dialog.getByText('Matrix pings the selected people.', { exact: true }),
+  ).toBeVisible();
+  await expect(dialog.locator('.MuiAutocomplete-tag')).toHaveText(['Bob']);
+  await dialog
+    .getByRole('button', { name: 'Close reminder settings', exact: true })
+    .click();
 
   await waitForDialogTransitions(dialog);
   const dimensions = await readDialogMeasurements(dialog);
