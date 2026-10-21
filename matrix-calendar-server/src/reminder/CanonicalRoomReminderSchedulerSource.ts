@@ -47,7 +47,9 @@ import {
   MAX_REMINDER_EVENT_DURATION_MS,
   MAX_REMINDER_REPEAT_COUNT,
   MAX_REMINDER_TRIGGER_HORIZON_MS,
+  calculateAllDayReminderDueAt,
   calculateDisplayReminderDueAt,
+  isAllDayReminderScheduleWithinLimits,
   isReminderScheduleWithinLimits,
 } from './ReminderTrigger';
 import {
@@ -281,6 +283,7 @@ export class CanonicalRoomReminderSchedulerSource implements CanonicalReminderSc
             alarmUid: configuration.alarmUid,
           },
           resourceData,
+          configuration.allDaySchedule,
         );
         const parsed = new ICalendarEventCodec().parse(
           configuration.calendarId,
@@ -391,12 +394,20 @@ export class CanonicalRoomReminderSchedulerSource implements CanonicalReminderSc
           selected.selection,
           occurrence.event.timing,
         );
-        if (
-          !isReminderScheduleWithinLimits(
-            selected.selection.alarmSource,
-            occurrenceTiming,
-          )
-        ) {
+        const scheduleWithinLimits =
+          occurrenceTiming.type === 'timed'
+            ? isReminderScheduleWithinLimits(
+                selected.selection.alarmSource,
+                occurrenceTiming,
+              )
+            : configuration.allDaySchedule !== undefined &&
+              configuration.allDaySchedule !== null &&
+              isAllDayReminderScheduleWithinLimits(
+                selected.selection.alarmSource,
+                configuration.allDaySchedule,
+                occurrenceTiming.startDate,
+              );
+        if (!scheduleWithinLimits) {
           throw new CanonicalReminderSourceError('unsupported-source');
         }
 
@@ -407,11 +418,21 @@ export class CanonicalRoomReminderSchedulerSource implements CanonicalReminderSc
           triggerOrdinal += 1
         ) {
           throwIfAborted(signal);
-          const dueAt = calculateDisplayReminderDueAt(
-            selected.selection.alarmSource,
-            occurrenceTiming,
-            triggerOrdinal,
-          );
+          const dueAt =
+            occurrenceTiming.type === 'all-day'
+              ? configuration.allDaySchedule
+                ? calculateAllDayReminderDueAt(
+                    selected.selection.alarmSource,
+                    configuration.allDaySchedule,
+                    occurrenceTiming.startDate,
+                    triggerOrdinal,
+                  )
+                : undefined
+              : calculateDisplayReminderDueAt(
+                  selected.selection.alarmSource,
+                  occurrenceTiming,
+                  triggerOrdinal,
+                );
           if (!dueAt) {
             throw new CanonicalReminderSourceError('unsupported-source');
           }

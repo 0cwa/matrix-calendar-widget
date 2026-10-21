@@ -16,12 +16,31 @@
 
 import { createHash } from 'crypto';
 
+export type RoomReminderTarget =
+  | Readonly<{ kind: 'room' }>
+  | Readonly<{ kind: 'users'; userIds: readonly string[] }>;
+
+export type RoomReminderAllDaySchedule = Readonly<{
+  /** Number of local calendar days before the occurrence starts. */
+  daysBefore: number;
+  /** Local wall-clock time, HH:mm, in `timezone`. */
+  localTime: string;
+  /** Explicit IANA timezone selected by the room manager. */
+  timezone: string;
+}>;
+
 export type RoomReminderConfiguration = {
   roomId: string;
   calendarId: string;
   eventUid: string;
   recurrenceId: string | null;
   alarmUid: string;
+  /** Omitted only by legacy in-process callers; persisted rows normalize it. */
+  target?: RoomReminderTarget;
+  /** DATE events require an explicit sidecar schedule; timed events use VALARM. */
+  allDaySchedule?: RoomReminderAllDaySchedule | null;
+  /** Incremented only when target or schedule metadata changes. */
+  revision?: number;
 };
 
 /** Stable identity for one alarm firing on one event occurrence. */
@@ -110,6 +129,12 @@ const REMINDER_CONFIGURATION_KEYS = [
   'eventUid',
   'recurrenceId',
   'alarmUid',
+] as const;
+const REMINDER_CONFIGURATION_KEYS_WITH_METADATA = [
+  ...REMINDER_CONFIGURATION_KEYS,
+  'target',
+  'allDaySchedule',
+  'revision',
 ] as const;
 const REMINDER_DELIVERY_IDENTITY_KEYS = [
   ...REMINDER_CONFIGURATION_KEYS,
@@ -225,7 +250,10 @@ export function validateReminderDeliveryIdentity(
 export function validateRoomReminderConfiguration(
   configuration: RoomReminderConfiguration,
 ): void {
-  if (!hasExactKeys(configuration, REMINDER_CONFIGURATION_KEYS)) {
+  if (
+    !hasExactKeys(configuration, REMINDER_CONFIGURATION_KEYS) &&
+    !hasExactKeys(configuration, REMINDER_CONFIGURATION_KEYS_WITH_METADATA)
+  ) {
     throw new Error('Invalid room reminder configuration: shape');
   }
   for (const name of [
@@ -246,6 +274,74 @@ export function validateRoomReminderConfiguration(
   ) {
     throw new Error('Invalid room reminder configuration: recurrenceId');
   }
+
+  const target = configuration.target ?? { kind: 'room' };
+  if (target.kind === 'room') {
+    if (Object.keys(target).length !== 1) {
+      throw new Error('Invalid room reminder configuration: target');
+    }
+  } else if (target.kind === 'users') {
+    if (
+      Object.keys(target).length !== 2 ||
+      !Array.isArray(target.userIds) ||
+      target.userIds.length === 0 ||
+      target.userIds.length > MAX_SELECTED_REMINDER_RECIPIENTS ||
+      target.userIds.some((userId) => !isCanonicalMatrixUserId(userId)) ||
+      new Set(target.userIds).size !== target.userIds.length
+    ) {
+      throw new Error('Invalid room reminder configuration: target');
+    }
+  } else {
+    throw new Error('Invalid room reminder configuration: target');
+  }
+
+  const allDaySchedule = configuration.allDaySchedule ?? null;
+  if (allDaySchedule !== null) {
+    if (
+      !hasExactKeys(allDaySchedule, ['daysBefore', 'localTime', 'timezone']) ||
+      !Number.isSafeInteger(allDaySchedule.daysBefore) ||
+      allDaySchedule.daysBefore < 0 ||
+      allDaySchedule.daysBefore > 366 ||
+      !/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(allDaySchedule.localTime) ||
+      !isValidIanaTimezone(allDaySchedule.timezone)
+    ) {
+      throw new Error('Invalid room reminder configuration: allDaySchedule');
+    }
+  }
+
+  if (
+    configuration.revision !== undefined &&
+    (!Number.isSafeInteger(configuration.revision) ||
+      configuration.revision < 1)
+  ) {
+    throw new Error('Invalid room reminder configuration: revision');
+  }
+}
+
+export const MAX_SELECTED_REMINDER_RECIPIENTS = 50;
+
+export function normalizeRoomReminderConfiguration(
+  configuration: RoomReminderConfiguration,
+): RoomReminderConfiguration & {
+  target: RoomReminderTarget;
+  allDaySchedule: RoomReminderAllDaySchedule | null;
+  revision: number;
+} {
+  validateRoomReminderConfiguration(configuration);
+  const target = configuration.target ?? { kind: 'room' as const };
+  return {
+    roomId: configuration.roomId,
+    calendarId: configuration.calendarId,
+    eventUid: configuration.eventUid,
+    recurrenceId: configuration.recurrenceId,
+    alarmUid: configuration.alarmUid,
+    target:
+      target.kind === 'room'
+        ? { kind: 'room' }
+        : { kind: 'users', userIds: [...target.userIds].sort() },
+    allDaySchedule: configuration.allDaySchedule ?? null,
+    revision: configuration.revision ?? 1,
+  };
 }
 
 export function validateReminderConfigurationCursorShape(
@@ -281,6 +377,33 @@ function hasExactKeys(value: object, expectedKeys: readonly string[]): boolean {
     keys.length === expectedKeys.length &&
     expectedKeys.every((key) => keys.includes(key))
   );
+}
+
+function isCanonicalMatrixUserId(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length <= 255 &&
+    /^@[^:\s?#]+:[^\s?#]+$/.test(value)
+  );
+}
+
+function isValidIanaTimezone(value: unknown): value is string {
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value.length > 64 ||
+    value.trim() !== value ||
+    /\s/.test(value) ||
+    [...value].some((character) => character.charCodeAt(0) < 0x20)
+  ) {
+    return false;
+  }
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Stable opaque key shared by the durable store and Matrix transaction ID. */
