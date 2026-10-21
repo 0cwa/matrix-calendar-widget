@@ -2,7 +2,7 @@
 
 [Documentation](./README.md) · [Current status](./STATUS.md) · [Roadmap](./ROADMAP.md) · [Release evidence](./RELEASE.md)
 
-_Reviewed 21 October 2026 against `main` at `817854b`._
+_Reviewed 21 October 2026 against `main` at `224fa735`._
 
 This is the milestone and follow-up index. The [roadmap](./ROADMAP.md) owns priority and dependency order; the [release ledger](./RELEASE.md) owns source-specific qualification. Detailed checkboxes, test counts, and earlier attempts are preserved in the [implementation history](./archive/implementation-history.md). A completed source milestone does not certify a target deployment.
 
@@ -58,7 +58,7 @@ Tracked in [#382](https://github.com/0cwa/matrix-calendar-widget/issues/382):
 
 - [x] Readable bot event listings and optional identifiers: merged #383.
 - [x] Opt-in public VEVENT calendar subscriptions: merged #385; operational ingress, log redaction, and signing-key/share-store recovery remain installation requirements.
-- [ ] Independently revocable private credentials for external CalDAV read/write access.
+- [ ] Independently revocable private credentials for external CalDAV read/write access; in development on a dedicated source branch and not merged to main. See [status](./STATUS.md) for the remaining acceptance gates.
 - [ ] Selected joined-member and all-day Matrix reminder delivery: open #384.
 - [ ] Human pilot-room command/setup validation and relevant actual-client journeys.
 

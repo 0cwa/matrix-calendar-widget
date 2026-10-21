@@ -6,7 +6,7 @@ An architecture decision record (ADR) explains a consequential design choice and
 
 ## Reading the history
 
-ADR001–ADR003 were inherited from NeoDateFix and describe its meeting product. Fork decisions start at ADR004. Later decisions can narrow or extend earlier ones: ADR014 clarifies target-dependent principals, ADR041 adds the normal-bot option, ADR043 extends static bindings with optional moderator setup, and ADR045 introduces public read-only shares without replacing private OpenID authentication. Keep earlier decisions for context rather than renumbering or deleting them.
+ADR001–ADR003 were inherited from NeoDateFix and describe its meeting product. Fork decisions start at ADR004. Later decisions can narrow or extend earlier ones: ADR014 clarifies target-dependent principals, ADR041 adds the normal-bot option, ADR043 extends static bindings with optional moderator setup, ADR045 introduces public read-only shares, and ADR046 defines private app-scoped CalDAV editing. Keep earlier decisions for context rather than renumbering or deleting them.
 
 ## Foundations
 
@@ -61,6 +61,7 @@ ADR001–ADR003 were inherited from NeoDateFix and describe its meeting product.
 | [ADR027](./adr027-free-busy-privacy-boundary.md)                     | Restrict free/busy to an authorized, minimal projection   |
 | [ADR037](./adr037-independent-radicale-store-for-controlled-beta.md) | Use an independent Radicale store for the controlled beta |
 | [ADR045](./adr045-public-calendar-feeds.md)                          | Publish opt-in, VEVENT-only public calendar feeds         |
+| [ADR046](./adr046-private-caldav-clients.md)                         | Scope private CalDAV editing to separate app credentials  |
 
 ## Inherited meeting architecture
 

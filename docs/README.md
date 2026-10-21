@@ -8,6 +8,7 @@ Choose the path that matches what you want to do. You do not need to read the mi
 
 - [User guide](./user-guide.md): calendars, events, recurring events, reminders, public feeds, and common problems.
 - [Room setup and bot commands](./bot-calendar.md): prerequisites, `!calendar setup`, command examples, and permissions.
+- [Private calendar app access](./private-calendar-app-access.md): an in-development external CalDAV workflow, not yet available on main.
 - [Feature status](./STATUS.md): what is merged, what is in development, and known limits.
 - [Free/busy privacy](./free-busy-privacy.md): what calendar information is sensitive and what the product discloses.
 
