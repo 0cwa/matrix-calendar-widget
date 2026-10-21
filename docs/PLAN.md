@@ -1031,10 +1031,11 @@ room access, event writes, or reminders.
       replies to `!calendar help` and the first `!calendar setup` event, creates
       a ready binding/widget with verified OpenID/CalDAV access, and refuses a
       joined member without calendar-manage power before setup side effects.
-      Repeated setup is verified by a direct service call, not a second command
-      event or an `already-ready` reply. This is automated source-contract
-      evidence; it does not establish a human pilot-room, Element/browser, or
-      production/operator acceptance.
+      Repeated setup is verified by direct service and command tests: an
+      existing widget reports `already-ready`, while a retry that adds a
+      missing widget reports a localized `widget-installed` reply. This is
+      automated source-contract evidence; it does not establish a human
+      pilot-room, Element/browser, or production/operator acceptance.
 - [ ] Validate the empty-room guidance for unconfigured and configured rooms,
       and test multiple distinct room bindings while preserving cross-room
       authorization.
