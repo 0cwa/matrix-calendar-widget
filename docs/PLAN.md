@@ -741,6 +741,11 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
 - [x] Container images and deployment docs use fork-owned names. This covers
       repository-owned image builds and documented operator-run deployment
       boundaries, not a live etke-host deployment or recovery validation.
+  - [x] Preserve the server's `src/static/images` layout in compiled output so
+        `WidgetClient` can read its calendar avatar. The post-copy build smoke
+        calls the compiled method with a local upload stub and verifies the
+        bundled PNG. This source check does not qualify a candidate or live
+        operator image.
   - [x] Document the current Docker build/runtime contracts and the generic operator-run etke/MDAD compatibility boundary.
   - [x] Add non-publishing CI image-build smoke checks with fork-owned local tags; PR #102 run 36316604092 passed both image build steps at `0da7f3345e603e808231a24cc2ed6d979bea987a` without publishing.
 - [x] Generate and verify a short-lived, source-bound image archive for the

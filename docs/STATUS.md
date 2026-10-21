@@ -1,6 +1,6 @@
 # Project status
 
-_Last updated: 2026-10-20._
+_Last updated: 2026-10-21._
 
 _Frozen application candidate: `99d4c9f9f36aa0b0861a13499a7f7cd512c56920` (application tree `97022a9d2351655d2aae0a50a44a14bd81daacc9`), accepted from merged PR #294. Exact-source protected checks, CodeQL, PostgreSQL and both-mode CalDAV contracts, standalone Desktop, and normal-bot plus appservice Web/Desktop acceptance passed. Strict ordinary 0/25-event timings passed in both profiles; two trusted Element-origin opening errors per profile met the existing diagnostic predicate, with causes unknown. The prior refresh failure was not reproduced on this source. Trusted workflow run [38913010664](https://github.com/0cwa/matrix-calendar-widget/actions/runs/38913010664) produced and verified the source-bound three-image archive (artifact SHA-256 `3e71a5edea6b2a021a539f792f6abf7522b331b6620765f7ecff28b1b306a49f`; manifest SHA-256 `d0315e465e33e38f093fe4de2faf0e5eb0f57afc6fec7e0c2aa325a727d9ae49`), whose three application images were subsequently imported and verified against their exact configuration IDs and platform. The run also completed the enabled operator rehearsal success path. That is derived runner-completion evidence; separate per-check runtime values were not captured. Pinned database and helper images, native tools, and a dedicated backup account are prepared; private runtime configuration remains pending. Pilot services remain unstarted. Protected credential staging, final operator recording, live calendar/room canary validation, the first real paired backup, isolated gateway restore, and daily activation remain pending in the private operator phase. See the sanitized [release gate](./RELEASE.md)._
 
@@ -307,6 +307,12 @@ The initial reminder target is a standard `m.room.message` with `msgtype: m.text
 PR #196 implements bounded `!calendar upcoming`, `event`, `create`, and `delete`/`cancel` commands. Creation is a single timed event; deletion is whole-series only for a supported VEVENT resource. The Matrix sender is actor context and attribution, never the CalDAV identity. Commands recheck current membership, action power, and exact binding before appservice proof or CalDAV I/O. PR #198 adds a process-local command limiter before state lookups and calendar work. PR #199 adds opt-in best-effort notices after successful room-target widget create/update/delete; Matrix failure cannot roll back the CalDAV change. Notices use a sanitized title and opaque resource ID, suppress automatic mentions, and fail closed for encrypted rooms unless the SDK confirms encryption. SDK requests use their default 60-second timeout; the notice service does not override it or provide an abort adapter. Issue #8 is complete for the repository fallback scope; this does not establish actual-client or operator acceptance.
 
 ### M8 — gateway and transport controls
+
+The server build preserves the `src/static/images` layout used by compiled
+`WidgetClient` and runs a packaged-avatar smoke through the actual compiled
+`getMeetingWidgetEventContentAsync` method with a local upload stub. This
+source check does not qualify a new exact-source candidate or change any
+operator/deployment or publication gate.
 
 PR #181 limits `/v1/calendar` before OpenID validation to 120 requests per 60 seconds per TCP peer by default, with at most 10,000 in-memory source entries and a generic 429 with `Retry-After`. It ignores forwarded-address headers and resets on restart. PR #189 bounds event responses (16 MiB default, configurable up to 64 MiB) and refuses redirects; PR #191 bounds discovery XML and confines resource paths. Express JSON and urlencoded request bodies remain capped at 100 KiB.
 
