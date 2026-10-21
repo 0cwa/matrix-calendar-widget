@@ -45,6 +45,13 @@ jobs:
           yarn exec -- tsc -p matrix-calendar-widget/browser-tests/tsconfig.json --noEmit
           yarn exec -- tsc -p e2e/gallery-tests/tsconfig.json --noEmit
 
+      # Temporary diagnostic to mirror CI's exact Prettier output for the
+      # two gallery source files; remove before merging.
+      - name: Show gallery formatting changes
+        run: |
+          yarn prettier --write e2e/gallery-tests/readme-gallery.spec.ts matrix-calendar-widget/browser-tests/calendarFixture.tsx
+          git --no-pager diff --no-color -- e2e/gallery-tests/readme-gallery.spec.ts matrix-calendar-widget/browser-tests/calendarFixture.tsx
+
       - name: Install Chromium
         run: yarn workspace e2e playwright install --with-deps chromium --only-shell
 
@@ -57,7 +64,7 @@ jobs:
         with:
           name: readme-gallery
           path: .gallery-output/*.png
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 7
 
   publish:
