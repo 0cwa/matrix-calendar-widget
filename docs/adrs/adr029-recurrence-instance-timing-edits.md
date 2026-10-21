@@ -1,7 +1,16 @@
 # ADR029: Bounded RECURRENCE-ID instance timing edits
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
 - Status: Accepted
 - Date: 2026-10-03
+
+> **Later implementation (2026-10-21):** The one-occurrence timing path is
+> implemented. [ADR040](./adr040-selected-occurrence-text-fields.md) extends
+> selected-occurrence editing to title, description, and location through a
+> separate bounded field operation; the timing-only wording below records
+> this ADR's original phase. [ADR034](./adr034-bounded-following-timing-edits.md)
+> remains the separate contract for following-occurrence timing changes.
 
 ## Context
 

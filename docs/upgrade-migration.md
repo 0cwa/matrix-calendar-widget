@@ -1,11 +1,14 @@
 # Upgrade and migration runbook
 
+[Documentation](./README.md) · [Backup and recovery](./backup-recovery.md) · [Release policy](./release-versioning.md)
+
 This document defines a release and recovery procedure for a future, reviewed
 Matrix Calendar deployment. It does not establish that the application is
 production-ready, validate an etke-managed host, or authorize a deployment or
 artifact publication. The repository remains pre-alpha; the current
-[release policy](./release-versioning.md) explicitly permits breaking changes
-and does not authorize live deployment or publication.
+[release policy](./release-versioning.md) permits breaking changes. Use the
+[release ledger](./RELEASE.md) for candidate evidence and the deployment
+owner's separate, target-specific authorization for operational work.
 
 The only described deployment example is an operator-run Compose sidecar with
 its own Radicale store. That sidecar is not an etke-managed Radicale upgrade,
@@ -13,6 +16,14 @@ does not use etke's existing `/data`, and does not migrate existing etke
 calendar data. An etke image override, runtime configuration, persistent-data
 continuity, PostgreSQL wiring, and rollback path still require operator
 validation on the actual host.
+
+**On this page**
+
+- [Data stores and migration behavior](#data-stores-and-migration-behavior)
+- [Before an upgrade](#before-an-upgrade)
+- [Apply and validate an upgrade](#apply-and-validate-an-upgrade)
+- [Failure and rollback](#failure-and-rollback)
+- [Deployment-specific stop conditions](#deployment-specific-stop-conditions)
 
 ## Data stores and migration behavior
 
@@ -38,12 +49,31 @@ path for this state, so validate a candidate against an isolated restore.
 disabled and no reminder-store schema migration runs. If configured, the
 server applies numbered migrations at startup to the separate
 `matrix_calendar` schema ([store implementation](../matrix-calendar-server/src/reminder/PostgresRoomReminderStore.ts),
-[startup wiring](../matrix-calendar-server/src/app.module.ts)). At base
-commit `cbd1a0a`, the source contains migration version 1. It creates
+[startup wiring](../matrix-calendar-server/src/app.module.ts)). The current merged reminder implementation contains migration version 1. It creates
 `schema_migrations`, `room_reminder_configurations`, `reminder_deliveries`,
 and their indexes. It stores identifiers and delivery state, not event titles
 or bodies. Record the exact before/after schema versions for every release
 that changes them.
+
+**Optional binding PostgreSQL.** Moderator-driven room setup uses the independent
+`MATRIX_CALENDAR_BINDING_DATABASE_URL` setting and
+`matrix_calendar_bindings` schema. Its current migration version 1 creates
+`room_calendar_bindings` and indexes alongside its own migration ledger
+([binding store](../matrix-calendar-server/src/service/PostgresRoomCalendarBindingStore.ts)).
+Binding and reminder stores may share an application-owned database, but
+neither substitutes for the other. Record both schema versions and include
+both in recovery. If they use different databases, the single-database backup
+coordinator requires a separate operator procedure for the second database.
+
+**Public share tokens and signing key.** Public calendar feeds store native
+share metadata inside Radicale `/data`; the gateway's dedicated signing key
+is external configuration. Preserve both in the same protected recovery point.
+Losing or rotating the key invalidates existing signed URLs without deleting
+the native shares. Reconcile or revoke those shares before issuing new links.
+An older Radicale backup can contain shares revoked since that recovery point;
+verify and reapply intended revocations in isolation before exposing restored
+public ingress. See [ADR045](./adrs/adr045-public-calendar-feeds.md) and
+[backup and recovery](./backup-recovery.md).
 
 **Legacy Matrix control-room migration.**
 `ENABLE_CONTROL_ROOM_MIGRATION` defaults to `false`
@@ -57,7 +87,7 @@ intended and rehearsed change; its sequential room-state writes can be partial
 when an individual update fails, and the startup migration does not restore
 prior state.
 
-The PostgreSQL migration runner serializes migrations with a transaction-level
+Each PostgreSQL migration runner serializes its migrations with a transaction-level
 advisory lock and executes pending migration SQL and its version records
 transactionally. Startup fails when the database or migration cannot be used. It
 also rejects a database whose recorded migration version is newer than the
@@ -72,10 +102,9 @@ production credentials, TLS settings, or database ownership on an operator
 host; see [ADR019](./adrs/adr019-postgresql-reminder-sidecar-store.md) and
 [ADR021](./adrs/adr021-postgresql-verified-tls.md).
 
-The source has no automatic CalDAV data migration. The existing M6 room-owned
-calendar path remains gated separately; passing a database migration does not
-enable room-calendar access or prove that an etke-host image can preserve its
-existing store.
+The source has no automatic CalDAV data migration. Room access, setup, writes,
+and reminders remain separate capability gates; passing a database migration
+does not enable them or establish compatibility with an existing managed store.
 
 ## Before an upgrade
 
@@ -163,9 +192,10 @@ unset.
    delete behavior. Check the migration record and that expected reminder
    identifiers remain available if the optional store is enabled. Do not use
    real user event contents in the report, and do not send real Matrix
-   notifications. Room-target checks remain unavailable until their separate
-   M6 authorization, appservice, cross-room-isolation, and deployment gates
-   pass.
+   notifications. For any enabled room capability, also check current membership/power, exact
+   binding, cross-room denial, and the selected principal mode. Include dynamic
+   setup or public-feed lifecycle checks only when those features are in the
+   reviewed release scope.
 5. **Record the result.** Record pass/fail, elapsed maintenance and restore
    times, release commit and image digests, chart/configuration revisions,
    database migration version, and any data or permission discrepancy. Do not
@@ -208,6 +238,6 @@ stop and plan a separate CalDAV migration with the operator; the Compose
 sidecar example creates an independent Radicale service and does not perform
 that migration.
 
-This runbook records a future procedure only. It does not execute an upgrade,
-create a release, publish images or charts, or imply that a live deployment or
-recovery rehearsal has passed.
+This runbook is a procedure, not an execution record. Consult the
+[release ledger](./RELEASE.md) and private operator record for completed
+rehearsals and target-specific decisions.

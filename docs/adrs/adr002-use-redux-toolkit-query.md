@@ -1,4 +1,8 @@
-# ADR002: Use Redux Tookit Query (RTK Query)
+# ADR002: Use Redux Toolkit Query (RTK Query)
+
+[Decision index](./README.md) · [Documentation](../README.md)
+
+> **Inherited NeoDateFix record.** This document describes the original meeting product. Its recorded status is historical; use the [current architecture](../ARCHITECTURE.md) and fork decisions beginning with ADR004 for calendar development.
 
 Status: accepted
 
@@ -9,7 +13,7 @@ Status: accepted
 <!--
 This section describes the forces at play, including technological, political, social, and project local. These forces are probably in tension, and should be called out as such. The language in this section is value-neutral. It is simply describing facts. -->
 
-The meetings widget needs to keep track a number of different (>10) matrix events (see [ADR001](./adr001-list-meetings-from-widget-api.md)).
+The meetings widget needs to keep track a number of different (>10) matrix events (see [ADR001](./adr001-use-the-widget-api-to-interact-with-the-meetings-bot.md)).
 Each event type should be added to a Redux slice with limited complexity.
 
 ## Decision

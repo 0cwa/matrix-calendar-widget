@@ -1,9 +1,18 @@
 # Calendar setup and bot fallback
 
+[Documentation](./README.md) · [Configuration](./configuration.md) · [Project overview](../README.md)
+
 The Matrix Calendar widget is the primary interface. The bot can add a room
 calendar and supplies a small fallback for calendar commands. Room access,
 event writes, and moderator-driven setup are separate server gates and remain
 disabled by default.
+
+**On this page**
+
+- [Setting up a room](#setting-up-a-room)
+- [Command reference](#command-reference)
+- [Limits and troubleshooting](#limits-and-troubleshooting)
+- [Validation scope](#validation-scope)
 
 ## Setting up a room
 
@@ -52,6 +61,8 @@ sender membership and power requirements.
 | Widget pending                         | The verified calendar remains available under the ordinary access gates; retry setup to add the widget. |
 | Conflict or capacity reached           | Ask an administrator to inspect the existing room/widget state or configured binding limit.             |
 
+## Command reference
+
 | Command                                                                         | Behavior                                                                                                       |
 | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | `!calendar help`                                                                | Explain commands and direct users to the widget.                                                               |
@@ -98,6 +109,8 @@ access and event-write gates. Deletes read current data and use its ETag; mixed
 or otherwise unsafe resources are refused. A conflict requires reloading before
 retrying.
 
+## Limits and troubleshooting
+
 The command service applies a process-local bound to `m.text` bodies beginning
 with `!calendar`, including help and malformed command prefixes. It admits at
 most eight calendar commands at once across the process, two in one room, and
@@ -130,6 +143,8 @@ The process-local command limiter can silently drop commands when its
 concurrency or rate limit is full. A missing reply alone does not identify the
 cause; check that the bot can safely send in the room and ask an administrator
 to verify room setup if calendar data commands do not work.
+
+## Validation scope
 
 Unit tests exercise grammar, bounds, authorization before proof/I/O, replies,
 calendar projection, and encryption guards. The hosted room appservice contract

@@ -1,5 +1,7 @@
 # ADR025: Manage iCalendar event revision metadata
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
 Status: accepted
 Date: 2026-10-03
 

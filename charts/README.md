@@ -1,5 +1,7 @@
 # Matrix Calendar Helm charts
 
+[Project overview](../README.md) · [Deployment](../docs/deployment-docker.md) · [Release policy](../docs/release-versioning.md)
+
 These charts are retained from the upstream meeting-widget baseline and have been renamed for this fork.
 
 > **Pre-alpha:** chart publishing is intentionally disabled. Treat these as deployment scaffolding until M8 validates the final gateway configuration and release process.
@@ -13,9 +15,13 @@ These charts are retained from the upstream meeting-widget baseline and have bee
 The calendar gateway is implemented in the server. Configure its Matrix and
 Radicale endpoints through `matrix-calendar-server.settings.additionalEnv`;
 see [`docs/configuration.md`](../docs/configuration.md) for the supported
-settings. The final delegated OpenID-to-Radicale contract still depends on
-external plugin work, so the charts remain pre-alpha deployment scaffolding,
-not a verified pilot release configuration.
+settings. The project-owned [Radicale OpenID adapter](../radicale-auth/README.md) is
+implemented and exercised by the pinned service contracts. These charts do
+not provision that independent Radicale store, the application PostgreSQL
+stores, public-feed key/ingress, or a verified recovery procedure. They remain
+pre-alpha deployment scaffolding. The controlled pilot uses the
+[operator-run Compose reference](../docs/deployment-docker.md#operator-run-compose-sidecar-example);
+see the [release ledger](../docs/RELEASE.md) for qualified source and evidence.
 
 The server chart uses `/v1/health/live` for Kubernetes liveness. This endpoint
 reports only that the server process can answer HTTP requests, so a temporary

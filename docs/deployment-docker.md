@@ -1,6 +1,18 @@
 # Docker build and deployment notes
 
+[Documentation](./README.md) · [Configuration](./configuration.md) · [Release ledger](./RELEASE.md)
+
 This page records the container behavior currently present in the repository at the time of writing. It is not a production deployment recipe. The project is pre-alpha; operators must supply and verify their own configuration, networking, persistence, and upgrade procedures.
+
+**On this page**
+
+- [Build contracts](#build-contracts)
+- [Source-bound image archive](#source-bound-image-archive)
+- [Runtime behavior in the current Dockerfiles](#runtime-behavior-in-the-current-dockerfiles)
+- [etke and Matrix Docker Ansible deployment](#etke-and-matrix-docker-ansible-deployment)
+- [Operator-run Compose sidecar example](#operator-run-compose-sidecar-example)
+- [Public calendar feed ingress and recovery](#public-calendar-feed-ingress-and-recovery)
+- [Optional reminder PostgreSQL database](#optional-reminder-postgresql-database)
 
 ## Build contracts
 
@@ -8,6 +20,7 @@ Build the server from the repository root after installing the locked Yarn depen
 
 ```bash
 yarn install --frozen-lockfile
+yarn workspace @matrix-calendar-widget/ical-timezones build
 yarn workspace @matrix-calendar-widget/calendar build
 yarn workspace @matrix-calendar-widget/server build
 docker build -t matrix-calendar-widget/server:local -f matrix-calendar-server/Dockerfile .
@@ -15,9 +28,10 @@ docker build -t matrix-calendar-widget/server:local -f matrix-calendar-server/Do
 
 The root context is required because the server Dockerfile reads the root `package.json` and `yarn.lock`, and copies the built calendar package. The build also creates a license SBOM with Trivy.
 
-Build the widget after the calendar package and widget workspace have been built:
+Build the widget after building both shared packages:
 
 ```bash
+yarn workspace @matrix-calendar-widget/ical-timezones build
 yarn workspace @matrix-calendar-widget/calendar build
 yarn workspace @matrix-calendar-widget/widget build
 docker build --build-context root=. -t matrix-calendar-widget/widget:local -f matrix-calendar-widget/Dockerfile matrix-calendar-widget
@@ -276,7 +290,7 @@ The local `dev/compose.yaml` stack is for development and integration services;
 it does not define a production deployment or an etke/MDAD deployment contract.
 Helm and Kubernetes packaging are outside this slice.
 
-### Operator-run Compose sidecar example
+## Operator-run Compose sidecar example
 
 [`deploy/etke-sidecar.compose.yaml`](../deploy/etke-sidecar.compose.yaml) is a
 reference for an operator who already manages a Matrix homeserver with etke's
@@ -380,8 +394,11 @@ credential uses the service localpart as the username and a
 name. Keep the proof in memory, suppress request/response logging that could
 expose it, and discard it immediately; never place it in command arguments,
 shell history, files, or artifacts. The repository does not yet provide a
-one-command provisioner, so perform this step only with an operator-approved
-secret-safe tool during isolated acceptance.
+standalone command-line provisioner for this static-binding path, so perform
+this step only with an operator-approved secret-safe tool during isolated
+acceptance. For an explicitly enabled dynamic setup deployment,
+[`!calendar setup`](./bot-calendar.md) provides the separately authorized
+moderator workflow under ADR043; it does not change the frozen pilot baseline.
 
 #### Normal bot-account mode
 
@@ -570,7 +587,54 @@ Preserve the existing managed services and stores. Issue
 deployment, with the source/evidence ledger in
 [#255](https://github.com/0cwa/matrix-calendar-widget/issues/255).
 
+## Public calendar feed ingress and recovery
+
+Public subscriptions are available in current source under
+[ADR045](./adrs/adr045-public-calendar-feeds.md), outside the older frozen pilot
+candidate. A publication-specific rollout must verify its own exact source,
+public ingress, logging, and recovery. See the [release ledger](./RELEASE.md)
+for what is actually qualified.
+
+Before setting the [origin and signing key](./configuration.md#public-calendar-subscriptions):
+
+1. Route only the gateway's `GET`/`HEAD /v1/public-calendar-feeds/<envelope>`
+   reads through the chosen public HTTPS origin. Keep Radicale's root origin,
+   `/.token/`, and `/.sharing/` private to trusted services/operators. The signed
+   URL is not encrypted; its native token can be decoded, so direct public
+   access to Radicale would bypass gateway signature/content validation and request limits.
+2. Redact or omit the public bearer path and publication-management query at
+   every proxy/access-log boundary. Keep ordinary diagnostics. Verify this
+   with synthetic tokens before publishing a real calendar.
+3. Supply one dedicated persistent signing key, inline through secret
+   management or as a mounted one-line file. Never set both key forms. The
+   gateway keeps publication disabled when origin/key configuration is absent.
+4. Include the complete Radicale `/data` store and the matching key in the
+   protected recovery point described in [backup and recovery](./backup-recovery.md).
+   If file-backed, add the exact key file to the encrypted restore-input
+   allowlist. A new key invalidates existing signed URLs; native shares must
+   then be explicitly reconciled or revoked.
+5. Exercise publish, anonymous read, unpublish/revocation, and isolated restore
+   with a synthetic VEVENT calendar and an actual subscription client. A mixed
+   calendar must fail without returning data. Existing downloaded copies
+   cannot be recalled. Public reads intentionally continue after Matrix
+   membership or manager-power changes, so unpublish before removing or
+   changing a static binding.
+
+The gateway validates the complete canonical calendar on every GET/HEAD. It
+uses fixed transport size/time limits, denies redirects and writes, and sends
+no-store responses. These source controls do not establish a target's proxy,
+client-cache behavior, or recovery readiness. One publication-management
+writer is required; locks are process-local.
+
 ## Optional reminder PostgreSQL database
+
+The binding store from moderator setup is independently configured through
+`MATRIX_CALENDAR_BINDING_DATABASE_URL` and
+`MATRIX_CALENDAR_BINDING_DATABASE_TLS_MODE`. It may share the same
+application-owned database while using its own `matrix_calendar_bindings`
+schema. If the URLs select different databases, back up and restore both;
+the existing single-database backup coordinator does not discover a second
+binding database automatically. See [configuration](./configuration.md#application-postgresql-stores).
 
 The server can persist Matrix reminder sidecar state in a separate
 application-owned PostgreSQL database through the optional

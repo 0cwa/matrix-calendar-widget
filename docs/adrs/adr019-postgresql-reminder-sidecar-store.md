@@ -1,7 +1,18 @@
 # ADR019: Store Matrix reminder state in app-owned PostgreSQL
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
 - Status: Accepted
 - Date: 2026-09-26
+
+> **Later implementation (2026-10-21):** The persistence-only scope described
+> below has since been integrated with the default-off configuration,
+> scheduler, and delivery paths in
+> [ADR028](./adr028-room-reminder-configuration-and-delivery.md) and the alarm
+> options in [ADR033](./adr033-room-reminder-alarm-options.md). Enabling the
+> store alone still enables none of those features. The claim, crash-retry,
+> and single-replica limits below remain in force; deployment acceptance is
+> recorded separately in the [release evidence](../RELEASE.md).
 
 ## Context
 

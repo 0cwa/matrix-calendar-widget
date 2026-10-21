@@ -1,5 +1,7 @@
 # IANA VTIMEZONE data
 
+[Documentation](./README.md) · [Timezone package](../packages/ical-timezones/README.md) · [Architecture](./ARCHITECTURE.md)
+
 `@matrix-calendar-widget/ical-timezones` provides exact, generated VTIMEZONE
 components for supported IANA identifiers. `getVTimezoneBlock(id)` returns the
 serialized component for a bundled ID and `undefined` for malformed or

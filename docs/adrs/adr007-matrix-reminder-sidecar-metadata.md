@@ -1,7 +1,17 @@
 # ADR007: Model Matrix reminder targets as sidecar metadata
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
 - Status: Accepted
 - Date: 2026-09-22
+
+> **Later implementation (2026-10-21):** Merged reminder delivery supports
+> whole-room mentions under [ADR028](./adr028-room-reminder-configuration-and-delivery.md)
+> and [ADR033](./adr033-room-reminder-alarm-options.md). Selected-user and all-day
+> delivery are proposed in open [PR #384](https://github.com/0cwa/matrix-calendar-widget/pull/384),
+> not implemented on the current main branch. The idempotency requirement below
+> does not promise exactly-once Matrix delivery; see the claim and retry limits
+> in [ADR019](./adr019-postgresql-reminder-sidecar-store.md) and ADR028.
 
 ## Context
 

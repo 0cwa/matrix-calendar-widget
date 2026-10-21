@@ -1,80 +1,67 @@
 # Matrix Calendar Widget
 
-> **Status: pre-alpha.** This repository is a hard fork of Nordeck's NeoDateFix / `matrix-meetings` project and is being converted into a Matrix-first team calendar backed by CalDAV/Radicale.
+A team calendar for Matrix rooms, with a widget for Element and calendar data stored in Radicale through CalDAV. Create and edit events, manage calendars, and share a room calendar without giving the widget your Matrix password. A `!calendar` bot provides a fallback for clients without widgets.
 
-The primary product is a responsive Matrix widget for Element and other widget-capable clients. Its current scope is VEVENT calendars with bounded recurrence and preservation-first editing, including selected-occurrence text, one safe conference link, URI attachment operations, and supported DISPLAY alarm metadata. Collection-timezone editing, attendee/email authoring, individual reminder recipients, arbitrary RRULE editing, file uploads, and broader conference forms remain deferred or unsupported. The Matrix bot provides bounded room-calendar commands as a fallback when widget support is unavailable.
-
-The bounded controlled-beta target is defined in [docs/beta-scope.md](./docs/beta-scope.md): Element Web and Desktop, one server replica, an independent project-owned Radicale store, and a separate app-owned PostgreSQL reminder store. Client and operator acceptance remain open; defining this scope does not authorize publication or rollout.
-
-## Product principles
-
-- **The widget is the product.** Commands are a compatibility fallback, not a parallel UI.
-- **CalDAV is canonical.** Radicale remains the source of truth for calendars and iCalendar objects.
-- **Create simple collections.** Calendars created by this project are VEVENT-only. Existing mixed collections are tolerated and preserved.
-- **Do not surface dead complexity.** VJOURNAL is not a first-class feature. VTODO may become a separate task-list feature later.
-- **Preserve interoperability.** Editing an event must not silently discard iCalendar properties the widget does not understand.
-- **Disclose partial projection.** Unsupported recurrence or timezone data that the bounded projector cannot handle may be omitted from the widget's visible projection. The widget warns for source forms it diagnoses, but does not guarantee every unsupported form is detected. The original resource remains in CalDAV; a warning-free view is not a complete export of every resource.
-- **Matrix identity, not Matrix passwords.** The widget authenticates to our gateway using Matrix widget/OpenID flows. It must never ask users for their Matrix password.
-- **Room reminder boundary.** Scheduled reminders use whole-room `m.mentions.room` and are limited to unencrypted rooms. Configuration and delivery are separate default-off capabilities; the native sender refuses encrypted or unknown room state.
-- **Track MSC4496 without depending on it.** Our domain model should map cleanly to the proposal while it remains unstable.
-
-## Current state
-
-M0–M3 are complete for the supported scope, including widget CRUD, user-scoped Matrix OpenID access, and pinned personal-access/event contracts against the project-owned Synapse/Radicale test stack. These contracts do not validate a production host or the etke-managed Radicale service and its existing `/data` store.
-
-M4 includes calendar visibility, VEVENT-only calendar creation, rename, safe deletion, description and color editing, mixed-collection safeguards, and a manager-authorized CalDAV diagnostics endpoint for support tooling. The widget does not expose raw collection URLs. Collection-timezone editing remains deferred. M5 supports a documented bounded RRULE/RDATE/EXDATE subset, including PERIOD values, one monthly ordinal weekday (ADR035), revision metadata, bundled-timezone projection, selected-occurrence timing/text edits (ADR040), and typed EXDATE skip/restore. Ordinary master edits can author one safe HTTP(S) CONFERENCE URI with an optional label (ADR036) or one URI ATTACH operation per save (ADR038), preserving opaque siblings and parameters. One non-repeating DISPLAY alarm may use a negative start-relative DURATION or an absolute UTC timestamp (ADR039); absolute alarms are calendar metadata and are unavailable for Matrix reminder delivery. Safe external links remain explicit anchors without previews or fetches. Timing-only this-and-following edits remain limited to ADR034-supported finite series with at most 128 members; monthly ordinal rules are excluded. They reject alarms, RDATE/EXDATE data, unsafe detached suffixes, and unsupported timing. Other instance properties, additional RRULE parts, arbitrary rule splitting, attendee/email, individual reminder recipients, binary attachment authoring/uploads, multiple conferences, RTC provisioning, and actual client/server interoperability remain open or deferred.
-
-M6 room reads (#164) and event mutations (#193) use current actor authorization and exact room/calendar bindings. Immutable static bindings remain operator-configured; accepted ADR043 adds an optional moderator setup flow that can create durable dynamic bindings when explicitly enabled. `ROOM_CALENDAR_ACCESS_ENABLED`, `ROOM_CALENDAR_EVENT_WRITES_ENABLED`, and `ROOM_CALENDAR_SETUP_ENABLED` are separate default-off gates. PR #201 connects the primary widget to the authorized room calendar, displays the current Matrix room link in event details, and provides reminder settings for supported alarms to authorized managers. PR #199 adds the reminder APIs, bounded scheduler lifecycle, native Matrix transport, and post-success room-target widget action notices. ADR041 adds a process-wide room principal mode: appservice remains the default, while bot-account uses the server's `ACCESS_TOKEN`; switching modes selects another Radicale home and does not migrate calendars. All eight hosted checks passed on PR #201's exact tree `a65811903363397ea0883f4e32a98ace7dfdb9a8`, independently reviewed at the same tree and merged as `f49acee71280944ad6ae351111947ff01c00031d`. Reminder configuration, delivery, and action notices remain independently default-off through `MATRIX_CALENDAR_REMINDER_CONFIGURATION_ENABLED`, `ROOM_CALENDAR_REMINDER_DELIVERY_ENABLED`, and `ROOM_CALENDAR_ACTION_MESSAGES_ENABLED`; delivery also requires room access and the app-owned PostgreSQL store. The selected Radicale principal has whole-home `owner_only` rights; binding checks scope access in the gateway, not in Radicale.
-
-A local source contract drives a normal bot account through real Matrix sync on a synthetic Synapse/Radicale stack. It covers invite autojoin, replies to real `!calendar help` and first `!calendar setup` events, ready binding/widget/OpenID/Radicale behavior, and refusal for a joined member without calendar-manage power. Repeated setup is a direct service call, so a second command reply is not covered. This automated contract does not establish Element/browser behavior, human pilot-room acceptance, or production/operator acceptance.
-
-M7 provides bounded `!calendar upcoming`, `event`, `create`, and `delete`/`cancel` commands. The Matrix sender is actor context, not the CalDAV identity. Replies use the Matrix SDK's encryption-aware sender and fail closed when encrypted-room support cannot be confirmed. PR #198 bounds command work before Matrix state and CalDAV operations; its counters are process-local. PR #199 adds separate opt-in best-effort notices after successful room-target widget event mutations. Notices suppress automatic mentions and do not roll back a successful CalDAV change; they do not establish scheduled reminder delivery or encrypted reminder support.
-
-M8 includes process-local calendar-gateway and bot-command limits, bounded CalDAV responses, redirect refusal, and discovery href confinement. Hosted browser evidence includes ten total room-control cases (PR #213), then twelve total list/month cases with a prepared 1,000-event benchmark (PR #216); all use synthetic components. The 1,000-event month samples include a long task up to 2.63 seconds; this is not a capacity promise. These results do not validate Element Web/Desktop. The project remains pre-alpha: operator validation of proxy/log behavior, the selected project-owned Radicale deployment, PostgreSQL TLS/CA, backups, and recovery is still required. An existing etke image override or data-store reuse is required only if that reuse is selected. No live deployment or publication is authorized.
-
-The source-bound image archive workflow offers an optional `operator_rehearsal` input, defaulting to false. When enabled, it runs the no-Element Docker integration, API authorization and CRUD checks, reminder restart, and paired-store restore on the same fresh hosted runner before artifact upload. A pass is recorded only after exact owned-resource cleanup and foreign-state verification. This does not certify Element browser clients, a local Podman/SELinux host, an off-server backup destination, or a production installation; those remain separate gates.
+**Pre-alpha.** The controlled pilot targets Element Web and Desktop. The implementation is usable for development, but target deployment and recovery acceptance remain incomplete. See [project status](./docs/STATUS.md) for implemented features and [release evidence](./docs/RELEASE.md) for the exact source that has been qualified.
 
 ## Start here
 
-- [AGENTS.md](./AGENTS.md) — rules for humans and coding agents
-- [Architecture](./docs/ARCHITECTURE.md)
-- [Implementation plan](./docs/PLAN.md)
-- [Current project status](./docs/STATUS.md)
-- [Current release gate and sanitized evidence index](./docs/RELEASE.md)
-- [Controlled beta scope and acceptance](./docs/beta-scope.md)
-- [Room setup and bot command fallback](./docs/bot-calendar.md)
-- [Security policy](./SECURITY.md)
-- [Threat model](./docs/threat-model.md) — current trust boundaries, controls, and open risks
-- [Roadmap](./docs/ROADMAP.md)
-- [Development guide](./docs/DEVELOPMENT.md)
-- [Upstream provenance](./docs/UPSTREAM.md)
-- [Upgrade and migration runbook](./docs/upgrade-migration.md)
-- [Free/busy privacy policy](./docs/free-busy-privacy.md)
-- [Architecture decisions](./docs/adrs/)
+| I want to…                                 | Read                                                                                                   |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| Use a calendar in my Matrix room           | [User guide](./docs/user-guide.md) and [room setup / bot commands](./docs/bot-calendar.md)             |
+| Run the code and make a first contribution | [Development guide](./docs/DEVELOPMENT.md) and [contributing](./CONTRIBUTING.md)                       |
+| Understand how the code fits together      | [Architecture](./docs/ARCHITECTURE.md) and [data model](./docs/data-model.md)                          |
+| Configure or operate an installation       | [Deployment guide](./docs/deployment-docker.md) and [configuration reference](./docs/configuration.md) |
+| Find supported features and upcoming work  | [Current status](./docs/STATUS.md) and [roadmap](./docs/ROADMAP.md)                                    |
+| Browse all documentation                   | [Documentation index](./docs/README.md)                                                                |
 
-## Development
+## What it does
 
-Node.js 22 and Yarn 1.22 are recommended.
+- **View and edit events** in list, day, work-week, week, and month views, including timed and all-day events, timezones, and a supported subset of recurring events.
+- **Manage event calendars:** create, rename, set description and color, choose visible calendars, and safely delete supported calendars. Existing mixed collections retain their non-event data.
+- **Connect calendars to Matrix rooms** with server-enforced membership and permissions. Operators can enable a moderator-led `!calendar setup` flow.
+- **Configure room reminders** for supported alarms in unencrypted rooms. Reminder configuration, delivery, event writes, and room setup are independently enabled by the operator.
+- **Publish an optional public subscription feed** for an event-only calendar. Anyone with the link can read its events; unpublishing stops future reads. Public subscriptions are read-only.
+- **Use bot commands** to list, inspect, create, and delete events when the widget is unavailable.
+
+Supported edits preserve unrecognized iCalendar data and use ETags to detect concurrent changes. The widget displays a bounded projection of the source calendar: unsupported recurrence or timezone forms may be absent from the view, so it is not a complete export.
+
+Private external CalDAV editing, arbitrary recurrence authoring, attendee/email workflows, and mobile-client certification remain outside the current supported scope. Selected-member and all-day Matrix reminder delivery is being developed separately; it is not included in the documented `main` baseline. See [feature status and limits](./docs/STATUS.md#implemented-on-main).
+
+## Run locally
+
+Use **Node.js 22.12 or newer** and the pinned **Yarn Classic 1.22.22**. CI uses Node 22.
 
 ```bash
+git clone https://github.com/0cwa/matrix-calendar-widget.git
+cd matrix-calendar-widget
 corepack enable
 yarn install --frozen-lockfile
-yarn ci
 yarn dev
 ```
 
-For Matrix/Radicale integration work, start the pinned local services with `yarn dev:services:up`. See [dev/README.md](./dev/README.md).
+This starts the Vite development server. The application needs a Matrix widget host and a configured calendar gateway for real calendars; opening the URL alone does not create a working backend. The [development guide](./docs/DEVELOPMENT.md) explains configuration, focused tests, and the [local Synapse/Radicale stack](./dev/README.md). If your Node installation does not provide Corepack, install Yarn Classic 1.22.22 before running the commands.
 
-## Upstream
+## Repository map
 
-Baseline imported from:
+| Directory                                                    | Responsibility                                                          |
+| ------------------------------------------------------------ | ----------------------------------------------------------------------- |
+| [Widget](./matrix-calendar-widget/README.md)                 | React/TypeScript widget and calendar UI                                 |
+| [Server](./matrix-calendar-server/README.md)                 | NestJS gateway, Matrix authorization, CalDAV access, bot, and reminders |
+| [Calendar package](./packages/calendar/README.md)            | Calendar domain, repository interfaces, iCalendar and recurrence logic  |
+| [Timezone package](./packages/ical-timezones/README.md)      | Bundled timezone data and provenance                                    |
+| [Radicale auth](./radicale-auth/README.md)                   | Project-owned Radicale OpenID authentication module                     |
+| [Local services](./dev/README.md) and [E2E](./e2e/README.md) | Local services, integration contracts, and browser acceptance           |
+| [Documentation](./docs/README.md)                            | User, developer, operator, and design documentation                     |
 
-- Repository: `nordeck/matrix-meetings`
-- Commit: `2d3011f665af04c3cd376c388f7ae3bcb06bba25`
-- Import commit in this repository: `387a3292d1a1ffce4d109762608d421f79ba1392`
+Radicale is the source of truth for calendar objects. PostgreSQL holds separate application state such as reminder delivery and optional room bindings. Matrix provides identity and room policy. The [architecture guide](./docs/ARCHITECTURE.md) explains those boundaries and the remaining inherited server code.
 
-See [docs/UPSTREAM.md](./docs/UPSTREAM.md) before attempting an upstream sync.
+## Contributing
 
-## License
+Start with a small change, follow the [contribution guide](./CONTRIBUTING.md), and run the checks relevant to it. Bug reports should include reproduction steps and synthetic calendar examples with private data removed. Report security issues using the [security policy](./SECURITY.md).
 
-Apache License 2.0. The original Nordeck copyright, NOTICE files, and attribution must be retained for inherited code as required by the license.
+## Origin and license
+
+This project is a hard fork of Nordeck's NeoDateFix / `matrix-meetings`. We retain its attribution and reuse its Matrix integration, calendar UI, and testing foundations while making CalDAV canonical. See [upstream provenance and sync policy](./docs/UPSTREAM.md).
+
+Licensed under [Apache-2.0](./LICENSE). Retain the applicable [NOTICE](./NOTICE), copyright, and attribution when reusing inherited code.
