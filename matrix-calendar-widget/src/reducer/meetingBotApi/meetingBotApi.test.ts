@@ -15,7 +15,7 @@
  */
 
 import { MockedWidgetApi, mockWidgetApi } from '@matrix-widget-toolkit/testing';
-import { rest } from 'msw';
+import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import { createStore } from '../../store';
 import { meetingBotApi } from './meetingBotApi';
@@ -45,12 +45,12 @@ describe('meetingBotApi', () => {
 
     it('returns the server-validated Matrix identity', async () => {
       server.use(
-        rest.get('http://localhost/v1/calendar/context', (req, res, ctx) => {
-          if (req.headers.get('Authorization') !== expectedAuthHeader) {
-            return res(ctx.status(401));
+        http.get('http://localhost/v1/calendar/context', ({ request }) => {
+          if (request.headers.get('Authorization') !== expectedAuthHeader) {
+            return new HttpResponse(null, { status: 401 });
           }
 
-          return res(ctx.json({ userId: '@alice:example.test' }));
+          return HttpResponse.json({ userId: '@alice:example.test' });
         }),
       );
 
@@ -63,21 +63,22 @@ describe('meetingBotApi', () => {
 
     it('passes a room id for server-side membership checks', async () => {
       server.use(
-        rest.get('http://localhost/v1/calendar/context', (req, res, ctx) => {
-          if (req.headers.get('Authorization') !== expectedAuthHeader) {
-            return res(ctx.status(401));
+        http.get('http://localhost/v1/calendar/context', ({ request }) => {
+          if (request.headers.get('Authorization') !== expectedAuthHeader) {
+            return new HttpResponse(null, { status: 401 });
           }
 
-          if (req.url.searchParams.get('roomId') !== '!team:example.test') {
-            return res(ctx.status(400));
+          if (
+            new URL(request.url).searchParams.get('roomId') !==
+            '!team:example.test'
+          ) {
+            return new HttpResponse(null, { status: 400 });
           }
 
-          return res(
-            ctx.json({
-              userId: '@alice:example.test',
-              roomId: '!team:example.test',
-            }),
-          );
+          return HttpResponse.json({
+            userId: '@alice:example.test',
+            roomId: '!team:example.test',
+          });
         }),
       );
 
@@ -93,8 +94,8 @@ describe('meetingBotApi', () => {
 
     it('rejects malformed gateway responses', async () => {
       server.use(
-        rest.get('http://localhost/v1/calendar/context', (_req, res, ctx) =>
-          res(ctx.json({ userId: 7 })),
+        http.get('http://localhost/v1/calendar/context', () =>
+          HttpResponse.json({ userId: 7 }),
         ),
       );
 
@@ -124,12 +125,12 @@ describe('meetingBotApi', () => {
 
     it('should handle empty', async () => {
       server.use(
-        rest.get('http://localhost/v1/config', (req, res, ctx) => {
-          if (req.headers.get('Authorization') !== expectedAuthHeader) {
-            return res(ctx.status(401));
+        http.get('http://localhost/v1/config', ({ request }) => {
+          if (request.headers.get('Authorization') !== expectedAuthHeader) {
+            return new HttpResponse(null, { status: 401 });
           }
 
-          return res(ctx.json({}));
+          return HttpResponse.json({});
         }),
       );
 
@@ -142,12 +143,12 @@ describe('meetingBotApi', () => {
 
     it('should handle value', async () => {
       server.use(
-        rest.get('http://localhost/v1/config', (req, res, ctx) => {
-          if (req.headers.get('Authorization') !== expectedAuthHeader) {
-            return res(ctx.status(401));
+        http.get('http://localhost/v1/config', ({ request }) => {
+          if (request.headers.get('Authorization') !== expectedAuthHeader) {
+            return new HttpResponse(null, { status: 401 });
           }
 
-          return res(ctx.json({ jitsiDialInEnabled: true }));
+          return HttpResponse.json({ jitsiDialInEnabled: true });
         }),
       );
 
@@ -160,17 +161,15 @@ describe('meetingBotApi', () => {
 
     it('should handle OX value', async () => {
       server.use(
-        rest.get('http://localhost/v1/config', (req, res, ctx) => {
-          if (req.headers.get('Authorization') !== expectedAuthHeader) {
-            return res(ctx.status(401));
+        http.get('http://localhost/v1/config', ({ request }) => {
+          if (request.headers.get('Authorization') !== expectedAuthHeader) {
+            return new HttpResponse(null, { status: 401 });
           }
 
-          return res(
-            ctx.json({
-              jitsiDialInEnabled: true,
-              openXchangeMeetingUrlTemplate: '--TEMPLATE--',
-            }),
-          );
+          return HttpResponse.json({
+            jitsiDialInEnabled: true,
+            openXchangeMeetingUrlTemplate: '--TEMPLATE--',
+          });
         }),
       );
 
@@ -186,8 +185,8 @@ describe('meetingBotApi', () => {
 
     it('should reject invalid values', async () => {
       server.use(
-        rest.get('http://localhost/v1/config', (_req, res, ctx) => {
-          return res(ctx.json({ jitsiDialInEnabled: 'true' }));
+        http.get('http://localhost/v1/config', () => {
+          return HttpResponse.json({ jitsiDialInEnabled: 'true' });
         }),
       );
 
@@ -213,8 +212,8 @@ describe('meetingBotApi', () => {
 
     it('should reject server error', async () => {
       server.use(
-        rest.get('http://localhost/v1/config', (_req, res, ctx) => {
-          return res(ctx.status(500), ctx.json('an error occurred'));
+        http.get('http://localhost/v1/config', () => {
+          return HttpResponse.json('an error occurred', { status: 500 });
         }),
       );
 
@@ -232,12 +231,12 @@ describe('meetingBotApi', () => {
 
     it('should handle empty list', async () => {
       server.use(
-        rest.get('http://localhost/v1/widget/list', (req, res, ctx) => {
-          if (req.headers.get('Authorization') !== expectedAuthHeader) {
-            return res(ctx.status(401));
+        http.get('http://localhost/v1/widget/list', ({ request }) => {
+          if (request.headers.get('Authorization') !== expectedAuthHeader) {
+            return new HttpResponse(null, { status: 401 });
           }
 
-          return res(ctx.json([]));
+          return HttpResponse.json([]);
         }),
       );
 
@@ -248,24 +247,22 @@ describe('meetingBotApi', () => {
 
     it('should handle list', async () => {
       server.use(
-        rest.get('http://localhost/v1/widget/list', (req, res, ctx) => {
-          if (req.headers.get('Authorization') !== expectedAuthHeader) {
-            return res(ctx.status(401));
+        http.get('http://localhost/v1/widget/list', ({ request }) => {
+          if (request.headers.get('Authorization') !== expectedAuthHeader) {
+            return new HttpResponse(null, { status: 401 });
           }
 
-          return res(
-            ctx.json([
-              {
-                id: 'widget-1',
-                name: 'Widget 1',
-              },
-              {
-                id: 'widget-2',
-                name: 'Widget 2',
-                optional: true,
-              },
-            ]),
-          );
+          return HttpResponse.json([
+            {
+              id: 'widget-1',
+              name: 'Widget 1',
+            },
+            {
+              id: 'widget-2',
+              name: 'Widget 2',
+              optional: true,
+            },
+          ]);
         }),
       );
 
@@ -286,15 +283,13 @@ describe('meetingBotApi', () => {
 
     it('should reject invalid values', async () => {
       server.use(
-        rest.get('http://localhost/v1/widget/list', (_req, res, ctx) => {
-          return res(
-            ctx.json([
-              {
-                id: 'widget-1',
-                name: 815,
-              },
-            ]),
-          );
+        http.get('http://localhost/v1/widget/list', () => {
+          return HttpResponse.json([
+            {
+              id: 'widget-1',
+              name: 815,
+            },
+          ]);
         }),
       );
 
@@ -307,8 +302,8 @@ describe('meetingBotApi', () => {
 
     it('should reject if token was rejected', async () => {
       server.use(
-        rest.get('http://localhost/v1/widget/list', (_req, res, ctx) => {
-          return res(ctx.json([]));
+        http.get('http://localhost/v1/widget/list', () => {
+          return HttpResponse.json([]);
         }),
       );
 
@@ -326,8 +321,8 @@ describe('meetingBotApi', () => {
 
     it('should reject server error', async () => {
       server.use(
-        rest.get('http://localhost/v1/widget/list', (_req, res, ctx) => {
-          return res(ctx.status(500), ctx.json('an error occurred'));
+        http.get('http://localhost/v1/widget/list', () => {
+          return HttpResponse.json('an error occurred', { status: 500 });
         }),
       );
 
@@ -345,14 +340,14 @@ describe('meetingBotApi', () => {
 
     it('should handle empty', async () => {
       server.use(
-        rest.get(
+        http.get(
           'http://localhost/v1/meeting/!roomId/sharingInformation',
-          (req, res, ctx) => {
-            if (req.headers.get('Authorization') !== expectedAuthHeader) {
-              return res(ctx.status(401));
+          ({ request }) => {
+            if (request.headers.get('Authorization') !== expectedAuthHeader) {
+              return new HttpResponse(null, { status: 401 });
             }
 
-            return res(ctx.json({}));
+            return HttpResponse.json({});
           },
         ),
       );
@@ -368,19 +363,17 @@ describe('meetingBotApi', () => {
 
     it('should handle values', async () => {
       server.use(
-        rest.get(
+        http.get(
           'http://localhost/v1/meeting/!roomId/sharingInformation',
-          (req, res, ctx) => {
-            if (req.headers.get('Authorization') !== expectedAuthHeader) {
-              return res(ctx.status(401));
+          ({ request }) => {
+            if (request.headers.get('Authorization') !== expectedAuthHeader) {
+              return new HttpResponse(null, { status: 401 });
             }
 
-            return res(
-              ctx.json({
-                jitsi_dial_in_number: '0123',
-                jitsi_pin: 1111,
-              }),
-            );
+            return HttpResponse.json({
+              jitsi_dial_in_number: '0123',
+              jitsi_pin: 1111,
+            });
           },
         ),
       );
@@ -399,15 +392,13 @@ describe('meetingBotApi', () => {
 
     it('should reject invalid values', async () => {
       server.use(
-        rest.get(
+        http.get(
           'http://localhost/v1/meeting/!roomId/sharingInformation',
-          (_req, res, ctx) => {
-            return res(
-              ctx.json({
-                jitsi_dial_in_number: 123,
-                jitsi_pin: '1111',
-              }),
-            );
+          () => {
+            return HttpResponse.json({
+              jitsi_dial_in_number: 123,
+              jitsi_pin: '1111',
+            });
           },
         ),
       );
@@ -423,11 +414,8 @@ describe('meetingBotApi', () => {
 
     it('should reject if token was rejected', async () => {
       server.use(
-        rest.get(
-          'http://localhost/v1/meeting/!roomId/sharingInformation',
-          (_req, res, ctx) => {
-            return res(ctx.json({}));
-          },
+        http.get('http://localhost/v1/meeting/!roomId/sharingInformation', () =>
+          HttpResponse.json({}),
         ),
       );
 
@@ -447,11 +435,8 @@ describe('meetingBotApi', () => {
 
     it('should reject server error', async () => {
       server.use(
-        rest.get(
-          'http://localhost/v1/meeting/!roomId/sharingInformation',
-          (_req, res, ctx) => {
-            return res(ctx.status(500), ctx.json('an error occurred'));
-          },
+        http.get('http://localhost/v1/meeting/!roomId/sharingInformation', () =>
+          HttpResponse.json('an error occurred', { status: 500 }),
         ),
       );
 

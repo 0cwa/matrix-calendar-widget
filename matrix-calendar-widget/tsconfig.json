@@ -3,6 +3,7 @@
   "extends": "../tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
+    "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "types": ["node", "vitest/globals"]
   },

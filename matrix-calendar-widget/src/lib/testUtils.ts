@@ -24,8 +24,8 @@ import {
   StateEventCreateContent,
 } from '@matrix-widget-toolkit/api';
 import { MockedWidgetApi } from '@matrix-widget-toolkit/testing';
-import { rest } from 'msw';
-import { SetupServer } from 'msw/node';
+import { http, HttpResponse } from 'msw';
+import type { SetupServer } from 'msw/node';
 import { AvailableWidget } from '../reducer/meetingBotApi';
 import { Meeting } from '../reducer/meetingsApi';
 import {
@@ -362,20 +362,18 @@ export function mockWidgetEndpoint(
   { widgets }: { widgets?: AvailableWidget[] } = {},
 ) {
   server.use(
-    rest.get('http://localhost/v1/widget/list', (_, res, ctx) =>
-      res(
-        ctx.json(
-          widgets ?? [
-            {
-              id: 'widget-1',
-              name: 'Widget 1',
-            },
-            {
-              id: 'widget-2',
-              name: 'Widget 2',
-            },
-          ],
-        ),
+    http.get('http://localhost/v1/widget/list', () =>
+      HttpResponse.json(
+        widgets ?? [
+          {
+            id: 'widget-1',
+            name: 'Widget 1',
+          },
+          {
+            id: 'widget-2',
+            name: 'Widget 2',
+          },
+        ],
       ),
     ),
   );
@@ -392,8 +390,8 @@ export function mockConfigEndpoint(
   } = {},
 ) {
   server.use(
-    rest.get('http://localhost/v1/config', (_, res, ctx) =>
-      res(ctx.json({ jitsiDialInEnabled, openXchangeMeetingUrlTemplate })),
+    http.get('http://localhost/v1/config', () =>
+      HttpResponse.json({ jitsiDialInEnabled, openXchangeMeetingUrlTemplate }),
     ),
   );
 }
@@ -406,9 +404,8 @@ export function mockMeetingSharingInformationEndpoint(
   }: { jitsi_dial_in_number?: string; jitsi_pin?: number } = {},
 ) {
   server.use(
-    rest.get(
-      'http://localhost/v1/meeting/:room/sharingInformation',
-      (_, res, ctx) => res(ctx.json({ jitsi_dial_in_number, jitsi_pin })),
+    http.get('http://localhost/v1/meeting/:room/sharingInformation', () =>
+      HttpResponse.json({ jitsi_dial_in_number, jitsi_pin }),
     ),
   );
 }
