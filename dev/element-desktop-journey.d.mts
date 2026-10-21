@@ -60,7 +60,27 @@ export type DesktopARefreshFailurePoint =
 
 export type DesktopRefreshRoomNavigationDiagnostic = {
   roomListItemCountCapped: 0 | 1 | 2 | null;
+  targetCountCapped: 0 | 1 | 2 | null;
   fixtureRoomTargetVisible: boolean | null;
+  centerHitObserved: boolean | null;
+  centerHitWithinTarget: boolean | null;
+  centerHitRole:
+    | 'button'
+    | 'row'
+    | 'option'
+    | 'treeitem'
+    | 'link'
+    | 'listbox'
+    | 'other'
+    | 'unavailable';
+  clickFailureClass:
+    | 'not_observed'
+    | 'pointer_interception'
+    | 'navigation_wait'
+    | 'frame_gone'
+    | 'playwright_timeout'
+    | 'other';
+  roomIdMatchesAfterFailure: boolean | null;
   clickAttempted: boolean;
   clickCompleted: boolean;
   elapsedBucket:
@@ -474,7 +494,7 @@ type DesktopJourneyCliSummaryBase = Omit<
   DesktopJourneySummary,
   'schemaVersion' | 'status' | 'desktopChildCompletion'
 > & {
-  schemaVersion: 21;
+  schemaVersion: 22;
   desktopChildDiagnostic: DesktopChildDiagnostic;
 };
 
@@ -517,6 +537,7 @@ export declare const DESKTOP_JOURNEY_PHASES: readonly DesktopJourneyPhase[];
 export declare const DESKTOP_A_REFRESH_FAILURE_POINTS: readonly DesktopARefreshFailurePoint[];
 export declare const DESKTOP_JOURNEY_FAILURE_POINTS: readonly DesktopJourneyFailurePoint[];
 export declare const DESKTOP_JOURNEY_ERROR_CLASSES: readonly DesktopJourneyErrorClass[];
+export declare const DESKTOP_REFRESH_ROOM_NAVIGATION_CLICK_FAILURE_CLASSES: readonly DesktopRefreshRoomNavigationDiagnostic['clickFailureClass'][];
 export declare const DESKTOP_LOGIN_STEPS: readonly DesktopLoginStep[];
 export declare const DESKTOP_LOGIN_FAILURE_REASONS: readonly DesktopLoginFailureReason[];
 export declare const DESKTOP_LOGIN_ENTRIES: readonly DesktopLoginEntry[];
@@ -524,6 +545,10 @@ export declare const DESKTOP_LOGIN_ENTRIES: readonly DesktopLoginEntry[];
 export declare function classifyDesktopJourneyErrorClass(
   error: unknown,
 ): DesktopJourneyErrorClass;
+
+export declare function classifyDesktopRoomNavigationClickFailure(
+  error: unknown,
+): DesktopRefreshRoomNavigationDiagnostic['clickFailureClass'];
 
 export declare function classifyDesktopLoginFailure(
   error: unknown,

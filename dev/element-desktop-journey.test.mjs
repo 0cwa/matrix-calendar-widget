@@ -35,6 +35,7 @@ import {
   classifyDesktopJourneyEvidence,
   classifyDesktopJourneyEvidenceState,
   classifyDesktopLoginFailure,
+  classifyDesktopRoomNavigationClickFailure,
   desktopWidgetIsReady,
   enterDesktopPasswordLogin,
   findUniqueWebBEventId,
@@ -2052,7 +2053,13 @@ test('reports uncaught Desktop refresh exceptions with fixed classifications', (
 test('records bounded Desktop refresh room-navigation progress', () => {
   const beforeClick = {
     roomListItemCountCapped: 2,
+    targetCountCapped: null,
     fixtureRoomTargetVisible: true,
+    centerHitObserved: null,
+    centerHitWithinTarget: null,
+    centerHitRole: 'unavailable',
+    clickFailureClass: 'not_observed',
+    roomIdMatchesAfterFailure: null,
     clickAttempted: false,
     clickCompleted: false,
     elapsedBucket: 'not_started',
@@ -2256,7 +2263,13 @@ test('records bounded Desktop refresh room-navigation progress', () => {
 test('rejects malformed room-navigation diagnostics while parsing evidence', () => {
   const diagnostic = {
     roomListItemCountCapped: 2,
+    targetCountCapped: null,
     fixtureRoomTargetVisible: true,
+    centerHitObserved: null,
+    centerHitWithinTarget: null,
+    centerHitRole: 'unavailable',
+    clickFailureClass: 'not_observed',
+    roomIdMatchesAfterFailure: null,
     clickAttempted: false,
     clickCompleted: false,
     elapsedBucket: 'not_started',
@@ -2273,6 +2286,7 @@ test('rejects malformed room-navigation diagnostics while parsing evidence', () 
   for (const malformedDiagnostic of [
     { ...diagnostic, unexpectedKey: true },
     { ...diagnostic, roomListItemCountCapped: 3 },
+    { ...diagnostic, clickFailureClass: 'private room title' },
     {
       ...diagnostic,
       progressTimeline: [
@@ -2327,7 +2341,13 @@ test('rejects malformed room-navigation diagnostics while parsing evidence', () 
 test('records only bounded failed refresh room-navigation progress', () => {
   const failedDiagnostic = {
     roomListItemCountCapped: 1,
+    targetCountCapped: 1,
     fixtureRoomTargetVisible: true,
+    centerHitObserved: true,
+    centerHitWithinTarget: false,
+    centerHitRole: 'button',
+    clickFailureClass: 'pointer_interception',
+    roomIdMatchesAfterFailure: false,
     clickAttempted: true,
     clickCompleted: false,
     elapsedBucket: '5_to_15s',
@@ -2354,6 +2374,12 @@ test('records only bounded failed refresh room-navigation progress', () => {
   };
   const startedDiagnostic = {
     ...failedDiagnostic,
+    targetCountCapped: null,
+    centerHitObserved: null,
+    centerHitWithinTarget: null,
+    centerHitRole: 'unavailable',
+    clickFailureClass: 'not_observed',
+    roomIdMatchesAfterFailure: null,
     elapsedBucket: 'not_completed',
     progressTimeline: failedDiagnostic.progressTimeline.slice(0, 2),
   };
@@ -2486,6 +2512,37 @@ test('classifies caught Desktop refresh errors without persisting error text', (
     assertion.name = 'AssertionError';
     assert.equal(classifyDesktopJourneyErrorClass(assertion), 'assertion');
   });
+});
+
+test('classifies Desktop room-navigation click failures into closed reasons', () => {
+  const timeout = new Error('Playwright timed out');
+  timeout.name = 'TimeoutError';
+  assert.equal(
+    classifyDesktopRoomNavigationClickFailure(timeout),
+    'playwright_timeout',
+  );
+  assert.equal(
+    classifyDesktopRoomNavigationClickFailure(
+      new Error('another element intercepts pointer events'),
+    ),
+    'pointer_interception',
+  );
+  assert.equal(
+    classifyDesktopRoomNavigationClickFailure(
+      new Error('waiting for scheduled navigations to finish'),
+    ),
+    'navigation_wait',
+  );
+  assert.equal(
+    classifyDesktopRoomNavigationClickFailure(new Error('Frame was detached')),
+    'frame_gone',
+  );
+  assert.equal(
+    classifyDesktopRoomNavigationClickFailure(
+      new Error('private room title and private URL'),
+    ),
+    'other',
+  );
 });
 
 test('refresh failure fallback records the minimal error when optional diagnostics fail', () => {
@@ -3768,7 +3825,7 @@ test('emits a sanitized unavailable summary when evidence validation fails', () 
     assert.doesNotMatch(result.stderr, new RegExp(privateSentinel, 'u'));
 
     const summary = JSON.parse(result.stdout);
-    assert.equal(summary.schemaVersion, 21);
+    assert.equal(summary.schemaVersion, 22);
     assert.equal(summary.sourceSha, DESKTOP_REFRESH_SOURCE_SHA);
     assert.equal(summary.status, 'unavailable');
     assert.equal(summary.desktopChildCompletion.outcome, 'unknown');
@@ -3783,12 +3840,12 @@ test('emits a sanitized unavailable summary when evidence validation fails', () 
   });
 });
 
-test('declares the schema-21 CLI parent diagnostic shape', () => {
+test('declares the schema-22 CLI parent diagnostic shape', () => {
   const declarations = readFileSync(
     new URL('./element-desktop-journey.d.mts', import.meta.url),
     'utf8',
   );
-  assert.match(declarations, /schemaVersion: 21;/u);
+  assert.match(declarations, /schemaVersion: 22;/u);
   assert.match(declarations, /DesktopJourneyEvidenceFailureCode/u);
   assert.match(
     declarations,
