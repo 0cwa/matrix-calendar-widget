@@ -41,6 +41,11 @@ jobs:
           node-version: '22'
           cache: yarn
 
+      - name: Check documentation links and validator regressions
+        run: |
+          node --test scripts/check-docs.test.mjs
+          node scripts/check-docs.mjs
+
       - name: Test source-bound image archive validation
         run: node --test scripts/release-image-archive.test.mjs
 

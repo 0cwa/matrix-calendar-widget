@@ -1,5 +1,7 @@
 # Legacy entry-point inventory
 
+[Documentation](./README.md) · [Architecture](./ARCHITECTURE.md) · [Server inventory](./legacy-server-inventory.md)
+
 This source inventory records which old widget and bot paths remain reachable
 alongside the calendar product, what they can do, and which contract owns their
 disposition. It distinguishes a configured capability from a concrete call

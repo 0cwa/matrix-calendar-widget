@@ -1,5 +1,7 @@
 # CalDAV discovery credential boundary
 
+[Documentation](./README.md) · [Threat model](./threat-model.md) · [Event transport](./security-caldav-event-transport.md)
+
 The gateway delegates short-lived Matrix OpenID proofs to Radicale using
 credential-bearing CalDAV requests. CalDAV discovery therefore treats the
 configured `RADICALE_URL` and every href in the peer's response as untrusted
@@ -37,3 +39,6 @@ or a total process-memory guarantee.
 This boundary covers `CalDavDiscoveryClient` discovery and collection requests.
 Event-resource transport has its own documented bounds. Caller authentication
 and authorization remain enforced by the gateway and are unchanged here.
+
+Implementation: [CalDavDiscoveryClient](../matrix-calendar-server/src/caldav/CalDavDiscoveryClient.ts)
+and its [transport tests](../matrix-calendar-server/src/caldav/CalDavDiscoveryTransport.test.ts).

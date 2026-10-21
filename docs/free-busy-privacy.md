@@ -1,15 +1,26 @@
 # Free/busy privacy model
 
+[Documentation](./README.md) · [Threat model](./threat-model.md) · [Security policy](../SECURITY.md)
+
 Free/busy data reveals when a person or group is unavailable even when it omits
-event titles. Treat it as sensitive calendar data under [AGENTS.md](../AGENTS.md)
-and the [security policy](../SECURITY.md). This document sets the privacy and
+event titles. Treat it as sensitive calendar data under the
+[security policy](../SECURITY.md). This document sets the privacy and
 projection rules for any future availability feature. **There is no free/busy
-API, widget surface, or cross-calendar sharing feature in the current source.**
+API, availability widget surface, or cross-calendar availability feature in the current source.**
 This policy does not mean the behavior is implemented or available to users.
+[Public calendar feeds](./adrs/adr045-public-calendar-feeds.md) are a separate,
+opt-in disclosure of full canonical VEVENT data, not a free/busy projection.
 
 The decisions are recorded in [ADR027](./adrs/adr027-free-busy-privacy-boundary.md).
 A future implementation must complete the acceptance checks there before
 exposing an endpoint or UI.
+
+**On this page**
+
+- [Who may request availability](#who-may-request-availability)
+- [Response data](#response-data)
+- [Interval and event semantics](#interval-and-event-semantics)
+- [Implementation gates](#implementation-gates)
 
 ## Who may request availability
 

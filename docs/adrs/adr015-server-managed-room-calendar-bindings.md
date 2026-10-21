@@ -1,7 +1,18 @@
 # ADR015: Manage room/calendar bindings in server configuration
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
 - Status: Accepted
 - Date: 2026-09-26
+
+> **Later implementation (2026-10-21):** Static server-managed bindings are
+> implemented. [ADR043](./adr043-moderator-room-calendar-setup.md) adds a
+> separately gated moderator setup command with server-selected collections
+> and durable dynamic bindings. Static configuration remains authoritative;
+> this extension provides no general unlink, rebind, or delete operation.
+> The future-implementation gates below record the original static-binding
+> scope; consult [status](../STATUS.md) and [release evidence](../RELEASE.md)
+> for current implementation and deployment acceptance.
 
 ## Context
 

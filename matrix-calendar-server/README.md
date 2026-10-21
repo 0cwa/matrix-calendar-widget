@@ -1,26 +1,68 @@
-# Matrix Calendar Server
+# Gateway and bot workspace
 
-The Matrix Calendar widget is the primary calendar interface. This server provides the Matrix bot fallback, authenticated calendar gateway, and reminder services. Radicale/CalDAV remains the canonical calendar store.
+[Project overview](../README.md) · [Development guide](../docs/DEVELOPMENT.md) · [Architecture](../docs/ARCHITECTURE.md) · [Configuration](../docs/configuration.md)
 
-## Calendar-only pilot behavior
+`@matrix-calendar-widget/server` is the NestJS calendar gateway and Matrix bot. It validates Matrix identity and permissions, talks to CalDAV, handles bounded `!calendar` commands, and hosts optional room setup, reminder, and public-feed services. Radicale remains the canonical calendar store.
 
-- Use `!calendar help` for the supported bot command fallback. Room-calendar commands remain subject to the configured room binding, access, and write gates.
-- When the operator enables `ROOM_CALENDAR_SETUP_ENABLED`, an eligible room member can use the exact no-argument `!calendar setup` command. Setup also requires the configured binding store for new rooms, a confirmed unencrypted room, bot membership and widget-state power, and a usable widget URL. See [the setup guide](../docs/bot-calendar.md).
-- The inherited `/v1/meeting/*` HTTP routes and Matrix meeting RPC handlers are disabled for the pilot.
-- `!meeting setup` is disabled because the legacy welcome-room marker cannot authorize widget writes to another room. The legacy `!meeting` workflow is off by default (`ENABLE_WELCOME_WORKFLOW=false`).
-- Legacy private help-room creation and RPC error-room notifications are off by default. The existing `ENABLE_WELCOME_WORKFLOW` and `ENABLE_PRIVATE_ROOM_ERROR_SENDING` variables are explicit compatibility opt-ins; `!calendar` remains available when the welcome workflow is off.
-- See [the legacy entry-point inventory](../docs/legacy-entry-points.md) for source-backed route and background-task dispositions, and [configuration](../docs/configuration.md) for environment settings.
+## Run locally
 
-### Available Scripts
+Install dependencies from the repository root. Configure a disposable Matrix/Radicale environment using [local services](../dev/README.md) and the [configuration reference](../docs/configuration.md). The server reads environment variables and local `.env.local`, `.env.dev`, or `.env` files in its workspace; keep real credentials out of Git.
 
-In the project directory, you can run:
+Build the shared packages and start the server in watch mode:
 
-- `yarn start`: Start the bot for development.
-- `yarn build`: Build the production version of the bot.
-- `yarn test`: Watch all files for changes and run tests.
-- `yarn tsc`: Check TypeScript types for errors in the widget.
-- `yarn lint`: Run eslint on the bot.
-- `yarn depcheck`: Check for missing or unused dependencies.
-- `yarn translate`: Update translation files from code.
-- `yarn generate-disclaimer`: Generates license disclaimer and include it in the build output.
-- `yarn docker:build`: Builds a container from the output of `yarn build` and `yarn generate-disclaimer`.
+```bash
+yarn workspace @matrix-calendar-widget/ical-timezones build
+yarn workspace @matrix-calendar-widget/calendar build
+yarn workspace @matrix-calendar-widget/server start:dev
+```
+
+The workspace start scripts set port 3001. Starting the process requires valid service configuration; it does not create a complete production deployment or automatically enable room features. For packaged operation, use [the deployment guide](../docs/deployment-docker.md).
+
+## Find the code
+
+| Path                                                                         | Responsibility                                                               |
+| ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| [`src/index.ts`](./src/index.ts), [`src/app.module.ts`](./src/app.module.ts) | Process bootstrap, dependency wiring, Matrix listeners                       |
+| [`src/configuration.ts`](./src/configuration.ts)                             | Environment parsing and defaults                                             |
+| [`src/controller/`](./src/controller/)                                       | Gateway, public-feed, reminder, and retained compatibility HTTP routes       |
+| [`src/guard/`](./src/guard/), [`src/middleware/`](./src/middleware/)         | Matrix identity/membership, request policy, traffic bounds                   |
+| [`src/caldav/`](./src/caldav/)                                               | Discovery, HTTP transport, conditional writes, iCalendar codec               |
+| [`src/service/`](./src/service/)                                             | Room authorization, principal selection, bindings, setup, bot commands       |
+| [`src/service/public-feed/`](./src/service/public-feed/)                     | Opt-in publication and canonical public ICS delivery                         |
+| [`src/reminder/`](./src/reminder/)                                           | Alarm validation, configuration, PostgreSQL claims, scheduler and transports |
+| [`test/integration/`](./test/integration/)                                   | Real Synapse/Radicale contracts                                              |
+
+Tests also sit beside the implementation and in [`test/`](./test/). The [data model](../docs/data-model.md) explains identifiers, timing, and preservation rules.
+
+## Runtime boundaries
+
+- Personal calendar operations use the authenticated user's validated OpenID proof. Room operations recheck actor permissions and the exact binding before using the selected server-side principal.
+- Room access, event writes, setup, reminder configuration/delivery, action notices, and public publication are separately configured capabilities. See [configuration](../docs/configuration.md) for defaults and prerequisites.
+- `!calendar help` documents supported fallback commands. The optional exact `!calendar setup` command creates a binding only after the configured store and authorization/widget prerequisites pass. See [bot setup](../docs/bot-calendar.md).
+- Native scheduled reminders currently support whole-room mentions in unencrypted rooms. A configured database alone does not enable delivery.
+- Inherited `/v1/meeting/*` routes and meeting RPC handlers are disabled for the calendar pilot. The legacy welcome workflow and private error-room notifications are off by default; `!meeting setup` remains disabled. Retained compatibility flags do not replace the calendar setup flow.
+
+The [legacy entry-point](../docs/legacy-entry-points.md) and [server inventories](../docs/legacy-server-inventory.md) describe what remains and why. Do not infer that every registered provider is part of normal calendar use.
+
+## Workspace commands
+
+Run from the repository root with `yarn workspace @matrix-calendar-widget/server <command>`:
+
+| Command                              | Purpose                                                           |
+| ------------------------------------ | ----------------------------------------------------------------- |
+| `start`                              | Build, then start the configured service on port 3001             |
+| `start:dev` / `start:debug`          | Start with watch mode / debugger and watch mode                   |
+| `test`                               | Jest watch mode                                                   |
+| `test:all`                           | Finite Jest run with coverage; accepts file filters               |
+| `exec -- tsc --noEmit`               | Type-check server source without emitting files                   |
+| `lint`                               | ESLint with no warnings allowed                                   |
+| `build`                              | Compile to `lib/`, copy assets/locales, and check packaged assets |
+| `test:postgres-contract`             | Reminder-store contract against configured PostgreSQL             |
+| `test:postgres-binding-contract`     | Dynamic-binding store contract against configured PostgreSQL      |
+| `test:postgres-coexistence-contract` | Shared binding/reminder database and recovery contract            |
+| `translate`                          | Extract and synchronize translation keys                          |
+| `depcheck`                           | Check dependency usage                                            |
+| `generate-disclaimer`                | Add license/NOTICE information after building                     |
+| `docker:build`                       | Build the server image from prepared outputs                      |
+
+Database and CalDAV contracts require their fixture environment; absent configuration can cause a suite to skip. The [testing map](../docs/DEVELOPMENT.md#choose-the-right-test-layer) and [CI workflow](../.github/workflows/ci.yml) describe the complete checks. The current server image uses Node 22; the package manifest declares a runtime minimum of Node 20, while full-repository development requires Node 22.12 or newer.

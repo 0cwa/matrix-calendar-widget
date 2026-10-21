@@ -1,6 +1,10 @@
 # ADR000: [TITLE]
 
-Status: accepted
+[Decision index](./README.md) · [Contribution guide](../../CONTRIBUTING.md)
+
+This is a template, not an accepted decision. Copy it to an unused numbered file, set the title and status, and link the new record from the decision index.
+
+Status: proposed
 
 <!-- These documents have names that are short noun phrases. For example, "ADR001: Deployment on Ruby on Rails 3.0.10" or "ADR009: LDAP for Multitenant Integration" -->
 

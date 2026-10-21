@@ -1,5 +1,7 @@
 # ADR043: Set up a room calendar through a moderator command
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
 - Status: Accepted
 - Date: 2026-10-20
 - Supersedes: only ADR015 Decision 5's operator-only binding-write and

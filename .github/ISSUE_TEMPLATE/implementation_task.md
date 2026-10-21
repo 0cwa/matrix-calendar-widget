@@ -1,6 +1,6 @@
 ---
 name: Implementation task
-about: A scoped task suitable for a human or coding agent
+about: Propose a focused contribution with clear acceptance criteria
 title: ''
 labels: ''
 assignees: ''

@@ -1,5 +1,7 @@
 # Backup and recovery for the operator-run Compose sidecar
 
+[Documentation](./README.md) · [Deployment](./deployment-docker.md) · [Upgrades](./upgrade-migration.md)
+
 This runbook covers only the project-owned named volumes in
 [`deploy/etke-sidecar.compose.yaml`](../deploy/etke-sidecar.compose.yaml):
 
@@ -21,7 +23,9 @@ volume captured here. Preserve the configured public-feed signing key in the
 same protected recovery point: if the key is file-backed, add the exact key
 file to the encrypted `restoreInputs` allowlist; if it comes from an environment
 file, include that file only where secret-backup policy permits. The signing
-key is required to keep existing signed URLs valid after recovery. Restoring
+key is required to keep existing signed URLs valid after recovery. A restored
+share database may also restore a token revoked after the snapshot: verify
+and reapply intended revocations in isolation before reopening public ingress. Restoring
 the Radicale volume without its matching key, or the key without the matching
 volume, does not preserve those URLs. Keep the signing key in separate secret
 custody from the Restic repository password and object-store credentials.
@@ -34,6 +38,17 @@ and generic systemd service/timer templates. The templates are examples only:
 they are not installed or enabled by the project. No S3 provider, scheduled
 run, or production recovery path has been validated here. No live etke
 deployment or etke data recovery path has been verified.
+
+**On this page**
+
+- [Restic repository and daily schedule](#restic-repository-and-daily-schedule)
+- [Use the shipped host-local coordinator](#use-the-shipped-host-local-coordinator)
+- [Prepare a backup window](#prepare-a-backup-window)
+- [Archive the two volumes](#archive-the-two-volumes)
+- [Restore into an isolated Compose project](#restore-into-an-isolated-compose-project)
+- [Validate the recovery copy](#validate-the-recovery-copy)
+- [Optional external PostgreSQL store](#optional-external-postgresql-store)
+- [Explicit exclusions](#explicit-exclusions)
 
 ## Restic repository and daily schedule
 
@@ -642,6 +657,21 @@ these project-owned volumes does not validate the separate etke-managed
 Radicale service or its data.
 
 ## Optional external PostgreSQL store
+
+Inventory both configured database URLs before a backup. The reminder store
+uses `MATRIX_CALENDAR_REMINDER_DATABASE_URL`; dynamic room setup uses
+`MATRIX_CALENDAR_BINDING_DATABASE_URL`. They may share one application-owned
+database, with separate `matrix_calendar` and `matrix_calendar_bindings`
+schemas. A full dump of that database must include both schemas and their
+migration ledgers. Verify the dump inventory and restore both before enabling
+their features.
+
+The shipped coordinator captures one PostgreSQL database and calls the archive
+`reminder-postgresql.dump`; it does not automatically discover or capture a
+second binding database. If the stores use different databases, arrange an
+explicit, rehearsed capture/restore of the additional database in the same
+stopped-writer maintenance window. Do not treat the coordinator's successful
+single-database result as proof of complete binding recovery.
 
 The optional reminder database configured by
 `MATRIX_CALENDAR_REMINDER_DATABASE_URL` is external to the Compose volumes. The

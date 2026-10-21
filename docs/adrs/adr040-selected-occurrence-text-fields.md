@@ -1,5 +1,7 @@
 # ADR 040: Bounded selected-occurrence text edits
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
 - Status: Accepted
 - Date: 2026-10-06
 

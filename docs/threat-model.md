@@ -1,36 +1,38 @@
 # Security threat model
 
+[Documentation](./README.md) · [Architecture](./ARCHITECTURE.md) · [Security policy](../SECURITY.md)
+
+**On this page**
+
+- [Scope and status](#scope-and-status)
+- [Assets and actors](#assets-and-actors)
+- [Trust boundaries and current controls](#trust-boundaries-and-current-controls)
+- [Threats, evidence, and residual work](#threats-evidence-and-residual-work)
+- [Deferred security gates](#deferred-security-gates)
+
 ## Scope and status
 
-This source-based model records the repository boundary at `main` commit
-`f49acee71280944ad6ae351111947ff01c00031d` on 2026-10-03. It is not a
-penetration test, a deployment approval, or evidence that an operator-hosted
-service has the same configuration.
+This model describes the implemented trust boundaries reviewed against `main`
+commit `817854b` on 2026-10-21, including public calendar feeds. It is a source
+review, not a penetration test or target-deployment acceptance. The
+[release ledger](./RELEASE.md) binds actual validation results to their tested
+source; the frozen pilot candidate predates some behavior described here.
 
-The personal widget path validates Matrix OpenID identity and accesses
-Radicale as that user. Room-owned calendar reads (#164) and event mutations
-(#193) use the configured application-service principal after current actor,
-membership, action-power, and exact room/calendar-binding checks. PR #201
-connects the primary widget to the room capabilities and the one authorized
-bound calendar; its detail view displays a safe link to the current Matrix
-room, and authorized managers can configure supported alarm reminders. Read
-and write features are separately default-off. The service principal's
-Radicale `owner_only` access spans its whole home; room bindings provide
-application scoping, not backend per-room ACLs. Pinned Synapse/Radicale and
-widget contracts cover these repository paths, not an etke-managed host or
-production deployment.
+Personal widget operations validate Matrix OpenID identity and access Radicale
+as that user. Room operations separately check current membership, action
+power, and the exact static or ready dynamic room/calendar binding before
+using the configured room principal. That principal is selected process-wide:
+`appservice` by default, or the normal `bot-account` under ADR041. Radicale's
+`owner_only` rights cover its whole home; gateway bindings provide application
+scoping, not backend per-room isolation.
 
-The fallback bot has bounded room-calendar data commands (#196); its process-
-local traffic limiter (#198) denies excess commands before Matrix state or
-CalDAV work. Command replies use the SDK's encryption-aware send path and fail
-closed when encrypted-room state cannot be confirmed. PR #199 wires separately
-gated reminder configuration and delivery plus best-effort notices after
-room-target widget event create/update/delete. Scheduled reminders use a native
-appservice sender and are refused for encrypted or unknown room state;
-room-target widget action notices use the SDK crypto-aware path and send only
-after successful room-target widget create/update/delete operations. Neither
-path is enabled by default. The actual etke image override, `/data` continuity, proxy logging, and
-production PostgreSQL connection remain unverified.
+Room reads, event writes, moderator setup, reminder configuration, scheduled
+delivery, and post-success action notices each have separate default-off
+gates. Scheduled reminders use whole-room mentions and refuse encrypted or
+unknown room state. Command replies and action notices use the SDK's
+crypto-aware path where supported. Public calendar feeds introduce a separate,
+explicitly opted-in anonymous read boundary described below; they do not make
+private calendar operations anonymous.
 
 ## Assets and actors
 
@@ -46,9 +48,14 @@ production PostgreSQL connection remain unverified.
 - **Room/calendar bindings and service-principal home:** bindings choose the
   app-owned room collection. Radicale `owner_only` grants the service
   principal access to its whole home, not to one room.
-- **Reminder database and backups:** when enabled, PostgreSQL holds
+- **Application databases and backups:** the binding store holds room/calendar
+  mappings and setup state; the reminder store holds
   room/calendar/event/alarm identities and delivery claims, not event titles
-  or bodies. Operators own backup and retention.
+  or bodies. They use independent schemas and connection settings. Operators
+  own backup and retention.
+- **Public feed links and signing key:** a link is a bearer capability for the
+  entire published VEVENT calendar. The native share database and the dedicated
+  gateway signing key must be recovered together.
 - **Logs and deployment configuration:** logs, environment secrets, proxy
   settings, and persistent volumes can expose credentials or calendar data or
   change which service receives them.
@@ -66,16 +73,15 @@ event body is not an identity proof.
 
 The widget obtains OpenID credentials through the Matrix Widget API for a
 gateway request and sends an `MX-Identity` Authorization header
-([AppContainer.tsx#L98-L114](../matrix-calendar-widget/src/AppContainer.tsx#L98-L114)).
+([AppContainer.tsx](../matrix-calendar-widget/src/AppContainer.tsx)).
 The inspected widget path contains no local/session storage for these
 credentials. The middleware verifies the proof through the configured
 homeserver's user-info endpoint, checks the returned Matrix server name
 against the assertion, and keeps the proof in the request context
-([MatrixAuthMiddleware.ts#L77-L96](../matrix-calendar-server/src/middleware/MatrixAuthMiddleware.ts#L77-L96),
-[verification at #L121-L159](../matrix-calendar-server/src/middleware/MatrixAuthMiddleware.ts#L121-L159)).
+([MatrixAuthMiddleware.ts](../matrix-calendar-server/src/middleware/MatrixAuthMiddleware.ts)).
 The middleware also accepts `Bearer` credentials through `whoAmI` for legacy
 routes
-([MatrixAuthMiddleware.ts#L99-L101](../matrix-calendar-server/src/middleware/MatrixAuthMiddleware.ts#L99-L101)),
+([MatrixAuthMiddleware.ts](../matrix-calendar-server/src/middleware/MatrixAuthMiddleware.ts)),
 so the whole server is not OpenID-only. See
 [middleware tests](../matrix-calendar-server/test/middleware/MatrixAuthMiddleware.test.ts).
 
@@ -90,7 +96,7 @@ permits HTTP only on loopback
 Matrix userinfo path is fixed in the gateway, and request fields cannot select
 the verification origin. Userinfo requests carry the short-lived
 `access_token` in the query string and refuse redirects
-([MatrixAuthMiddleware.ts#L133-L154](../matrix-calendar-server/src/middleware/MatrixAuthMiddleware.ts#L133-L154)).
+([MatrixAuthMiddleware.ts](../matrix-calendar-server/src/middleware/MatrixAuthMiddleware.ts)).
 Apply query-token redaction to the verification origin's logs and every proxy
 or access-log boundary on that route. Membership and power lookups use the
 server's Matrix client.
@@ -99,10 +105,9 @@ server's Matrix client.
 
 `MatrixOpenIdCalDavCredentialProvider` builds a tagged `matrix-openid:` proof
 inside a Basic Authorization header from the validated request context
-([credential construction at #L49-L63](../matrix-calendar-server/src/caldav/MatrixOpenIdCalDavCredentialProvider.ts#L49-L63)).
+([credential construction](../matrix-calendar-server/src/caldav/MatrixOpenIdCalDavCredentialProvider.ts)).
 `CalDavEventClient` obtains those headers from the provider and attaches them
-to the request ([header construction at #L259-L261](../matrix-calendar-server/src/caldav/CalDavEventClient.ts#L259-L261),
-[REPORT request at #L95-L103](../matrix-calendar-server/src/caldav/CalDavEventClient.ts#L95-L103)).
+to the request ([CalDavEventClient.ts](../matrix-calendar-server/src/caldav/CalDavEventClient.ts)).
 Missing proof fails closed. A real-container contract covers same-user
 enumeration and denial of invalid identities and nonmembers before CalDAV I/O.
 See
@@ -131,22 +136,50 @@ continue to use the authenticated user's CalDAV identity.
 
 Reminder persistence is disabled when `MATRIX_CALENDAR_REMINDER_DATABASE_URL`
 is absent. If configured, the store uses verified TLS by default; plaintext
-requires the explicit `trusted-private-network` mode. PR #199 wires the
-bounded scheduler and native sender, but delivery also requires
+requires the explicit `trusted-private-network` mode. The independently
+configured binding store uses the same TLS policy under
+`MATRIX_CALENDAR_BINDING_DATABASE_URL` and its own schema. Configured stores
+run migrations and reject unsupported future schema versions on startup.
+The bounded scheduler and native sender also require
 `ROOM_CALENDAR_ACCESS_ENABLED`, a valid binding and service configuration, and
 the default-off `ROOM_CALENDAR_REMINDER_DELIVERY_ENABLED` gate. The separate
 settings API gate is `MATRIX_CALENDAR_REMINDER_CONFIGURATION_ENABLED`. Native
 scheduled delivery is limited to unencrypted rooms and checks current room
-state and mention permission before sending. No production database endpoint
-has been tested. See [app.module.ts](../matrix-calendar-server/src/app.module.ts),
+state and mention permission before sending. Source contracts do not establish a production database endpoint's readiness. See [app.module.ts](../matrix-calendar-server/src/app.module.ts),
 [ReminderDatabaseConnection.ts](../matrix-calendar-server/src/reminder/ReminderDatabaseConnection.ts),
 [ADR019](./adrs/adr019-postgresql-reminder-sidecar-store.md), and
 [ADR028](./adrs/adr028-room-reminder-configuration-and-delivery.md).
 
 The project never asks for or stores a user's Matrix password. The browser
-does not receive CalDAV credentials or the bot service principal's credential.
+does not receive OpenID-backed CalDAV Authorization headers or the selected
+room principal's credential. Public-feed links are separately disclosed bearer
+capabilities after explicit publication consent.
 These boundaries do not protect a token from a compromised widget host or
-browser, nor do they make the appservice principal's Radicale home room-scoped.
+browser, nor do they make the selected room principal's Radicale home room-scoped.
+
+### Public reader to published calendar
+
+Publication management requires the current personal owner or an authorized
+room manager, plus explicit confirmation. The gateway wraps one native
+read-only Radicale share in a signed URL and preserves Radicale's share store
+as the authority. Every anonymous GET/HEAD fetches and validates the complete
+bounded canonical VEVENT feed, rejecting malformed or mixed components,
+redirects, unsupported methods, and tampered envelopes. It does not reconstruct
+ICS from the widget's partial projection. Requests use fixed deadlines and
+size limits plus the process-local gateway limiter; responses are no-store.
+See [ADR045](./adrs/adr045-public-calendar-feeds.md),
+[publication service](../matrix-calendar-server/src/service/public-feed/PublicCalendarFeedService.ts),
+and [public controller](../matrix-calendar-server/src/controller/PublicCalendarFeedController.ts).
+
+A published link remains readable after Matrix membership or manager-power
+changes. Unpublishing or native token revocation stops future reads; it cannot
+recall client copies. Operators must unpublish before changing a static room
+binding. Signed envelopes are not encrypted, so Radicale and its token/sharing
+routes must stay private. Proxy logs must redact public bearer paths and
+publication queries. Preserve the signing key with the complete Radicale store,
+verify revocations after restoring older backups, and use one publication
+management writer because its locks are process-local. The source contracts
+do not validate a public proxy, external client, or operator recovery.
 
 ## Threats, evidence, and residual work
 
@@ -177,7 +210,7 @@ binding-store or CalDAV work. The room access and write feature gates remain
 independently default-off. Pinned real-service contracts exercise allowed
 room access and negative cross-room attempts.
 
-**Residual risk and owner.** Radicale `owner_only` still grants the appservice
+**Residual risk and owner.** Radicale `owner_only` still grants the selected room
 principal whole-home access. Gateway binding checks are application-level
 scoping, not backend isolation. Keep the service-principal home within one
 operator-trusted boundary and keep the feature gates off until the target
@@ -187,7 +220,7 @@ installation's home contents, proxy, and service identity are accepted.
 
 **Current control.** Authentication failures and sensitive transport errors use
 fixed or sanitized messages. Pino redacts request Authorization headers and
-`matrix_event.content`. OpenID proofs stay server-side and CalDAV event
+`matrix_event.content`. Delegated CalDAV headers remain server-side and event
 transports refuse redirects, so credentials are not forwarded through a
 redirect response. The pinned personal OpenID contract checks that proofs are
 absent from gateway responses and inspected test-service logs. See
@@ -245,10 +278,12 @@ current membership; diagnostics require manager power. The current calendar
 API returns full supported event details for matching resources, not a
 free/busy projection.
 
-**Residual risk and owner.** The M8 free/busy privacy model is open; no
-user-facing free/busy surface was established in this slice. Product/security
-owners must define disclosure rules before adding availability endpoints or
-sharing calendar data across trust boundaries.
+**Residual risk and owner.** The adopted [free/busy policy](./free-busy-privacy.md)
+and ADR027 define disclosure rules, but no availability endpoint or UI is
+implemented. Public feeds deliberately disclose the full selected VEVENT
+calendar, not a free/busy view; publication consent must make that distinction
+clear. Any future availability surface must satisfy ADR027's authorization,
+minimization, and fail-closed projection requirements.
 
 ### API abuse or reminder mention spam
 
@@ -265,11 +300,11 @@ room/sender, two per room, and eight process-wide. Its key table is capped at
 and [CalendarCommandTrafficLimiter.ts](../matrix-calendar-server/src/service/CalendarCommandTrafficLimiter.ts).
 
 Room commands also require current membership, action power, and exact binding
-before proof or DAV access. Replies use plain `m.text`, empty `m.mentions`, and
+before proof or DAV access. Replies use `m.text` with an equivalent plain-text fallback and optional escaped `org.matrix.custom.html`, empty `m.mentions`, and
 the SDK's encryption-aware sender; they do not fall back to plaintext when an
 encrypted room cannot be confirmed.
 
-PR #199 wires scheduled whole-room reminders behind
+Scheduled whole-room reminders remain behind
 `ROOM_CALENDAR_REMINDER_DELIVERY_ENABLED`. The bounded scheduler rechecks the
 current binding, canonical event/alarm, encryption state, and room-mention
 power before sending; its native transport refuses encrypted or unknown room
@@ -302,10 +337,12 @@ proxy policy.
 **Current control.** Reminder database transport defaults to verified TLS,
 and deployment docs describe cold backups for project-owned volumes.
 
-**Residual risk and owner.** The etke image override, existing `/data`
-continuity, live TLS/CA settings, external log redaction, network boundaries,
-secret delivery, and restore path have not been rehearsed on the operator host.
-The operator owns those checks; repository CI is not deployment evidence.
+**Residual risk and owner.** Target TLS/CA settings, external log redaction,
+network boundaries, secret delivery, and complete recovery require operator
+evidence. The bounded pilot uses independent project-owned Radicale storage;
+an etke image override or existing `/data` reuse needs additional verification
+only if that topology is selected. Repository CI does not establish those
+target facts; see [release status](./RELEASE.md).
 
 ## Deferred security gates
 
@@ -315,7 +352,7 @@ proof before the stated behavior is available:
 - M4/M5: collection-timezone editing and recurrence support beyond the bounded
   implemented slice remain unfinished. PRs #197/#200 support selected-occurrence
   and constrained this-and-following timing edits plus typed EXDATE skip/restore.
-  General RECURRENCE-ID property editing, additional RRULE parts, arbitrary rule
+  RECURRENCE-ID changes beyond supported timing/text edits, additional RRULE parts, arbitrary rule
   splitting, and actual client/server interoperability remain open; arbitrary
   RRULE and broader authoring are unsupported.
 - M6: the bounded repository scope, including the primary room-calendar
@@ -326,11 +363,15 @@ proof before the stated behavior is available:
   Keep room access, writes, configuration, delivery, and notices disabled
   until the operator accepts each capability and the service-principal home
   boundary.
-- M8: free/busy disclosure policy, actual-client and screen-reader validation,
-  large-calendar capacity, and trusted upstream rate control remain open.
-- Production: etke image/data rehearsal, proxy query-log redaction, external
-  PostgreSQL TLS/CA validation, and isolated restore rehearsal remain operator
-  responsibilities.
+- M8: applying the free/busy policy in any future surface, qualifying changed
+  source in actual clients, screen-reader certification, large-calendar
+  capacity, and target ingress/rate controls remain separate work.
+- Public feeds: explicit publication consent, private Radicale ingress,
+  bearer-path redaction, public-client behavior, and signing-key/share-store
+  recovery must be verified for the deployment.
+- Production: proxy redaction, external PostgreSQL TLS/CA validation, and
+  isolated restore remain operator responsibilities. Existing managed
+  Radicale reuse requires its own additional image/data rehearsal.
 
 The hosted browser check is standalone synthetic component evidence. The
 pinned Synapse/Radicale contracts are not evidence of an actual Element client,
