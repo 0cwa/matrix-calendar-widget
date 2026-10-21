@@ -203,6 +203,7 @@ describeWithDatabase('PostgresRoomReminderStore integration', () => {
         SELECT version FROM matrix_calendar.schema_migrations ORDER BY version
       `,
     ).toEqual([{ version: 1 }, { version: 2 }, { version: 3 }]);
+    await store.deleteConfiguration(legacy);
   });
 
   it('returns bounded exclusive configuration pages and checks exact existence', async () => {
@@ -232,6 +233,12 @@ describeWithDatabase('PostgresRoomReminderStore integration', () => {
     for (const configuration of configurations) {
       await store.upsertConfiguration(configuration);
     }
+    const normalizedConfigurations = configurations.map((configuration) => ({
+      ...configuration,
+      target: { kind: 'room' as const },
+      allDaySchedule: null,
+      revision: 1,
+    }));
 
     const firstPage = await store.listConfigurationPage(
       roomId,
@@ -250,8 +257,8 @@ describeWithDatabase('PostgresRoomReminderStore integration', () => {
       2,
     );
 
-    expect(firstPage).toEqual(configurations.slice(0, 2));
-    expect(secondPage).toEqual(configurations.slice(2));
+    expect(firstPage).toEqual(normalizedConfigurations.slice(0, 2));
+    expect(secondPage).toEqual(normalizedConfigurations.slice(2));
     expect(await store.hasConfiguration(configurations[0])).toBe(true);
     expect(
       await store.hasConfiguration({
@@ -416,7 +423,11 @@ describeWithDatabase('PostgresRoomReminderStore integration', () => {
       },
     };
     const identity = {
-      ...config,
+      roomId: config.roomId,
+      calendarId: config.calendarId,
+      eventUid: config.eventUid,
+      recurrenceId: config.recurrenceId,
+      alarmUid: config.alarmUid,
       triggerOrdinal: 0,
     };
 

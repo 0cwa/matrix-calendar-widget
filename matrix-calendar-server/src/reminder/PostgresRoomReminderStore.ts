@@ -276,8 +276,8 @@ export class PostgresRoomReminderStore implements RoomReminderStore {
         ${normalized.eventUid},
         ${normalized.recurrenceId ?? ''},
         ${normalized.alarmUid},
-        ${JSON.stringify(normalized.target)}::jsonb,
-        ${normalized.allDaySchedule === null ? null : JSON.stringify(normalized.allDaySchedule)}::jsonb,
+        ${this.sql.json(normalized.target)},
+        ${normalized.allDaySchedule === null ? null : this.sql.json(normalized.allDaySchedule)},
         1
       )
       ON CONFLICT (room_id, calendar_id, event_uid, recurrence_id, alarm_uid)
