@@ -256,7 +256,6 @@
     "label": "{{range, daterange}}"
   },
   "cancel": "Cancel",
-  "close": "Close",
   "copyableTextButton": {
     "copied": "Copied",
     "copy-to-clipboard": "Copy to clipboard"
