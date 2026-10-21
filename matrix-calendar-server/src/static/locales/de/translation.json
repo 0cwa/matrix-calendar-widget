@@ -48,13 +48,13 @@
         "title": "Termine finden und anzeigen",
         "commands": [
           {
-            "syntax": "!calendar upcoming [count] [--tz IANA]",
-            "description": "Termine der nächsten 30 Tage anzeigen. Standard: 5, höchstens 10. Zeiten gelten standardmäßig in UTC.",
-            "example": "!calendar upcoming 3 --tz Europe/Stockholm"
+            "syntax": "!calendar upcoming [count] [--ids] [--tz IANA]",
+            "description": "Termine der nächsten 30 Tage anzeigen. Standard: 5, höchstens 10. Zeiten gelten standardmäßig in UTC. Mit --ids werden die Ressourcen-IDs für event- und delete-Befehle angezeigt.",
+            "example": "!calendar upcoming 3 --ids --tz Europe/Stockholm"
           },
           {
             "syntax": "!calendar event <resource-id> [--tz IANA]",
-            "description": "Einen Termin mit der .ics-Ressourcen-ID aus !calendar upcoming anzeigen.",
+            "description": "Einen Termin mit der .ics-Ressourcen-ID aus !calendar upcoming --ids oder einer Erstellungsantwort anzeigen.",
             "example": "!calendar event team-planning.ics --tz Europe/Stockholm"
           }
         ]
@@ -87,6 +87,7 @@
     "title": "Befehle für den Raumkalender"
   },
   "calendarCommandReplies": {
+    "allDay": "Ganztägig",
     "descriptionLabel": "Beschreibung",
     "eventCreated": "Termin {{resourceId}} wurde erstellt.",
     "eventDeleted": "Termin {{resourceId}} samt vollständiger Serie wurde gelöscht.",

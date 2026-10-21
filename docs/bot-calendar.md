@@ -52,14 +52,14 @@ sender membership and power requirements.
 | Widget pending                         | The verified calendar remains available under the ordinary access gates; retry setup to add the widget. |
 | Conflict or capacity reached           | Ask an administrator to inspect the existing room/widget state or configured binding limit.             |
 
-| Command                                                                         | Behavior                                                                      |
-| ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| `!calendar help`                                                                | Explain commands and direct users to the widget.                              |
-| `!calendar setup`                                                               | Set up the room calendar when the server enables moderator-driven setup.      |
-| `!calendar upcoming [count] [--tz IANA]`                                        | Show the next 30 days, default five and maximum ten occurrences.              |
-| `!calendar event <resource-id> [--tz IANA]`                                     | Read one resource using its opaque `.ics` ID from upcoming results.           |
-| `!calendar create <start> <end> "<title>" [--description "<text>"] [--tz IANA]` | Create a single timed event; start and end use `YYYY-MM-DDTHH:mm`.            |
-| `!calendar delete <resource-id>`                                                | Conditionally delete the whole supported VEVENT series. `cancel` is an alias. |
+| Command                                                                         | Behavior                                                                                                       |
+| ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `!calendar help`                                                                | Explain commands and direct users to the widget.                                                               |
+| `!calendar setup`                                                               | Set up the room calendar when the server enables moderator-driven setup.                                       |
+| `!calendar upcoming [count] [--ids] [--tz IANA]`                                | Show the next 30 days, default five and maximum ten occurrences. `--ids` adds resource IDs for other commands. |
+| `!calendar event <resource-id> [--tz IANA]`                                     | Read one resource using its `.ics` ID from `upcoming --ids` or a create reply.                                 |
+| `!calendar create <start> <end> "<title>" [--description "<text>"] [--tz IANA]` | Create a single timed event; start and end use `YYYY-MM-DDTHH:mm`.                                             |
+| `!calendar delete <resource-id>`                                                | Conditionally delete the whole supported VEVENT series. `cancel` is an alias.                                  |
 
 Send these as ordinary text messages in the room. Start with `!calendar help`
 for the command list. For calendar data commands, the room needs a configured
@@ -74,6 +74,13 @@ default, and deployments may explicitly select `bot-account` (ADR041). This
 selects the server identity used for room calendar access; it does not enable
 room access or writes. No command accepts a calendar URL, credential, or
 principal.
+
+Upcoming event summaries put the title first and show dates and times in the
+room's detected language. Timed events include the requested IANA timezone;
+all-day events show inclusive date ranges. Resource IDs are hidden by default;
+run `!calendar upcoming --ids` to show the `.ics` IDs used by `event` and
+`delete`. The explicit `!calendar event <resource-id>` reply includes its ID
+after the event details.
 
 Times default to UTC. Creation requires end after start and rejects ambiguous
 or nonexistent daylight-saving wall times. Titles are limited to 120 characters,

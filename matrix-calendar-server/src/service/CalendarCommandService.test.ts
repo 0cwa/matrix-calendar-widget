@@ -102,6 +102,7 @@ function safeTranslator(
       'calendarCommandReplies.descriptionLabel': 'Description',
       'calendarCommandReplies.untitled': '(untitled)',
       'calendarCommandReplies.timeUnavailable': 'Time unavailable',
+      'calendarCommandReplies.allDay': 'All day',
     };
     return labels[key] ?? key;
   };
@@ -352,8 +353,9 @@ describe('CalendarCommandService', () => {
     );
 
     expect(result).toContain(
-      'earlier.ics — 2026-10-05 13:00 – 13:30 — Earlier',
+      'Earlier\n  Mon, Oct 5, 2026 · 1:00 PM–1:30 PM (UTC)',
     );
+    expect(result).not.toContain('earlier.ics');
     expect(result).not.toContain('later.ics');
     const range = operations.listEvents.mock.calls[0][1];
     expect(Date.parse(range.end) - Date.parse(range.start)).toBe(
@@ -405,8 +407,65 @@ describe('CalendarCommandService', () => {
       safeTranslator(),
     );
 
-    expect(result).toContain('date.ics — 2026-10-05 — All day event');
+    expect(result).toContain('All day event\n  All day · Mon, Oct 5, 2026');
     expect(result).not.toContain('timed.ics');
+    expect(result).not.toContain('date.ics');
+  });
+
+  test('shows only the canonical resource ID when upcoming requests --ids', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-10-04T12:00:00.000Z'));
+    operations.listEvents.mockResolvedValue([
+      {
+        event: makeEvent(EVENT_HREF, 'Planning'),
+        etag: ETAG,
+      },
+    ]);
+
+    const result = await service.execute(
+      ROOM_ID,
+      SENDER_ID,
+      'upcoming --ids',
+      safeTranslator(),
+    );
+
+    expect(result).toContain('Planning\n  ');
+    expect(result).toContain('  Resource ID: event.ics');
+    expect(result).not.toContain('private-event-uid');
+    expect(result).not.toContain(COLLECTION_URL);
+
+    await service.execute(
+      ROOM_ID,
+      SENDER_ID,
+      'event event.ics',
+      safeTranslator(),
+    );
+    expect(operations.getEvent).toHaveBeenCalledWith(access, EVENT_HREF);
+  });
+
+  test('formats upcoming dates in the detected room locale', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-10-04T12:00:00.000Z'));
+    operations.listEvents.mockResolvedValue([
+      {
+        event: makeEvent(EVENT_HREF, 'Planung'),
+        etag: ETAG,
+      },
+    ]);
+
+    const result = await service.execute(
+      ROOM_ID,
+      SENDER_ID,
+      'upcoming',
+      safeTranslator(),
+      'de',
+    );
+
+    expect(result).toContain('Planung\n  ');
+    expect(result).toContain('Okt');
+    expect(result).toContain('(UTC)');
+    expect(result).not.toContain('Oct');
+    expect(result).not.toContain('event.ics');
   });
 
   test('warns with generic text when projection diagnostics hide all events', async () => {
@@ -460,7 +519,10 @@ describe('CalendarCommandService', () => {
       safeTranslator(),
     );
 
-    expect(result).toContain('visible.ics');
+    expect(result).toContain(
+      'Visible event\n  Mon, Oct 5, 2026 · 10:00 AM–11:00 AM (UTC)',
+    );
+    expect(result).not.toContain('visible.ics');
     expect(result).toContain(
       'Some events could not be shown. Review the calendar widget for complete results.',
     );

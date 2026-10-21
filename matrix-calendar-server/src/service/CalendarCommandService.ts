@@ -137,14 +137,21 @@ export class CalendarCommandService {
     sender: string,
     commandText: string,
     translate: CalendarCommandTranslation,
+    locale = 'en',
   ): Promise<string> {
     try {
       const command = parseCalendarCommand(commandText);
       switch (command.kind) {
         case 'upcoming':
-          return await this.upcoming(roomId, sender, command, translate);
+          return await this.upcoming(
+            roomId,
+            sender,
+            command,
+            translate,
+            locale,
+          );
         case 'event':
-          return await this.event(roomId, sender, command, translate);
+          return await this.event(roomId, sender, command, translate, locale);
         case 'create':
           return await this.create(roomId, sender, command, translate);
         case 'delete':
@@ -162,6 +169,7 @@ export class CalendarCommandService {
     sender: string,
     command: Extract<CalendarCommandRequest, { kind: 'upcoming' }>,
     translate: CalendarCommandTranslation,
+    locale: string,
   ): Promise<string> {
     const { access } = await this.authorizedAccess(roomId, sender, 'read');
     const now = DateTime.utc();
@@ -229,6 +237,8 @@ export class CalendarCommandService {
         resourceId,
         command.timeZone,
         labels,
+        locale,
+        command.includeIds,
       ),
     );
     const response = `${translate('calendarCommandReplies.upcoming')}\n${lines.join('\n')}`;
@@ -242,6 +252,7 @@ export class CalendarCommandService {
     sender: string,
     command: Extract<CalendarCommandRequest, { kind: 'event' }>,
     translate: CalendarCommandTranslation,
+    locale: string,
   ): Promise<string> {
     const { access } = await this.authorizedAccess(roomId, sender, 'read');
     const eventHref = calendarResourceHref(
@@ -260,6 +271,7 @@ export class CalendarCommandService {
       command.resourceId,
       command.timeZone,
       labels,
+      locale,
     )}`;
   }
 
@@ -392,6 +404,7 @@ export class CalendarCommandService {
       description: translate('calendarCommandReplies.descriptionLabel'),
       untitled: translate('calendarCommandReplies.untitled'),
       timeUnavailable: translate('calendarCommandReplies.timeUnavailable'),
+      allDay: translate('calendarCommandReplies.allDay'),
     };
   }
 }

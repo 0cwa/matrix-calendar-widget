@@ -48,13 +48,13 @@
         "title": "Find and read events",
         "commands": [
           {
-            "syntax": "!calendar upcoming [count] [--tz IANA]",
-            "description": "List events in the next 30 days. Default: 5; maximum: 10. Times default to UTC.",
-            "example": "!calendar upcoming 3 --tz Europe/Stockholm"
+            "syntax": "!calendar upcoming [count] [--ids] [--tz IANA]",
+            "description": "List events in the next 30 days. Default: 5; maximum: 10. Times default to UTC. Add --ids to show the resource IDs needed by event and delete commands.",
+            "example": "!calendar upcoming 3 --ids --tz Europe/Stockholm"
           },
           {
             "syntax": "!calendar event <resource-id> [--tz IANA]",
-            "description": "Show one event using the .ics resource ID from !calendar upcoming.",
+            "description": "Show one event using its .ics resource ID from !calendar upcoming --ids or a create reply.",
             "example": "!calendar event team-planning.ics --tz Europe/Stockholm"
           }
         ]
@@ -87,6 +87,7 @@
     "title": "Room calendar commands"
   },
   "calendarCommandReplies": {
+    "allDay": "All day",
     "descriptionLabel": "Description",
     "eventCreated": "Created event {{resourceId}}.",
     "eventDeleted": "Deleted event {{resourceId}} and its entire recurrence series.",
