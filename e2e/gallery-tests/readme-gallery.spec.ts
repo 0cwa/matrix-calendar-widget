@@ -18,7 +18,10 @@ import { expect, test, type Page } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 
-const outputDir = path.resolve(__dirname, '../../.gallery-output');
+const outputDir = path.resolve(
+  process.env.GITHUB_WORKSPACE ?? path.resolve(process.cwd(), '..'),
+  '.gallery-output',
+);
 
 test('desktop month view', async ({ page }) => {
   await openGallery(page, { width: 1280, height: 800 }, 'month');
