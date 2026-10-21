@@ -5365,6 +5365,12 @@ async function addCalDavAlarmFromReminderSettings(
   await editor.getByRole('button', { name: 'Save', exact: true }).click();
   const response = await saveResponse;
   await expect(editor).toBeHidden({ timeout: 20_000 });
+  const parentDetails = frame.getByRole('dialog').last();
+  await expect(parentDetails).toBeVisible();
+  await parentDetails
+    .getByRole('button', { name: 'Close', exact: true })
+    .click();
+  await expect(parentDetails).toBeHidden({ timeout: 20_000 });
   return response.status() >= 200 && response.status() < 300;
 }
 
