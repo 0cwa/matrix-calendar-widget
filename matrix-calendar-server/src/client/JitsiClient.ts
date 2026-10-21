@@ -86,7 +86,7 @@ export class JitsiClient {
         }
         return dialInNumbers.length > 0
           ? dialInNumbers[0].formattedNumber
-          : null;
+          : undefined;
       }
       const { numbers } = dialInNumbers;
       if (numbers && Object.keys(numbers).length > 0) {
