@@ -497,10 +497,25 @@ connect and migrate even with delivery disabled; default startup without a
 database or enabled flags does no reminder Matrix/CalDAV/timer work. One
 replica remains the supported initial topology.
 
-Room-wide reminders are the accepted v1 recipient flow. Individual Matrix
-recipients require a later scope decision; email attendee registration remains
-deferred until members explicitly verify and consent to sharing an address.
-Do not infer addresses from Matrix membership.
+ADR044 extends the accepted room-wide reminder flow with selected current
+Matrix members and explicit local schedules for all-day `DATE` events. The
+widget configures Matrix destinations beside the canonical CalDAV alarm;
+timed reminders keep their relative trigger, while all-day schedules remain
+sidecar metadata. Email attendee delivery remains deferred, and Matrix
+recipients are never inferred from attendee addresses.
+
+- [x] Add whole-room and selected-member Matrix destinations with a 50-user
+      cap, current-member validation at configuration and delivery, and no
+      room-mention fallback when selected members have left.
+- [x] Require an explicit local time and IANA time zone for all-day Matrix
+      schedules, show past-time feedback, and include the sidecar schedule in
+      bounded source lookahead without changing the canonical `VEVENT`.
+- [x] Expose timed and all-day CalDAV alarms in one reminder editor with
+      actionable reasons for unsupported alarms and a direct CalDAV edit path.
+- [ ] Complete real Matrix mention and browser acceptance for timed and
+      all-day reminders, including selected-member keyboard use and a narrow
+      event-details panel. Reuse the existing local reminder fixture and
+      Radicale/Synapse harness.
 
 **Exit:** repository v1 supports configured room event management and durable
 room-wide reminders in the default appservice mode and the optional bot-account

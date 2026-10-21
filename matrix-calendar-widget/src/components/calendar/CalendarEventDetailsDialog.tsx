@@ -29,6 +29,7 @@ import {
   MAX_CALENDAR_EVENT_EXTERNAL_LINKS,
   projectCalendarEventOccurrenceByRecurrenceId,
 } from '@matrix-calendar-widget/calendar';
+import { getRoomMemberDisplayName } from '@matrix-widget-toolkit/api';
 import {
   Alert,
   Button,
@@ -41,7 +42,7 @@ import {
   Typography,
 } from '@mui/material';
 import { DateTime } from 'luxon';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   useCalendarRepository,
@@ -49,6 +50,9 @@ import {
   useDeleteCalendarEvent,
   useUpdateCalendarEvent,
 } from '../../calendar';
+import { isBotUser } from '../../lib/utils';
+import { makeSelectAllRoomMemberEventsByRoomId } from '../../reducer/meetingsApi';
+import { useAppSelector } from '../../store';
 import { ConfirmDeleteDialog } from '../common/ConfirmDeleteDialog';
 import { CalendarEventEditorDialog } from './CalendarEventEditorDialog';
 import { CalendarRoomReminderControl } from './CalendarRoomReminderControl';
@@ -73,12 +77,34 @@ export function CalendarEventDetailsDialog({
   const { i18n, t } = useTranslation();
   const calendars = useCalendars();
   const repository = useCalendarRepository();
+  const roomMemberSelector = useMemo(
+    () => makeSelectAllRoomMemberEventsByRoomId(),
+    [],
+  );
+  const roomMemberEvents = useAppSelector((state) =>
+    roomMemberSelector(state, calendars.roomCapabilities?.roomId),
+  );
+  const roomMemberLabels = useMemo(
+    () => roomMemberEvents.filter((member) => !isBotUser(member.state_key)),
+    [roomMemberEvents],
+  );
+  const reminderMembers = useMemo(
+    () =>
+      roomMemberLabels
+        .filter((member) => member.content.membership === 'join')
+        .map((member) => ({
+          userId: member.state_key,
+          displayName: getRoomMemberDisplayName(member, roomMemberLabels),
+        })),
+    [roomMemberLabels],
+  );
   const deleteEvent = useDeleteCalendarEvent();
   const updateEvent = useUpdateCalendarEvent();
   const [currentEvent, setCurrentEvent] = useState(event);
   const [currentSourceEvent, setCurrentSourceEvent] = useState(sourceEvent);
   const [currentRecurrenceId, setCurrentRecurrenceId] = useState(recurrenceId);
   const [editing, setEditing] = useState(false);
+  const [reminderOptionsRevision, setReminderOptionsRevision] = useState(0);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState<
@@ -505,6 +531,14 @@ export function CalendarEventDetailsDialog({
                       canManageReminders
                       eventId={currentSourceEvent.id}
                       eventUid={currentEvent.uid}
+                      eventTiming={currentEvent.timing}
+                      hasFutureOccurrences={Boolean(
+                        currentSourceEvent.recurrence?.rrule,
+                      )}
+                      members={reminderMembers}
+                      calendarTimezone={eventCalendar.timezone}
+                      refreshToken={reminderOptionsRevision}
+                      onEditCalendarReminder={() => setEditing(true)}
                     />
                   )}
               </Stack>
@@ -548,6 +582,7 @@ export function CalendarEventDetailsDialog({
           onSaved={(savedEvent, occurrenceEvent) => {
             setCurrentSourceEvent(savedEvent);
             setCurrentEvent(occurrenceEvent ?? savedEvent);
+            setReminderOptionsRevision((current) => current + 1);
             onSourceEventChange?.(savedEvent);
           }}
           onOccurrenceReloadRequired={(latestSourceEvent) => {

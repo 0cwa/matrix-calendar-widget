@@ -232,6 +232,16 @@ PR #199 adds manager-authorized reminder configuration and alarm-options APIs, b
 
 PR #201 connects the primary widget to the gateway-authorized room calendar. It consumes the current room capability response, shows the authorized bound room calendar and its read/write capabilities, displays a safe link to the current Matrix room in event details, and exposes reminder controls for supported alarms to authorized managers. All eight hosted checks passed at exact source tree `a65811903363397ea0883f4e32a98ace7dfdb9a8`; independent review passed on the same tree, merged as `f49acee71280944ad6ae351111947ff01c00031d`. Issue #7's bounded repository criteria are complete. The complete local check set passed with the server Jest suite rerun serially after the parallel `yarn ci` invocation exited 1 when Jest workers were terminated by SIGKILL; the serial server run, remaining calendar/timezone suites, static checks, and production build passed. The hosted checks ran on Node 22. These checks do not establish actual Element client or operator-host acceptance.
 
+ADR044 extends reminder configuration to selected current Matrix members and
+all-day `DATE` events while keeping the CalDAV alarm canonical. The source
+candidate now includes additive reminder-store migrations, target-specific
+authorization and delivery filtering, explicit local all-day schedules, a
+unified event-details reminder editor, and restore verification for recipient
+and schedule metadata. Focused server suites pass 196 tests; focused widget
+tests and widget type-check pass. Browser interaction and real Matrix mention
+acceptance remain pending and must use the existing local reminder fixture and
+Synapse/Radicale harness.
+
 ADR041 accepts an optional process-wide `bot-account` principal mode for room
 CalDAV and reminder providers. Its source implementation and focused unit
 coverage are present on this candidate. The existing appservice mode remains

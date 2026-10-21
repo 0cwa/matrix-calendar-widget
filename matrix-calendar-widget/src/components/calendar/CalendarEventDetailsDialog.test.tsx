@@ -21,6 +21,7 @@ import {
   CalendarRepositoryError,
   InMemoryCalendarRepository,
 } from '@matrix-calendar-widget/calendar';
+import type { WidgetApi } from '@matrix-widget-toolkit/api';
 import {
   fireEvent,
   render,
@@ -31,12 +32,14 @@ import {
 import userEvent from '@testing-library/user-event';
 import { Settings } from 'luxon';
 import { PropsWithChildren } from 'react';
+import { Provider } from 'react-redux';
 import { vi } from 'vitest';
 import { axe } from 'vitest-axe';
 import {
   CalendarRepositoryProvider,
   type CalendarRoomCapabilities,
 } from '../../calendar';
+import { createStore } from '../../store/store';
 import {
   CalendarEventDetailsDialog,
   formatCalendarEventTime,
@@ -123,10 +126,13 @@ const eventWithExternalLinks = {
 
 function createWrapper(repository: InMemoryCalendarRepository) {
   return function Wrapper({ children }: PropsWithChildren<{}>) {
+    const store = createStore({ widgetApi: {} as WidgetApi });
     return (
-      <CalendarRepositoryProvider repository={repository}>
-        {children}
-      </CalendarRepositoryProvider>
+      <Provider store={store}>
+        <CalendarRepositoryProvider repository={repository}>
+          {children}
+        </CalendarRepositoryProvider>
+      </Provider>
     );
   };
 }
@@ -163,6 +169,10 @@ function createRoomCalendarRepository(
         diagnostics: [],
         partialAvailability: false,
       }),
+      listRoomReminderAlarmOptions: vi.fn().mockResolvedValue([]),
+      listRoomReminderConfigurations: vi.fn().mockResolvedValue([]),
+      enableRoomReminder: vi.fn(),
+      disableRoomReminder: vi.fn().mockResolvedValue(undefined),
     },
   );
   return { repository, roomEvent };
@@ -233,6 +243,31 @@ describe('<CalendarEventDetailsDialog />', () => {
     );
     expect(roomLink).toHaveAttribute('target', '_blank');
     expect(roomLink).toHaveAttribute('rel', 'noopener noreferrer');
+  });
+
+  it('opens CalDAV alarm editing from reminder settings in event details', async () => {
+    const { repository, roomEvent } = createRoomCalendarRepository({
+      calendarId: 'room-calendar',
+      roomId: '!authorized-room:example.test',
+      canReadEvents: true,
+      canWriteEvents: true,
+      canManageReminders: true,
+    });
+
+    render(<CalendarEventDetailsDialog event={roomEvent} onClose={vi.fn()} />, {
+      wrapper: createWrapper(repository),
+    });
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Reminder settings' }),
+    );
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Edit CalDAV reminder' }),
+    );
+
+    expect(
+      await screen.findByRole('dialog', { name: 'Edit event' }),
+    ).toBeInTheDocument();
   });
 
   it('links canonical domainless room IDs used by newer Matrix rooms', async () => {

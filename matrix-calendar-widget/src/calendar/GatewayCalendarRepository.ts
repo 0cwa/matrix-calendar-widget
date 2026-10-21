@@ -32,8 +32,11 @@ import { DateTime } from 'luxon';
 import type { CalendarDiagnostics } from './CalendarDiagnosticsRepository';
 import type {
   CalendarRoomReminderAlarmOption,
+  CalendarRoomReminderAllDaySchedule,
+  CalendarRoomReminderConfiguration,
   CalendarRoomReminderIdentity,
   CalendarRoomReminderRepository,
+  CalendarRoomReminderTarget,
 } from './CalendarRoomReminderRepository';
 import type {
   CalendarEventsWithAvailability,
@@ -236,9 +239,9 @@ export class GatewayCalendarRepository
   }
 
   async listRoomReminderConfigurations(): Promise<
-    CalendarRoomReminderIdentity[]
+    CalendarRoomReminderConfiguration[]
   > {
-    const configurations: CalendarRoomReminderIdentity[] = [];
+    const configurations: CalendarRoomReminderConfiguration[] = [];
     let cursor: string | undefined;
     const maxPages = 20;
     for (let page = 0; page < maxPages; page += 1) {
@@ -267,7 +270,9 @@ export class GatewayCalendarRepository
     eventId: CalendarEventId,
     alarmUid: string,
     recurrenceId: string | null,
-  ): Promise<CalendarRoomReminderIdentity> {
+    target: CalendarRoomReminderTarget,
+    allDaySchedule: CalendarRoomReminderAllDaySchedule | null,
+  ): Promise<CalendarRoomReminderConfiguration> {
     const reference = this.roomEventReference(calendarId, eventId);
     const response = await this.transport.requestJson<unknown>(
       this.transport.url(
@@ -281,10 +286,12 @@ export class GatewayCalendarRepository
           eventId: reference.eventId,
           recurrenceId,
           alarmUid,
+          target,
+          allDaySchedule,
         }),
       },
     );
-    return parseRoomReminderIdentity(response);
+    return parseRoomReminderConfiguration(response);
   }
 
   async disableRoomReminder(
@@ -870,6 +877,21 @@ function parseRoomReminderOptions(
     if (
       !candidate ||
       typeof candidate !== 'object' ||
+      Object.keys(candidate).some(
+        (key) =>
+          ![
+            'eventUid',
+            'recurrenceId',
+            'alarmUid',
+            'timingType',
+            'supported',
+            'requiresAllDaySchedule',
+            'unavailableReason',
+            'relatedTo',
+            'trigger',
+            'repeat',
+          ].includes(key),
+      ) ||
       !('eventUid' in candidate) ||
       !isBoundedString(candidate.eventUid, 255) ||
       candidate.eventUid.trim() !== candidate.eventUid ||
@@ -880,14 +902,38 @@ function parseRoomReminderOptions(
       ) ||
       !('alarmUid' in candidate) ||
       !isBoundedString(candidate.alarmUid, 255) ||
-      !('relatedTo' in candidate) ||
-      !(candidate.relatedTo === 'start' || candidate.relatedTo === 'end') ||
-      !('trigger' in candidate)
+      !('timingType' in candidate) ||
+      !['timed', 'all-day', 'unsupported'].includes(
+        String(candidate.timingType),
+      ) ||
+      !('supported' in candidate) ||
+      typeof candidate.supported !== 'boolean' ||
+      !('requiresAllDaySchedule' in candidate) ||
+      typeof candidate.requiresAllDaySchedule !== 'boolean' ||
+      ('unavailableReason' in candidate &&
+        candidate.unavailableReason !== undefined &&
+        ![
+          'unsupported-timezone',
+          'unsupported-event-timing',
+          'absolute-trigger',
+          'unsupported-trigger',
+        ].includes(String(candidate.unavailableReason))) ||
+      ('relatedTo' in candidate &&
+        candidate.relatedTo !== undefined &&
+        candidate.relatedTo !== 'start' &&
+        candidate.relatedTo !== 'end')
     ) {
       throw invalidRoomReminderResponse();
     }
 
-    const trigger = parseReminderDuration(candidate.trigger);
+    const trigger =
+      'trigger' in candidate && candidate.trigger !== undefined
+        ? parseReminderDuration(candidate.trigger)
+        : undefined;
+    const relatedTo =
+      candidate.relatedTo === 'start' || candidate.relatedTo === 'end'
+        ? candidate.relatedTo
+        : undefined;
     let repeat: CalendarRoomReminderAlarmOption['repeat'];
     if ('repeat' in candidate && candidate.repeat !== undefined) {
       const rawRepeat = candidate.repeat;
@@ -916,19 +962,43 @@ function parseRoomReminderOptions(
       repeat = { count: rawRepeat.count as number, interval };
     }
 
+    if (
+      (candidate.supported && (!trigger || !relatedTo)) ||
+      (candidate.supported && candidate.unavailableReason !== undefined) ||
+      (candidate.timingType === 'all-day' &&
+        candidate.supported &&
+        candidate.requiresAllDaySchedule !== true) ||
+      (candidate.timingType === 'timed' &&
+        candidate.requiresAllDaySchedule === true) ||
+      (!candidate.supported && candidate.unavailableReason === undefined)
+    ) {
+      throw invalidRoomReminderResponse();
+    }
+
     return {
       eventUid: candidate.eventUid,
       recurrenceId: candidate.recurrenceId as string | null,
       alarmUid: candidate.alarmUid,
-      relatedTo: candidate.relatedTo,
-      trigger,
+      timingType:
+        candidate.timingType as CalendarRoomReminderAlarmOption['timingType'],
+      supported: candidate.supported,
+      requiresAllDaySchedule: candidate.requiresAllDaySchedule,
+      ...(candidate.unavailableReason === undefined
+        ? {}
+        : {
+            unavailableReason: candidate.unavailableReason as NonNullable<
+              CalendarRoomReminderAlarmOption['unavailableReason']
+            >,
+          }),
+      ...(relatedTo ? { relatedTo } : {}),
+      ...(trigger ? { trigger } : {}),
       ...(repeat ? { repeat } : {}),
     };
   });
 }
 
 function parseRoomReminderConfigurationPage(value: unknown): {
-  items: CalendarRoomReminderIdentity[];
+  items: CalendarRoomReminderConfiguration[];
   nextCursor?: string;
 } {
   if (
@@ -940,7 +1010,7 @@ function parseRoomReminderConfigurationPage(value: unknown): {
   ) {
     throw invalidRoomReminderResponse();
   }
-  const items = value.items.map(parseRoomReminderIdentity);
+  const items = value.items.map(parseRoomReminderConfiguration);
   let nextCursor: string | undefined;
   if ('nextCursor' in value && value.nextCursor !== undefined) {
     if (!isBoundedString(value.nextCursor, 16384)) {
@@ -976,9 +1046,112 @@ function parseRoomReminderIdentity(
   };
 }
 
+function parseRoomReminderConfiguration(
+  value: unknown,
+): CalendarRoomReminderConfiguration {
+  const identity = parseRoomReminderIdentity(value);
+  if (!value || typeof value !== 'object') throw invalidRoomReminderResponse();
+  const record = value as Record<string, unknown>;
+  if (
+    Object.keys(record).some(
+      (key) =>
+        ![
+          'eventUid',
+          'recurrenceId',
+          'alarmUid',
+          'target',
+          'allDaySchedule',
+          'revision',
+        ].includes(key),
+    )
+  ) {
+    throw invalidRoomReminderResponse();
+  }
+  const target =
+    record.target === undefined
+      ? { kind: 'room' as const }
+      : parseRoomReminderTarget(record.target);
+  const allDaySchedule =
+    record.allDaySchedule === undefined || record.allDaySchedule === null
+      ? null
+      : parseAllDayReminderSchedule(record.allDaySchedule);
+  const revision = record.revision === undefined ? 1 : record.revision;
+  if (!Number.isSafeInteger(revision) || (revision as number) < 1) {
+    throw invalidRoomReminderResponse();
+  }
+  return {
+    ...identity,
+    target,
+    allDaySchedule,
+    revision: revision as number,
+  };
+}
+
+function parseRoomReminderTarget(value: unknown): CalendarRoomReminderTarget {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw invalidRoomReminderResponse();
+  }
+  const record = value as Record<string, unknown>;
+  if (record.kind === 'room' && Object.keys(record).length === 1) {
+    return { kind: 'room' };
+  }
+  if (
+    record.kind !== 'users' ||
+    Object.keys(record).length !== 2 ||
+    !Array.isArray(record.userIds) ||
+    record.userIds.length === 0 ||
+    record.userIds.length > 50 ||
+    record.userIds.some(
+      (userId) =>
+        typeof userId !== 'string' ||
+        userId.length > 255 ||
+        !/^@[^:\s?#]+:[^\s?#]+$/.test(userId),
+    ) ||
+    new Set(record.userIds).size !== record.userIds.length
+  ) {
+    throw invalidRoomReminderResponse();
+  }
+  return {
+    kind: 'users',
+    userIds: [...(record.userIds as string[])].sort(),
+  };
+}
+
+function parseAllDayReminderSchedule(
+  value: unknown,
+): CalendarRoomReminderAllDaySchedule {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw invalidRoomReminderResponse();
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    Object.keys(record).length !== 3 ||
+    !Number.isSafeInteger(record.daysBefore) ||
+    (record.daysBefore as number) < 0 ||
+    (record.daysBefore as number) > 366 ||
+    typeof record.localTime !== 'string' ||
+    !/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(record.localTime) ||
+    typeof record.timezone !== 'string' ||
+    record.timezone.length === 0 ||
+    record.timezone.length > 64
+  ) {
+    throw invalidRoomReminderResponse();
+  }
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: record.timezone });
+  } catch {
+    throw invalidRoomReminderResponse();
+  }
+  return {
+    daysBefore: record.daysBefore as number,
+    localTime: record.localTime,
+    timezone: record.timezone,
+  };
+}
+
 function parseReminderDuration(
   value: unknown,
-): CalendarRoomReminderAlarmOption['trigger'] {
+): NonNullable<CalendarRoomReminderAlarmOption['trigger']> {
   if (
     !value ||
     typeof value !== 'object' ||
