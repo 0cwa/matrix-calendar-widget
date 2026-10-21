@@ -620,7 +620,7 @@ function ordinaryPageErrorsPass(report) {
     );
   }
   return (
-    report.version === 13 &&
+    (report.version === 13 || report.version === 14) &&
     report.pageErrorCount !== null &&
     report.pageErrorCount > 0 &&
     report.pageErrorCount <= 8 &&

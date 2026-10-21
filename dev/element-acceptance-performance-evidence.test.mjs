@@ -806,6 +806,35 @@ test('keeps only complete opening Element-bundle errors as ordinary diagnostics'
   );
 });
 
+test('accepts the verified opening Element diagnostic in report version 14', () => {
+  const report = ordinaryReportWithVerifiedHostError(14);
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(ordinaryStage('passed', report)),
+    sourceSha,
+  );
+
+  assert.match(summary, /report_version=14/u);
+  assert.match(summary, /ordinary_gate_eligible=true status=passed/u);
+  assert.match(
+    summary,
+    /stage=widget-open .*error_source=element .*host_stack_status=complete .*host_stack_trusted_bundle_frames=1/u,
+  );
+  assert.doesNotMatch(summary, /private error text|https?:\/\//u);
+
+  for (const futureVersion of [15, 999]) {
+    assert.throws(
+      () => {
+        const futureReport = ordinaryReportWithVerifiedHostError(futureVersion);
+        sanitizeElementAcceptance(
+          JSON.stringify(ordinaryStage('passed', futureReport)),
+          sourceSha,
+        );
+      },
+      /invalid element acceptance summary/u,
+    );
+  }
+});
+
 test('samples the ordinary error stage at emission and waits for real readiness', async () => {
   const report = ordinaryReport();
   report.version = 13;
