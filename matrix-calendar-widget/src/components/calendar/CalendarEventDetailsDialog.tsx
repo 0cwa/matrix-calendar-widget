@@ -532,8 +532,9 @@ export function CalendarEventDetailsDialog({
                       eventId={currentSourceEvent.id}
                       eventUid={currentEvent.uid}
                       eventTiming={currentEvent.timing}
-                      hasFutureOccurrences={Boolean(
-                        currentSourceEvent.recurrence?.rrule,
+                      isRecurringSeries={Boolean(
+                        currentSourceEvent.recurrence?.rrule ||
+                        currentSourceEvent.recurrence?.rdates?.length,
                       )}
                       members={reminderMembers}
                       calendarTimezone={eventCalendar.timezone}

@@ -163,7 +163,7 @@ function renderControl(
           timezone: 'Europe/Stockholm',
         },
       }}
-      hasFutureOccurrences={false}
+      isRecurringSeries={false}
       refreshToken={0}
       canManageReminders
       onEditCalendarReminder={vi.fn()}
@@ -366,7 +366,7 @@ describe('<CalendarRoomReminderControl />', () => {
         startDate: '2026-10-21',
         endDate: '2026-10-22',
       },
-      hasFutureOccurrences: true,
+      isRecurringSeries: true,
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Reminder settings' }));

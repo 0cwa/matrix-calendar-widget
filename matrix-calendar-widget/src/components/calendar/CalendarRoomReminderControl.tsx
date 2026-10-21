@@ -70,7 +70,7 @@ type CalendarRoomReminderControlProps = {
   members: readonly CalendarReminderMember[];
   calendarTimezone?: string;
   eventTiming: CalendarEventTiming;
-  hasFutureOccurrences: boolean;
+  isRecurringSeries: boolean;
   refreshToken: number;
   canManageReminders: boolean;
   onEditCalendarReminder: () => void;
@@ -88,7 +88,7 @@ export function CalendarRoomReminderControl({
   members,
   calendarTimezone,
   eventTiming,
-  hasFutureOccurrences,
+  isRecurringSeries,
   refreshToken,
   canManageReminders,
   onEditCalendarReminder,
@@ -312,8 +312,8 @@ export function CalendarRoomReminderControl({
         : configuration?.target.kind === 'users'
           ? 'users'
           : 'off';
-    const isRecurringSeries =
-      hasFutureOccurrences && option.recurrenceId === null;
+    const selectedRecurringSeries =
+      isRecurringSeries && option.recurrenceId === null;
     const now = Date.now();
     const pastSchedule = option.requiresAllDaySchedule
       ? getAllDaySchedulePastState(draft.allDaySchedule, eventTiming, now)
@@ -447,7 +447,7 @@ export function CalendarRoomReminderControl({
               <AllDayScheduleFields
                 destination={draft.destination}
                 eventTiming={eventTiming}
-                hasFutureOccurrences={isRecurringSeries}
+                isRecurringSeries={selectedRecurringSeries}
                 now={now}
                 onChange={(allDaySchedule) =>
                   updateDraft(key, { allDaySchedule })
@@ -468,7 +468,7 @@ export function CalendarRoomReminderControl({
                   Boolean(savingKey) ||
                   !canSaveDraft(draft, option) ||
                   (pastSchedule === 'past' &&
-                    !isRecurringSeries &&
+                    !selectedRecurringSeries &&
                     draft.destination !== 'off')
                 }
                 onClick={() => void save(option, draft.destination)}
@@ -623,7 +623,7 @@ export function CalendarRoomReminderControl({
             <Alert severity="error">
               {t(
                 'calendarEvents.roomReminder.saveError',
-                'Matrix reminder settings were not saved. The CalDAV alert is unchanged. Check the selected people or time zone, then retry.',
+                'Matrix reminder settings were not saved. The CalDAV alert is unchanged. Check the selected people and time zone, and choose a future reminder time, then retry.',
               )}
             </Alert>
           )}
@@ -729,7 +729,7 @@ function validateAllDayDraft(
 function AllDayScheduleFields({
   destination,
   eventTiming,
-  hasFutureOccurrences,
+  isRecurringSeries,
   now,
   onChange,
   schedule,
@@ -737,7 +737,7 @@ function AllDayScheduleFields({
 }: {
   destination: ReminderDestinationChoice;
   eventTiming: CalendarEventTiming;
-  hasFutureOccurrences: boolean;
+  isRecurringSeries: boolean;
   now: number;
   onChange: (schedule: CalendarRoomReminderAllDaySchedule) => void;
   schedule: CalendarRoomReminderAllDaySchedule;
@@ -750,8 +750,11 @@ function AllDayScheduleFields({
   const pastSchedule = getAllDaySchedulePastState(schedule, eventTiming, now);
   const destinationLabel =
     destination === 'room'
-      ? t('calendarEvents.roomReminder.wholeRoom', 'the whole room')
-      : t('calendarEvents.roomReminder.selectedPeople', 'the selected people');
+      ? t('calendarEvents.roomReminder.wholeRoomPreview', 'the whole room')
+      : t(
+          'calendarEvents.roomReminder.selectedPeoplePreview',
+          'the selected people',
+        );
   return (
     <Stack spacing={1}>
       <Typography variant="subtitle2">
@@ -818,10 +821,10 @@ function AllDayScheduleFields({
       </Typography>
       {pastSchedule === 'past' && (
         <Alert severity="warning">
-          {hasFutureOccurrences
+          {isRecurringSeries
             ? t(
                 'calendarEvents.roomReminder.pastRecurring',
-                'This time has passed for the selected occurrence. Matrix does not send past reminders; future occurrences in this series will use the schedule.',
+                'This time has passed for the selected occurrence. Matrix does not send past reminders. The schedule applies to any future occurrences that remain in this series; if none remain, no reminder will be sent.',
               )
             : t(
                 'calendarEvents.roomReminder.pastOneTime',
