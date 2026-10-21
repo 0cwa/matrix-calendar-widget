@@ -65,6 +65,56 @@ function createWrapper(repository: InMemoryCalendarRepository) {
 }
 
 describe('<CalendarToolbar />', () => {
+  it('loads private app access only after opening settings and explains when the server has it disabled', async () => {
+    const listClients = vi
+      .fn()
+      .mockRejectedValue(
+        new CalendarRepositoryError(
+          'capability-unavailable',
+          'private calendar clients disabled',
+        ),
+      );
+    const repository = Object.assign(
+      new InMemoryCalendarRepository({ calendars }),
+      {
+        listPrivateCalendarClients: listClients,
+        createPrivateCalendarClient: vi.fn(),
+        revokePrivateCalendarClient: vi.fn(),
+      },
+    );
+
+    render(
+      <CalendarToolbar
+        filters={{
+          startDate: '2026-09-01T00:00:00Z',
+          endDate: '2026-10-01T00:00:00Z',
+        }}
+        onRangeChange={vi.fn()}
+        onSearchChange={vi.fn()}
+        onViewChange={vi.fn()}
+        view="month"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(listClients).not.toHaveBeenCalled();
+    const accessButton = screen.getByRole('button', {
+      name: 'Calendar app access',
+    });
+    await waitFor(() => expect(accessButton).toBeEnabled());
+    fireEvent.click(accessButton);
+    expect(
+      await screen.findByText(
+        'Calendar app access is not available on this server.',
+      ),
+    ).toBeInTheDocument();
+    expect(listClients).toHaveBeenCalledTimes(1);
+    expect(listClients).toHaveBeenCalledWith('writable');
+    expect(
+      screen.queryByRole('button', { name: 'Create app access' }),
+    ).toBeNull();
+  });
+
   it('requires public link consent before publishing and offers a standard subscribe URL', async () => {
     const publicUrl =
       'https://feeds.example.test/v1/public-calendar-feeds/signed-capability';

@@ -22,6 +22,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   CalendarFilters,
+  isCalendarPrivateClientRepository,
   isCalendarPublicFeedRepository,
   useCalendarRepository,
   useCalendars,
@@ -32,6 +33,7 @@ import { CalendarDeleteDialog } from './CalendarDeleteDialog';
 import { CalendarDescriptionDialog } from './CalendarDescriptionDialog';
 import { CalendarEventEditorDialog } from './CalendarEventEditorDialog';
 import { CalendarNavigation, CalendarSurfaceView } from './CalendarNavigation';
+import { CalendarPrivateClientDialog } from './CalendarPrivateClientDialog';
 import { CalendarPublicFeedDialog } from './CalendarPublicFeedDialog';
 import { CalendarRenameDialog } from './CalendarRenameDialog';
 import { CalendarToolbarButtons } from './CalendarToolbar/CalendarToolbarButtons';
@@ -60,6 +62,8 @@ export function CalendarToolbar({
   const calendarRepository = useCalendarRepository();
   const supportsPublicFeeds =
     isCalendarPublicFeedRepository(calendarRepository);
+  const supportsPrivateClients =
+    isCalendarPrivateClientRepository(calendarRepository);
   const [createCalendarOpen, setCreateCalendarOpen] = useState(false);
   const [deleteCalendarOpen, setDeleteCalendarOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -67,6 +71,7 @@ export function CalendarToolbar({
   const [descriptionOpen, setDescriptionOpen] = useState(false);
   const [colorOpen, setColorOpen] = useState(false);
   const [publicFeedOpen, setPublicFeedOpen] = useState(false);
+  const [privateClientOpen, setPrivateClientOpen] = useState(false);
   const writableCalendars = calendars.data.filter(
     (calendar) => calendar.readOnly === false,
   );
@@ -97,6 +102,16 @@ export function CalendarToolbar({
             variant="outlined"
           >
             {t('calendarPublicFeed.action', 'Public feed')}
+          </Button>
+        )}
+
+        {supportsPrivateClients && (
+          <Button
+            disabled={calendars.loading || calendars.data.length === 0}
+            onClick={() => setPrivateClientOpen(true)}
+            variant="outlined"
+          >
+            {t('calendarPrivateClient.action', 'Calendar app access')}
           </Button>
         )}
 
@@ -219,6 +234,14 @@ export function CalendarToolbar({
           calendars={calendars.data}
           onClose={() => setPublicFeedOpen(false)}
           open={publicFeedOpen}
+        />
+      )}
+
+      {supportsPrivateClients && (
+        <CalendarPrivateClientDialog
+          calendars={calendars.data}
+          onClose={() => setPrivateClientOpen(false)}
+          open={privateClientOpen}
         />
       )}
 

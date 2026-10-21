@@ -9,6 +9,7 @@ A team calendar for Matrix rooms, with a widget for Element and calendar data st
 | I want to…                                 | Read                                                                                                   |
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
 | Use a calendar in my Matrix room           | [User guide](./docs/user-guide.md) and [room setup / bot commands](./docs/bot-calendar.md)             |
+| Connect an external calendar app           | [Private calendar app access](./docs/private-calendar-app-access.md) (in development; not available on main) |
 | Run the code and make a first contribution | [Development guide](./docs/DEVELOPMENT.md) and [contributing](./CONTRIBUTING.md)                       |
 | Understand how the code fits together      | [Architecture](./docs/ARCHITECTURE.md) and [data model](./docs/data-model.md)                          |
 | Configure or operate an installation       | [Deployment guide](./docs/deployment-docker.md) and [configuration reference](./docs/configuration.md) |

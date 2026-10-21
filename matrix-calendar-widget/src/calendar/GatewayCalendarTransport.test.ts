@@ -58,6 +58,7 @@ describe('GatewayCalendarTransport', () => {
   it.each([
     [401, 'authentication-required'],
     [409, 'event-conflict'],
+    [503, 'request-failed'],
   ] as const)(
     'maps gateway status %s into the repository contract',
     async (status, code) => {
@@ -93,6 +94,40 @@ describe('GatewayCalendarTransport', () => {
     await expect(
       transport.requestVoid('https://widget-api.example.test/resource'),
     ).rejects.toMatchObject({ code: 'unsupported-calendar-components' });
+  });
+
+  it('maps only the explicit private-client errors to UI capability states', async () => {
+    const disabledTransport = new GatewayCalendarTransport({
+      baseUrl: 'https://widget-api.example.test',
+      getAuthorizationHeader: async () => undefined,
+      fetchImpl: vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({ code: 'private-calendar-clients-disabled' }),
+            { status: 503 },
+          ),
+      ) as typeof fetch,
+    });
+    const capacityTransport = new GatewayCalendarTransport({
+      baseUrl: 'https://widget-api.example.test',
+      getAuthorizationHeader: async () => undefined,
+      fetchImpl: vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              code: 'private-calendar-client-capacity-reached',
+            }),
+            { status: 409 },
+          ),
+      ) as typeof fetch,
+    });
+
+    await expect(
+      disabledTransport.requestVoid('https://widget-api.example.test/resource'),
+    ).rejects.toMatchObject({ code: 'capability-unavailable' });
+    await expect(
+      capacityTransport.requestVoid('https://widget-api.example.test/resource'),
+    ).rejects.toMatchObject({ code: 'private-client-capacity-reached' });
   });
 
   it('retains bounded unsupported-patch details and rejects invalid JSON safely', async () => {
