@@ -40,4 +40,13 @@ export class HealthCheckController {
       throw new HttpException(await response.text(), response.status);
     }
   }
+
+  /**
+   * Reports that the server process can receive HTTP requests.
+   * Dependency availability is checked separately by `health()`.
+   */
+  @Get('live')
+  liveness() {
+    return 'Healthy';
+  }
 }
