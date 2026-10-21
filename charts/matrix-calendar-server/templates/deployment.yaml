@@ -132,7 +132,7 @@ spec:
                 port: http
           livenessProbe:
               httpGet:
-                path: /v1/health
+                path: /v1/health/live
                 port: http
           env:
             - name: STORAGE_FILE_DATA_PATH
