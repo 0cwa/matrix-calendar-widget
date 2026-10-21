@@ -22,9 +22,18 @@ import {
   calendarLocalDateTimeToUnixMillis,
 } from '@matrix-calendar-widget/calendar';
 import {
+  getRoomMemberDisplayName,
+  isValidRoomMemberStateEvent,
+  STATE_EVENT_ROOM_MEMBER,
+  type RoomMemberStateEventContent,
+  type StateEvent,
+} from '@matrix-widget-toolkit/api';
+import { useWidgetApi } from '@matrix-widget-toolkit/react';
+import {
   Alert,
   Autocomplete,
   Button,
+  createFilterOptions,
   Divider,
   FormControl,
   FormHelperText,
@@ -34,7 +43,6 @@ import {
   Stack,
   TextField,
   Typography,
-  createFilterOptions,
 } from '@mui/material';
 import type { TFunction } from 'i18next';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -48,6 +56,7 @@ import {
   isCalendarRoomReminderRepository,
   useCalendarRepository,
 } from '../../calendar';
+import { isBotUser } from '../../lib/utils';
 
 type CalendarReminderMember = Readonly<{
   userId: string;
@@ -67,7 +76,7 @@ type CalendarRoomReminderControlProps = {
   calendarId: CalendarId;
   eventId: CalendarEventId;
   eventUid: string;
-  members: readonly CalendarReminderMember[];
+  roomId?: string;
   calendarTimezone?: string;
   eventTiming: CalendarEventTiming;
   isRecurringSeries: boolean;
@@ -85,7 +94,7 @@ export function CalendarRoomReminderControl({
   calendarId,
   eventId,
   eventUid,
-  members,
+  roomId,
   calendarTimezone,
   eventTiming,
   isRecurringSeries,
@@ -94,6 +103,7 @@ export function CalendarRoomReminderControl({
   onEditCalendarReminder,
 }: CalendarRoomReminderControlProps) {
   const { t } = useTranslation();
+  const widgetApi = useWidgetApi();
   const repository = useCalendarRepository();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -107,7 +117,23 @@ export function CalendarRoomReminderControl({
     CalendarRoomReminderConfiguration[]
   >([]);
   const [drafts, setDrafts] = useState<Record<string, ReminderDraft>>({});
+  const [roomMemberEvents, setRoomMemberEvents] = useState<
+    Record<string, StateEvent<RoomMemberStateEventContent>>
+  >({});
+  const [roomMembersUnavailable, setRoomMembersUnavailable] = useState(false);
   const requestSequence = useRef(0);
+  const roomMemberLabels = useMemo(
+    () => Object.values(roomMemberEvents),
+    [roomMemberEvents],
+  );
+  const members = useMemo(
+    () =>
+      roomMemberLabels.map((member) => ({
+        userId: member.state_key,
+        displayName: getRoomMemberDisplayName(member, roomMemberLabels),
+      })),
+    [roomMemberLabels],
+  );
   const joinedMemberIds = useMemo(
     () => new Set(members.map((member) => member.userId)),
     [members],
@@ -127,6 +153,8 @@ export function CalendarRoomReminderControl({
     setConfigurations({});
     setOrphanedConfigurations([]);
     setDrafts({});
+    setRoomMemberEvents({});
+    setRoomMembersUnavailable(false);
   }, [calendarId, eventId, eventUid, refreshToken]);
 
   useEffect(
@@ -135,6 +163,38 @@ export function CalendarRoomReminderControl({
     },
     [],
   );
+
+  useEffect(() => {
+    if (!open || loading || !roomId) return;
+    const subscription = widgetApi
+      .observeStateEvents<RoomMemberStateEventContent>(
+        STATE_EVENT_ROOM_MEMBER,
+        { roomIds: [roomId] },
+      )
+      .subscribe(
+        (event) => {
+          if (!isValidRoomMemberStateEvent(event) || event.room_id !== roomId) {
+            return;
+          }
+          setRoomMemberEvents((current) => {
+            const next = { ...current };
+            delete next[event.state_key];
+            if (
+              event.content.membership === 'join' &&
+              !isBotUser(event.state_key)
+            ) {
+              next[event.state_key] = event;
+            }
+            return next;
+          });
+        },
+        () => {
+          setRoomMemberEvents({});
+          setRoomMembersUnavailable(true);
+        },
+      );
+    return () => subscription.unsubscribe();
+  }, [loading, open, roomId, widgetApi]);
 
   if (!canManageReminders || !isCalendarRoomReminderRepository(repository)) {
     return null;
@@ -149,12 +209,34 @@ export function CalendarRoomReminderControl({
     setConfigurations({});
     setOrphanedConfigurations([]);
     setDrafts({});
+    setRoomMembersUnavailable(false);
     try {
-      const [availableOptions, allConfigurations] = await Promise.all([
-        repository.listRoomReminderAlarmOptions(calendarId, eventId),
-        repository.listRoomReminderConfigurations(),
-      ]);
+      let memberReadFailed = false;
+      const memberEventsPromise = roomId
+        ? widgetApi
+            .receiveStateEvents<RoomMemberStateEventContent>(
+              STATE_EVENT_ROOM_MEMBER,
+              { roomIds: [roomId] },
+            )
+            .catch(() => {
+              memberReadFailed = true;
+              return [];
+            })
+        : Promise.resolve([]);
+      const [availableOptions, allConfigurations, currentMemberEvents] =
+        await Promise.all([
+          repository.listRoomReminderAlarmOptions(calendarId, eventId),
+          repository.listRoomReminderConfigurations(),
+          memberEventsPromise,
+        ]);
       if (requestSequence.current !== requestId) return;
+      const initialRoomMemberEvents = roomMemberEventMap(
+        currentMemberEvents,
+        roomId,
+      );
+      setRoomMemberEvents(initialRoomMemberEvents);
+      setRoomMembersUnavailable(memberReadFailed || !roomId);
+      const currentMembers = roomMemberList(initialRoomMemberEvents);
       const eventOptions = availableOptions.filter(
         (candidate) => candidate.eventUid === eventUid,
       );
@@ -176,7 +258,12 @@ export function CalendarRoomReminderControl({
         }
         const configuration = matches[0];
         if (configuration) byKey[key] = configuration;
-        draftByKey[key] = createDraft(configuration, members, calendarTimezone);
+        draftByKey[key] = createDraft(
+          configuration,
+          currentMembers,
+          calendarTimezone,
+          memberReadFailed || !roomId,
+        );
       }
       setOptions(eventOptions);
       setConfigurations(byKey);
@@ -305,7 +392,11 @@ export function CalendarRoomReminderControl({
     const draft =
       drafts[key] ?? createDraft(configuration, members, calendarTimezone);
     const changed = !isSameDraft(draft, configuration, option);
-    const missingMembers = draft.departedUserIds.length > 0;
+    const departedUserIds = new Set([
+      ...draft.departedUserIds,
+      ...draft.userIds.filter((userId) => !joinedMemberIds.has(userId)),
+    ]);
+    const missingMembers = departedUserIds.size > 0;
     const targetValue =
       configuration?.target.kind === 'room'
         ? 'room'
@@ -318,6 +409,19 @@ export function CalendarRoomReminderControl({
     const pastSchedule = option.requiresAllDaySchedule
       ? getAllDaySchedulePastState(draft.allDaySchedule, eventTiming, now)
       : undefined;
+    const scheduleChanged =
+      option.requiresAllDaySchedule &&
+      !sameAllDaySchedule(draft.allDaySchedule, configuration?.allDaySchedule);
+    const pastScheduleBlocksSave =
+      pastSchedule === 'past' &&
+      !selectedRecurringSeries &&
+      draft.destination !== 'off' &&
+      (configuration === undefined || scheduleChanged);
+    const selectedPeopleUnavailable =
+      draft.destination === 'users' &&
+      (roomMembersUnavailable ||
+        draft.userIds.length === 0 ||
+        draft.userIds.some((userId) => !joinedMemberIds.has(userId)));
 
     return (
       <Stack key={key} spacing={1.25} sx={{ py: 1.25 }}>
@@ -428,11 +532,11 @@ export function CalendarRoomReminderControl({
                     {t(
                       'calendarEvents.roomReminder.departedPeople',
                       '{{count}} saved recipient(s) are no longer joined. They will not be pinged. Save to remove them from this reminder.',
-                      { count: draft.departedUserIds.length },
+                      { count: departedUserIds.size },
                     )}
                   </Alert>
                 )}
-                {members.length === 0 && (
+                {(members.length === 0 || roomMembersUnavailable) && (
                   <Alert severity="info">
                     {t(
                       'calendarEvents.roomReminder.membersUnavailable',
@@ -467,9 +571,8 @@ export function CalendarRoomReminderControl({
                   !changed ||
                   Boolean(savingKey) ||
                   !canSaveDraft(draft, option) ||
-                  (pastSchedule === 'past' &&
-                    !selectedRecurringSeries &&
-                    draft.destination !== 'off')
+                  selectedPeopleUnavailable ||
+                  pastScheduleBlocksSave
                 }
                 onClick={() => void save(option, draft.destination)}
                 size="small"
@@ -633,10 +736,39 @@ export function CalendarRoomReminderControl({
   );
 }
 
+function roomMemberEventMap(
+  events: readonly StateEvent<RoomMemberStateEventContent>[],
+  roomId?: string,
+): Record<string, StateEvent<RoomMemberStateEventContent>> {
+  if (!roomId) return {};
+  return Object.fromEntries(
+    events
+      .filter(isValidRoomMemberStateEvent)
+      .filter(
+        (event) =>
+          event.room_id === roomId &&
+          event.content.membership === 'join' &&
+          !isBotUser(event.state_key),
+      )
+      .map((event) => [event.state_key, event]),
+  );
+}
+
+function roomMemberList(
+  eventsByUserId: Record<string, StateEvent<RoomMemberStateEventContent>>,
+): CalendarReminderMember[] {
+  const events = Object.values(eventsByUserId);
+  return events.map((member) => ({
+    userId: member.state_key,
+    displayName: getRoomMemberDisplayName(member, events),
+  }));
+}
+
 function createDraft(
   configuration: CalendarRoomReminderConfiguration | undefined,
   members: readonly CalendarReminderMember[],
   calendarTimezone?: string,
+  membersUnavailable = false,
 ): ReminderDraft {
   const configuredIds =
     configuration?.target.kind === 'users'
@@ -645,14 +777,31 @@ function createDraft(
   const joinedIds = new Set(members.map((member) => member.userId));
   return {
     destination: configuration?.target.kind ?? 'off',
-    userIds: configuredIds.filter((userId) => joinedIds.has(userId)),
-    departedUserIds: configuredIds.filter((userId) => !joinedIds.has(userId)),
+    userIds: membersUnavailable
+      ? configuredIds
+      : configuredIds.filter((userId) => joinedIds.has(userId)),
+    departedUserIds: membersUnavailable
+      ? []
+      : configuredIds.filter((userId) => !joinedIds.has(userId)),
     allDaySchedule: configuration?.allDaySchedule ?? {
       daysBefore: 0,
       localTime: '09:00',
       timezone: calendarTimezone ?? '',
     },
   };
+}
+
+function sameAllDaySchedule(
+  left: CalendarRoomReminderAllDaySchedule,
+  right: CalendarRoomReminderAllDaySchedule | null | undefined,
+): boolean {
+  return (
+    right !== null &&
+    right !== undefined &&
+    left.daysBefore === right.daysBefore &&
+    left.localTime === right.localTime &&
+    left.timezone === right.timezone
+  );
 }
 
 function isSameDraft(

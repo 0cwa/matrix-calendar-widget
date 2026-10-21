@@ -22,6 +22,7 @@ import {
   InMemoryCalendarRepository,
 } from '@matrix-calendar-widget/calendar';
 import type { WidgetApi } from '@matrix-widget-toolkit/api';
+import { WidgetApiMockProvider } from '@matrix-widget-toolkit/react';
 import {
   fireEvent,
   render,
@@ -32,14 +33,13 @@ import {
 import userEvent from '@testing-library/user-event';
 import { Settings } from 'luxon';
 import { PropsWithChildren } from 'react';
-import { Provider } from 'react-redux';
+import { of } from 'rxjs';
 import { vi } from 'vitest';
 import { axe } from 'vitest-axe';
 import {
   CalendarRepositoryProvider,
   type CalendarRoomCapabilities,
 } from '../../calendar';
-import { createStore } from '../../store/store';
 import {
   CalendarEventDetailsDialog,
   formatCalendarEventTime,
@@ -126,13 +126,19 @@ const eventWithExternalLinks = {
 
 function createWrapper(repository: InMemoryCalendarRepository) {
   return function Wrapper({ children }: PropsWithChildren<{}>) {
-    const store = createStore({ widgetApi: {} as WidgetApi });
     return (
-      <Provider store={store}>
+      <WidgetApiMockProvider
+        value={
+          {
+            receiveStateEvents: vi.fn().mockResolvedValue([]),
+            observeStateEvents: vi.fn().mockReturnValue(of()),
+          } as unknown as WidgetApi
+        }
+      >
         <CalendarRepositoryProvider repository={repository}>
           {children}
         </CalendarRepositoryProvider>
-      </Provider>
+      </WidgetApiMockProvider>
     );
   };
 }

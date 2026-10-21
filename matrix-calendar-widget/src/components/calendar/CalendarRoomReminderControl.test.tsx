@@ -15,9 +15,12 @@
  */
 
 import { InMemoryCalendarRepository } from '@matrix-calendar-widget/calendar';
+import type { WidgetApi } from '@matrix-widget-toolkit/api';
+import { WidgetApiMockProvider } from '@matrix-widget-toolkit/react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ComponentProps, PropsWithChildren } from 'react';
+import { of } from 'rxjs';
 import { afterEach, vi } from 'vitest';
 import {
   CalendarRepositoryProvider,
@@ -29,10 +32,17 @@ import { CalendarRoomReminderControl } from './CalendarRoomReminderControl';
 const eventUid = 'event@example.test';
 const calendarId = 'room-calendar';
 const eventId = 'event-resource';
+const roomId = '!reminder-room:example.test';
 const members = [
   { userId: '@alice:example.test', displayName: 'Alice' },
   { userId: '@bob:example.test', displayName: 'Bob' },
 ];
+const roomMemberEvents = members.map((member) => ({
+  type: 'm.room.member',
+  room_id: roomId,
+  state_key: member.userId,
+  content: { membership: 'join', displayname: member.displayName },
+}));
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -129,12 +139,28 @@ function createRepository(
   return { repository, enableRoomReminder, disableRoomReminder };
 }
 
-function createWrapper(repository: InMemoryCalendarRepository) {
+function createWrapper(
+  repository: InMemoryCalendarRepository,
+  memberReadUnavailable = false,
+) {
   return function Wrapper({ children }: PropsWithChildren<{}>) {
     return (
-      <CalendarRepositoryProvider repository={repository}>
-        {children}
-      </CalendarRepositoryProvider>
+      <WidgetApiMockProvider
+        value={
+          {
+            receiveStateEvents: memberReadUnavailable
+              ? vi.fn().mockRejectedValue(new Error('member list unavailable'))
+              : vi.fn().mockResolvedValue(roomMemberEvents),
+            observeStateEvents: vi
+              .fn()
+              .mockReturnValue(of(...roomMemberEvents)),
+          } as unknown as WidgetApi
+        }
+      >
+        <CalendarRepositoryProvider repository={repository}>
+          {children}
+        </CalendarRepositoryProvider>
+      </WidgetApiMockProvider>
     );
   };
 }
@@ -142,13 +168,14 @@ function createWrapper(repository: InMemoryCalendarRepository) {
 function renderControl(
   repository: InMemoryCalendarRepository,
   overrides: Partial<ComponentProps<typeof CalendarRoomReminderControl>> = {},
+  memberReadUnavailable = false,
 ) {
   return render(
     <CalendarRoomReminderControl
       calendarId={calendarId}
       eventId={eventId}
       eventUid={eventUid}
-      members={members}
+      roomId={roomId}
       calendarTimezone="Europe/Stockholm"
       eventTiming={{
         type: 'timed',
@@ -169,7 +196,7 @@ function renderControl(
       onEditCalendarReminder={vi.fn()}
       {...overrides}
     />,
-    { wrapper: createWrapper(repository) },
+    { wrapper: createWrapper(repository, memberReadUnavailable) },
   );
 }
 
@@ -306,6 +333,72 @@ describe('<CalendarRoomReminderControl />', () => {
       localTime: '10:00',
       timezone: 'Europe/Stockholm',
     });
+  });
+
+  it('allows a recipient-only edit after an existing all-day schedule is due', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(
+      new Date('2026-10-21T07:30:00.000Z').getTime(),
+    );
+    const allDayEventTiming = {
+      type: 'all-day' as const,
+      startDate: '2026-10-21',
+      endDate: '2026-10-22',
+    };
+    const existing = createConfiguration(allDayOption);
+    const { repository, enableRoomReminder } = createRepository(
+      [allDayOption],
+      [existing],
+    );
+    renderControl(repository, { eventTiming: allDayEventTiming });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reminder settings' }));
+    await screen.findByText('Alarm 1: −15m relative to event start');
+    await chooseDestination('users', 'Selected people');
+    const autocomplete = screen.getByRole('combobox', {
+      name: 'Selected people',
+    });
+    await userEvent.click(autocomplete);
+    await userEvent.type(autocomplete, 'Alice');
+    await userEvent.keyboard('{ArrowDown}{Enter}');
+
+    expect(
+      screen.getByRole('button', { name: 'Save Matrix destination' }),
+    ).toBeEnabled();
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Save Matrix destination' }),
+    );
+    await waitFor(() => expect(enableRoomReminder).toHaveBeenCalledTimes(1));
+    expect(enableRoomReminder).toHaveBeenCalledWith(
+      calendarId,
+      eventId,
+      allDayOption.alarmUid,
+      null,
+      { kind: 'users', userIds: ['@alice:example.test'] },
+      existing.allDaySchedule,
+    );
+  });
+
+  it('does not mark saved recipients departed or permit their edit when membership is unavailable', async () => {
+    const existing = createConfiguration(timedOption, {
+      target: { kind: 'users', userIds: ['@alice:example.test'] },
+    });
+    const { repository, enableRoomReminder } = createRepository(
+      [timedOption],
+      [existing],
+    );
+    renderControl(repository, {}, true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reminder settings' }));
+    expect(
+      await screen.findByText(/Joined room members are not available yet/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/saved recipient\(s\) are no longer joined/),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Save Matrix destination' }),
+    ).toBeDisabled();
+    expect(enableRoomReminder).not.toHaveBeenCalled();
   });
 
   it('saves an explicit all-day schedule for selected joined members', async () => {
