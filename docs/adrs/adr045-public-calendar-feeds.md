@@ -1,5 +1,7 @@
 # ADR045: Publish opt-in, VEVENT-only public calendar feeds
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
 - Status: Accepted
 - Date: 2026-10-21
 - Tracking: [issue #382](https://github.com/0cwa/matrix-calendar-widget/issues/382)

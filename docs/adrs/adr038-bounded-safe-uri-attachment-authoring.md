@@ -1,5 +1,7 @@
 # ADR 038: Bounded authoring of safe URI attachments
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
 - Status: Accepted
 - Date: 2026-10-06
 

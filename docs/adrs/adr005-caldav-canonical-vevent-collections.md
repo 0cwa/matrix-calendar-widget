@@ -1,5 +1,7 @@
 # ADR005: CalDAV is canonical and new calendars are VEVENT-only
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
 - Status: Accepted
 - Date: 2026-09-22
 

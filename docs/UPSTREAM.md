@@ -1,5 +1,7 @@
 # Upstream provenance and sync policy
 
+[Documentation](./README.md) · [Migration inventory](./UPSTREAM_INVENTORY.md) · [Contributing](../CONTRIBUTING.md)
+
 ## Origin
 
 Matrix Calendar Widget is a derivative of Nordeck's NeoDateFix / `matrix-meetings` project.

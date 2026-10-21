@@ -1,11 +1,20 @@
 # Calendar performance measurements
 
+[Documentation](./README.md) · [Beta scope](./beta-scope.md) · [Release ledger](./RELEASE.md)
+
 This benchmark measures the synchronous domain occurrence projection on
 synthetic calendars. It does not measure the CalDAV gateway, network latency,
 React/FullCalendar rendering, memory peaks, or a deployment's capacity. A
 separate synthetic browser smoke measures one fixed 1,000-event calendar in
 the actual list and month components; it is an observational UI measurement,
 not a product latency or capacity target.
+
+**On this page**
+
+- [Controlled beta ordinary-load contract](#controlled-beta-ordinary-load-contract)
+- [Reproduce](#reproduce)
+- [Initial measurement](#initial-measurement)
+- [Synthetic browser render measurement](#synthetic-browser-render-measurement)
 
 ## Controlled beta ordinary-load contract
 

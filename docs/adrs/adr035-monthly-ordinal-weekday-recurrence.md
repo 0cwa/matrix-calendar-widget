@@ -1,5 +1,7 @@
 # ADR035: Bounded monthly ordinal weekday recurrence authoring
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
 - Status: Accepted
 - Date: 2026-10-06
 

@@ -1,5 +1,7 @@
 # Project-owned Radicale OpenID authentication
 
+[Project overview](../README.md) · [Architecture](../docs/ARCHITECTURE.md) · [Deployment](../docs/deployment-docker.md)
+
 This directory builds the project's Radicale 3.8.0.0 image and contains its
 clean-room `Auth` plugin. The image extends the official Radicale image pinned
 by digest in `Dockerfile`. The build preserves the base image's installed
@@ -32,10 +34,24 @@ The image keeps Radicale's existing `/data` mount point. Compatibility with an
 etke-managed image override, service environment translation, and existing
 host data ownership is not verified by this package.
 
-Run the focused tests with the official Radicale package installed:
+Native read-only token sharing is configured for optional
+[public calendar feeds](../docs/adrs/adr045-public-calendar-feeds.md). Sharing
+keeps `owner_only` rights unchanged and stores tokens under the persistent
+`/data` tree. Public clients access the gateway, not Radicale's `/.token/` or
+`/.sharing/` routes. The auth package also redacts native token paths from
+Radicale logs. Back up the full store with the gateway's matching signing key.
+
+Run the focused tests from the repository root with the pinned official
+Radicale package installed:
 
 ```bash
-PYTHONPATH=src python -m unittest discover -s tests -v
+PYTHONPATH=radicale-auth/src python -m unittest discover -s radicale-auth/tests -v
+```
+
+For a reproducible environment, build the test image from the repository root:
+
+```bash
+docker build --target test -t matrix-calendar-widget/radicale-openid:test radicale-auth
 ```
 
 The CI image smoke builds both the `test` and `runtime` targets. The image test

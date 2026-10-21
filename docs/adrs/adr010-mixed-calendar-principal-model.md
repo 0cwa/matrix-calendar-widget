@@ -1,7 +1,19 @@
 # ADR010: Use personal widget calendars and room-owned bot calendars
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
 - Status: Accepted
 - Date: 2026-09-27
+
+> **Later implementation (2026-10-21):** The room-principal authentication and
+> event-operation paths are implemented under
+> [ADR024](./adr024-in-repo-radicale-openid-auth.md) and
+> [ADR030](./adr030-gated-room-event-operations.md), with room access and writes
+> still disabled by default. [ADR041](./adr041-optional-normal-bot-account-for-room-operations.md)
+> adds an optional normal-bot-account principal without changing the separation
+> between actor authorization and CalDAV identity. The prerequisites below
+> remain security requirements; current acceptance is recorded in the
+> [release evidence](../RELEASE.md).
 
 ## Context
 

@@ -1,5 +1,7 @@
 # ADR-039: Calendar-only absolute DISPLAY alarm metadata
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
 **Status:** Accepted
 **Date:** 2026-10-06
 

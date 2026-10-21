@@ -1,5 +1,7 @@
 # ADR034: Bounded this-and-following timing edits
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
 - Status: Accepted
 - Date: 2026-10-03
 
