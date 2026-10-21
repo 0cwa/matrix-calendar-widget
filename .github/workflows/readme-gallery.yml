@@ -45,13 +45,6 @@ jobs:
           yarn exec -- tsc -p matrix-calendar-widget/browser-tests/tsconfig.json --noEmit
           yarn exec -- tsc -p e2e/gallery-tests/tsconfig.json --noEmit
 
-      # Temporary diagnostic to mirror CI's exact Prettier output for the
-      # two gallery source files; remove before merging.
-      - name: Show gallery formatting changes
-        run: |
-          yarn prettier --write e2e/gallery-tests/readme-gallery.spec.ts matrix-calendar-widget/browser-tests/calendarFixture.tsx
-          git --no-pager diff --no-color -- e2e/gallery-tests/readme-gallery.spec.ts matrix-calendar-widget/browser-tests/calendarFixture.tsx
-
       - name: Install Chromium
         run: yarn workspace e2e playwright install --with-deps chromium --only-shell
 
@@ -63,7 +56,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: readme-gallery
-          path: .gallery-output/*.png
+          path: gallery-output/*.png
           if-no-files-found: error
           retention-days: 7
 
@@ -81,17 +74,17 @@ jobs:
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: readme-gallery
-          path: .gallery-output
+          path: gallery-output
 
       - name: Publish to the image-only gallery branch
         shell: bash
         run: |
           set -euo pipefail
           for name in month-desktop event-details mobile-list mobile-create; do
-            test -s ".gallery-output/${name}.png"
+            test -s "gallery-output/${name}.png"
           done
           image_dir="$(mktemp -d)"
-          cp .gallery-output/*.png "$image_dir/"
+          cp gallery-output/*.png "$image_dir/"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if git ls-remote --exit-code --heads origin refs/heads/readme-gallery >/dev/null 2>&1; then
