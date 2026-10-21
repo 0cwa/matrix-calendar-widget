@@ -77,6 +77,20 @@ RADICALE_URL=https://calendar.example.com
 # MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY=<43-character-base64url-secret>
 # MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY_FILE=/run/secrets/public-feed-key
 
+# Private standard CalDAV clients remain disabled unless explicitly enabled.
+# They require an API origin, an app-owned PostgreSQL URL, and separate
+# 32-byte private epoch and callback HMAC keys. Inject each from deployment
+# secret management as a 43-character base64url value. Their decoded bytes must
+# differ from one another and from the public-feed signing key when configured;
+# startup rejects collisions without printing key values. See ADR046 for the
+# callback replay boundary and observed-leave lifecycle.
+# MATRIX_CALENDAR_PRIVATE_CLIENTS_ENABLED=false
+# MATRIX_CALENDAR_PRIVATE_CLIENT_ORIGIN=https://calendar.example.com
+# MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_URL=postgresql://private-client:password@db.example.com/calendar
+# MATRIX_CALENDAR_PRIVATE_CLIENT_EPOCH_KEY=<43-character-base64url-secret>
+# MATRIX_CALENDAR_PRIVATE_CLIENT_CALLBACK_KEY=<43-character-base64url-secret>
+# MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_TLS_MODE=verify-full
+
 # optional - maximum streamed REPORT/GET response size for CalDAV event requests
 # defaults to 16777216 bytes (16 MiB); valid range is 1 through 67108864 bytes (64 MiB)
 # MATRIX_CALENDAR_CALDAV_MAX_EVENT_RESPONSE_BYTES=16777216

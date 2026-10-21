@@ -111,6 +111,23 @@ describe('private CalDAV credential and Matrix policy', () => {
     }
   });
 
+  it('tombstones a leave observed by a request and does not revive it after rejoin', async () => {
+    record = activeRecord('room', '/calendarbot/room-team/');
+    matrixClient.getJoinedRoomMembers.mockResolvedValueOnce([]);
+
+    expect(await policy.authorizeDavRequest(APP_ID, 'GET', 'resource')).toBe(
+      false,
+    );
+    expect(record.state).toBe('revoked');
+    expect(store.revoke).toHaveBeenCalledWith(APP_ID, NOW);
+
+    expect(await policy.authorizeDavRequest(APP_ID, 'GET', 'resource')).toBe(
+      false,
+    );
+    expect(matrixClient.getJoinedRoomMembers).toHaveBeenCalledTimes(1);
+    expect(store.revoke).toHaveBeenCalledTimes(1);
+  });
+
   it('rechecks room membership, current binding, and manager power for every request', async () => {
     record = activeRecord('room', '/calendarbot/room-team/');
     expect(await policy.authorizeDavRequest(APP_ID, 'PUT', 'resource')).toBe(

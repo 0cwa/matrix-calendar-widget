@@ -16,6 +16,7 @@
  */
 
 import Joi from 'joi';
+import { timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { isIP } from 'node:net';
 import { IAppConfiguration } from './IAppConfiguration';
@@ -174,13 +175,48 @@ function validatePrivateCalendarClientConfiguration(
   value: Record<string, unknown>,
 ): boolean {
   if (value.MATRIX_CALENDAR_PRIVATE_CLIENTS_ENABLED !== true) return true;
-  return (
+  if (
     typeof value.MATRIX_CALENDAR_PRIVATE_CLIENT_ORIGIN === 'string' &&
     typeof value.MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_URL === 'string' &&
     typeof value.MATRIX_CALENDAR_PRIVATE_CLIENT_EPOCH_KEY === 'string' &&
     typeof value.MATRIX_CALENDAR_PRIVATE_CLIENT_CALLBACK_KEY === 'string' &&
     typeof value.RADICALE_URL === 'string'
-  );
+  ) {
+    try {
+      const epochKey = decodePrivateCalendarClientKey(
+        value.MATRIX_CALENDAR_PRIVATE_CLIENT_EPOCH_KEY,
+        'epoch',
+      );
+      const callbackKey = decodePrivateCalendarClientKey(
+        value.MATRIX_CALENDAR_PRIVATE_CLIENT_CALLBACK_KEY,
+        'callback',
+      );
+      const publicFeedKey = decodePublicCalendarFeedSigningKey(
+        typeof value.MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY === 'string'
+          ? value.MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY
+          : undefined,
+        typeof value.MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY_FILE === 'string'
+          ? value.MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY_FILE
+          : undefined,
+      );
+
+      return (
+        epochKey !== undefined &&
+        callbackKey !== undefined &&
+        !sameSecretKeyBytes(epochKey, callbackKey) &&
+        (publicFeedKey === undefined ||
+          (!sameSecretKeyBytes(epochKey, publicFeedKey) &&
+            !sameSecretKeyBytes(callbackKey, publicFeedKey)))
+      );
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+function sameSecretKeyBytes(left: Buffer, right: Buffer): boolean {
+  return left.byteLength === right.byteLength && timingSafeEqual(left, right);
 }
 
 function isValidRoomCalendarSetupServerName(value: string): boolean {
