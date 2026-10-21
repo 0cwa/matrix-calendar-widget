@@ -20,7 +20,7 @@ import path from 'node:path';
 
 const outputDir = path.resolve(
   process.env.GITHUB_WORKSPACE ?? path.resolve(process.cwd(), '..'),
-  '.gallery-output',
+  'gallery-output',
 );
 
 test('desktop month view', async ({ page }) => {
@@ -31,7 +31,10 @@ test('desktop month view', async ({ page }) => {
 
 test('desktop event details', async ({ page }) => {
   await openGallery(page, { width: 1024, height: 760 }, 'month');
-  await page.getByRole('button', { name: /Sprint planning/ }).first().click();
+  await page
+    .getByRole('button', { name: /Sprint planning/ })
+    .first()
+    .click();
   await expect(
     page.getByRole('dialog', { name: 'Sprint planning' }),
   ).toBeVisible();
