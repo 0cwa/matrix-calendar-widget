@@ -222,27 +222,29 @@ const galleryEvents: CalendarEvent[] = [
     location: 'Video call',
     description: 'Share project updates with contributors.',
   },
-].map(({ id, title, day, start, end, location, description }): CalendarEvent => ({
-  id: 'gallery-' + id,
-  uid: 'gallery-' + id + '@example.test',
-  calendarId: galleryCalendar.id,
-  title,
-  description,
-  location,
-  timing: {
-    type: 'timed',
-    start: {
-      type: 'zoned',
-      local: '2026-10-' + String(day).padStart(2, '0') + 'T' + start,
-      timezone: 'Europe/Stockholm',
+].map(
+  ({ id, title, day, start, end, location, description }): CalendarEvent => ({
+    id: 'gallery-' + id,
+    uid: 'gallery-' + id + '@example.test',
+    calendarId: galleryCalendar.id,
+    title,
+    description,
+    location,
+    timing: {
+      type: 'timed',
+      start: {
+        type: 'zoned',
+        local: '2026-10-' + String(day).padStart(2, '0') + 'T' + start,
+        timezone: 'Europe/Stockholm',
+      },
+      end: {
+        type: 'zoned',
+        local: '2026-10-' + String(day).padStart(2, '0') + 'T' + end,
+        timezone: 'Europe/Stockholm',
+      },
     },
-    end: {
-      type: 'zoned',
-      local: '2026-10-' + String(day).padStart(2, '0') + 'T' + end,
-      timezone: 'Europe/Stockholm',
-    },
-  },
-}));
+  }),
+);
 
 const roomAlarmOption: CalendarRoomReminderAlarmOption = {
   eventUid: roomEvent.uid,
