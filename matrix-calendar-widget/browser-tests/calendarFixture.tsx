@@ -24,6 +24,8 @@ import {
   CalendarEvent,
   InMemoryCalendarRepository,
 } from '@matrix-calendar-widget/calendar';
+import type { StateEvent, WidgetApi } from '@matrix-widget-toolkit/api';
+import { WidgetApiMockProvider } from '@matrix-widget-toolkit/react';
 import {
   Box,
   Button,
@@ -36,6 +38,7 @@ import i18next from 'i18next';
 import { useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { I18nextProvider, initReactI18next } from 'react-i18next';
+import { of } from 'rxjs';
 import en from '../public/locales/en/translation.json';
 import type {
   CalendarRoomCapabilities,
@@ -106,6 +109,32 @@ const roomCalendar: Calendar = {
   operatorManaged: true,
   supportedComponents: ['VEVENT'],
 };
+const syntheticRoomId = '!synthetic-room:example.test';
+const syntheticBotUserId = '@calendar-bot:example.test';
+const syntheticRoomMembers = [
+  {
+    type: 'm.room.member',
+    room_id: syntheticRoomId,
+    state_key: '@alice:example.test',
+    content: { membership: 'join', displayname: 'Alice' },
+  },
+  {
+    type: 'm.room.member',
+    room_id: syntheticRoomId,
+    state_key: '@bob:example.test',
+    content: { membership: 'join', displayname: 'Bob' },
+  },
+  {
+    type: 'm.room.member',
+    room_id: syntheticRoomId,
+    state_key: syntheticBotUserId,
+    content: { membership: 'join', displayname: 'Calendar bot' },
+  },
+] as unknown as StateEvent[];
+const syntheticRoomWidgetApi = {
+  receiveStateEvents: async () => syntheticRoomMembers,
+  observeStateEvents: () => of(...syntheticRoomMembers),
+} as unknown as WidgetApi;
 const roomEvent: CalendarEvent = {
   id: 'synthetic-room-event',
   uid: 'synthetic-room-event@example.test',
@@ -307,7 +336,7 @@ class SyntheticRoomCalendarRepository
     super({ calendars: [roomCalendar], events: [roomEvent] });
     this.capabilities = {
       calendarId: roomCalendar.id,
-      roomId: '!synthetic-room:example.test',
+      roomId: syntheticRoomId,
       canReadEvents: true,
       canWriteEvents: manager,
       canManageReminders: manager,
@@ -475,18 +504,20 @@ async function start() {
     performance.mark('synthetic-large-calendar-mount-start');
   }
   createRoot(document.getElementById('root')!).render(
-    <I18nextProvider i18n={i18next}>
-      <ThemeProvider theme={theme}>
-        <CssBaseline />
-        <LocalizationProvider>
-          <CalendarRepositoryProvider repository={repository}>
-            <CalendarFixture
-              largeCalendarRepository={largeCalendarRepository}
-            />
-          </CalendarRepositoryProvider>
-        </LocalizationProvider>
-      </ThemeProvider>
-    </I18nextProvider>,
+    <WidgetApiMockProvider value={syntheticRoomWidgetApi}>
+      <I18nextProvider i18n={i18next}>
+        <ThemeProvider theme={theme}>
+          <CssBaseline />
+          <LocalizationProvider>
+            <CalendarRepositoryProvider repository={repository}>
+              <CalendarFixture
+                largeCalendarRepository={largeCalendarRepository}
+              />
+            </CalendarRepositoryProvider>
+          </LocalizationProvider>
+        </ThemeProvider>
+      </I18nextProvider>
+    </WidgetApiMockProvider>,
   );
 }
 

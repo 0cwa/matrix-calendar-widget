@@ -220,7 +220,9 @@ test('room manager sees writable event controls at a narrow width', async ({
     pageErrors.push(error.message.slice(0, 2000)),
   );
   await page.setViewportSize({ width: 320, height: 640 });
-  await page.goto('/browser-tests/index.html?mode=room-manager');
+  await page.goto(
+    '/browser-tests/index.html?mode=room-manager&meetings_bot_user_id=%40calendar-bot%3Aexample.test',
+  );
   await expect(
     page.getByRole('heading', { name: 'Calendar component validation' }),
   ).toBeVisible();
@@ -263,6 +265,21 @@ test('room manager sees writable event controls at a narrow width', async ({
   await expect(dialog.getByRole('button', { name: 'Edit' })).toBeEnabled();
   await expect(dialog.getByRole('button', { name: 'Delete' })).toBeEnabled();
   await dialog.getByRole('button', { name: 'Notify room' }).click();
+  const destination = dialog.getByRole('combobox', {
+    name: 'Matrix destination',
+  });
+  await destination.click();
+  await page.getByRole('option', { name: 'Selected people' }).click();
+  const people = dialog.getByRole('combobox', { name: 'Selected people' });
+  await people.click();
+  await expect(page.getByRole('option', { name: 'Alice' })).toBeVisible();
+  await expect(page.getByRole('option', { name: 'Bob' })).toBeVisible();
+  await expect(page.getByRole('option', { name: 'Calendar bot' })).toHaveCount(
+    0,
+  );
+  await page.keyboard.press('Escape');
+  await destination.click();
+  await page.getByRole('option', { name: 'Whole room' }).click();
   const reminder = dialog.getByRole('checkbox', {
     name: 'Alarm 1: −15m relative to event start',
   });
