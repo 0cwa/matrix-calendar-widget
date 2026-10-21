@@ -1,12 +1,13 @@
 # Connect a calendar app (in development)
 
-Private external CalDAV access is under development on a separate source
-branch; it is not available on current main and is not ready for deployment.
-The backend and widget checks and combined map-plus-token Radicale contract
-pass locally at source `867ef236`; actual desktop-app acceptance, real
-Matrix-policy integration, and same-database migration coexistence remain
-open. See the [branch validation record](./private-calendar-app-access-validation.md).
-Keep `MATRIX_CALENDAR_PRIVATE_CLIENTS_ENABLED` disabled.
+This change includes private external CalDAV access. The feature remains
+disabled by default and requires operator qualification before enablement; it
+is not deployed. The backend and widget checks and combined map-plus-token
+Radicale contract pass locally at source `867ef236`; actual desktop-app
+acceptance, real Matrix-policy integration, and same-database migration
+coexistence remain open. See the [branch validation
+record](./private-calendar-app-access-validation.md). Keep
+`MATRIX_CALENDAR_PRIVATE_CLIENTS_ENABLED` disabled.
 
 The intended workflow will let a user create a separate CalDAV credential for
 one personal or room calendar. It will not reveal or store the user's Matrix
