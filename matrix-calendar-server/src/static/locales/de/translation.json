@@ -111,6 +111,7 @@
     "pending": "Die Kalendersammlung ist reserviert, konnte aber noch nicht verifiziert werden. Führe später erneut !calendar setup aus.",
     "unavailable": "Die Einrichtung des Raumkalenders ist vorübergehend nicht verfügbar. Versuche es später erneut.",
     "unsupported-room": "Die Raumeinrichtung ist nur möglich, wenn der Raum nachweislich unverschlüsselt ist.",
+    "widget-installed": "Der Raumkalender war bereits bereit; das Widget wurde jetzt hinzugefügt.",
     "widget-pending": "Der Kalender ist bereit, aber das Widget konnte nicht hinzugefügt werden. Führe später erneut !calendar setup aus.",
     "widget-power-required": "Der Kalender-Bot benötigt die Berechtigung, das Kalender-Widget in diesem Raum hinzuzufügen."
   },
