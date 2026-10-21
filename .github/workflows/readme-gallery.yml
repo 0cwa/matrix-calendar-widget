@@ -1,0 +1,99 @@
+name: Refresh README gallery
+
+# The short-lived push trigger bootstraps the first captures on the feature
+# branch. Remove it once the images have been published; ongoing updates
+# should be intentional manual dispatches from main only.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/readme-gallery-20261021
+    paths:
+      - .github/workflows/readme-gallery.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: readme-gallery-publish
+  cancel-in-progress: false
+
+jobs:
+  screenshots:
+    name: Render and publish gallery
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Build calendar prerequisites
+        run: |
+          yarn workspace @matrix-calendar-widget/ical-timezones build
+          yarn workspace @matrix-calendar-widget/calendar build
+
+      - name: Type-check gallery fixtures
+        run: |
+          yarn exec -- tsc -p matrix-calendar-widget/browser-tests/tsconfig.json --noEmit
+          yarn exec -- tsc -p e2e/gallery-tests/tsconfig.json --noEmit
+
+      - name: Install Chromium
+        run: yarn workspace e2e playwright install --with-deps chromium --only-shell
+
+      - name: Capture screenshots from the local synthetic widget
+        run: yarn workspace e2e playwright test --config playwright.gallery.config.ts
+
+      - name: Upload screenshots for review
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: readme-gallery
+          path: .gallery-output/*.png
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Publish to the image-only gallery branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in month-desktop event-details mobile-list mobile-create; do
+            test -s ".gallery-output/${name}.png"
+          done
+          image_dir="$(mktemp -d)"
+          cp .gallery-output/*.png "$image_dir/"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin refs/heads/readme-gallery >/dev/null 2>&1; then
+            git fetch --no-tags origin readme-gallery
+            git switch -C readme-gallery FETCH_HEAD
+          else
+            git switch --orphan readme-gallery
+            git rm -rfq --ignore-unmatch .
+          fi
+          mkdir -p images
+          for name in month-desktop event-details mobile-list mobile-create; do
+            cp "$image_dir/${name}.png" "images/${name}.png"
+          done
+          {
+            echo '# README gallery'
+            echo
+            echo 'Screenshots rendered from the real calendar React components with'
+            echo 'fictional demo events. No Matrix or CalDAV credentials are used.'
+            echo
+            echo "Source commit: ${GITHUB_SHA}"
+            echo 'Dates and browser timezone are fixed to October 2026 / Europe/Stockholm.'
+          } > SOURCE.md
+          git add images SOURCE.md
+          if git diff --cached --quiet; then
+            echo 'Screenshots are unchanged.'
+          else
+            git commit -m "docs: refresh README gallery from ${GITHUB_SHA:0:12}"
+            git push origin HEAD:refs/heads/readme-gallery
+          fi
