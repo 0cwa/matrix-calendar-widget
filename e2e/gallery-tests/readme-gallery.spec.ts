@@ -72,6 +72,9 @@ async function openGallery(
     return route.abort();
   });
 
+  // Make the calendar's "today" marker and new-event defaults reproducible
+  // even when this workflow is run years after the fictional event dates.
+  await page.clock.setFixedTime(new Date('2026-10-21T10:00:00.000Z'));
   await page.setViewportSize(viewport);
   await page.goto('/browser-tests/index.html?mode=gallery&view=' + view);
   await expect(page.getByTestId('gallery-root')).toBeVisible();
