@@ -62,6 +62,49 @@ function prose(source) {
     .join('\n');
 }
 
+function slugText(text, codeSpans) {
+  const restored = text
+    .replace(/\uE000(\d+)\uE001/g, (_, index) => codeSpans[Number(index)])
+    .replace(
+      /&(?:amp|lt|gt|quot|apos|#39);/g,
+      (entity) =>
+        ({
+          '&amp;': '&',
+          '&lt;': '<',
+          '&gt;': '>',
+          '&quot;': '"',
+          '&apos;': "'",
+          '&#39;': "'",
+        })[entity],
+    )
+    .replace(/&#(x[0-9a-f]+|\d+);/gi, (_, number) =>
+      String.fromCodePoint(
+        number[0].toLowerCase() === 'x'
+          ? parseInt(number.slice(1), 16)
+          : Number(number),
+      ),
+    );
+  return (
+    unescape(restored)
+      // Remove tag-token markers before context-sensitive Unicode case conversion.
+      .replace(/\uE002/g, '')
+      .toLowerCase()
+      .replace(/[^\p{L}\p{M}\p{N}\p{Pc}\- ]/gu, '')
+      .replace(/ /g, '-')
+  );
+}
+
+function headingSlug(heading, codeSpans) {
+  // Mask ordinary tag tokens so attributes cannot participate in emphasis.
+  // The whole visible heading then becomes slug characters, never rendered HTML.
+  const tags = /<\/?[a-z][a-z0-9-]*(?=[\s/>])(?:[^<>"']|"[^"]*"|'[^']*')*>/gi;
+  const tokens = heading.replace(tags, '\uE002');
+  return slugText(
+    tokens.replace(/(\*{1,2}|_{1,2})(?=\S)(.*?\S)\1/g, '$2'),
+    codeSpans,
+  );
+}
+
 function anchors(source) {
   const text = prose(source);
   const result = new Set();
@@ -84,33 +127,8 @@ function anchors(source) {
         return `\uE000${codeSpans.length - 1}\uE001`;
       })
       .replace(/!?\[([^\]]+)\]\([^)]*\)/g, '$1')
-      .replace(/\[([^\]]+)\]\[[^\]]*\]/g, '$1')
-      .replace(/<[^>]*>/g, '')
-      .replace(/(\*{1,2}|_{1,2})(?=\S)(.*?\S)\1/g, '$2')
-      .replace(/\uE000(\d+)\uE001/g, (_, index) => codeSpans[Number(index)])
-      .replace(
-        /&(?:amp|lt|gt|quot|apos|#39);/g,
-        (entity) =>
-          ({
-            '&amp;': '&',
-            '&lt;': '<',
-            '&gt;': '>',
-            '&quot;': '"',
-            '&apos;': "'",
-            '&#39;': "'",
-          })[entity],
-      )
-      .replace(/&#(x[0-9a-f]+|\d+);/gi, (_, number) =>
-        String.fromCodePoint(
-          number[0].toLowerCase() === 'x'
-            ? parseInt(number.slice(1), 16)
-            : Number(number),
-        ),
-      );
-    const base = unescape(heading)
-      .toLowerCase()
-      .replace(/[^\p{L}\p{M}\p{N}\p{Pc}\- ]/gu, '')
-      .replace(/ /g, '-');
+      .replace(/\[([^\]]+)\]\[[^\]]*\]/g, '$1');
+    const base = headingSlug(heading, codeSpans);
     let slug = base;
     let suffix = 0;
     while (generated.has(slug)) slug = `${base}-${++suffix}`;
