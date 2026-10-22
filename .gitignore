@@ -113,6 +113,7 @@ dist
 
 # testing
 /coverage
+/gallery-output/
 
 # production
 /build
