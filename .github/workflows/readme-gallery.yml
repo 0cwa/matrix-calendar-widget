@@ -1,15 +1,9 @@
 name: Refresh README gallery
 
-# The short-lived push trigger bootstraps the first captures on the feature
-# branch. Remove it once the images have been published; ongoing updates
-# should be intentional manual dispatches from main only.
+# Trigger intentionally only by hand. Select main so captures use
+# the current widget code and do not change a release or live deployment.
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - feat/readme-gallery-20261021
-    paths:
-      - .github/workflows/readme-gallery.yml
 
 permissions:
   contents: read
@@ -21,7 +15,7 @@ concurrency:
 jobs:
   screenshots:
     name: Capture gallery screenshots
-    if: github.event_name == 'push' || github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
