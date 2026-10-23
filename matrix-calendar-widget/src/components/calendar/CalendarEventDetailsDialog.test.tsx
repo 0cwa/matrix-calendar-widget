@@ -277,6 +277,41 @@ describe('<CalendarEventDetailsDialog />', () => {
     ).toBeInTheDocument();
   });
 
+  it('uses ordinary Save on Enter without reopening Matrix reminder settings', async () => {
+    const { repository, roomEvent } = createRoomCalendarRepository({
+      calendarId: 'room-calendar',
+      roomId: '!authorized-room:example.test',
+      canReadEvents: true,
+      canWriteEvents: true,
+      canManageReminders: true,
+    });
+
+    render(<CalendarEventDetailsDialog event={roomEvent} onClose={vi.fn()} />, {
+      wrapper: createWrapper(repository),
+    });
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Reminder settings' }),
+    );
+    await screen.findByText(/There is no CalDAV reminder in this event yet/);
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Edit CalDAV reminder' }),
+    );
+
+    await userEvent.type(
+      await screen.findByRole('textbox', { name: /Title/i }),
+      '{Enter}',
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('dialog', { name: 'Edit event' }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(repository.listRoomReminderAlarmOptions).toHaveBeenCalledTimes(1);
+    expect(repository.enableRoomReminder).not.toHaveBeenCalled();
+  });
+
   it('saves a CalDAV alarm before opening Matrix reminder settings', async () => {
     const { repository, roomEvent } = createRoomCalendarRepository({
       calendarId: 'room-calendar',

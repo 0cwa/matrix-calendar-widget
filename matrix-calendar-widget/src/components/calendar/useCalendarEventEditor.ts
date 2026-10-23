@@ -723,12 +723,12 @@ export function useCalendarEventEditor({
   const handleSubmit = async (submitEvent: FormEvent) => {
     submitEvent.preventDefault();
 
-    const submitter = (submitEvent.nativeEvent as SubmitEvent).submitter;
+    const form = submitEvent.currentTarget as HTMLFormElement;
     const configureRoomRemindersAfterSave = Boolean(
       onSaveAndConfigureRoomReminders &&
-      submitter?.getAttribute('data-save-intent') ===
-        'configure-room-reminders',
+      form.dataset.saveIntent === 'configure-room-reminders',
     );
+    delete form.dataset.saveIntent;
 
     if (validationError || readOnly || chooseScope || missingOccurrence) {
       return;

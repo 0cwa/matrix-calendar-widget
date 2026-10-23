@@ -628,6 +628,7 @@ export function CalendarEventEditorFields({
                 <LoadingButton
                   data-save-intent="configure-room-reminders"
                   disabled={
+                    saving ||
                     Boolean(validationError) ||
                     readOnly ||
                     chooseScope ||
@@ -636,8 +637,18 @@ export function CalendarEventEditorFields({
                     (editingOccurrence && !occurrenceHasChanges)
                   }
                   loading={savingRoomReminderSetup}
+                  onClick={(submitEvent) => {
+                    const form = submitEvent.currentTarget.form;
+                    const saveIntent =
+                      submitEvent.currentTarget.dataset.saveIntent;
+
+                    if (form && saveIntent && form.reportValidity()) {
+                      form.dataset.saveIntent = saveIntent;
+                      form.requestSubmit();
+                    }
+                  }}
                   size="small"
-                  type="submit"
+                  type="button"
                   variant="outlined"
                 >
                   {t(
