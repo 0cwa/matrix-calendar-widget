@@ -15,6 +15,7 @@ import socket
 import subprocess
 import sys
 import tarfile
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -25,6 +26,7 @@ from typing import Any, Iterator
 
 LOCK_PATH = Path(__file__).with_name("thunderbird-calendar-smoke-artifacts.json")
 ROOT_PARENT = Path("/var/tmp")
+WORKER_FILENAME = ".thunderbird-calendar-smoke-worker.py"
 EXPECTED_ARCHIVE_HOST = "archive.mozilla.org"
 EXPECTED_PACKAGE_HOST = "files.pythonhosted.org"
 DOWNLOAD_TIMEOUT_SECONDS = 25
@@ -338,6 +340,11 @@ def _bwrap_command(
                 raise SmokeFailure("preflight", "invalid_input")
             args.extend(["--bind", str(path), str(path)])
         args.extend(["--bind", str(root / "tmp"), "/tmp"])
+        if not installing:
+            worker = root / "workspace" / WORKER_FILENAME
+            if worker.is_symlink() or not worker.is_file() or not worker.resolve().is_relative_to(ROOT_PARENT):
+                raise SmokeFailure("preflight", "invalid_input")
+            args.extend(["--ro-bind", str(worker), str(worker)])
     args.extend(["--proc", "/proc", "--dev", "/dev", "--clearenv"])
     env = _namespace_environment(root, installing=installing)
     for name, value in env.items():
@@ -423,6 +430,63 @@ print(json.dumps({
         and observation.get("loopback") is True
     )
     if not valid:
+        raise SmokeFailure("preflight", "namespace_unavailable")
+
+
+def _probe_worker_visibility(interpreter: str | None = None) -> None:
+    source = Path(__file__).resolve()
+    home = Path(os.environ["HOME"]).resolve()
+    try:
+        source.relative_to(home)
+    except ValueError:
+        raise SmokeFailure("preflight", "unsupported_runner") from None
+    try:
+        with tempfile.TemporaryDirectory(prefix="tb-worker-probe-", dir=ROOT_PARENT) as temporary:
+            root = Path(temporary)
+            for name in (
+                "app",
+                "venv",
+                "downloads",
+                "python-artifacts",
+                "workspace",
+                "config",
+                "cache",
+                "data",
+                "state",
+                "runtime",
+                "tmp",
+            ):
+                (root / name).mkdir(mode=0o700)
+            workspace = root / "workspace"
+            worker = workspace / WORKER_FILENAME
+            worker.write_bytes(source.read_bytes())
+            os.chmod(worker, 0o400)
+            probe = (
+                "from pathlib import Path; import runpy,sys; "
+                "assert not Path(sys.argv[2]).exists(); "
+                "assert not __import__('os').access(sys.argv[1],__import__('os').W_OK); "
+                "module=runpy.run_path(sys.argv[1],run_name='tb_worker_probe'); "
+                "assert callable(module['_smoke_worker']); print('worker-import-visible')"
+            )
+            command = _bwrap_command(
+                [interpreter or sys.executable, "-B", "-c", probe, str(worker), str(source)],
+                root=root,
+            )
+            result = subprocess.run(
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                check=False,
+                timeout=20,
+                env=_namespace_environment(None),
+            )
+    except SmokeFailure:
+        raise
+    except (OSError, subprocess.SubprocessError, ValueError):
+        raise SmokeFailure("preflight", "namespace_unavailable") from None
+    if result.returncode != 0 or result.stdout.strip() != "worker-import-visible":
         raise SmokeFailure("preflight", "namespace_unavailable")
 
 
@@ -608,6 +672,9 @@ def _prepare(payload: dict[str, Any], source_sha: str, root: Path, data: dict[st
     release = data["thunderbird"]
     packages = data["packages"]
     try:
+        worker = root / "workspace" / WORKER_FILENAME
+        worker.write_bytes(Path(__file__).resolve().read_bytes())
+        os.chmod(worker, 0o400)
         payload["phase"] = "download"
         with _total_wall_deadline(DOWNLOAD_TOTAL_SECONDS, "download"):
             _download(release, root / "downloads" / release["filename"], EXPECTED_ARCHIVE_HOST, both_hashes=True)
@@ -817,7 +884,13 @@ def _smoke(payload: dict[str, Any], source_sha: str, root: Path) -> None:
     _probe_namespace()
     payload["rootless_namespace_verified"] = True
     payload["phase"] = "startup"
-    worker = [str(root / "venv" / "bin" / "python"), "-B", str(Path(__file__).resolve()), "--worker", str(root)]
+    worker = [
+        str(root / "venv" / "bin" / "python"),
+        "-B",
+        str(root / "workspace" / WORKER_FILENAME),
+        "--worker",
+        str(root),
+    ]
     command = _bwrap_command(worker, root=root)
     log_path = root / "logs" / "thunderbird-startup.log"
     env = _namespace_environment(root)
@@ -912,6 +985,7 @@ def _main() -> int:
         if args.mode == "preflight":
             payload["phase"] = "preflight"
             _probe_namespace()
+            _probe_worker_visibility()
             payload["rootless_namespace_verified"] = True
         elif args.mode == "prepare":
             root = _root_path()
