@@ -178,7 +178,7 @@ describe('<CalendarToolbar />', () => {
     const calendarListbox = await screen.findByRole('listbox');
     fireEvent.click(
       within(calendarListbox).getByRole('option', {
-        name: 'Unknown calendar',
+        name: 'Room calendar',
       }),
     );
 
