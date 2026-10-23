@@ -42,7 +42,7 @@ jobs:
       - name: Install Chromium
         run: yarn workspace e2e playwright install --with-deps chromium --only-shell
 
-      - name: Capture screenshots from the local synthetic widget
+      - name: Capture and combine light/dark screenshots
         run: yarn workspace e2e playwright test --config playwright.gallery.config.ts
 
       - name: Upload screenshots for review
@@ -100,6 +100,7 @@ jobs:
             echo
             echo "Source commit: ${GITHUB_SHA}"
             echo 'Dates and browser timezone are fixed to October 2026 / Europe/Stockholm.'
+            echo 'Each screenshot combines matching light and dark themes: light upper-left, dark lower-right, separated diagonally from bottom-left to top-right.'
           } > SOURCE.md
           git add images SOURCE.md
           if git diff --cached --quiet; then

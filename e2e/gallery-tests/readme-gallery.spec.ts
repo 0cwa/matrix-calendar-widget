@@ -15,8 +15,11 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+
+type GalleryTheme = 'light' | 'dark';
+type GalleryViewport = { width: number; height: number };
 
 const outputDir = path.resolve(
   process.env.GITHUB_WORKSPACE ?? path.resolve(process.cwd(), '..'),
@@ -24,41 +27,130 @@ const outputDir = path.resolve(
 );
 
 test('desktop month view', async ({ page }) => {
-  await openGallery(page, { width: 1280, height: 800 }, 'month');
-  await expect(page.locator('.fc-daygrid-event').first()).toBeVisible();
-  await capture(page, 'month-desktop.png');
+  await captureThemes(page, 'month-desktop.png', { width: 1280, height: 800 }, 'month');
 });
 
 test('desktop event details', async ({ page }) => {
-  await openGallery(page, { width: 1024, height: 760 }, 'month');
-  await page
-    .getByRole('button', { name: /Sprint planning/ })
-    .first()
-    .click();
-  await expect(
-    page.getByRole('dialog', { name: 'Sprint planning' }),
-  ).toBeVisible();
-  await capture(page, 'event-details.png');
+  await captureThemes(
+    page,
+    'event-details.png',
+    { width: 1024, height: 760 },
+    'month',
+    async (page) => {
+      await page.getByRole('button', { name: /Sprint planning/ }).first().click();
+      await expect(page.getByRole('dialog', { name: 'Sprint planning' })).toBeVisible();
+    },
+  );
 });
 
 test('narrow list view', async ({ page }) => {
-  await openGallery(page, { width: 420, height: 930 }, 'list');
-  await capture(page, 'mobile-list.png');
+  await captureThemes(page, 'mobile-list.png', { width: 420, height: 930 }, 'list');
 });
 
 test('narrow create event dialog', async ({ page }) => {
-  await openGallery(page, { width: 420, height: 930 }, 'list');
-  await page.getByRole('button', { name: 'Create event' }).click();
-  await expect(
-    page.getByRole('dialog', { name: 'Create event' }),
-  ).toBeVisible();
-  await capture(page, 'mobile-create.png');
+  await captureThemes(
+    page,
+    'mobile-create.png',
+    { width: 420, height: 930 },
+    'list',
+    async (page) => {
+      await page.getByRole('button', { name: 'Create event' }).click();
+      await expect(page.getByRole('dialog', { name: 'Create event' })).toBeVisible();
+    },
+  );
 });
+
+/**
+ * Render each view and its optional dialog twice, with identical viewport,
+ * frozen time, fictional events and locale. Only the color scheme changes.
+ * The output keeps the existing README filenames and publication contract.
+ */
+async function captureThemes(
+  page: Page,
+  name: string,
+  viewport: GalleryViewport,
+  view: 'month' | 'list',
+  prepare?: (page: Page) => Promise<void>,
+): Promise<void> {
+  const screenshots: Buffer[] = [];
+  for (const theme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
+    await openGallery(page, viewport, view, theme);
+    if (prepare) {
+      await prepare(page);
+    }
+    // Give the calendar and dialogs the same two-frame opportunity to settle.
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        }),
+    );
+    screenshots.push(
+      await page.screenshot({ animations: 'disabled', caret: 'hide' }),
+    );
+  }
+
+  const [light, dark] = screenshots;
+  expect(light.equals(dark), 'light and dark captures should differ').toBe(false);
+  const composite = await composeDiagonal(page, light, dark);
+  await mkdir(outputDir, { recursive: true });
+  await writeFile(path.join(outputDir, name), composite);
+}
+
+/** Light above/left of a bottom-left to top-right diagonal; dark below/right. */
+async function composeDiagonal(
+  page: Page,
+  light: Buffer,
+  dark: Buffer,
+): Promise<Buffer> {
+  const encoded = await page.evaluate(
+    async (sources: string[]) => {
+      const load = (base64: string) =>
+        new Promise<HTMLImageElement>((resolve, reject) => {
+          const image = new Image();
+          image.onload = () => resolve(image);
+          image.onerror = () => reject(new Error('Cannot decode gallery PNG'));
+          image.src = 'data:image/png;base64,' + base64;
+        });
+      const [lightImage, darkImage] = await Promise.all(
+        sources.map((source) => load(source)),
+      );
+      if (
+        lightImage.naturalWidth !== darkImage.naturalWidth ||
+        lightImage.naturalHeight !== darkImage.naturalHeight
+      ) {
+        throw new Error('Light/dark gallery screenshots have different dimensions');
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = lightImage.naturalWidth;
+      canvas.height = lightImage.naturalHeight;
+      const context = canvas.getContext('2d');
+      if (!context) {
+        throw new Error('Cannot create gallery compositing canvas');
+      }
+
+      context.drawImage(darkImage, 0, 0);
+      context.beginPath();
+      context.moveTo(0, 0);
+      context.lineTo(canvas.width, 0);
+      context.lineTo(0, canvas.height);
+      context.closePath();
+      context.clip();
+      context.drawImage(lightImage, 0, 0);
+      return canvas.toDataURL('image/png').slice('data:image/png;base64,'.length);
+    },
+    [light.toString('base64'), dark.toString('base64')],
+  );
+  return Buffer.from(encoded, 'base64');
+}
 
 async function openGallery(
   page: Page,
-  viewport: { width: number; height: number },
+  viewport: GalleryViewport,
   view: 'month' | 'list',
+  theme: GalleryTheme,
 ): Promise<void> {
   const pageErrors: string[] = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
@@ -76,22 +168,18 @@ async function openGallery(
   // even when this workflow is run years after the fictional event dates.
   await page.clock.setFixedTime(new Date('2026-10-21T10:00:00.000Z'));
   await page.setViewportSize(viewport);
-  await page.goto('/browser-tests/index.html?mode=gallery&view=' + view);
+  await page.goto('/browser-tests/index.html?mode=gallery&view=' + view + '&theme=' + theme);
   await expect(page.getByTestId('gallery-root')).toBeVisible();
   await expect(
     page.getByRole('button', { name: /Sprint planning/ }).first(),
   ).toBeVisible();
+  // The theme must actually change MUI rendering, not just the browser preference.
+  await expect(page.locator('body')).toHaveCSS(
+    'background-color',
+    theme === 'light' ? 'rgb(255, 255, 255)' : 'rgb(18, 18, 18)',
+  );
   await page.evaluate(async () => {
     await document.fonts.ready;
   });
   expect(pageErrors).toEqual([]);
-}
-
-async function capture(page: Page, name: string): Promise<void> {
-  await mkdir(outputDir, { recursive: true });
-  await page.screenshot({
-    path: path.join(outputDir, name),
-    animations: 'disabled',
-    caret: 'hide',
-  });
 }
