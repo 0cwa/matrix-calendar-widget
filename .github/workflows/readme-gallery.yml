@@ -132,6 +132,8 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.profile == 'calendar-client-smoke'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    env:
+      TB_DOCKER_IMAGE: thunderbird-calendar-smoke:${{ github.sha }}
     permissions:
       contents: read
     steps:
@@ -139,19 +141,27 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install bubblewrap from the Ubuntu runner repositories if needed
+      - name: Build the pinned isolated Thunderbird runtime image
+        id: tb_image
         run: |
-          if ! command -v bwrap >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install --yes --no-install-recommends bubblewrap
-          fi
-          command -v bwrap
+          set -euo pipefail
+          image_context="$RUNNER_TEMP/thunderbird-smoke-image-context"
+          runner_uid="$(id -u)"
+          runner_gid="$(id -g)"
+          [[ "$runner_uid" =~ ^[0-9]+$ && "$runner_gid" =~ ^[0-9]+$ ]]
+          [[ "$runner_uid" -gt 0 && "$runner_gid" -gt 0 ]]
+          mkdir -m 0700 "$image_context"
+          install -m 0600 dev/thunderbird-calendar-smoke.Dockerfile "$image_context/Dockerfile"
+          docker build --platform linux/amd64 --pull \
+            --build-arg "TASK_UID=$runner_uid" --build-arg "TASK_GID=$runner_gid" \
+            --file "$image_context/Dockerfile" --tag "$TB_DOCKER_IMAGE" "$image_context"
+          docker image inspect --format '{{.Id}}' "$TB_DOCKER_IMAGE" >/dev/null
 
       - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
 
-      - name: Check rootless smoke isolation
+      - name: Check Docker smoke isolation before app download
         id: tb_preflight
         run: python -B dev/thunderbird-calendar-smoke.py preflight
 
@@ -166,6 +176,7 @@ jobs:
       - name: Finalize closed smoke evidence
         if: always()
         env:
+          TB_IMAGE_OUTCOME: ${{ steps.tb_image.outcome }}
           TB_PREFLIGHT_OUTCOME: ${{ steps.tb_preflight.outcome }}
           TB_PREPARE_OUTCOME: ${{ steps.tb_prepare.outcome }}
           TB_SMOKE_OUTCOME: ${{ steps.tb_smoke.outcome }}
@@ -176,7 +187,7 @@ jobs:
         run: |
           summary="$RUNNER_TEMP/thunderbird-calendar-smoke-summary.json"
           if [[ ! -s "$summary" ]]; then
-            printf '{"schema":"thunderbird-calendar-startup-smoke@1","qualification_scope":"startup_only_not_caldav","source_sha":"%s","status":"failed","phase":"complete","error_class":"internal_error","archive_sha256_verified":false,"archive_sha512_verified":false,"python_artifacts_verified":false,"rootless_namespace_verified":false,"marionette_handshake":false,"main_window":false,"calendar_tab":false,"app_version":null}\n' "$GITHUB_SHA" > "$summary"
+            printf '{"schema":"thunderbird-calendar-startup-smoke@2","qualification_scope":"startup_only_not_caldav","source_sha":"%s","status":"failed","phase":"complete","error_class":"internal_error","archive_sha256_verified":false,"archive_sha512_verified":false,"python_artifacts_verified":false,"docker_backend_verified":false,"docker_isolation_verified":false,"marionette_handshake":false,"main_window":false,"calendar_tab":false,"app_version":null}\n' "$GITHUB_SHA" > "$summary"
             chmod 0600 "$summary"
           fi
           cat "$summary" >> "$GITHUB_STEP_SUMMARY"
