@@ -114,12 +114,14 @@ class SmokeFailure(RuntimeError):
         *,
         failed_artifact: str | None = None,
         network_error_class: str | None = None,
+        http_status: int | None = None,
     ):
         super().__init__(error_class)
         self.phase = phase
         self.error_class = error_class
         self.failed_artifact = failed_artifact
         self.network_error_class = network_error_class
+        self.http_status = http_status
 
 
 def _source_sha() -> str:
@@ -156,7 +158,7 @@ def _summary_path() -> Path:
 
 def _initial_summary(source_sha: str) -> dict[str, Any]:
     return {
-        "schema": "thunderbird-calendar-startup-smoke@3",
+        "schema": "thunderbird-calendar-startup-smoke@4",
         "qualification_scope": "startup_only_not_caldav",
         "source_sha": source_sha,
         "status": "running",
@@ -164,6 +166,7 @@ def _initial_summary(source_sha: str) -> dict[str, Any]:
         "error_class": None,
         "failed_artifact": None,
         "network_error_class": None,
+        "http_status": None,
         "archive_sha256_verified": False,
         "archive_sha512_verified": False,
         "python_artifacts_verified": False,
@@ -185,7 +188,7 @@ def _write_summary(payload: dict[str, Any]) -> None:
     if (
         not isinstance(safe["source_sha"], str)
         or not re.fullmatch(r"[0-9a-f]{40}", safe["source_sha"])
-        or safe["schema"] != "thunderbird-calendar-startup-smoke@3"
+        or safe["schema"] != "thunderbird-calendar-startup-smoke@4"
         or safe["qualification_scope"] != "startup_only_not_caldav"
         or not isinstance(safe["status"], str)
         or safe["status"] not in {"running", "passed", "failed"}
@@ -204,6 +207,13 @@ def _write_summary(payload: dict[str, Any]) -> None:
             and (
                 not isinstance(safe["network_error_class"], str)
                 or safe["network_error_class"] not in NETWORK_ERROR_CLASSES
+            )
+        )
+        or (
+            safe["http_status"] is not None
+            and (
+                type(safe["http_status"]) is not int
+                or not 100 <= safe["http_status"] <= 599
             )
         )
         or any(
@@ -671,9 +681,12 @@ def _network_error_class(error: BaseException) -> str:
     if isinstance(error, SmokeFailure):
         return error.network_error_class or "unknown"
     if isinstance(error, urllib.error.HTTPError):
-        if 400 <= error.code < 500:
+        status = _http_error_status(error)
+        if status is None:
+            return "http_status"
+        if 400 <= status < 500:
             return "http_4xx"
-        if 500 <= error.code < 600:
+        if 500 <= status < 600:
             return "http_5xx"
         return "http_status"
     if isinstance(error, http.client.IncompleteRead):
@@ -700,12 +713,22 @@ def _network_error_class(error: BaseException) -> str:
     return "unknown"
 
 
+def _http_error_status(error: BaseException) -> int | None:
+    if not isinstance(error, urllib.error.HTTPError):
+        return None
+    status = error.code
+    if type(status) is not int or not 100 <= status <= 599:
+        return None
+    return status
+
+
 def _download_failure(artifact_id: str, error: BaseException) -> SmokeFailure:
     return SmokeFailure(
         "download",
         "network_error",
         failed_artifact=artifact_id,
         network_error_class=_network_error_class(error),
+        http_status=_http_error_status(error),
     )
 
 
@@ -913,7 +936,7 @@ def _require_preflight(source_sha: str) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         raise SmokeFailure("preflight", "invalid_input") from None
     if (
-        value.get("schema") != "thunderbird-calendar-startup-smoke@3"
+        value.get("schema") != "thunderbird-calendar-startup-smoke@4"
         or value.get("source_sha") != source_sha
         or value.get("docker_backend_verified") is not True
         or value.get("docker_isolation_verified") is not True
@@ -1467,6 +1490,8 @@ def _main() -> int:
             payload["failed_artifact"] = failure.failed_artifact
         if failure.network_error_class is not None:
             payload["network_error_class"] = failure.network_error_class
+        if failure.http_status is not None:
+            payload["http_status"] = failure.http_status
         if args.mode == "prepare" and root is not None and root.exists():
             try:
                 shutil.rmtree(root)
