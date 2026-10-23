@@ -6,7 +6,7 @@ A team calendar for Matrix rooms, with a widget for Element and calendar data st
 
 ## Screenshots
 
-These are captures of the actual widget calendar components using **fictional example events**, not a connected Matrix room or a live CalDAV installation. Dates are fixed to October 2026 so future captures are comparable.
+These are captures of the actual widget calendar components using **fictional example events**, not a connected Matrix room or a live CalDAV installation. Dates are fixed to October 2026 so future captures are comparable. Each screenshot combines the **same view in light and dark mode**, split diagonally from bottom-left to top-right (light in the upper-left, dark in the lower-right).
 
 <table>
   <tr>
