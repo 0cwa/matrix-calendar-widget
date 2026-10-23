@@ -341,6 +341,7 @@ test('summarizes reminder restore gates without exposing backup fingerprints or 
         status: 'passed',
         count: 1,
         attemptCount: 2,
+        configurationCount: 1,
         deliveryStateSent: true,
         deliveryClaimClear: true,
       }),
@@ -377,12 +378,12 @@ test('summarizes reminder restore gates without exposing backup fingerprints or 
       JSON.stringify({
         phase: 'restore-delivery-row',
         status: 'passed',
-        count: 1,
-        attemptCount: 2,
+        count: 3,
+        attemptCount: 3,
         deliveryStateSent: true,
         deliveryClaimClear: true,
         deliveryKeyUnchanged: true,
-        attemptCountUnchanged: true,
+        deliveryMetadataUnchanged: true,
       }),
     ].join('\n'),
     sourceSha,
@@ -396,9 +397,312 @@ test('summarizes reminder restore gates without exposing backup fingerprints or 
   );
   assert.match(
     summary,
-    /delivery_key_unchanged=true attempt_count_unchanged=true/u,
+    /delivery_key_unchanged=true delivery_metadata_unchanged=true/u,
+  );
+  assert.match(
+    summary,
+    /phase=reminder-delivery-snapshot status=passed count=1 configuration_count=1 delivery_state_sent=true delivery_claim_clear=true/u,
   );
   assert.doesNotMatch(summary, /b{64}|attempt_count=2/u);
+});
+
+test('accepts and projects the complete reminder producer stream for room and selected targets', () => {
+  const stage = (phase, status, details = {}) =>
+    JSON.stringify({ phase, status, ...details });
+  const records = [
+    JSON.stringify(reminderConfigurationObservation({ recipientKind: 'room' })),
+    stage('reminder-configuration-stored', 'started'),
+    stage('reminder-configuration-stored', 'passed', {
+      count: 1,
+      snapshotCompared: false,
+    }),
+    stage('reminder-delivery-snapshot', 'started'),
+    stage('reminder-delivery-snapshot', 'passed', {
+      count: 1,
+      attemptCount: 1,
+      deliveryStateSent: true,
+      deliveryClaimClear: true,
+      configurationCount: 1,
+    }),
+    stage('reminder-initial-delivery', 'passed', {
+      httpStatus: 200,
+      count: 1,
+      canaryDelivered: true,
+      roomMentioned: true,
+      selectedMemberMentioned: false,
+      targetMentioned: true,
+      expectedRoomRecipient: true,
+      expectedSelectedRecipient: false,
+      deliveredAfterDue: true,
+      allMarkersOnce: true,
+    }),
+    JSON.stringify(
+      reminderConfigurationObservation({
+        recipientKind: 'selected',
+        selectedMemberKeyboardFlow: true,
+      }),
+    ),
+    stage('reminder-configuration-stored', 'started'),
+    stage('reminder-configuration-stored', 'passed', {
+      count: 2,
+      snapshotCompared: true,
+    }),
+    stage('reminder-restart-delivery-row', 'started'),
+    stage('reminder-restart-delivery-row', 'passed', {
+      count: 2,
+      attemptCount: 2,
+      deliveryStateSent: true,
+      deliveryClaimClear: true,
+      deliveryKeyUnchanged: true,
+      deliveryMetadataUnchanged: true,
+    }),
+    stage('reminder-restart-scheduler-scan', 'passed', {
+      httpStatus: 200,
+      count: 2,
+      canaryDelivered: true,
+      roomMentioned: false,
+      selectedMemberMentioned: true,
+      targetMentioned: true,
+      expectedRoomRecipient: false,
+      expectedSelectedRecipient: true,
+      deliveredAfterDue: true,
+      allMarkersOnce: true,
+    }),
+    JSON.stringify(reminderConfigurationObservation({ recipientKind: 'room' })),
+    stage('reminder-configuration-stored', 'started'),
+    stage('reminder-configuration-stored', 'passed', {
+      count: 3,
+      snapshotCompared: true,
+    }),
+    stage('restore-delivery-row', 'started'),
+    stage('restore-delivery-row', 'passed', {
+      count: 3,
+      attemptCount: 3,
+      deliveryStateSent: true,
+      deliveryClaimClear: true,
+      deliveryKeyUnchanged: true,
+      deliveryMetadataUnchanged: true,
+    }),
+    stage('reminder-restore-scheduler-scan', 'passed', {
+      httpStatus: 200,
+      count: 3,
+      canaryDelivered: true,
+      roomMentioned: true,
+      selectedMemberMentioned: false,
+      targetMentioned: true,
+      expectedRoomRecipient: true,
+      expectedSelectedRecipient: false,
+      deliveredAfterDue: true,
+      allMarkersOnce: true,
+    }),
+  ];
+
+  const summary = sanitizeElementAcceptance(records.join('\n'), sourceSha);
+  assert.match(
+    summary,
+    /phase=reminder-delivery-snapshot status=passed count=1 configuration_count=1 delivery_state_sent=true delivery_claim_clear=true/u,
+  );
+  assert.match(
+    summary,
+    /phase=reminder-configuration-stored status=passed count=3 snapshot_compared=true/u,
+  );
+  assert.match(
+    summary,
+    /phase=reminder-restart-delivery-row status=passed count=2 delivery_state_sent=true delivery_claim_clear=true delivery_key_unchanged=true delivery_metadata_unchanged=true/u,
+  );
+  assert.match(
+    summary,
+    /phase=restore-delivery-row status=passed count=3 delivery_state_sent=true delivery_claim_clear=true delivery_key_unchanged=true delivery_metadata_unchanged=true/u,
+  );
+  assert.match(
+    summary,
+    /phase=reminder-restart-scheduler-scan status=passed http_status=200 count=2 canary_delivered=true room_mentioned=false selected_member_mentioned=true target_mentioned=true expected_room_recipient=false expected_selected_recipient=true delivered_after_due=true all_markers_once=true/u,
+  );
+  assert.match(
+    summary,
+    /phase=reminder-restore-scheduler-scan status=passed http_status=200 count=3 canary_delivered=true room_mentioned=true selected_member_mentioned=false target_mentioned=true expected_room_recipient=true expected_selected_recipient=false delivered_after_due=true all_markers_once=true/u,
+  );
+  assert.doesNotMatch(summary, /attempt_count=|delivery_key=/u);
+
+  const selectedTargetSummary = sanitizeElementAcceptance(
+    JSON.stringify(
+      reminderConfigurationObservation({
+        recipientKind: 'selected',
+        selectedMemberKeyboardFlow: true,
+      }),
+    ),
+    sourceSha,
+  );
+  assert.match(
+    selectedTargetSummary,
+    /recipient_kind=selected recipient_selection_attempted=true selected_member_keyboard_flow=true reminder_target_matches=true all_day_schedule_matches=true narrow_side_panel_safe=true/u,
+  );
+});
+
+test('closes reminder producer records while preserving bounded failure rows', () => {
+  for (const record of [
+    {
+      phase: 'reminder-delivery-snapshot',
+      status: 'passed',
+      count: 1,
+      attemptCount: 1,
+      deliveryStateSent: true,
+      deliveryClaimClear: true,
+    },
+    {
+      phase: 'reminder-delivery-snapshot',
+      status: 'passed',
+      count: 1,
+      attemptCount: 1,
+      deliveryStateSent: true,
+      deliveryClaimClear: true,
+      configurationCount: 0,
+    },
+    {
+      phase: 'reminder-delivery-snapshot',
+      status: 'passed',
+      count: 1,
+      attemptCount: 1,
+      deliveryStateSent: true,
+      deliveryClaimClear: true,
+      configurationCount: 1,
+      schemaVersionMatches: true,
+    },
+    {
+      phase: 'reminder-restart-delivery-row',
+      status: 'passed',
+      count: 2,
+      attemptCount: 2,
+      deliveryStateSent: true,
+      deliveryClaimClear: true,
+      deliveryKeyUnchanged: true,
+    },
+    {
+      phase: 'reminder-restart-delivery-row',
+      status: 'passed',
+      count: 2,
+      attemptCount: 2,
+      deliveryStateSent: true,
+      deliveryClaimClear: true,
+      deliveryKeyUnchanged: true,
+      deliveryMetadataUnchanged: false,
+    },
+    {
+      phase: 'restore-delivery-row',
+      status: 'passed',
+      count: 3,
+      attemptCount: 3,
+      deliveryStateSent: true,
+      deliveryClaimClear: true,
+      deliveryKeyUnchanged: true,
+      deliveryMetadataUnchanged: true,
+      attemptCountUnchanged: true,
+    },
+    {
+      phase: 'restore-delivery-row',
+      status: 'passed',
+      count: 2,
+      attemptCount: 3,
+      deliveryStateSent: true,
+      deliveryClaimClear: true,
+      deliveryKeyUnchanged: true,
+      deliveryMetadataUnchanged: true,
+    },
+    {
+      phase: 'reminder-restart-delivery-row',
+      status: 'passed',
+      count: 2,
+      attemptCount: 2,
+      deliveryStateSent: true,
+      deliveryClaimClear: true,
+      deliveryKeyUnchanged: true,
+      deliveryMetadataUnchanged: true,
+      privateField: 'must-not-pass',
+    },
+  ]) {
+    assert.throws(
+      () => sanitizeElementAcceptance(JSON.stringify(record), sourceSha),
+      /invalid element acceptance summary/u,
+    );
+  }
+
+  const failedSnapshot = sanitizeElementAcceptance(
+    [
+      JSON.stringify({
+        phase: 'reminder-delivery-snapshot',
+        status: 'started',
+      }),
+      JSON.stringify({
+        phase: 'reminder-delivery-snapshot',
+        status: 'failed',
+        schemaVersionMatches: false,
+      }),
+    ].join('\n'),
+    sourceSha,
+  );
+  assert.match(
+    failedSnapshot,
+    /phase=reminder-delivery-snapshot status=failed schema_version_matches=false/u,
+  );
+
+  const failedBackendSnapshot = sanitizeElementAcceptance(
+    [
+      JSON.stringify({
+        phase: 'reminder-delivery-snapshot',
+        status: 'started',
+      }),
+      JSON.stringify({
+        phase: 'reminder-delivery-snapshot',
+        status: 'failed',
+        processExitCode: 1,
+      }),
+    ].join('\n'),
+    sourceSha,
+  );
+  assert.match(
+    failedBackendSnapshot,
+    /phase=reminder-delivery-snapshot status=failed process_exit_code=1/u,
+  );
+
+  const failedRestart = sanitizeElementAcceptance(
+    [
+      JSON.stringify({
+        phase: 'reminder-restart-delivery-row',
+        status: 'started',
+      }),
+      JSON.stringify({
+        phase: 'reminder-restart-delivery-row',
+        status: 'failed',
+        count: 4,
+      }),
+    ].join('\n'),
+    sourceSha,
+  );
+  assert.match(
+    failedRestart,
+    /phase=reminder-restart-delivery-row status=failed count=4/u,
+  );
+
+  const failedRestoreComparison = sanitizeElementAcceptance(
+    [
+      JSON.stringify({ phase: 'restore-delivery-row', status: 'started' }),
+      JSON.stringify({
+        phase: 'restore-delivery-row',
+        status: 'failed',
+        count: 3,
+        attemptCount: 3,
+        deliveryStateSent: true,
+        deliveryClaimClear: true,
+        deliveryKeyUnchanged: true,
+        deliveryMetadataUnchanged: false,
+      }),
+    ].join('\n'),
+    sourceSha,
+  );
+  assert.match(
+    failedRestoreComparison,
+    /phase=restore-delivery-row status=failed count=3 delivery_state_sent=true delivery_claim_clear=true delivery_key_unchanged=true delivery_metadata_unchanged=false/u,
+  );
 });
 
 test('reports skipped Element only on a three-container restore quiescence', () => {
@@ -1293,7 +1597,7 @@ test('rejects incomplete or inconsistent restore evidence', () => {
       deliveryStateSent: true,
       deliveryClaimClear: true,
       deliveryKeyUnchanged: false,
-      attemptCountUnchanged: true,
+      deliveryMetadataUnchanged: true,
     },
     {
       phase: 'restore-radicale-backup',

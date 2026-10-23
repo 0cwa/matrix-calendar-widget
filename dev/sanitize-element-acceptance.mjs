@@ -359,7 +359,7 @@ const PHASE_BOOLEAN_FIELDS = new Map([
       'deliveryStateSent',
       'deliveryClaimClear',
       'deliveryKeyUnchanged',
-      'attemptCountUnchanged',
+      'deliveryMetadataUnchanged',
     ],
   ],
   [
@@ -374,7 +374,7 @@ const PHASE_BOOLEAN_FIELDS = new Map([
       'deliveryStateSent',
       'deliveryClaimClear',
       'deliveryKeyUnchanged',
-      'attemptCountUnchanged',
+      'deliveryMetadataUnchanged',
     ],
   ],
   ['g6-fixture-ready', ['openIdProofValid', 'allResourcesSeeded']],
@@ -769,6 +769,11 @@ const REMINDER_DELIVERY_PHASES = new Set([
   'reminder-delivery-snapshot',
   'reminder-restart-delivery-row',
   'restore-delivery-row',
+]);
+const REMINDER_DELIVERY_SUCCESS_COUNTS = new Map([
+  ['reminder-delivery-snapshot', 1],
+  ['reminder-restart-delivery-row', 2],
+  ['restore-delivery-row', 3],
 ]);
 const REMINDER_TARGET_DELIVERY_PHASES = new Set([
   'reminder-initial-delivery',
@@ -1285,7 +1290,7 @@ const ALLOWED_KEYS = new Set([
   'deliveryStateSent',
   'deliveryClaimClear',
   'deliveryKeyUnchanged',
-  'attemptCountUnchanged',
+  'deliveryMetadataUnchanged',
   'relativeAlarmReadback',
   'reminderEnabled',
   'targetSettingsReadback',
@@ -1303,6 +1308,7 @@ const ALLOWED_KEYS = new Set([
   'deliveredAfterDue',
   'allMarkersOnce',
   'attemptCount',
+  'configurationCount',
   'checksum',
   'gatewayStoppedGracefully',
   'radicaleStoppedGracefully',
@@ -2350,6 +2356,36 @@ function validReminderConfigurationStoredRecord(record) {
   );
 }
 
+function validReminderDeliveryRecord(record) {
+  const keys = Object.keys(record).sort().join(',');
+  if (record.status === 'started') {
+    return keys === 'phase,status';
+  }
+
+  const phase = record.phase;
+  const terminalFields =
+    phase === 'reminder-delivery-snapshot'
+      ? 'attemptCount,configurationCount,count,deliveryClaimClear,deliveryStateSent,phase,status'
+      : 'attemptCount,count,deliveryClaimClear,deliveryKeyUnchanged,deliveryMetadataUnchanged,deliveryStateSent,phase,status';
+  if (record.status === 'passed') return keys === terminalFields;
+  if (record.status !== 'failed') return false;
+
+  if (
+    keys === 'phase,status' ||
+    keys === 'count,phase,status' ||
+    keys === 'phase,processExitCode,status'
+  ) {
+    return true;
+  }
+  if (
+    phase === 'reminder-delivery-snapshot' &&
+    keys === 'phase,schemaVersionMatches,status'
+  ) {
+    return record.schemaVersionMatches === false;
+  }
+  return keys === terminalFields;
+}
+
 const PROJECTION_DIAGNOSTIC_REASONS = [
   'invalid-recurrence',
   'invalid-timing',
@@ -2783,6 +2819,9 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       REMINDER_CONFIGURATION_STORED_FIELDS.some((key) =>
         Object.hasOwn(record, key),
       );
+    const hasReminderDeliveryRecord = REMINDER_DELIVERY_PHASES.has(
+      record.phase,
+    );
     if (
       (record.phase === 'widget-a-runtime-observed' &&
         !validRuntimeObservation(record)) ||
@@ -2800,9 +2839,15 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       (record.phase !== 'reminder-room-configuration-enabled' &&
         hasReminderConfigurationObservation) ||
       (hasReminderConfigurationStoredField &&
-        record.phase !== 'reminder-configuration-stored') ||
+        !(
+          (record.phase === 'reminder-configuration-stored' &&
+            validReminderConfigurationStoredRecord(record)) ||
+          (record.phase === 'reminder-delivery-snapshot' &&
+            validReminderDeliveryRecord(record))
+        )) ||
       (record.phase === 'reminder-configuration-stored' &&
-        !validReminderConfigurationStoredRecord(record))
+        !validReminderConfigurationStoredRecord(record)) ||
+      (hasReminderDeliveryRecord && !validReminderDeliveryRecord(record))
     ) {
       throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
@@ -2967,6 +3012,11 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         (!REMINDER_DELIVERY_PHASES.has(record.phase) ||
           !Number.isSafeInteger(record.attemptCount) ||
           record.attemptCount < 0)) ||
+      (Object.hasOwn(record, 'configurationCount') &&
+        (record.phase !== 'reminder-delivery-snapshot' ||
+          !Number.isInteger(record.configurationCount) ||
+          record.configurationCount < 0 ||
+          record.configurationCount > 100_000)) ||
       (Object.hasOwn(record, 'checksum') &&
         (!PRIVATE_CHECKSUM_PHASES.has(record.phase) ||
           typeof record.checksum !== 'string' ||
@@ -2974,7 +3024,13 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       (record.status === 'passed' &&
         REMINDER_DELIVERY_PHASES.has(record.phase) &&
         (!Number.isSafeInteger(record.attemptCount) ||
-          record.attemptCount < 1)) ||
+          record.attemptCount <
+            REMINDER_DELIVERY_SUCCESS_COUNTS.get(record.phase) ||
+          record.count !==
+            REMINDER_DELIVERY_SUCCESS_COUNTS.get(record.phase))) ||
+      (record.status === 'passed' &&
+        record.phase === 'reminder-delivery-snapshot' &&
+        record.configurationCount !== record.count) ||
       (record.status === 'passed' &&
         PRIVATE_CHECKSUM_PHASES.has(record.phase) &&
         !Object.hasOwn(record, 'checksum'))
@@ -3945,6 +4001,14 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       }
       if (Object.hasOwn(record, 'metadataUnchanged')) {
         fields.push(`metadata_unchanged=${record.metadataUnchanged}`);
+      }
+      if (Object.hasOwn(record, 'schemaVersionMatches')) {
+        fields.push(`schema_version_matches=${record.schemaVersionMatches}`);
+      }
+    }
+    if (phase === 'reminder-delivery-snapshot') {
+      if (Object.hasOwn(record, 'configurationCount')) {
+        fields.push(`configuration_count=${record.configurationCount}`);
       }
       if (Object.hasOwn(record, 'schemaVersionMatches')) {
         fields.push(`schema_version_matches=${record.schemaVersionMatches}`);
