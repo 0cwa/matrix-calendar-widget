@@ -1,21 +1,28 @@
 name: Refresh README gallery
 
-# Trigger intentionally only by hand. Select main so captures use
-# the current widget code and do not change a release or live deployment.
+# Only a manual run on main publishes to the README image branch.
+# PRs touching the gallery run captures for review without publishing.
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/readme-gallery.yml'
+      - 'e2e/gallery-tests/**'
+      - 'e2e/playwright.gallery.config.ts'
+      - 'matrix-calendar-widget/browser-tests/**'
+      - 'README.md'
 
 permissions:
   contents: read
 
 concurrency:
-  group: readme-gallery-publish
+  group: readme-gallery-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   screenshots:
     name: Capture gallery screenshots
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -57,6 +64,7 @@ jobs:
   publish:
     name: Publish screenshot assets
     needs: screenshots
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
