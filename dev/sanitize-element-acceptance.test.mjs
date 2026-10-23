@@ -871,6 +871,17 @@ test('sanitizes the manager-consented anonymous public feed lifecycle', () => {
       phase: 'public-feed-browser-lifecycle',
       status: 'passed',
       httpStatus: 404,
+      publicFeedLifecycleStep: 'complete',
+      publicFeedSettingsEnabled: true,
+      publicFeedSettingsUnpublished: true,
+      publicFeedTargetCalendarMatches: true,
+      publicFeedManagementTargetMatches: true,
+      publicFeedConsentCheckboxCount: 1,
+      publicFeedConsentCheckboxVisible: true,
+      publicFeedConsentCheckboxChecked: true,
+      publicFeedPublishButtonCount: 1,
+      publicFeedPublishDisabledBeforeConsent: true,
+      publicFeedPublishDisabledAfterConsent: false,
       publicFeedManagementGetStatus: 200,
       publicFeedPublishStatus: 200,
       publicFeedGetStatus: 200,
@@ -890,6 +901,10 @@ test('sanitizes the manager-consented anonymous public feed lifecycle', () => {
     sourceSha,
   );
 
+  assert.match(
+    summary,
+    /public_feed_lifecycle_step=complete public_feed_settings_enabled=true public_feed_settings_unpublished=true public_feed_target_calendar_matches=true public_feed_management_target_matches=true public_feed_consent_checkbox_count=1 public_feed_consent_checkbox_visible=true public_feed_consent_checkbox_checked=true public_feed_publish_button_count=1 public_feed_publish_disabled_before_consent=true public_feed_publish_disabled_after_consent=false/u,
+  );
   assert.match(
     summary,
     /public_feed_management_get_status=200 public_feed_publish_status=200 public_feed_get_status=200 public_feed_head_status=200 public_feed_unpublish_status=200 public_feed_revoked_get_status=404 public_feed_revoked_head_status=404/u,
@@ -926,6 +941,58 @@ test('sanitizes the manager-consented anonymous public feed lifecycle', () => {
       ),
     /invalid element acceptance summary/u,
   );
+});
+
+test('sanitizes the closed public-feed consent failure boundary', () => {
+  const observation = {
+    phase: 'public-feed-browser-lifecycle',
+    status: 'failed',
+    publicFeedLifecycleStep: 'awaiting-consent-control',
+    publicFeedSettingsEnabled: true,
+    publicFeedSettingsUnpublished: true,
+    publicFeedTargetCalendarMatches: true,
+    publicFeedManagementTargetMatches: false,
+    publicFeedConsentCheckboxCount: 0,
+    publicFeedConsentCheckboxVisible: false,
+    publicFeedPublishButtonCount: 1,
+    publicFeedPublishDisabledBeforeConsent: true,
+    publicConsentGateObserved: false,
+    publicManagerPublishSucceeded: false,
+    publicUrlOriginAndRouteMatch: false,
+    anonymousGetContainsCanonicalEvent: false,
+    anonymousHeadMatchesGet: false,
+    unpublishSucceeded: false,
+    anonymousGetDeniedAfterUnpublish: false,
+    anonymousHeadDeniedAfterUnpublish: false,
+  };
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(observation),
+    sourceSha,
+  );
+
+  assert.match(
+    summary,
+    /public_feed_lifecycle_step=awaiting-consent-control public_feed_settings_enabled=true public_feed_settings_unpublished=true public_feed_target_calendar_matches=true public_feed_management_target_matches=false public_feed_consent_checkbox_count=0 public_feed_consent_checkbox_visible=false public_feed_publish_button_count=1 public_feed_publish_disabled_before_consent=true/u,
+  );
+  assert.doesNotMatch(
+    summary,
+    /https?:\/\/|checkbox-name|calendar-title|private/iu,
+  );
+
+  for (const invalid of [
+    { ...observation, publicFeedLifecycleStep: 'future-stage-private-data' },
+    { ...observation, publicFeedConsentCheckboxCount: 11 },
+    { ...observation, publicFeedConsentCheckboxVisible: 'private text' },
+    { ...observation, publicFeedManagementTargetMatches: 'private text' },
+    { ...observation, calendarId: 'synthetic-calendar-id' },
+    { ...observation, roomId: '!synthetic:example.test' },
+    { ...observation, phase: 'runtime-ready' },
+  ]) {
+    assert.throws(
+      () => sanitizeElementAcceptance(JSON.stringify(invalid), sourceSha),
+      /invalid element acceptance summary/u,
+    );
+  }
 });
 
 test('reports only closed backend codes for public-feed management 503 responses', () => {

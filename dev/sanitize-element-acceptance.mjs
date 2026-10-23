@@ -243,6 +243,46 @@ const PUBLIC_FEED_BROWSER_ERROR_CODES = new Set([
   'room-calendar-caldav-disabled',
   'unclassified',
 ]);
+const PUBLIC_FEED_BROWSER_DIAGNOSTIC_FIELDS = [
+  'publicFeedLifecycleStep',
+  'publicFeedSettingsEnabled',
+  'publicFeedSettingsUnpublished',
+  'publicFeedTargetCalendarMatches',
+  'publicFeedManagementTargetMatches',
+  'publicFeedConsentCheckboxCount',
+  'publicFeedConsentCheckboxVisible',
+  'publicFeedConsentCheckboxChecked',
+  'publicFeedPublishButtonCount',
+  'publicFeedPublishDisabledBeforeConsent',
+  'publicFeedPublishDisabledAfterConsent',
+];
+const PUBLIC_FEED_BROWSER_LIFECYCLE_STEPS = new Set([
+  'opening-dialog',
+  'loading-settings',
+  'selecting-target-calendar',
+  'awaiting-consent-control',
+  'toggling-consent',
+  'verifying-consent',
+  'publishing',
+  'checking-public-feed',
+  'unpublishing',
+  'checking-revocation',
+  'complete',
+]);
+const PUBLIC_FEED_BROWSER_DIAGNOSTIC_BOOLEAN_FIELDS = [
+  'publicFeedSettingsEnabled',
+  'publicFeedSettingsUnpublished',
+  'publicFeedTargetCalendarMatches',
+  'publicFeedManagementTargetMatches',
+  'publicFeedConsentCheckboxVisible',
+  'publicFeedConsentCheckboxChecked',
+  'publicFeedPublishDisabledBeforeConsent',
+  'publicFeedPublishDisabledAfterConsent',
+];
+const PUBLIC_FEED_BROWSER_DIAGNOSTIC_COUNT_FIELDS = [
+  'publicFeedConsentCheckboxCount',
+  'publicFeedPublishButtonCount',
+];
 const PUBLIC_FEED_BROWSER_BOOLEAN_FIELDS = [
   'publicConsentGateObserved',
   'publicManagerPublishSucceeded',
@@ -1247,6 +1287,7 @@ const ALLOWED_KEYS = new Set([
   'allDayScheduleReadback',
   ...PUBLIC_FEED_BROWSER_STATUS_FIELDS,
   ...PUBLIC_FEED_BROWSER_ERROR_FIELDS,
+  ...PUBLIC_FEED_BROWSER_DIAGNOSTIC_FIELDS,
   ...PUBLIC_FEED_BROWSER_BOOLEAN_FIELDS,
   'canaryDelivered',
   'roomMentioned',
@@ -2841,6 +2882,25 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         record.status === 'failed' &&
         record.publicFeedManagementGetStatus === 503 &&
         !Object.hasOwn(record, 'publicFeedManagementErrorCode')) ||
+      PUBLIC_FEED_BROWSER_DIAGNOSTIC_FIELDS.some(
+        (key) =>
+          Object.hasOwn(record, key) &&
+          record.phase !== 'public-feed-browser-lifecycle',
+      ) ||
+      (Object.hasOwn(record, 'publicFeedLifecycleStep') &&
+        !PUBLIC_FEED_BROWSER_LIFECYCLE_STEPS.has(
+          record.publicFeedLifecycleStep,
+        )) ||
+      PUBLIC_FEED_BROWSER_DIAGNOSTIC_BOOLEAN_FIELDS.some(
+        (key) => Object.hasOwn(record, key) && typeof record[key] !== 'boolean',
+      ) ||
+      PUBLIC_FEED_BROWSER_DIAGNOSTIC_COUNT_FIELDS.some(
+        (key) =>
+          Object.hasOwn(record, key) &&
+          (!Number.isInteger(record[key]) ||
+            record[key] < 0 ||
+            record[key] > 10),
+      ) ||
       (record.phase === 'public-feed-browser-lifecycle' &&
         record.status === 'passed' &&
         (record.publicFeedManagementGetStatus !== 200 ||
@@ -4084,6 +4144,14 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       }
     }
     if (phase === 'public-feed-browser-lifecycle') {
+      for (const key of PUBLIC_FEED_BROWSER_DIAGNOSTIC_FIELDS) {
+        if (!Object.hasOwn(record, key)) continue;
+        const outputKey = key.replace(
+          /[A-Z]/gu,
+          (letter) => `_${letter.toLowerCase()}`,
+        );
+        fields.push(`${outputKey}=${record[key]}`);
+      }
       for (const key of PUBLIC_FEED_BROWSER_STATUS_FIELDS) {
         if (!Object.hasOwn(record, key)) continue;
         const outputKey = key.replace(

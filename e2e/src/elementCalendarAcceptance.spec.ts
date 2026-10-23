@@ -173,6 +173,17 @@ type ReminderConfigurationObservation = {
 };
 
 type PublicFeedBrowserObservation = {
+  publicFeedLifecycleStep: PublicFeedLifecycleStep;
+  publicFeedSettingsEnabled?: boolean;
+  publicFeedSettingsUnpublished?: boolean;
+  publicFeedTargetCalendarMatches?: boolean;
+  publicFeedManagementTargetMatches?: boolean;
+  publicFeedConsentCheckboxCount?: number;
+  publicFeedConsentCheckboxVisible?: boolean;
+  publicFeedConsentCheckboxChecked?: boolean;
+  publicFeedPublishButtonCount?: number;
+  publicFeedPublishDisabledBeforeConsent?: boolean;
+  publicFeedPublishDisabledAfterConsent?: boolean;
   publicFeedManagementGetStatus?: number;
   publicFeedManagementErrorCode?: PublicFeedManagementErrorCode;
   publicFeedPublishStatus?: number;
@@ -201,6 +212,19 @@ const PUBLIC_FEED_MANAGEMENT_ERROR_CODES = [
 type PublicFeedManagementErrorCode =
   | (typeof PUBLIC_FEED_MANAGEMENT_ERROR_CODES)[number]
   | 'unclassified';
+
+type PublicFeedLifecycleStep =
+  | 'opening-dialog'
+  | 'loading-settings'
+  | 'selecting-target-calendar'
+  | 'awaiting-consent-control'
+  | 'toggling-consent'
+  | 'verifying-consent'
+  | 'publishing'
+  | 'checking-public-feed'
+  | 'unpublishing'
+  | 'checking-revocation'
+  | 'complete';
 
 const PUBLIC_FEED_MANAGEMENT_ERROR_CODE_SET = new Set<string>(
   PUBLIC_FEED_MANAGEMENT_ERROR_CODES,
@@ -5996,6 +6020,21 @@ async function waitForPublicFeedPublicationResponse(
   );
 }
 
+function publicFeedManagementTargetMatches(response: Response): boolean {
+  try {
+    const url = new URL(response.url());
+    return (
+      url.origin === new URL(fixture.gatewayUrl).origin &&
+      url.pathname === '/v1/calendar-feeds/publication' &&
+      url.searchParams.get('target') === 'room' &&
+      url.searchParams.get('calendarId') === fixture.calendarId &&
+      url.searchParams.get('roomId') === fixture.teamRoomId
+    );
+  } catch {
+    return false;
+  }
+}
+
 async function fetchAnonymousPublicFeed(
   url: string,
   method: 'GET' | 'HEAD',
@@ -6036,6 +6075,7 @@ async function verifyPublicFeedBrowserLifecycle(
   activePhase = 'public-feed-browser-lifecycle';
   record(activePhase, 'started');
   const observation: PublicFeedBrowserObservation = {
+    publicFeedLifecycleStep: 'opening-dialog',
     publicConsentGateObserved: false,
     publicManagerPublishSucceeded: false,
     publicUrlOriginAndRouteMatch: false,
@@ -6054,6 +6094,7 @@ async function verifyPublicFeedBrowserLifecycle(
       exact: true,
     });
     await expect(publicFeedButton).toBeVisible();
+    observation.publicFeedLifecycleStep = 'loading-settings';
     const initialSettingsResponse = waitForPublicFeedPublicationResponse(
       page,
       'GET',
@@ -6064,6 +6105,7 @@ async function verifyPublicFeedBrowserLifecycle(
     });
     await expect(dialog).toBeVisible();
     const settingsResponse = await initialSettingsResponse;
+    let managementResponse = settingsResponse;
     observation.publicFeedManagementGetStatus = settingsResponse.status();
     let managementState: unknown = await settingsResponse
       .json()
@@ -6073,10 +6115,11 @@ async function verifyPublicFeedBrowserLifecycle(
         classifyPublicFeedManagementErrorCode(managementState);
     }
 
+    observation.publicFeedLifecycleStep = 'selecting-target-calendar';
     const calendarSelect = dialog.getByRole('combobox', {
       name: 'Calendar',
     });
-    const selectedCalendarName = (await calendarSelect.innerText()).trim();
+    let selectedCalendarName = (await calendarSelect.innerText()).trim();
     if (selectedCalendarName !== 'Synthetic team calendar') {
       const targetSettingsResponse = waitForPublicFeedPublicationResponse(
         page,
@@ -6090,13 +6133,23 @@ async function verifyPublicFeedBrowserLifecycle(
         })
         .click();
       const response = await targetSettingsResponse;
+      managementResponse = response;
       observation.publicFeedManagementGetStatus = response.status();
       managementState = await response.json().catch(() => null);
       if (response.status() === 503) {
         observation.publicFeedManagementErrorCode =
           classifyPublicFeedManagementErrorCode(managementState);
       }
+      selectedCalendarName = (await calendarSelect.innerText()).trim();
     }
+    observation.publicFeedTargetCalendarMatches =
+      selectedCalendarName === 'Synthetic team calendar';
+    observation.publicFeedManagementTargetMatches =
+      publicFeedManagementTargetMatches(managementResponse);
+    observation.publicFeedSettingsEnabled =
+      isRecord(managementState) && managementState.enabled === true;
+    observation.publicFeedSettingsUnpublished =
+      isRecord(managementState) && managementState.published === false;
 
     const managerCanPublish =
       isRecord(managementState) &&
@@ -6110,10 +6163,38 @@ async function verifyPublicFeedBrowserLifecycle(
       name: 'Publish feed',
       exact: true,
     });
+    observation.publicFeedLifecycleStep = 'awaiting-consent-control';
+    observation.publicFeedConsentCheckboxCount = Math.min(
+      await consent.count(),
+      10,
+    );
+    observation.publicFeedConsentCheckboxVisible =
+      observation.publicFeedConsentCheckboxCount > 0 &&
+      (await consent.isVisible());
+    observation.publicFeedConsentCheckboxChecked =
+      observation.publicFeedConsentCheckboxCount > 0 &&
+      (await consent.isChecked());
+    observation.publicFeedPublishButtonCount = Math.min(
+      await publishButton.count(),
+      10,
+    );
     await expect(consent).toBeVisible();
+    observation.publicFeedConsentCheckboxCount = Math.min(
+      await consent.count(),
+      10,
+    );
+    observation.publicFeedConsentCheckboxVisible = await consent.isVisible();
+    observation.publicFeedConsentCheckboxChecked = await consent.isChecked();
     const publishDisabledBeforeConsent = await publishButton.isDisabled();
+    observation.publicFeedPublishDisabledBeforeConsent =
+      publishDisabledBeforeConsent;
+    observation.publicFeedLifecycleStep = 'toggling-consent';
     await consent.check();
+    observation.publicFeedLifecycleStep = 'verifying-consent';
+    observation.publicFeedConsentCheckboxChecked = await consent.isChecked();
     const publishEnabledAfterConsent = !(await publishButton.isDisabled());
+    observation.publicFeedPublishDisabledAfterConsent =
+      !publishEnabledAfterConsent;
     observation.publicConsentGateObserved =
       managerCanPublish &&
       publishDisabledBeforeConsent &&
@@ -6122,6 +6203,7 @@ async function verifyPublicFeedBrowserLifecycle(
       throw new Error('Manager publication consent gate was not observed');
     }
 
+    observation.publicFeedLifecycleStep = 'publishing';
     const publishResponsePromise = waitForPublicFeedPublicationResponse(
       page,
       'PUT',
@@ -6142,6 +6224,7 @@ async function verifyPublicFeedBrowserLifecycle(
       throw new Error('Manager publication did not succeed');
     }
 
+    observation.publicFeedLifecycleStep = 'checking-public-feed';
     const publicUrlInput = dialog.getByRole('textbox', {
       name: 'Public feed URL',
       exact: true,
@@ -6213,6 +6296,7 @@ async function verifyPublicFeedBrowserLifecycle(
       throw new Error('Anonymous public feed GET/HEAD did not match');
     }
 
+    observation.publicFeedLifecycleStep = 'unpublishing';
     const unpublishResponsePromise = waitForPublicFeedPublicationResponse(
       page,
       'DELETE',
@@ -6229,6 +6313,7 @@ async function verifyPublicFeedBrowserLifecycle(
     }
     publicationCreated = false;
 
+    observation.publicFeedLifecycleStep = 'checking-revocation';
     const [revokedGet, revokedHead] = await Promise.all([
       fetchAnonymousPublicFeed(publicUrl, 'GET'),
       fetchAnonymousPublicFeed(publicUrl, 'HEAD'),
@@ -6246,6 +6331,7 @@ async function verifyPublicFeedBrowserLifecycle(
       throw new Error('Public feed remained available after unpublishing');
     }
 
+    observation.publicFeedLifecycleStep = 'complete';
     record(
       activePhase,
       'passed',
