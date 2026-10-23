@@ -260,8 +260,6 @@ const roomAlarmOption: CalendarRoomReminderAlarmOption = {
     isNegative: true,
   },
 };
-const theme = createTheme();
-
 function createLargeCalendarRepository(): InMemoryCalendarRepository {
   const calendar: Calendar = {
     id: 'synthetic-large',
@@ -588,17 +586,23 @@ async function start() {
   });
   registerDateRangeFormatter(i18next);
   setLocale(i18next.language);
-  const largeCalendarMode =
-    new URLSearchParams(window.location.search).get('mode') ===
-    'large-calendar';
+  const query = new URLSearchParams(window.location.search);
+  const largeCalendarMode = query.get('mode') === 'large-calendar';
+  // The gallery can render both palettes without changing other browser tests.
+  const theme = createTheme({
+    palette: {
+      mode:
+        query.get('mode') === 'gallery' && query.get('theme') === 'dark'
+          ? 'dark'
+          : 'light',
+    },
+  });
   const largeCalendarRepository = largeCalendarMode
     ? createLargeCalendarRepository()
     : undefined;
   if (largeCalendarMode) {
     observeLargeCalendarRender(
-      new URLSearchParams(window.location.search).get('view') === 'month'
-        ? 'month'
-        : 'list',
+      query.get('view') === 'month' ? 'month' : 'list',
     );
     performance.mark('synthetic-large-calendar-mount-start');
   }
