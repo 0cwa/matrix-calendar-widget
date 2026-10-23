@@ -678,6 +678,8 @@ def _network_error_class(error: BaseException) -> str:
         return "http_status"
     if isinstance(error, http.client.IncompleteRead):
         return "incomplete_transfer"
+    if isinstance(error, http.client.HTTPException):
+        return "invalid_response"
     if isinstance(error, urllib.error.URLError):
         reason = error.reason
         if isinstance(reason, BaseException) and reason is not error:
@@ -762,7 +764,13 @@ def _download(record: dict[str, Any], destination: Path, host: str, *, both_hash
         if failure.error_class == "network_error":
             raise _download_failure(artifact_id, failure) from None
         raise
-    except (OSError, urllib.error.URLError, ValueError, http.client.IncompleteRead) as error:
+    except (
+        OSError,
+        urllib.error.URLError,
+        ValueError,
+        http.client.IncompleteRead,
+        http.client.HTTPException,
+    ) as error:
         raise _download_failure(artifact_id, error) from None
     try:
         with response:
@@ -799,7 +807,13 @@ def _download(record: dict[str, Any], destination: Path, host: str, *, both_hash
                     while True:
                         try:
                             block = response.read(1024 * 1024)
-                        except (OSError, urllib.error.URLError, ValueError, http.client.IncompleteRead) as error:
+                        except (
+                            OSError,
+                            urllib.error.URLError,
+                            ValueError,
+                            http.client.IncompleteRead,
+                            http.client.HTTPException,
+                        ) as error:
                             raise _download_failure(artifact_id, error) from None
                         if not block:
                             break
@@ -826,7 +840,13 @@ def _download(record: dict[str, Any], destination: Path, host: str, *, both_hash
         if failure.error_class == "network_error" and failure.failed_artifact is None:
             raise _download_failure(artifact_id, failure) from None
         raise
-    except (OSError, urllib.error.URLError, ValueError, http.client.IncompleteRead) as error:
+    except (
+        OSError,
+        urllib.error.URLError,
+        ValueError,
+        http.client.IncompleteRead,
+        http.client.HTTPException,
+    ) as error:
         raise _download_failure(artifact_id, error) from None
     expected256 = record["sha256"]
     if written != record["size"] or sha256.hexdigest() != expected256:
