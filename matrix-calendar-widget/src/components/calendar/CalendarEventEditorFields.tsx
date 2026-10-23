@@ -644,7 +644,11 @@ export function CalendarEventEditorFields({
 
                     if (form && saveIntent && form.reportValidity()) {
                       form.dataset.saveIntent = saveIntent;
-                      form.requestSubmit();
+                      try {
+                        form.requestSubmit();
+                      } finally {
+                        delete form.dataset.saveIntent;
+                      }
                     }
                   }}
                   size="small"
