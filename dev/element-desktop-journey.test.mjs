@@ -3503,7 +3503,7 @@ test('records only bounded child and evidence classification enums', () => {
       }),
       {
         evidenceState: 'invalid',
-        evidenceFailureCode: 'evidence_phase_record_rejected',
+        evidenceFailureCode: 'evidence_phase_record_shape_rejected',
       },
     );
     const unreadableTemp = join(runnerTemp, 'unreadable');
@@ -3625,6 +3625,10 @@ test('records only bounded child and evidence classification enums', () => {
       'evidence_login_record_rejected',
       'evidence_progress_refresh_sequence_rejected',
       'evidence_phase_record_rejected',
+      'evidence_phase_record_object_rejected',
+      'evidence_phase_record_shape_rejected',
+      'evidence_phase_record_order_rejected',
+      'evidence_phase_record_diagnostic_rejected',
       'evidence_final_summary_cross_check_rejected',
     ]) {
       writeDesktopJourneyParentDiagnostic({
@@ -3723,6 +3727,10 @@ test('classifies fixed evidence validation stages without exposing input', () =>
         expected: 'evidence_input_bounds_rejected',
       },
       {
+        input: 'null',
+        expected: 'evidence_phase_record_object_rejected',
+      },
+      {
         input: JSON.stringify({ loginStep: 'private-evidence-sentinel' }),
         expected: 'evidence_login_record_rejected',
       },
@@ -3737,7 +3745,24 @@ test('classifies fixed evidence validation stages without exposing input', () =>
       },
       {
         input: JSON.stringify({ privateValue: 'private-evidence-sentinel' }),
-        expected: 'evidence_phase_record_rejected',
+        expected: 'evidence_phase_record_shape_rejected',
+      },
+      {
+        input:
+          '{"phase":"desktop-login","status":"passed"}\n' +
+          '{"phase":"desktop-login","status":"passed"}',
+        expected: 'evidence_phase_record_order_rejected',
+      },
+      {
+        input: JSON.stringify({
+          phase: 'desktop-room-widget-read',
+          status: 'failed',
+          failurePoint: 'room-navigation',
+          roomNavigationDiagnostic: {
+            privateValue: 'private-evidence-sentinel',
+          },
+        }),
+        expected: 'evidence_phase_record_diagnostic_rejected',
       },
       {
         input: JSON.stringify({ phase: 'desktop-login', status: 'passed' }),
@@ -3801,7 +3826,7 @@ test('emits a sanitized unavailable summary when evidence validation fails', () 
       childOutcome: 'exited',
       childExitStatus: 23,
       evidenceState: 'invalid',
-      evidenceFailureCode: 'evidence_phase_record_rejected',
+      evidenceFailureCode: 'evidence_phase_record_shape_rejected',
     });
 
     const scriptPath = fileURLToPath(
@@ -3834,7 +3859,7 @@ test('emits a sanitized unavailable summary when evidence validation fails', () 
       childOutcome: 'exited',
       childExitStatus: 23,
       evidenceState: 'invalid',
-      evidenceFailureCode: 'evidence_phase_record_rejected',
+      evidenceFailureCode: 'evidence_phase_record_shape_rejected',
     });
     assert.equal(summary.cases['desktop-a-refresh'], 'not_run');
   });
@@ -3849,7 +3874,7 @@ test('declares the schema-22 CLI parent diagnostic shape', () => {
   assert.match(declarations, /DesktopJourneyEvidenceFailureCode/u);
   assert.match(
     declarations,
-    /'path_file_rejected'[\s\S]*?'json_parse_failed'[\s\S]*?'evidence_validation_failed'[\s\S]*?'evidence_input_bounds_rejected'[\s\S]*?'evidence_login_record_rejected'[\s\S]*?'evidence_progress_refresh_sequence_rejected'[\s\S]*?'evidence_phase_record_rejected'[\s\S]*?'evidence_final_summary_cross_check_rejected'/u,
+    /'path_file_rejected'[\s\S]*?'json_parse_failed'[\s\S]*?'evidence_validation_failed'[\s\S]*?'evidence_input_bounds_rejected'[\s\S]*?'evidence_login_record_rejected'[\s\S]*?'evidence_progress_refresh_sequence_rejected'[\s\S]*?'evidence_phase_record_rejected'[\s\S]*?'evidence_phase_record_object_rejected'[\s\S]*?'evidence_phase_record_shape_rejected'[\s\S]*?'evidence_phase_record_order_rejected'[\s\S]*?'evidence_phase_record_diagnostic_rejected'[\s\S]*?'evidence_final_summary_cross_check_rejected'/u,
   );
   assert.match(
     declarations,

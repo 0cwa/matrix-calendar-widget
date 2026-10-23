@@ -374,10 +374,13 @@ const DESKTOP_EVIDENCE_FAILURE_CODES = new Set([
   'evidence_login_record_rejected',
   'evidence_progress_refresh_sequence_rejected',
   'evidence_phase_record_rejected',
+  'evidence_phase_record_object_rejected',
+  'evidence_phase_record_shape_rejected',
+  'evidence_phase_record_order_rejected',
+  'evidence_phase_record_diagnostic_rejected',
   'evidence_final_summary_cross_check_rejected',
 ]);
 const MAX_DIAGNOSTIC_ROW_BYTES = 256;
-const MAX_PROGRESS_ROW_BYTES = 512;
 const MAX_REFRESH_ROOM_NAVIGATION_ROW_BYTES = 1_024;
 const MAX_PROGRESS_ROWS = DESKTOP_A_REFRESH_FAILURE_POINTS.length * 2 + 1;
 const MAX_EVIDENCE_ROWS = DESKTOP_JOURNEY_PHASES.length + MAX_PROGRESS_ROWS + 6;
@@ -1868,7 +1871,7 @@ function parseEvidence(input, expectedSourceSha = null) {
       throw error;
     }
     if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-      invalidEvidenceAt('evidence_phase_record_rejected');
+      invalidEvidenceAt('evidence_phase_record_object_rejected');
     }
     const keys = Object.keys(value).sort().join(',');
     if (
@@ -2133,7 +2136,7 @@ function parseEvidence(input, expectedSourceSha = null) {
       continue;
     }
     if (Object.hasOwn(value, 'sourceSha')) {
-      invalidEvidenceAt('evidence_phase_record_rejected');
+      invalidEvidenceAt('evidence_phase_record_shape_rejected');
     }
     const phaseKeys = Object.keys(value).sort().join(',');
     const hasFailurePoint = Object.hasOwn(value, 'failurePoint');
@@ -2158,7 +2161,7 @@ function parseEvidence(input, expectedSourceSha = null) {
       value,
       'desktopRefreshRoomNavigationDiagnostic',
     );
-    if (
+    const phaseRecordShapeRejected =
       (phaseKeys !== 'phase,status' &&
         phaseKeys !== 'failurePoint,phase,status' &&
         phaseKeys !== 'failurePoint,gatewayReadDiagnostic,phase,status' &&
@@ -2181,18 +2184,12 @@ function parseEvidence(input, expectedSourceSha = null) {
       (hasErrorClass &&
         (value.phase !== 'desktop-a-refresh' ||
           value.status !== 'failed' ||
-          !DESKTOP_JOURNEY_ERROR_CLASS_SET.has(value.errorClass))) ||
-      (hasRefreshRoomNavigationDiagnostic &&
-        (value.phase !== 'desktop-a-refresh' ||
-          value.status !== 'failed' ||
-          value.failurePoint !== 'desktop-refresh-room-navigation' ||
-          desktopRefreshProgress?.failurePoint !==
-            'desktop-refresh-room-navigation' ||
-          desktopRefreshRoomNavigationDiagnostic?.clickAttempted !== true ||
-          !validDesktopRefreshRoomNavigationDiagnostic(
-            value.desktopRefreshRoomNavigationDiagnostic,
-            'failed',
-          ))) ||
+          !DESKTOP_JOURNEY_ERROR_CLASS_SET.has(value.errorClass)));
+    if (phaseRecordShapeRejected) {
+      invalidEvidenceAt('evidence_phase_record_shape_rejected');
+    }
+
+    const phaseRecordOrderRejected =
       (value.phase === 'desktop-a-refresh' &&
         (desktopRefreshProgress === null ||
           desktopRefreshProgress.phase !== value.phase ||
@@ -2211,6 +2208,23 @@ function parseEvidence(input, expectedSourceSha = null) {
         outcomes.get('desktop-a-refresh') !== 'passed') ||
       desktopChildCompletionCount > 0 ||
       playwrightResultCount > 0 ||
+      outcomes.has(value.phase);
+    if (phaseRecordOrderRejected) {
+      invalidEvidenceAt('evidence_phase_record_order_rejected');
+    }
+
+    const phaseRecordDiagnosticRejected =
+      (hasRefreshRoomNavigationDiagnostic &&
+        (value.phase !== 'desktop-a-refresh' ||
+          value.status !== 'failed' ||
+          value.failurePoint !== 'desktop-refresh-room-navigation' ||
+          desktopRefreshProgress?.failurePoint !==
+            'desktop-refresh-room-navigation' ||
+          desktopRefreshRoomNavigationDiagnostic?.clickAttempted !== true ||
+          !validDesktopRefreshRoomNavigationDiagnostic(
+            value.desktopRefreshRoomNavigationDiagnostic,
+            'failed',
+          ))) ||
       (hasGatewayReadDiagnostic &&
         (gatewayReadDiagnostic !== null ||
           !hasFailurePoint ||
@@ -2262,10 +2276,9 @@ function parseEvidence(input, expectedSourceSha = null) {
           !validWebBEditSaveDiagnostic(
             value.webBEditSaveDiagnostic,
             value.failurePoint,
-          ))) ||
-      outcomes.has(value.phase)
-    ) {
-      invalidEvidenceAt('evidence_phase_record_rejected');
+          )));
+    if (phaseRecordDiagnosticRejected) {
+      invalidEvidenceAt('evidence_phase_record_diagnostic_rejected');
     }
     if (hasFailurePoint) {
       failurePoint = { phase: value.phase, point: value.failurePoint };

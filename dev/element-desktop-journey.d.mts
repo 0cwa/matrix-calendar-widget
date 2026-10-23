@@ -455,6 +455,10 @@ export type DesktopJourneyEvidenceFailureCode =
   | 'evidence_login_record_rejected'
   | 'evidence_progress_refresh_sequence_rejected'
   | 'evidence_phase_record_rejected'
+  | 'evidence_phase_record_object_rejected'
+  | 'evidence_phase_record_shape_rejected'
+  | 'evidence_phase_record_order_rejected'
+  | 'evidence_phase_record_diagnostic_rejected'
   | 'evidence_final_summary_cross_check_rejected';
 
 export type DesktopJourneyEvidenceClassification =
