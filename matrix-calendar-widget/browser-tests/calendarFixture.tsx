@@ -601,7 +601,9 @@ async function start() {
     ? createLargeCalendarRepository()
     : undefined;
   if (largeCalendarMode) {
-    observeLargeCalendarRender(query.get('view') === 'month' ? 'month' : 'list');
+    observeLargeCalendarRender(
+      query.get('view') === 'month' ? 'month' : 'list',
+    );
     performance.mark('synthetic-large-calendar-mount-start');
   }
   createRoot(document.getElementById('root')!).render(
