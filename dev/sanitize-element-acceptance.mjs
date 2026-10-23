@@ -2903,6 +2903,9 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       ) ||
       (record.phase === 'public-feed-browser-lifecycle' &&
         record.status === 'passed' &&
+        record.publicFeedManagementTargetMatches !== true) ||
+      (record.phase === 'public-feed-browser-lifecycle' &&
+        record.status === 'passed' &&
         (record.publicFeedManagementGetStatus !== 200 ||
           record.publicFeedPublishStatus !== 200 ||
           record.publicFeedGetStatus !== 200 ||

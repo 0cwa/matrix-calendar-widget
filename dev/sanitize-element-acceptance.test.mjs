@@ -866,38 +866,39 @@ test('requires selected-user Matrix mentions to exclude a room broadcast', () =>
 });
 
 test('sanitizes the manager-consented anonymous public feed lifecycle', () => {
+  const successfulObservation = {
+    phase: 'public-feed-browser-lifecycle',
+    status: 'passed',
+    httpStatus: 404,
+    publicFeedLifecycleStep: 'complete',
+    publicFeedSettingsEnabled: true,
+    publicFeedSettingsUnpublished: true,
+    publicFeedTargetCalendarMatches: true,
+    publicFeedManagementTargetMatches: true,
+    publicFeedConsentCheckboxCount: 1,
+    publicFeedConsentCheckboxVisible: true,
+    publicFeedConsentCheckboxChecked: true,
+    publicFeedPublishButtonCount: 1,
+    publicFeedPublishDisabledBeforeConsent: true,
+    publicFeedPublishDisabledAfterConsent: false,
+    publicFeedManagementGetStatus: 200,
+    publicFeedPublishStatus: 200,
+    publicFeedGetStatus: 200,
+    publicFeedHeadStatus: 200,
+    publicFeedUnpublishStatus: 200,
+    publicFeedRevokedGetStatus: 404,
+    publicFeedRevokedHeadStatus: 404,
+    publicConsentGateObserved: true,
+    publicManagerPublishSucceeded: true,
+    publicUrlOriginAndRouteMatch: true,
+    anonymousGetContainsCanonicalEvent: true,
+    anonymousHeadMatchesGet: true,
+    unpublishSucceeded: true,
+    anonymousGetDeniedAfterUnpublish: true,
+    anonymousHeadDeniedAfterUnpublish: true,
+  };
   const summary = sanitizeElementAcceptance(
-    JSON.stringify({
-      phase: 'public-feed-browser-lifecycle',
-      status: 'passed',
-      httpStatus: 404,
-      publicFeedLifecycleStep: 'complete',
-      publicFeedSettingsEnabled: true,
-      publicFeedSettingsUnpublished: true,
-      publicFeedTargetCalendarMatches: true,
-      publicFeedManagementTargetMatches: true,
-      publicFeedConsentCheckboxCount: 1,
-      publicFeedConsentCheckboxVisible: true,
-      publicFeedConsentCheckboxChecked: true,
-      publicFeedPublishButtonCount: 1,
-      publicFeedPublishDisabledBeforeConsent: true,
-      publicFeedPublishDisabledAfterConsent: false,
-      publicFeedManagementGetStatus: 200,
-      publicFeedPublishStatus: 200,
-      publicFeedGetStatus: 200,
-      publicFeedHeadStatus: 200,
-      publicFeedUnpublishStatus: 200,
-      publicFeedRevokedGetStatus: 404,
-      publicFeedRevokedHeadStatus: 404,
-      publicConsentGateObserved: true,
-      publicManagerPublishSucceeded: true,
-      publicUrlOriginAndRouteMatch: true,
-      anonymousGetContainsCanonicalEvent: true,
-      anonymousHeadMatchesGet: true,
-      unpublishSucceeded: true,
-      anonymousGetDeniedAfterUnpublish: true,
-      anonymousHeadDeniedAfterUnpublish: true,
-    }),
+    JSON.stringify(successfulObservation),
     sourceSha,
   );
 
@@ -914,6 +915,18 @@ test('sanitizes the manager-consented anonymous public feed lifecycle', () => {
     /public_consent_gate_observed=true public_manager_publish_succeeded=true public_url_origin_and_route_match=true anonymous_get_contains_canonical_event=true anonymous_head_matches_get=true unpublish_succeeded=true anonymous_get_denied_after_unpublish=true anonymous_head_denied_after_unpublish=true/u,
   );
   assert.doesNotMatch(summary, /https?:\/\/|feed-url|signature|token-path/iu);
+
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify({
+          ...successfulObservation,
+          publicFeedManagementTargetMatches: false,
+        }),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
 
   assert.throws(
     () =>

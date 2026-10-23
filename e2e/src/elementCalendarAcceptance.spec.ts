@@ -6150,6 +6150,11 @@ async function verifyPublicFeedBrowserLifecycle(
       isRecord(managementState) && managementState.enabled === true;
     observation.publicFeedSettingsUnpublished =
       isRecord(managementState) && managementState.published === false;
+    if (!observation.publicFeedManagementTargetMatches) {
+      throw new Error(
+        'Public feed management target did not match the fixture',
+      );
+    }
 
     const managerCanPublish =
       isRecord(managementState) &&
