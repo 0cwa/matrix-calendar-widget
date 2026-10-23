@@ -27,7 +27,12 @@ const outputDir = path.resolve(
 );
 
 test('desktop month view', async ({ page }) => {
-  await captureThemes(page, 'month-desktop.png', { width: 1280, height: 800 }, 'month');
+  await captureThemes(
+    page,
+    'month-desktop.png',
+    { width: 1280, height: 800 },
+    'month',
+  );
 });
 
 test('desktop event details', async ({ page }) => {
@@ -37,14 +42,24 @@ test('desktop event details', async ({ page }) => {
     { width: 1024, height: 760 },
     'month',
     async (page) => {
-      await page.getByRole('button', { name: /Sprint planning/ }).first().click();
-      await expect(page.getByRole('dialog', { name: 'Sprint planning' })).toBeVisible();
+      await page
+        .getByRole('button', { name: /Sprint planning/ })
+        .first()
+        .click();
+      await expect(
+        page.getByRole('dialog', { name: 'Sprint planning' }),
+      ).toBeVisible();
     },
   );
 });
 
 test('narrow list view', async ({ page }) => {
-  await captureThemes(page, 'mobile-list.png', { width: 420, height: 930 }, 'list');
+  await captureThemes(
+    page,
+    'mobile-list.png',
+    { width: 420, height: 930 },
+    'list',
+  );
 });
 
 test('narrow create event dialog', async ({ page }) => {
@@ -55,7 +70,9 @@ test('narrow create event dialog', async ({ page }) => {
     'list',
     async (page) => {
       await page.getByRole('button', { name: 'Create event' }).click();
-      await expect(page.getByRole('dialog', { name: 'Create event' })).toBeVisible();
+      await expect(
+        page.getByRole('dialog', { name: 'Create event' }),
+      ).toBeVisible();
     },
   );
 });
@@ -92,7 +109,7 @@ async function captureThemes(
   }
 
   const [light, dark] = screenshots;
-  expect(light.equals(dark), 'light and dark captures should differ').toBe(false);
+  expect(light.equals(dark)).toBe(false);
   const composite = await composeDiagonal(page, light, dark);
   await mkdir(outputDir, { recursive: true });
   await writeFile(path.join(outputDir, name), composite);
@@ -120,7 +137,9 @@ async function composeDiagonal(
         lightImage.naturalWidth !== darkImage.naturalWidth ||
         lightImage.naturalHeight !== darkImage.naturalHeight
       ) {
-        throw new Error('Light/dark gallery screenshots have different dimensions');
+        throw new Error(
+          'Light/dark gallery screenshots have different dimensions',
+        );
       }
 
       const canvas = document.createElement('canvas');
@@ -139,7 +158,7 @@ async function composeDiagonal(
       context.closePath();
       context.clip();
       context.drawImage(lightImage, 0, 0);
-      return canvas.toDataURL('image/png').slice('data:image/png;base64,'.length);
+      return canvas.toDataURL('image/png').split(',')[1];
     },
     [light.toString('base64'), dark.toString('base64')],
   );
@@ -168,7 +187,8 @@ async function openGallery(
   // even when this workflow is run years after the fictional event dates.
   await page.clock.setFixedTime(new Date('2026-10-21T10:00:00.000Z'));
   await page.setViewportSize(viewport);
-  await page.goto('/browser-tests/index.html?mode=gallery&view=' + view + '&theme=' + theme);
+  const search = new URLSearchParams({ mode: 'gallery', view, theme });
+  await page.goto('/browser-tests/index.html?' + search.toString());
   await expect(page.getByTestId('gallery-root')).toBeVisible();
   await expect(
     page.getByRole('button', { name: /Sprint planning/ }).first(),
