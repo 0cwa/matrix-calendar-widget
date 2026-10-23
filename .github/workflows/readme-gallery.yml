@@ -4,6 +4,15 @@ name: Refresh README gallery
 # PRs touching the gallery run captures for review without publishing.
 on:
   workflow_dispatch:
+    inputs:
+      profile:
+        description: Select the normal gallery capture or the Thunderbird startup-only smoke.
+        required: true
+        type: choice
+        default: gallery
+        options:
+          - gallery
+          - calendar-client-smoke
   pull_request:
     paths:
       - '.github/workflows/readme-gallery.yml'
@@ -16,13 +25,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: readme-gallery-${{ github.event_name }}-${{ github.ref }}
+  group: readme-gallery-${{ github.event_name }}-${{ github.ref }}-${{ inputs.profile || 'gallery' }}
   cancel-in-progress: true
 
 jobs:
   screenshots:
     name: Capture gallery screenshots
-    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.profile == 'gallery')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -64,7 +73,7 @@ jobs:
   publish:
     name: Publish screenshot assets
     needs: screenshots
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.profile == 'gallery'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -117,3 +126,66 @@ jobs:
             git commit -m "docs: refresh README gallery from ${GITHUB_SHA:0:12}"
             git push origin HEAD:refs/heads/readme-gallery
           fi
+
+  calendar-client-smoke:
+    name: Thunderbird Calendar-tab startup smoke (not CalDAV qualification)
+    if: github.event_name == 'workflow_dispatch' && inputs.profile == 'calendar-client-smoke'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install bubblewrap from the Ubuntu runner repositories if needed
+        run: |
+          if ! command -v bwrap >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install --yes --no-install-recommends bubblewrap
+          fi
+          command -v bwrap
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+
+      - name: Check rootless smoke isolation
+        id: tb_preflight
+        run: python -B dev/thunderbird-calendar-smoke.py preflight
+
+      - name: Download and prepare pinned Thunderbird artifacts
+        id: tb_prepare
+        run: python -B dev/thunderbird-calendar-smoke.py prepare
+
+      - name: Start Thunderbird headlessly and check the Calendar tab
+        id: tb_smoke
+        run: python -B dev/thunderbird-calendar-smoke.py smoke
+
+      - name: Finalize closed smoke evidence
+        if: always()
+        env:
+          TB_PREFLIGHT_OUTCOME: ${{ steps.tb_preflight.outcome }}
+          TB_PREPARE_OUTCOME: ${{ steps.tb_prepare.outcome }}
+          TB_SMOKE_OUTCOME: ${{ steps.tb_smoke.outcome }}
+        run: python3 -B dev/thunderbird-calendar-smoke.py finalize
+
+      - name: Add the closed smoke summary to this run
+        if: always()
+        run: |
+          summary="$RUNNER_TEMP/thunderbird-calendar-smoke-summary.json"
+          if [[ ! -s "$summary" ]]; then
+            printf '{"schema":"thunderbird-calendar-startup-smoke@1","qualification_scope":"startup_only_not_caldav","source_sha":"%s","status":"failed","phase":"complete","error_class":"internal_error","archive_sha256_verified":false,"archive_sha512_verified":false,"python_artifacts_verified":false,"rootless_namespace_verified":false,"marionette_handshake":false,"main_window":false,"calendar_tab":false,"app_version":null}\n' "$GITHUB_SHA" > "$summary"
+            chmod 0600 "$summary"
+          fi
+          cat "$summary" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload closed smoke evidence only
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: thunderbird-calendar-startup-summary
+          path: ${{ runner.temp }}/thunderbird-calendar-smoke-summary.json
+          if-no-files-found: error
+          retention-days: 1

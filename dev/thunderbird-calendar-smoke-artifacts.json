@@ -1,0 +1,182 @@
+{
+  "schema": "thunderbird-calendar-smoke-artifacts@1",
+  "python": {
+    "implementation": "CPython",
+    "version": "3.13",
+    "platform": "Linux x86_64"
+  },
+  "thunderbird": {
+    "version": "158.0.1",
+    "filename": "thunderbird-158.0.1.tar.xz",
+    "size": 87464720,
+    "sha256": "1dc49731b31cc1d820b4dcec678ce2b01aa26c226f6e7cca4ba4807289763ce0",
+    "sha512": "b66a7a0353023500b3c89597d5feff5082f9666e071b9f3497c481da2b3205c2f09cf2a99877d84ecfcf48171dd3f1e7f19418fe8bea1433460d3f8b4c300c3c",
+    "url": "https://archive.mozilla.org/pub/thunderbird/releases/158.0.1/linux-x86_64/en-US/thunderbird-158.0.1.tar.xz"
+  },
+  "packages": [
+    {
+      "name": "setuptools",
+      "version": "84.2.1",
+      "filename": "setuptools-84.2.1-py3-none-any.whl",
+      "size": 876263,
+      "sha256": "ca140b45d5325a9478f880e351484f62fef15f336462e449ca0c03c873d589c2",
+      "url": "https://files.pythonhosted.org/packages/ef/55/6dc6d6bb953bdfc52519a0059592c52b6e3b8ad51cf8256dffceb55b0610/setuptools-84.2.1-py3-none-any.whl"
+    },
+    {
+      "name": "packaging",
+      "version": "26.3",
+      "filename": "packaging-26.3-py3-none-any.whl",
+      "size": 129956,
+      "sha256": "d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c",
+      "url": "https://files.pythonhosted.org/packages/63/34/ba1c580383c9eada3711951fef0795c80b829a078d72188184bcab9dd527/packaging-26.3-py3-none-any.whl"
+    },
+    {
+      "name": "wheel",
+      "version": "0.48.0",
+      "filename": "wheel-0.48.0-py3-none-any.whl",
+      "size": 33320,
+      "sha256": "3217dcc807155e45db462d7ef2431f5ddda0d7273b700d05a67b271ceb1287ab",
+      "url": "https://files.pythonhosted.org/packages/2e/29/69cfbb602cd91690c55d38ba9fe53e6a7e76a6fa647bf38f19c138d25449/wheel-0.48.0-py3-none-any.whl"
+    },
+    {
+      "name": "six",
+      "version": "1.17.0",
+      "filename": "six-1.17.0-py2.py3-none-any.whl",
+      "size": 11050,
+      "sha256": "4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274",
+      "url": "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl"
+    },
+    {
+      "name": "distro",
+      "version": "1.9.0",
+      "filename": "distro-1.9.0-py3-none-any.whl",
+      "size": 20277,
+      "sha256": "7bffd925d65168f85027d8da9af6bddab658135b840670a223589bc0c8ef02b2",
+      "url": "https://files.pythonhosted.org/packages/12/b3/231ffd4ab1fc9d679809f356cebee130ac7daa00d6d6f3206dd4fd137e9e/distro-1.9.0-py3-none-any.whl"
+    },
+    {
+      "name": "wcwidth",
+      "version": "0.9.3",
+      "filename": "wcwidth-0.9.3-py3-none-any.whl",
+      "size": 301629,
+      "sha256": "e3c9069c54a2da0bf4f6c7e65a735cb1da0f47601a15cb5fef7e4b6ffca4cf60",
+      "url": "https://files.pythonhosted.org/packages/bf/12/e10aad98050389ef674c9f69409e38ae086c2104912644e1f9143b394301/wcwidth-0.9.3-py3-none-any.whl"
+    },
+    {
+      "name": "jinxed",
+      "version": "2.1.0",
+      "filename": "jinxed-2.1.0-py2.py3-none-any.whl",
+      "size": 104999,
+      "sha256": "43b802d18b70e405d410fb66eb2837d1101e7e5ea922e666507bb43f34d11d09",
+      "url": "https://files.pythonhosted.org/packages/f1/1d/0a6be99b69bb448448403a45a241aff0dca751832ae54f027ed940d2eb52/jinxed-2.1.0-py2.py3-none-any.whl"
+    },
+    {
+      "name": "psutil",
+      "version": "7.2.2",
+      "filename": "psutil-7.2.2-cp36-abi3-manylinux2010_x86_64.manylinux_2_12_x86_64.manylinux_2_28_x86_64.whl",
+      "size": 155560,
+      "sha256": "076a2d2f923fd4821644f5ba89f059523da90dc9014e85f8e45a5774ca5bc6f9",
+      "url": "https://files.pythonhosted.org/packages/b5/70/5d8df3b09e25bce090399cf48e452d25c935ab72dad19406c77f4e828045/psutil-7.2.2-cp36-abi3-manylinux2010_x86_64.manylinux_2_12_x86_64.manylinux_2_28_x86_64.whl"
+    },
+    {
+      "name": "mozfile",
+      "version": "3.0.0",
+      "filename": "mozfile-3.0.0-py2.py3-none-any.whl",
+      "size": 8227,
+      "sha256": "3b0afcda2fa8b802ef657df80a56f21619008f61fcc14b756124028d7b7adf5c",
+      "url": "https://files.pythonhosted.org/packages/76/cd/fe6b0afa57fbf026631de1435682735dae0aa0ffbe3855f62806da31c55b/mozfile-3.0.0-py2.py3-none-any.whl"
+    },
+    {
+      "name": "mozterm",
+      "version": "1.0.0",
+      "filename": "mozterm-1.0.0-py2.py3-none-any.whl",
+      "size": 3428,
+      "sha256": "f5eafa25c23d391e2a2bb1dd45ee928fc9e3c811977a3856b5a5a0778011053c",
+      "url": "https://files.pythonhosted.org/packages/ab/eb/0c53684f5821d666372c6ea03d8c64558c8f74fda0fd5b24ae3dd2ab6a95/mozterm-1.0.0-py2.py3-none-any.whl"
+    },
+    {
+      "name": "mozsystemmonitor",
+      "version": "1.0.1",
+      "filename": "mozsystemmonitor-1.0.1-py2.py3-none-any.whl",
+      "size": 8546,
+      "sha256": "ab30a7587fdfee6041287f7b953911b07d0441d22bfa04bb4d82541c48bdcb02",
+      "url": "https://files.pythonhosted.org/packages/95/59/7a5f8f48946281c7a24bcecd722925493c0e67dabbc0826d215f2f45da9c/mozsystemmonitor-1.0.1-py2.py3-none-any.whl"
+    },
+    {
+      "name": "mozinfo",
+      "version": "1.2.3",
+      "filename": "mozinfo-1.2.3-py2.py3-none-any.whl",
+      "size": 7454,
+      "sha256": "90e0cfb377fc2cc3fad023d38c1f6d60a9135400ff5684a04abf79ca5cc3c521",
+      "url": "https://files.pythonhosted.org/packages/28/b2/0efcb9aa6d1362aa00b567c8f355f028332a5a533f80c45e5dacd12a5466/mozinfo-1.2.3-py2.py3-none-any.whl"
+    },
+    {
+      "name": "mozprofile",
+      "version": "3.0.0",
+      "filename": "mozprofile-3.0.0.tar.gz",
+      "size": 28864,
+      "sha256": "af661290cc91b15b6a6943d2bf5a2b0f708bc9e0289a8e0bf1da7593eaaab6d0",
+      "url": "https://files.pythonhosted.org/packages/00/eb/9de383c0ccfa3ac7ca21fe5d8fd861579c83c119d72ae1fe2d25e787c5b3/mozprofile-3.0.0.tar.gz"
+    },
+    {
+      "name": "mozprocess",
+      "version": "1.4.0",
+      "filename": "mozprocess-1.4.0-py2.py3-none-any.whl",
+      "size": 23105,
+      "sha256": "9a3b218dab0f1277275be7d89d673cd55b062519043a88a1a1a77eacefdfdf5e",
+      "url": "https://files.pythonhosted.org/packages/7c/a3/354e9f0c8b629319e6f6334beaf42e38eeb5ddc821c77e9082752b037d3f/mozprocess-1.4.0-py2.py3-none-any.whl"
+    },
+    {
+      "name": "blessed",
+      "version": "1.52.0",
+      "filename": "blessed-1.52.0-py3-none-any.whl",
+      "size": 142946,
+      "sha256": "1936f421f3feb130035a4629e6477d1432e33b2674ab2b9841292c74d479eac2",
+      "url": "https://files.pythonhosted.org/packages/29/1f/88e64e3b4a8299fcc47dd0db35276ca21c18fad4e8eb25afad546404c6/blessed-1.52.0-py3-none-any.whl"
+    },
+    {
+      "name": "mozlog",
+      "version": "8.1.0",
+      "filename": "mozlog-8.1.0-py2.py3-none-any.whl",
+      "size": 72222,
+      "sha256": "bc4a715e03896ebdb727d4df133d188cb53bcce18a1bbb90baa6bba6b83b007a",
+      "url": "https://files.pythonhosted.org/packages/d5/d0/2b4570c6328aefe8060f950577ff660bac1b4e57e9ba9821977c06f03f43/mozlog-8.1.0-py2.py3-none-any.whl"
+    },
+    {
+      "name": "mozdevice",
+      "version": "4.2.0",
+      "filename": "mozdevice-4.2.0-py2.py3-none-any.whl",
+      "size": 44473,
+      "sha256": "7fbb961cda951b2c2dd4abc2e8aef73dfd99aa0ffd852da707f9b631ad760647",
+      "url": "https://files.pythonhosted.org/packages/90/3c/02d47e719505af2745df5c0d5083305850ccd02fc56cbee4c4eca8fa321f/mozdevice-4.2.0-py2.py3-none-any.whl"
+    },
+    {
+      "name": "mozrunner",
+      "version": "8.4.0",
+      "filename": "mozrunner-8.4.0-py2.py3-none-any.whl",
+      "size": 47219,
+      "sha256": "fa5fc6edfc501ebf2dd0faf24934a626e2e0f67abb26d4878651fea54275b14f",
+      "url": "https://files.pythonhosted.org/packages/68/3a/2953c91c54a4e4e63658f239eec31cd7a2820870fb80ddbb7bf3f15ef1ac/mozrunner-8.4.0-py2.py3-none-any.whl"
+    },
+    {
+      "name": "mozversion",
+      "version": "2.4.0",
+      "filename": "mozversion-2.4.0-py2.py3-none-any.whl",
+      "size": 4281,
+      "sha256": "d9a0b997ff48a979f694af9e6fd3fb819f411e8199045a0b362d6ba112cb5676",
+      "url": "https://files.pythonhosted.org/packages/db/86/7ec5f7c4edee8929523dc9c07d1aba4a89d8f53a99b0fcaa3d71c71f99cc/mozversion-2.4.0-py2.py3-none-any.whl"
+    },
+    {
+      "name": "marionette-driver",
+      "version": "3.7.1",
+      "filename": "marionette_driver-3.7.1-py3-none-any.whl",
+      "size": 54383,
+      "sha256": "6c9286604cff5ae86e9b490078c1ecb54c6625576967e1b9ae93a952817692ef",
+      "url": "https://files.pythonhosted.org/packages/5a/ed/cdb5374088634e13a4bcb6b85716f4c65ee3da5a07ff3a56999881214428/marionette_driver-3.7.1-py3-none-any.whl"
+    }
+  ],
+  "pin_provenance": {
+    "thunderbird": "Pinned SHA-256 and SHA-512 were authenticated from Mozilla signed 158.0.1 release manifests on 2026-10-21. Signer fingerprint: 827E658608679618CD349F93678E455D76767AA3; primary fingerprint: 14F26682D0916CDD81E37B6D61B7B526D98F0353. The hosted job checks the downloaded archive bytes against both pins before extraction; it does not refresh or reverify the manifests.",
+    "python": "Exact PyPI artifact URLs, sizes, versions, and SHA-256 values were resolved from PyPI JSON metadata on 2026-10-21."
+  }
+}
