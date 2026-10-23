@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import http.client
 import hashlib
 import json
 import os
@@ -11,6 +12,8 @@ import platform
 import re
 import shutil
 import signal
+import socket
+import ssl
 import subprocess
 import sys
 import tarfile
@@ -57,13 +60,66 @@ PHASES = {
     "startup",
     "complete",
 }
+NETWORK_ERROR_CLASSES = {
+    "connection",
+    "dns",
+    "http_4xx",
+    "http_5xx",
+    "http_status",
+    "incomplete_transfer",
+    "invalid_response",
+    "io_error",
+    "redirect",
+    "timeout",
+    "tls",
+    "total_deadline",
+    "url_error",
+    "unknown",
+}
+PYTHON_ARTIFACT_NAMES = frozenset(
+    {
+        "setuptools",
+        "packaging",
+        "wheel",
+        "six",
+        "distro",
+        "wcwidth",
+        "jinxed",
+        "psutil",
+        "mozfile",
+        "mozterm",
+        "mozsystemmonitor",
+        "mozinfo",
+        "mozprofile",
+        "mozprocess",
+        "blessed",
+        "mozlog",
+        "mozdevice",
+        "mozrunner",
+        "mozversion",
+        "marionette-driver",
+    }
+)
+FAILED_ARTIFACT_IDS = frozenset(
+    {"mozilla_archive"}
+    | {f"python_{name.replace('-', '_')}" for name in PYTHON_ARTIFACT_NAMES}
+)
 
 
 class SmokeFailure(RuntimeError):
-    def __init__(self, phase: str, error_class: str):
+    def __init__(
+        self,
+        phase: str,
+        error_class: str,
+        *,
+        failed_artifact: str | None = None,
+        network_error_class: str | None = None,
+    ):
         super().__init__(error_class)
         self.phase = phase
         self.error_class = error_class
+        self.failed_artifact = failed_artifact
+        self.network_error_class = network_error_class
 
 
 def _source_sha() -> str:
@@ -100,12 +156,14 @@ def _summary_path() -> Path:
 
 def _initial_summary(source_sha: str) -> dict[str, Any]:
     return {
-        "schema": "thunderbird-calendar-startup-smoke@2",
+        "schema": "thunderbird-calendar-startup-smoke@3",
         "qualification_scope": "startup_only_not_caldav",
         "source_sha": source_sha,
         "status": "running",
         "phase": "preflight",
         "error_class": None,
+        "failed_artifact": None,
+        "network_error_class": None,
         "archive_sha256_verified": False,
         "archive_sha512_verified": False,
         "python_artifacts_verified": False,
@@ -127,13 +185,27 @@ def _write_summary(payload: dict[str, Any]) -> None:
     if (
         not isinstance(safe["source_sha"], str)
         or not re.fullmatch(r"[0-9a-f]{40}", safe["source_sha"])
-        or safe["schema"] != "thunderbird-calendar-startup-smoke@2"
+        or safe["schema"] != "thunderbird-calendar-startup-smoke@3"
         or safe["qualification_scope"] != "startup_only_not_caldav"
         or not isinstance(safe["status"], str)
         or safe["status"] not in {"running", "passed", "failed"}
         or not isinstance(safe["phase"], str)
         or safe["phase"] not in PHASES
         or safe["error_class"] not in (None, *FAILURE_CLASSES)
+        or (
+            safe["failed_artifact"] is not None
+            and (
+                not isinstance(safe["failed_artifact"], str)
+                or safe["failed_artifact"] not in FAILED_ARTIFACT_IDS
+            )
+        )
+        or (
+            safe["network_error_class"] is not None
+            and (
+                not isinstance(safe["network_error_class"], str)
+                or safe["network_error_class"] not in NETWORK_ERROR_CLASSES
+            )
+        )
         or any(
             type(safe[name]) is not bool
             for name in (
@@ -213,6 +285,8 @@ def _load_lock() -> dict[str, Any]:
         ):
             raise SmokeFailure("preflight", "invalid_input")
         names.add(name.lower())
+    if names != PYTHON_ARTIFACT_NAMES:
+        raise SmokeFailure("preflight", "invalid_input")
     return data
 
 
@@ -578,26 +652,87 @@ print(json.dumps(observation, sort_keys=True))
         raise SmokeFailure("preflight", "container_isolation_unavailable")
 
 
+def _artifact_id(record: dict[str, Any], host: str) -> str:
+    if host == EXPECTED_ARCHIVE_HOST:
+        return "mozilla_archive"
+    if host != EXPECTED_PACKAGE_HOST:
+        raise SmokeFailure("download", "invalid_input")
+    name = record.get("name", "")
+    if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+", name):
+        raise SmokeFailure("download", "invalid_input")
+    normalized = re.sub(r"[^a-z0-9_]", "_", name.lower())
+    artifact_id = f"python_{normalized}"
+    if artifact_id not in FAILED_ARTIFACT_IDS:
+        raise SmokeFailure("download", "invalid_input")
+    return artifact_id
+
+
+def _network_error_class(error: BaseException) -> str:
+    if isinstance(error, SmokeFailure):
+        return error.network_error_class or "unknown"
+    if isinstance(error, urllib.error.HTTPError):
+        if 400 <= error.code < 500:
+            return "http_4xx"
+        if 500 <= error.code < 600:
+            return "http_5xx"
+        return "http_status"
+    if isinstance(error, http.client.IncompleteRead):
+        return "incomplete_transfer"
+    if isinstance(error, urllib.error.URLError):
+        reason = error.reason
+        if isinstance(reason, BaseException) and reason is not error:
+            return _network_error_class(reason)
+        return "url_error"
+    if isinstance(error, socket.gaierror):
+        return "dns"
+    if isinstance(error, (TimeoutError, socket.timeout)):
+        return "timeout"
+    if isinstance(error, ssl.SSLError):
+        return "tls"
+    if isinstance(error, ConnectionError):
+        return "connection"
+    if isinstance(error, ValueError):
+        return "invalid_response"
+    if isinstance(error, OSError):
+        return "io_error"
+    return "unknown"
+
+
+def _download_failure(artifact_id: str, error: BaseException) -> SmokeFailure:
+    return SmokeFailure(
+        "download",
+        "network_error",
+        failed_artifact=artifact_id,
+        network_error_class=_network_error_class(error),
+    )
+
+
 class _PinnedRedirectHandler(urllib.request.HTTPRedirectHandler):
-    def __init__(self, host: str, filename: str):
+    def __init__(self, host: str, filename: str, artifact_id: str):
         super().__init__()
         self.host = host
         self.filename = filename
+        self.artifact_id = artifact_id
 
     def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> Any:
         if not _permitted_url(newurl, self.host, self.filename):
-            raise SmokeFailure("download", "network_error")
+            raise SmokeFailure(
+                "download",
+                "network_error",
+                failed_artifact=self.artifact_id,
+                network_error_class="redirect",
+            )
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 @contextmanager
 def _total_wall_deadline(seconds: int, phase: str) -> Iterator[None]:
     if signal.getitimer(signal.ITIMER_REAL)[0] > 0:
-        raise SmokeFailure(phase, "network_error")
+        raise SmokeFailure(phase, "network_error", network_error_class="total_deadline")
     previous = signal.getsignal(signal.SIGALRM)
 
     def expired(_signum: int, _frame: Any) -> None:
-        raise SmokeFailure(phase, "network_error")
+        raise SmokeFailure(phase, "network_error", network_error_class="total_deadline")
 
     signal.signal(signal.SIGALRM, expired)
     signal.setitimer(signal.ITIMER_REAL, seconds)
@@ -609,45 +744,95 @@ def _total_wall_deadline(seconds: int, phase: str) -> Iterator[None]:
 
 
 def _download(record: dict[str, Any], destination: Path, host: str, *, both_hashes: bool = False) -> None:
+    artifact_id = _artifact_id(record, host)
     if not _permitted_url(record.get("url", ""), host, record.get("filename", "")):
-        raise SmokeFailure("download", "invalid_input")
+        raise SmokeFailure("download", "invalid_input", failed_artifact=artifact_id)
     request = urllib.request.Request(
         record["url"],
         headers={"User-Agent": "matrix-calendar-thunderbird-smoke/1", "Accept-Encoding": "identity"},
     )
-    opener = urllib.request.build_opener(_PinnedRedirectHandler(host, record["filename"]))
+    handler = _PinnedRedirectHandler(host, record["filename"], artifact_id)
+    opener = urllib.request.build_opener(handler)
     sha256 = hashlib.sha256()
     sha512 = hashlib.sha512() if both_hashes else None
     written = 0
     try:
-        with opener.open(request, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response:
-            if not _permitted_url(response.geturl(), host, record["filename"]):
-                raise SmokeFailure("download", "network_error")
-            length = response.headers.get("Content-Length")
-            if length and int(length) != record["size"]:
-                raise SmokeFailure("hash_verification", "artifact_mismatch")
-            with destination.open("xb") as output:
-                os.chmod(destination, 0o600)
-                while True:
-                    block = response.read(1024 * 1024)
-                    if not block:
-                        break
-                    written += len(block)
-                    if written > record["size"]:
-                        raise SmokeFailure("hash_verification", "artifact_mismatch")
-                    output.write(block)
-                    sha256.update(block)
-                    if sha512 is not None:
-                        sha512.update(block)
-    except SmokeFailure:
+        response = opener.open(request, timeout=DOWNLOAD_TIMEOUT_SECONDS)
+    except SmokeFailure as failure:
+        if failure.error_class == "network_error":
+            raise _download_failure(artifact_id, failure) from None
         raise
-    except (OSError, urllib.error.URLError, ValueError):
-        raise SmokeFailure("download", "network_error") from None
+    except (OSError, urllib.error.URLError, ValueError, http.client.IncompleteRead) as error:
+        raise _download_failure(artifact_id, error) from None
+    try:
+        with response:
+            if not _permitted_url(response.geturl(), host, record["filename"]):
+                raise SmokeFailure(
+                    "download",
+                    "network_error",
+                    failed_artifact=artifact_id,
+                    network_error_class="redirect",
+                )
+            length = response.headers.get("Content-Length")
+            if length:
+                try:
+                    content_length = int(length)
+                except ValueError:
+                    raise SmokeFailure(
+                        "download",
+                        "network_error",
+                        failed_artifact=artifact_id,
+                        network_error_class="invalid_response",
+                    ) from None
+                if content_length != record["size"]:
+                    raise SmokeFailure("hash_verification", "artifact_mismatch", failed_artifact=artifact_id)
+            try:
+                descriptor = os.open(
+                    destination,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                    0o600,
+                )
+            except OSError:
+                raise SmokeFailure("download", "internal_error", failed_artifact=artifact_id) from None
+            try:
+                with os.fdopen(descriptor, "wb") as output:
+                    while True:
+                        try:
+                            block = response.read(1024 * 1024)
+                        except (OSError, urllib.error.URLError, ValueError, http.client.IncompleteRead) as error:
+                            raise _download_failure(artifact_id, error) from None
+                        if not block:
+                            break
+                        written += len(block)
+                        if written > record["size"]:
+                            raise SmokeFailure("hash_verification", "artifact_mismatch", failed_artifact=artifact_id)
+                        try:
+                            output.write(block)
+                        except OSError:
+                            raise SmokeFailure("download", "internal_error", failed_artifact=artifact_id) from None
+                        sha256.update(block)
+                        if sha512 is not None:
+                            sha512.update(block)
+                    try:
+                        output.flush()
+                        os.fsync(output.fileno())
+                    except OSError:
+                        raise SmokeFailure("download", "internal_error", failed_artifact=artifact_id) from None
+            except SmokeFailure:
+                raise
+            except OSError:
+                raise SmokeFailure("download", "internal_error", failed_artifact=artifact_id) from None
+    except SmokeFailure as failure:
+        if failure.error_class == "network_error" and failure.failed_artifact is None:
+            raise _download_failure(artifact_id, failure) from None
+        raise
+    except (OSError, urllib.error.URLError, ValueError, http.client.IncompleteRead) as error:
+        raise _download_failure(artifact_id, error) from None
     expected256 = record["sha256"]
     if written != record["size"] or sha256.hexdigest() != expected256:
-        raise SmokeFailure("hash_verification", "artifact_mismatch")
+        raise SmokeFailure("hash_verification", "artifact_mismatch", failed_artifact=artifact_id)
     if sha512 is not None and sha512.hexdigest() != record["sha512"]:
-        raise SmokeFailure("hash_verification", "artifact_mismatch")
+        raise SmokeFailure("hash_verification", "artifact_mismatch", failed_artifact=artifact_id)
 
 
 def _safe_extract(archive_path: Path, destination: Path) -> Path:
@@ -708,7 +893,7 @@ def _require_preflight(source_sha: str) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         raise SmokeFailure("preflight", "invalid_input") from None
     if (
-        value.get("schema") != "thunderbird-calendar-startup-smoke@2"
+        value.get("schema") != "thunderbird-calendar-startup-smoke@3"
         or value.get("source_sha") != source_sha
         or value.get("docker_backend_verified") is not True
         or value.get("docker_isolation_verified") is not True
@@ -1258,6 +1443,10 @@ def _main() -> int:
         payload["status"] = "failed"
         payload["phase"] = failure.phase if failure.phase in PHASES else "preflight"
         payload["error_class"] = failure.error_class if failure.error_class in FAILURE_CLASSES else "internal_error"
+        if failure.failed_artifact is not None:
+            payload["failed_artifact"] = failure.failed_artifact
+        if failure.network_error_class is not None:
+            payload["network_error_class"] = failure.network_error_class
         if args.mode == "prepare" and root is not None and root.exists():
             try:
                 shutil.rmtree(root)
