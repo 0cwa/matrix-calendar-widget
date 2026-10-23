@@ -1095,7 +1095,7 @@ function reminderConfigurationSnapshot(database, phase) {
   if (!/^\d+$/u.test(schemaVersionOutput)) throw new StageFailure(phase);
   const schemaVersion = Number(schemaVersionOutput);
   if (schemaVersion !== 4) {
-    throw new StageFailure(phase, { schemaVersion });
+    throw new StageFailure(phase, { schemaVersionMatches: false });
   }
 
   const output = queryPostgres(

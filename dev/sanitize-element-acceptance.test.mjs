@@ -575,8 +575,13 @@ test('requires UI, Matrix delivery, and timeline evidence for reminder recovery'
       JSON.stringify(reminderConfigurationObservation()),
       JSON.stringify({
         phase: 'reminder-configuration-stored',
+        status: 'started',
+      }),
+      JSON.stringify({
+        phase: 'reminder-configuration-stored',
         status: 'passed',
         count: 1,
+        snapshotCompared: false,
       }),
       JSON.stringify({
         phase: 'reminder-event-created',
@@ -697,6 +702,10 @@ test('requires UI, Matrix delivery, and timeline evidence for reminder recovery'
   );
   assert.match(
     summary,
+    /phase=reminder-configuration-stored status=passed count=1 snapshot_compared=false/u,
+  );
+  assert.match(
+    summary,
     /phase=reminder-initial-delivery status=passed http_status=200 count=1 canary_delivered=true room_mentioned=true selected_member_mentioned=false target_mentioned=true expected_room_recipient=true expected_selected_recipient=false delivered_after_due=true all_markers_once=true/u,
   );
   assert.match(
@@ -803,12 +812,24 @@ test('requires UI, Matrix delivery, and timeline evidence for reminder recovery'
 
 test('sanitizes selected-member reminder configuration with keyboard and narrow-panel evidence', () => {
   const summary = sanitizeElementAcceptance(
-    JSON.stringify(
-      reminderConfigurationObservation({
-        recipientKind: 'selected',
-        selectedMemberKeyboardFlow: true,
+    [
+      JSON.stringify(
+        reminderConfigurationObservation({
+          recipientKind: 'selected',
+          selectedMemberKeyboardFlow: true,
+        }),
+      ),
+      JSON.stringify({
+        phase: 'reminder-configuration-stored',
+        status: 'started',
       }),
-    ),
+      JSON.stringify({
+        phase: 'reminder-configuration-stored',
+        status: 'passed',
+        count: 1,
+        snapshotCompared: true,
+      }),
+    ].join('\n'),
     sourceSha,
   );
 
@@ -817,6 +838,109 @@ test('sanitizes selected-member reminder configuration with keyboard and narrow-
     /recipient_kind=selected recipient_selection_attempted=true selected_member_keyboard_flow=true reminder_target_matches=true all_day_schedule_matches=true narrow_side_panel_safe=true/u,
   );
   assert.doesNotMatch(summary, /user_id|matrix_id|https?:/iu);
+  assert.match(
+    summary,
+    /phase=reminder-configuration-stored status=passed count=1 snapshot_compared=true/u,
+  );
+});
+
+test('validates reminder configuration snapshot rows without accepting target identifiers', () => {
+  for (const record of [
+    {
+      phase: 'reminder-configuration-stored',
+      status: 'passed',
+      count: 0,
+      snapshotCompared: true,
+    },
+    {
+      phase: 'reminder-configuration-stored',
+      status: 'passed',
+      count: 1,
+    },
+    {
+      phase: 'reminder-configuration-stored',
+      status: 'passed',
+      count: 1,
+      snapshotCompared: true,
+      metadataUnchanged: false,
+    },
+    {
+      phase: 'reminder-configuration-stored',
+      status: 'failed',
+      count: 1,
+      snapshotCompared: false,
+      metadataUnchanged: false,
+    },
+    {
+      phase: 'reminder-configuration-stored',
+      status: 'failed',
+      schemaVersionMatches: true,
+    },
+    {
+      phase: 'reminder-configuration-stored',
+      status: 'passed',
+      count: 1,
+      snapshotCompared: true,
+      privateTargetUserId: '@private-sentinel:example.test',
+    },
+  ]) {
+    assert.throws(
+      () => sanitizeElementAcceptance(JSON.stringify(record), sourceSha),
+      /invalid element acceptance summary/u,
+    );
+  }
+
+  const failedComparison = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'reminder-configuration-stored',
+      status: 'failed',
+      count: 1,
+      snapshotCompared: true,
+      metadataUnchanged: false,
+    }),
+    sourceSha,
+  );
+  assert.match(
+    failedComparison,
+    /phase=reminder-configuration-stored status=failed count=1 snapshot_compared=true metadata_unchanged=false/u,
+  );
+  const schemaMismatch = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'reminder-configuration-stored',
+      status: 'failed',
+      schemaVersionMatches: false,
+    }),
+    sourceSha,
+  );
+  assert.match(
+    schemaMismatch,
+    /phase=reminder-configuration-stored status=failed schema_version_matches=false/u,
+  );
+
+  let failure;
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify({
+          phase: 'reminder-configuration-stored',
+          status: 'passed',
+          count: 1,
+          snapshotCompared: true,
+          privateTargetUserId: '@private-sentinel:example.test',
+        }),
+        sourceSha,
+      ),
+    (error) => {
+      failure = error;
+      return true;
+    },
+  );
+  const safeFailure = formatSanitizerFailureSummary(failure, sourceSha);
+  assert.match(
+    safeFailure,
+    /status=unavailable category=invalid-stage-record rejected_phase=reminder-configuration-stored/u,
+  );
+  assert.doesNotMatch(safeFailure, /private-sentinel|@private/u);
 });
 
 test('requires selected-user Matrix mentions to exclude a room broadcast', () => {

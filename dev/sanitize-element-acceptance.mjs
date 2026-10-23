@@ -1212,6 +1212,11 @@ const REMINDER_CONFIGURATION_STATUS_FIELDS = [
   'reminderConfigGetStatus',
   'reminderPutStatus',
 ];
+const REMINDER_CONFIGURATION_STORED_FIELDS = [
+  'snapshotCompared',
+  'metadataUnchanged',
+  'schemaVersionMatches',
+];
 const RUNTIME_COUNTER_FIELDS = [
   'gatewayContextRequestCount',
   'gatewayCalendarsRequestCount',
@@ -1328,6 +1333,7 @@ const ALLOWED_KEYS = new Set([
   ...POST_CREATE_VISIBILITY_FIELDS,
   'canManageReminders',
   ...REMINDER_CONFIGURATION_FIELDS,
+  ...REMINDER_CONFIGURATION_STORED_FIELDS,
   ...VERSION_FIELDS,
   'openIdProofValid',
   'allResourcesSeeded',
@@ -2314,6 +2320,36 @@ function validReminderConfigurationObservation(record) {
   );
 }
 
+function validReminderConfigurationStoredRecord(record) {
+  const keys = Object.keys(record).sort().join(',');
+  if (record.status === 'started') {
+    return keys === 'phase,status';
+  }
+  if (record.status === 'passed') {
+    return (
+      keys === 'count,phase,snapshotCompared,status' &&
+      Number.isInteger(record.count) &&
+      record.count >= 1 &&
+      record.count <= 3 &&
+      typeof record.snapshotCompared === 'boolean'
+    );
+  }
+  if (record.status !== 'failed') return false;
+  if (keys === 'phase,status') return true;
+  if (keys === 'phase,schemaVersionMatches,status') {
+    return record.schemaVersionMatches === false;
+  }
+  return (
+    keys === 'count,metadataUnchanged,phase,snapshotCompared,status' &&
+    Number.isInteger(record.count) &&
+    record.count >= 0 &&
+    record.count <= 100_000 &&
+    typeof record.snapshotCompared === 'boolean' &&
+    typeof record.metadataUnchanged === 'boolean' &&
+    (record.snapshotCompared || record.metadataUnchanged)
+  );
+}
+
 const PROJECTION_DIAGNOSTIC_REASONS = [
   'invalid-recurrence',
   'invalid-timing',
@@ -2743,6 +2779,10 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       POST_CREATE_VISIBILITY_FIELDS.some((key) => Object.hasOwn(record, key));
     const hasReminderConfigurationObservation =
       REMINDER_CONFIGURATION_FIELDS.some((key) => Object.hasOwn(record, key));
+    const hasReminderConfigurationStoredField =
+      REMINDER_CONFIGURATION_STORED_FIELDS.some((key) =>
+        Object.hasOwn(record, key),
+      );
     if (
       (record.phase === 'widget-a-runtime-observed' &&
         !validRuntimeObservation(record)) ||
@@ -2758,7 +2798,11 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       (record.phase === 'reminder-room-configuration-enabled' &&
         !validReminderConfigurationObservation(record)) ||
       (record.phase !== 'reminder-room-configuration-enabled' &&
-        hasReminderConfigurationObservation)
+        hasReminderConfigurationObservation) ||
+      (hasReminderConfigurationStoredField &&
+        record.phase !== 'reminder-configuration-stored') ||
+      (record.phase === 'reminder-configuration-stored' &&
+        !validReminderConfigurationStoredRecord(record))
     ) {
       throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
@@ -3032,11 +3076,6 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       (record.phase === 'restore-element-ready' &&
         record.status === 'passed' &&
         record.count !== 2) ||
-      (record.phase === 'reminder-configuration-stored' &&
-        record.status === 'passed' &&
-        (!Number.isInteger(record.count) ||
-          record.count < 1 ||
-          record.count > 3)) ||
       (record.phase === 'reminder-delivery-snapshot' &&
         record.status === 'passed' &&
         (!Number.isInteger(record.count) ||
@@ -3899,6 +3938,17 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     }
     if (Object.hasOwn(record, 'count')) {
       fields.push(`count=${record.count}`);
+    }
+    if (phase === 'reminder-configuration-stored') {
+      if (Object.hasOwn(record, 'snapshotCompared')) {
+        fields.push(`snapshot_compared=${record.snapshotCompared}`);
+      }
+      if (Object.hasOwn(record, 'metadataUnchanged')) {
+        fields.push(`metadata_unchanged=${record.metadataUnchanged}`);
+      }
+      if (Object.hasOwn(record, 'schemaVersionMatches')) {
+        fields.push(`schema_version_matches=${record.schemaVersionMatches}`);
+      }
     }
     if (record.elementQuiesceSkipped === true) {
       fields.push('element_quiesce_skipped=true');

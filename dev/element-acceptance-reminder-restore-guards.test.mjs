@@ -164,6 +164,16 @@ test('restore reminder snapshots preserve target, all-day schedule, and revision
     ]),
     false,
   );
+  assert.equal(
+    sameReminderConfigurationSnapshots(source, [
+      {
+        ...parsed[0],
+        allDaySchedule: { ...parsed[0].allDaySchedule, daysBefore: 6 },
+      },
+      parsed[1],
+    ]),
+    false,
+  );
 });
 
 test('restore reminder snapshots fail closed on unknown or invalid metadata', () => {
