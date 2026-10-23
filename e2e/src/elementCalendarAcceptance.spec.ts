@@ -6005,6 +6005,7 @@ async function waitForReminderDelivery(
 async function waitForPublicFeedPublicationResponse(
   page: Page,
   method: 'GET' | 'PUT' | 'DELETE',
+  targetScope: 'any' | 'fixture-room' = 'any',
 ): Promise<Response> {
   const gatewayOrigin = new URL(fixture.gatewayUrl).origin;
   return page.waitForResponse(
@@ -6013,7 +6014,8 @@ async function waitForPublicFeedPublicationResponse(
       return (
         url.origin === gatewayOrigin &&
         url.pathname === '/v1/calendar-feeds/publication' &&
-        response.request().method() === method
+        response.request().method() === method &&
+        (targetScope === 'any' || publicFeedManagementTargetMatches(response))
       );
     },
     { timeout: 20_000 },
@@ -6124,14 +6126,22 @@ async function verifyPublicFeedBrowserLifecycle(
       const targetSettingsResponse = waitForPublicFeedPublicationResponse(
         page,
         'GET',
+        'fixture-room',
       );
       await calendarSelect.click();
-      await frame
+      // MUI renders Select options in a frame-level portal. Scope the choice
+      // to the one visible listbox instead of querying the frame for options.
+      const calendarListbox = frame
+        .getByRole('listbox')
+        .filter({ visible: true });
+      await expect(calendarListbox).toHaveCount(1);
+      await calendarListbox
         .getByRole('option', {
           name: 'Synthetic team calendar',
           exact: true,
         })
         .click();
+      await expect(calendarSelect).toHaveText('Synthetic team calendar');
       const response = await targetSettingsResponse;
       managementResponse = response;
       observation.publicFeedManagementGetStatus = response.status();

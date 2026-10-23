@@ -164,8 +164,11 @@ describe('<CalendarToolbar />', () => {
     expect(confirmation).toBeChecked();
 
     fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Calendar' }));
+    const calendarListbox = await screen.findByRole('listbox');
     fireEvent.click(
-      await screen.findByRole('option', { name: 'Unknown calendar' }),
+      within(calendarListbox).getByRole('option', {
+        name: 'Unknown calendar',
+      }),
     );
 
     await waitFor(() => {
