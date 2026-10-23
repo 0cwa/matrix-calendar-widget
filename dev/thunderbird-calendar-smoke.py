@@ -291,7 +291,7 @@ def _load_lock() -> dict[str, Any]:
             or not isinstance(item.get("size"), int)
             or item["size"] <= 0
             or not re.fullmatch(r"[0-9a-f]{64}", item.get("sha256", ""))
-            or not _permitted_url(item.get("url", ""), EXPECTED_PACKAGE_HOST, filename)
+            or not _permitted_pypi_package_url(item.get("url", ""), filename)
         ):
             raise SmokeFailure("preflight", "invalid_input")
         names.add(name.lower())
@@ -315,6 +315,20 @@ def _permitted_url(url: str, host: str, filename: str) -> bool:
         and not parsed.query
         and not parsed.fragment
         and parsed.path.rsplit("/", 1)[-1] == filename
+    )
+
+
+def _permitted_pypi_package_url(url: str, filename: str) -> bool:
+    if not _permitted_url(url, EXPECTED_PACKAGE_HOST, filename):
+        return False
+    parts = urllib.parse.urlparse(url).path.split("/")
+    return (
+        len(parts) == 6
+        and parts[1] == "packages"
+        and re.fullmatch(r"[0-9a-f]{2}", parts[2]) is not None
+        and re.fullmatch(r"[0-9a-f]{2}", parts[3]) is not None
+        and re.fullmatch(r"[0-9a-f]{60}", parts[4]) is not None
+        and parts[5] == filename
     )
 
 
