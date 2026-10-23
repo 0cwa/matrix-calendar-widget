@@ -39,6 +39,7 @@ import { axe } from 'vitest-axe';
 import {
   CalendarRepositoryProvider,
   type CalendarRoomCapabilities,
+  type CalendarRoomReminderAlarmOption,
 } from '../../calendar';
 import {
   CalendarEventDetailsDialog,
@@ -274,6 +275,121 @@ describe('<CalendarEventDetailsDialog />', () => {
     expect(
       await screen.findByRole('dialog', { name: 'Edit event' }),
     ).toBeInTheDocument();
+  });
+
+  it('saves a CalDAV alarm before opening Matrix reminder settings', async () => {
+    const { repository, roomEvent } = createRoomCalendarRepository({
+      calendarId: 'room-calendar',
+      roomId: '!authorized-room:example.test',
+      canReadEvents: true,
+      canWriteEvents: true,
+      canManageReminders: true,
+    });
+    const savedAlarmOption: CalendarRoomReminderAlarmOption = {
+      eventUid: roomEvent.uid,
+      recurrenceId: null,
+      alarmUid: 'saved-alarm-1',
+      timingType: 'timed',
+      supported: true,
+      requiresAllDaySchedule: false,
+      relatedTo: 'start',
+      trigger: {
+        weeks: 0,
+        days: 0,
+        hours: 0,
+        minutes: 15,
+        seconds: 0,
+        isNegative: true,
+      },
+    };
+    repository.listRoomReminderAlarmOptions.mockImplementation(
+      async (calendarId, eventId) => {
+        const savedEvent = await repository.getEvent(calendarId, eventId);
+        return savedEvent.alarm ? [savedAlarmOption] : [];
+      },
+    );
+
+    render(<CalendarEventDetailsDialog event={roomEvent} onClose={vi.fn()} />, {
+      wrapper: createWrapper(repository),
+    });
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Reminder settings' }),
+    );
+    await screen.findByText(/There is no CalDAV reminder in this event yet/);
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Edit CalDAV reminder' }),
+    );
+    expect(
+      await screen.findByText(
+        /Supported timed Matrix reminders follow the saved CalDAV alert; all-day events need a separate local time and time zone/,
+      ),
+    ).toBeInTheDocument();
+    await userEvent.click(await screen.findByLabelText('CalDAV reminder'));
+    expect(
+      await screen.findByRole('button', {
+        name: 'Save and configure Matrix reminders',
+      }),
+    ).toBeEnabled();
+
+    await userEvent.click(
+      screen.getByRole('button', {
+        name: 'Save and configure Matrix reminders',
+      }),
+    );
+
+    expect(
+      await screen.findByText('Alarm 1: −15m relative to event start'),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Matrix destination')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /Supported timed Matrix reminders follow the saved alert; all-day events need a separate local time and time zone/,
+      ),
+    ).toBeInTheDocument();
+    expect(repository.listRoomReminderAlarmOptions).toHaveBeenCalledTimes(2);
+    expect(repository.enableRoomReminder).not.toHaveBeenCalled();
+  });
+
+  it('keeps the editor open and does not load Matrix settings when the CalDAV save conflicts', async () => {
+    const { repository, roomEvent } = createRoomCalendarRepository({
+      calendarId: 'room-calendar',
+      roomId: '!authorized-room:example.test',
+      canReadEvents: true,
+      canWriteEvents: true,
+      canManageReminders: true,
+    });
+    vi.spyOn(repository, 'updateEvent').mockRejectedValue(
+      new CalendarRepositoryError('event-conflict', 'stale event'),
+    );
+
+    render(<CalendarEventDetailsDialog event={roomEvent} onClose={vi.fn()} />, {
+      wrapper: createWrapper(repository),
+    });
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Reminder settings' }),
+    );
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Edit CalDAV reminder' }),
+    );
+    await userEvent.click(await screen.findByLabelText('CalDAV reminder'));
+    await userEvent.click(
+      screen.getByRole('button', {
+        name: 'Save and configure Matrix reminders',
+      }),
+    );
+
+    expect(
+      await screen.findByText(
+        'This event changed elsewhere. Reload the latest version before retrying.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('dialog', { name: 'Edit event' }),
+    ).toBeInTheDocument();
+    expect(repository.listRoomReminderAlarmOptions).toHaveBeenCalledTimes(1);
+    expect(repository.enableRoomReminder).not.toHaveBeenCalled();
   });
 
   it('links canonical domainless room IDs used by newer Matrix rooms', async () => {

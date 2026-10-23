@@ -19,6 +19,7 @@ import type {
   CalendarEventDuration,
   CalendarEventRecurrenceDate,
 } from '@matrix-calendar-widget/calendar';
+import { LoadingButton } from '@mui/lab';
 import {
   Alert,
   Button,
@@ -52,6 +53,7 @@ export function CalendarEventEditorFields({
     initialCalendar,
     values,
     saving,
+    savingRoomReminderSetup,
     error,
     conflict,
     missingOccurrence,
@@ -60,6 +62,7 @@ export function CalendarEventEditorFields({
     editingOccurrence,
     editingFollowing,
     occurrenceHasAlarm,
+    occurrenceHasChanges,
     attachmentControlsDisabled,
     followingSupported,
     periodValue,
@@ -98,6 +101,7 @@ export function CalendarEventEditorFields({
     weeklyByDayEnabled,
     canChooseWeekdays,
     validationError,
+    onSaveAndConfigureRoomReminders,
     handleReloadLatest,
     chooseOccurrenceScope,
     handleOccurrenceTextModeChange,
@@ -611,6 +615,39 @@ export function CalendarEventEditorFields({
               </Stack>
             )}
           </FormControl>
+
+          {onSaveAndConfigureRoomReminders && (
+            <Alert severity="info">
+              <Stack spacing={1}>
+                <Typography variant="body2">
+                  {t(
+                    'calendarEvents.editor.matrixReminderSaveFirst',
+                    'Save this event first. Supported timed Matrix reminders follow the saved CalDAV alert; all-day events need a separate local time and time zone. Choose who Matrix should ping after the save.',
+                  )}
+                </Typography>
+                <LoadingButton
+                  data-save-intent="configure-room-reminders"
+                  disabled={
+                    Boolean(validationError) ||
+                    readOnly ||
+                    chooseScope ||
+                    missingOccurrence ||
+                    followingTimingUnchanged ||
+                    (editingOccurrence && !occurrenceHasChanges)
+                  }
+                  loading={savingRoomReminderSetup}
+                  size="small"
+                  type="submit"
+                  variant="outlined"
+                >
+                  {t(
+                    'calendarEvents.editor.saveAndConfigureMatrixReminders',
+                    'Save and configure Matrix reminders',
+                  )}
+                </LoadingButton>
+              </Stack>
+            </Alert>
+          )}
 
           <FormControlLabel
             control={

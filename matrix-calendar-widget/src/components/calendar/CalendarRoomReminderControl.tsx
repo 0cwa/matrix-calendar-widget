@@ -45,7 +45,7 @@ import {
   Typography,
 } from '@mui/material';
 import type { TFunction } from 'i18next';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   CalendarRoomReminderAlarmOption,
@@ -80,6 +80,7 @@ type CalendarRoomReminderControlProps = {
   calendarTimezone?: string;
   eventTiming: CalendarEventTiming;
   isRecurringSeries: boolean;
+  openRequest?: number;
   refreshToken: number;
   canManageReminders: boolean;
   onEditCalendarReminder: () => void;
@@ -98,6 +99,7 @@ export function CalendarRoomReminderControl({
   calendarTimezone,
   eventTiming,
   isRecurringSeries,
+  openRequest = 0,
   refreshToken,
   canManageReminders,
   onEditCalendarReminder,
@@ -105,6 +107,9 @@ export function CalendarRoomReminderControl({
   const { t } = useTranslation();
   const widgetApi = useWidgetApi();
   const repository = useCalendarRepository();
+  const reminderRepository = isCalendarRoomReminderRepository(repository)
+    ? repository
+    : undefined;
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [savingKey, setSavingKey] = useState<string>();
@@ -122,6 +127,7 @@ export function CalendarRoomReminderControl({
   >({});
   const [roomMembersUnavailable, setRoomMembersUnavailable] = useState(false);
   const requestSequence = useRef(0);
+  const lastHandledOpenRequest = useRef(0);
   const roomMemberLabels = useMemo(
     () => Object.values(roomMemberEvents),
     [roomMemberEvents],
@@ -138,69 +144,15 @@ export function CalendarRoomReminderControl({
     () => new Set(members.map((member) => member.userId)),
     [members],
   );
+  const eventTimingIdentity = JSON.stringify(eventTiming);
   const memberById = useMemo(
     () => new Map(members.map((member) => [member.userId, member])),
     [members],
   );
-
-  useEffect(() => {
-    requestSequence.current += 1;
-    setOpen(false);
-    setLoading(false);
-    setSavingKey(undefined);
-    setError(false);
-    setOptions([]);
-    setConfigurations({});
-    setOrphanedConfigurations([]);
-    setDrafts({});
-    setRoomMemberEvents({});
-    setRoomMembersUnavailable(false);
-  }, [calendarId, eventId, eventUid, refreshToken]);
-
-  useEffect(
-    () => () => {
-      requestSequence.current += 1;
-    },
-    [],
-  );
-
-  useEffect(() => {
-    if (!open || loading || !roomId) return;
-    const subscription = widgetApi
-      .observeStateEvents<RoomMemberStateEventContent>(
-        STATE_EVENT_ROOM_MEMBER,
-        { roomIds: [roomId] },
-      )
-      .subscribe(
-        (event) => {
-          if (!isValidRoomMemberStateEvent(event) || event.room_id !== roomId) {
-            return;
-          }
-          setRoomMemberEvents((current) => {
-            const next = { ...current };
-            delete next[event.state_key];
-            if (
-              event.content.membership === 'join' &&
-              !isBotUser(event.state_key)
-            ) {
-              next[event.state_key] = event;
-            }
-            return next;
-          });
-        },
-        () => {
-          setRoomMemberEvents({});
-          setRoomMembersUnavailable(true);
-        },
-      );
-    return () => subscription.unsubscribe();
-  }, [loading, open, roomId, widgetApi]);
-
-  if (!canManageReminders || !isCalendarRoomReminderRepository(repository)) {
-    return null;
-  }
-
-  const load = async () => {
+  const load = useCallback(async () => {
+    if (!canManageReminders || !reminderRepository) {
+      return;
+    }
     const requestId = ++requestSequence.current;
     setOpen(true);
     setLoading(true);
@@ -225,8 +177,8 @@ export function CalendarRoomReminderControl({
         : Promise.resolve([]);
       const [availableOptions, allConfigurations, currentMemberEvents] =
         await Promise.all([
-          repository.listRoomReminderAlarmOptions(calendarId, eventId),
-          repository.listRoomReminderConfigurations(),
+          reminderRepository.listRoomReminderAlarmOptions(calendarId, eventId),
+          reminderRepository.listRoomReminderConfigurations(),
           memberEventsPromise,
         ]);
       if (requestSequence.current !== requestId) return;
@@ -278,7 +230,98 @@ export function CalendarRoomReminderControl({
     } finally {
       if (requestSequence.current === requestId) setLoading(false);
     }
-  };
+  }, [
+    calendarId,
+    calendarTimezone,
+    canManageReminders,
+    eventId,
+    eventUid,
+    reminderRepository,
+    roomId,
+    widgetApi,
+  ]);
+
+  useEffect(() => {
+    requestSequence.current += 1;
+    setOpen(false);
+    setLoading(false);
+    setSavingKey(undefined);
+    setError(false);
+    setOptions([]);
+    setConfigurations({});
+    setOrphanedConfigurations([]);
+    setDrafts({});
+    setRoomMemberEvents({});
+    setRoomMembersUnavailable(false);
+  }, [
+    calendarId,
+    eventId,
+    eventUid,
+    eventTimingIdentity,
+    isRecurringSeries,
+    canManageReminders,
+    calendarTimezone,
+    refreshToken,
+    repository,
+    roomId,
+  ]);
+
+  useEffect(
+    () => () => {
+      requestSequence.current += 1;
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (
+      openRequest === 0 ||
+      openRequest === lastHandledOpenRequest.current ||
+      !canManageReminders ||
+      !roomId ||
+      !reminderRepository
+    ) {
+      return;
+    }
+    lastHandledOpenRequest.current = openRequest;
+    void load();
+  }, [canManageReminders, load, openRequest, reminderRepository, roomId]);
+
+  useEffect(() => {
+    if (!open || loading || !roomId) return;
+    const subscription = widgetApi
+      .observeStateEvents<RoomMemberStateEventContent>(
+        STATE_EVENT_ROOM_MEMBER,
+        { roomIds: [roomId] },
+      )
+      .subscribe(
+        (event) => {
+          if (!isValidRoomMemberStateEvent(event) || event.room_id !== roomId) {
+            return;
+          }
+          setRoomMemberEvents((current) => {
+            const next = { ...current };
+            delete next[event.state_key];
+            if (
+              event.content.membership === 'join' &&
+              !isBotUser(event.state_key)
+            ) {
+              next[event.state_key] = event;
+            }
+            return next;
+          });
+        },
+        () => {
+          setRoomMemberEvents({});
+          setRoomMembersUnavailable(true);
+        },
+      );
+    return () => subscription.unsubscribe();
+  }, [loading, open, roomId, widgetApi]);
+
+  if (!canManageReminders || !reminderRepository) {
+    return null;
+  }
 
   const updateDraft = (key: string, patch: Partial<ReminderDraft>) => {
     setDrafts((current) => ({
@@ -300,7 +343,8 @@ export function CalendarRoomReminderControl({
     try {
       if (destination === 'off') {
         const configured = configurations[key];
-        if (configured) await repository.disableRoomReminder(configured);
+        if (configured)
+          await reminderRepository.disableRoomReminder(configured);
         if (requestSequence.current !== requestId) return;
         setConfigurations((current) => {
           const next = { ...current };
@@ -333,7 +377,7 @@ export function CalendarRoomReminderControl({
         setError(true);
         return;
       }
-      const saved = await repository.enableRoomReminder(
+      const saved = await reminderRepository.enableRoomReminder(
         calendarId,
         eventId,
         option.alarmUid,
@@ -370,7 +414,7 @@ export function CalendarRoomReminderControl({
     setSavingKey(key);
     setError(false);
     try {
-      await repository.disableRoomReminder(configuration);
+      await reminderRepository.disableRoomReminder(configuration);
       if (requestSequence.current !== requestId) return;
       setOrphanedConfigurations((current) =>
         current.filter((candidate) => reminderOptionKey(candidate) !== key),

@@ -219,6 +219,11 @@ describe('<CalendarRoomReminderControl />', () => {
     expect(
       screen.getByText(/CalDAV keeps the calendar alert/),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /Supported timed Matrix reminders follow the saved alert; all-day events need a separate local time and time zone/,
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByLabelText('Matrix destination')).toBeInTheDocument();
     expect(
       screen.getByText(
@@ -241,6 +246,130 @@ describe('<CalendarRoomReminderControl />', () => {
       null,
     );
     expect(onEditCalendarReminder).not.toHaveBeenCalled();
+  });
+
+  it('clears reminder drafts when the event resource identity changes', async () => {
+    const { repository, enableRoomReminder } = createRepository([timedOption]);
+    const { rerender } = renderControl(repository);
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Reminder settings' }),
+    );
+    await screen.findByText('Alarm 1: −15m relative to event start');
+    await chooseDestination('room', 'Whole room');
+
+    rerender(
+      <CalendarRoomReminderControl
+        calendarId={calendarId}
+        eventId="different-resource"
+        eventUid="different-event@example.test"
+        roomId={roomId}
+        calendarTimezone="Europe/Stockholm"
+        eventTiming={{
+          type: 'timed',
+          start: {
+            type: 'zoned',
+            local: '2026-10-21T10:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+          end: {
+            type: 'zoned',
+            local: '2026-10-21T11:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        }}
+        isRecurringSeries={false}
+        refreshToken={0}
+        canManageReminders
+        onEditCalendarReminder={vi.fn()}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Reminder settings' }),
+      ).toHaveAttribute('aria-expanded', 'false'),
+    );
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Reminder settings' }),
+    );
+    expect(
+      await screen.findByText(/There is no CalDAV reminder in this event yet/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByLabelText('Matrix destination'),
+    ).not.toBeInTheDocument();
+    expect(enableRoomReminder).not.toHaveBeenCalled();
+  });
+
+  it('reloads reminder configuration when the repository identity changes', async () => {
+    const first = createRepository([timedOption]);
+    const second = createRepository(
+      [timedOption],
+      [
+        createConfiguration(timedOption, {
+          target: { kind: 'users', userIds: ['@alice:example.test'] },
+        }),
+      ],
+    );
+    const eventTiming = {
+      type: 'timed' as const,
+      start: {
+        type: 'zoned' as const,
+        local: '2026-10-21T10:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+      end: {
+        type: 'zoned' as const,
+        local: '2026-10-21T11:00:00',
+        timezone: 'Europe/Stockholm',
+      },
+    };
+    const widgetApi = {
+      receiveStateEvents: vi.fn().mockResolvedValue(roomMemberEvents),
+      observeStateEvents: vi.fn().mockReturnValue(of(...roomMemberEvents)),
+    } as unknown as WidgetApi;
+    const renderWithRepository = (repository: InMemoryCalendarRepository) => (
+      <WidgetApiMockProvider value={widgetApi}>
+        <CalendarRepositoryProvider repository={repository}>
+          <CalendarRoomReminderControl
+            calendarId={calendarId}
+            eventId={eventId}
+            eventUid={eventUid}
+            roomId={roomId}
+            calendarTimezone="Europe/Stockholm"
+            eventTiming={eventTiming}
+            isRecurringSeries={false}
+            refreshToken={0}
+            canManageReminders
+            onEditCalendarReminder={vi.fn()}
+          />
+        </CalendarRepositoryProvider>
+      </WidgetApiMockProvider>
+    );
+    const view = render(renderWithRepository(first.repository));
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Reminder settings' }),
+    );
+    await screen.findByText('Alarm 1: −15m relative to event start');
+    await chooseDestination('room', 'Whole room');
+
+    view.rerender(renderWithRepository(second.repository));
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Reminder settings' }),
+      ).toHaveAttribute('aria-expanded', 'false'),
+    );
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Reminder settings' }),
+    );
+
+    expect(
+      await screen.findByRole('combobox', { name: 'Matrix destination' }),
+    ).toHaveTextContent('Selected people');
+    expect(first.enableRoomReminder).not.toHaveBeenCalled();
+    expect(second.enableRoomReminder).not.toHaveBeenCalled();
   });
 
   it('saves only current selected people and removes departed recipients', async () => {

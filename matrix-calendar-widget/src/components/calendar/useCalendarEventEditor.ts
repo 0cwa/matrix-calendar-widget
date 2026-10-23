@@ -76,6 +76,7 @@ export type CalendarEventEditorProps = {
   };
   onClose: () => void;
   onSaved?: (event: CalendarEvent, occurrence?: CalendarEvent) => void;
+  onSaveAndConfigureRoomReminders?: (event: CalendarEvent) => void;
   onOccurrenceReloadRequired?: (sourceEvent: CalendarEvent) => void;
   open: boolean;
   viewerTimezone?: string;
@@ -87,6 +88,7 @@ export function useCalendarEventEditor({
   event,
   onClose,
   onSaved,
+  onSaveAndConfigureRoomReminders,
   onOccurrenceReloadRequired,
   occurrence,
   open,
@@ -105,6 +107,7 @@ export function useCalendarEventEditor({
     calendars[0];
   const [values, setValues] = useState<CalendarEventFormValues | undefined>();
   const [saving, setSaving] = useState(false);
+  const [savingRoomReminderSetup, setSavingRoomReminderSetup] = useState(false);
   const [error, setError] = useState<Error>();
   const [conflict, setConflict] = useState(false);
   const [missingOccurrence, setMissingOccurrence] = useState(false);
@@ -720,13 +723,32 @@ export function useCalendarEventEditor({
   const handleSubmit = async (submitEvent: FormEvent) => {
     submitEvent.preventDefault();
 
+    const submitter = (submitEvent.nativeEvent as SubmitEvent).submitter;
+    const configureRoomRemindersAfterSave = Boolean(
+      onSaveAndConfigureRoomReminders &&
+      submitter?.getAttribute('data-save-intent') ===
+        'configure-room-reminders',
+    );
+
     if (validationError || readOnly || chooseScope || missingOccurrence) {
       return;
     }
 
     setSaving(true);
+    setSavingRoomReminderSetup(configureRoomRemindersAfterSave);
     setError(undefined);
     setConflict(false);
+
+    const finishSave = (
+      savedEvent: CalendarEvent,
+      savedOccurrence?: CalendarEvent,
+    ) => {
+      onSaved?.(savedEvent, savedOccurrence);
+      if (configureRoomRemindersAfterSave) {
+        onSaveAndConfigureRoomReminders?.(savedEvent);
+      }
+      onClose();
+    };
 
     try {
       let saved: CalendarEvent;
@@ -746,8 +768,7 @@ export function useCalendarEventEditor({
               },
             },
           });
-          onSaved?.(saved, { ...occurrence.event, timing });
-          onClose();
+          finishSave(saved, { ...occurrence.event, timing });
           return;
         }
         if (editingOccurrence && occurrence) {
@@ -778,8 +799,7 @@ export function useCalendarEventEditor({
               },
             });
           } else {
-            onSaved?.(event, occurrence.event);
-            onClose();
+            finishSave(event, occurrence.event);
             return;
           }
           const updatedOccurrence =
@@ -788,8 +808,7 @@ export function useCalendarEventEditor({
               occurrence.recurrenceId,
               viewerTimezone,
             )?.event ?? occurrence.event;
-          onSaved?.(saved, updatedOccurrence);
-          onClose();
+          finishSave(saved, updatedOccurrence);
           return;
         }
         saved = await updateEvent(
@@ -805,8 +824,7 @@ export function useCalendarEventEditor({
         saved = await createEvent(values.calendarId, input);
       }
 
-      onSaved?.(saved);
-      onClose();
+      finishSave(saved);
     } catch (caught) {
       if (
         event &&
@@ -839,6 +857,7 @@ export function useCalendarEventEditor({
       }
     } finally {
       setSaving(false);
+      setSavingRoomReminderSetup(false);
     }
   };
 
@@ -961,6 +980,7 @@ export function useCalendarEventEditor({
     initialCalendar,
     values,
     saving,
+    savingRoomReminderSetup,
     error,
     conflict,
     missingOccurrence,
@@ -1026,6 +1046,7 @@ export function useCalendarEventEditor({
     event,
     onClose,
     onSaved,
+    onSaveAndConfigureRoomReminders,
     onOccurrenceReloadRequired,
     occurrence,
     open,
