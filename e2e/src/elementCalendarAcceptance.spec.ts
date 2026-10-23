@@ -6122,7 +6122,7 @@ async function verifyPublicFeedBrowserLifecycle(
       name: 'Calendar',
     });
     let selectedCalendarName = (await calendarSelect.innerText()).trim();
-    if (selectedCalendarName !== 'Synthetic team calendar') {
+    if (selectedCalendarName !== 'Room calendar') {
       const targetSettingsResponse = waitForPublicFeedPublicationResponse(
         page,
         'GET',
@@ -6137,11 +6137,11 @@ async function verifyPublicFeedBrowserLifecycle(
       await expect(calendarListbox).toHaveCount(1);
       await calendarListbox
         .getByRole('option', {
-          name: 'Synthetic team calendar',
+          name: 'Room calendar',
           exact: true,
         })
         .click();
-      await expect(calendarSelect).toHaveText('Synthetic team calendar');
+      await expect(calendarSelect).toHaveText('Room calendar');
       const response = await targetSettingsResponse;
       managementResponse = response;
       observation.publicFeedManagementGetStatus = response.status();
@@ -6153,7 +6153,7 @@ async function verifyPublicFeedBrowserLifecycle(
       selectedCalendarName = (await calendarSelect.innerText()).trim();
     }
     observation.publicFeedTargetCalendarMatches =
-      selectedCalendarName === 'Synthetic team calendar';
+      selectedCalendarName === 'Room calendar';
     observation.publicFeedManagementTargetMatches =
       publicFeedManagementTargetMatches(managementResponse);
     observation.publicFeedSettingsEnabled =
