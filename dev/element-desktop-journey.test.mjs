@@ -35,6 +35,7 @@ import {
   classifyDesktopJourneyEvidence,
   classifyDesktopJourneyEvidenceState,
   classifyDesktopLoginFailure,
+  classifyDesktopRoomNavigationClickFailure,
   desktopWidgetIsReady,
   enterDesktopPasswordLogin,
   findUniqueWebBEventId,
@@ -2052,7 +2053,13 @@ test('reports uncaught Desktop refresh exceptions with fixed classifications', (
 test('records bounded Desktop refresh room-navigation progress', () => {
   const beforeClick = {
     roomListItemCountCapped: 2,
+    targetCountCapped: null,
     fixtureRoomTargetVisible: true,
+    centerHitObserved: null,
+    centerHitWithinTarget: null,
+    centerHitRole: 'unavailable',
+    clickFailureClass: 'not_observed',
+    roomIdMatchesAfterFailure: null,
     clickAttempted: false,
     clickCompleted: false,
     elapsedBucket: 'not_started',
@@ -2256,7 +2263,13 @@ test('records bounded Desktop refresh room-navigation progress', () => {
 test('rejects malformed room-navigation diagnostics while parsing evidence', () => {
   const diagnostic = {
     roomListItemCountCapped: 2,
+    targetCountCapped: null,
     fixtureRoomTargetVisible: true,
+    centerHitObserved: null,
+    centerHitWithinTarget: null,
+    centerHitRole: 'unavailable',
+    clickFailureClass: 'not_observed',
+    roomIdMatchesAfterFailure: null,
     clickAttempted: false,
     clickCompleted: false,
     elapsedBucket: 'not_started',
@@ -2273,6 +2286,7 @@ test('rejects malformed room-navigation diagnostics while parsing evidence', () 
   for (const malformedDiagnostic of [
     { ...diagnostic, unexpectedKey: true },
     { ...diagnostic, roomListItemCountCapped: 3 },
+    { ...diagnostic, clickFailureClass: 'private room title' },
     {
       ...diagnostic,
       progressTimeline: [
@@ -2327,7 +2341,13 @@ test('rejects malformed room-navigation diagnostics while parsing evidence', () 
 test('records only bounded failed refresh room-navigation progress', () => {
   const failedDiagnostic = {
     roomListItemCountCapped: 1,
+    targetCountCapped: 1,
     fixtureRoomTargetVisible: true,
+    centerHitObserved: true,
+    centerHitWithinTarget: false,
+    centerHitRole: 'button',
+    clickFailureClass: 'pointer_interception',
+    roomIdMatchesAfterFailure: false,
     clickAttempted: true,
     clickCompleted: false,
     elapsedBucket: '5_to_15s',
@@ -2354,6 +2374,12 @@ test('records only bounded failed refresh room-navigation progress', () => {
   };
   const startedDiagnostic = {
     ...failedDiagnostic,
+    targetCountCapped: null,
+    centerHitObserved: null,
+    centerHitWithinTarget: null,
+    centerHitRole: 'unavailable',
+    clickFailureClass: 'not_observed',
+    roomIdMatchesAfterFailure: null,
     elapsedBucket: 'not_completed',
     progressTimeline: failedDiagnostic.progressTimeline.slice(0, 2),
   };
@@ -2486,6 +2512,37 @@ test('classifies caught Desktop refresh errors without persisting error text', (
     assertion.name = 'AssertionError';
     assert.equal(classifyDesktopJourneyErrorClass(assertion), 'assertion');
   });
+});
+
+test('classifies Desktop room-navigation click failures into closed reasons', () => {
+  const timeout = new Error('Playwright timed out');
+  timeout.name = 'TimeoutError';
+  assert.equal(
+    classifyDesktopRoomNavigationClickFailure(timeout),
+    'playwright_timeout',
+  );
+  assert.equal(
+    classifyDesktopRoomNavigationClickFailure(
+      new Error('another element intercepts pointer events'),
+    ),
+    'pointer_interception',
+  );
+  assert.equal(
+    classifyDesktopRoomNavigationClickFailure(
+      new Error('waiting for scheduled navigations to finish'),
+    ),
+    'navigation_wait',
+  );
+  assert.equal(
+    classifyDesktopRoomNavigationClickFailure(new Error('Frame was detached')),
+    'frame_gone',
+  );
+  assert.equal(
+    classifyDesktopRoomNavigationClickFailure(
+      new Error('private room title and private URL'),
+    ),
+    'other',
+  );
 });
 
 test('refresh failure fallback records the minimal error when optional diagnostics fail', () => {
@@ -3446,7 +3503,7 @@ test('records only bounded child and evidence classification enums', () => {
       }),
       {
         evidenceState: 'invalid',
-        evidenceFailureCode: 'evidence_phase_record_rejected',
+        evidenceFailureCode: 'evidence_phase_record_shape_rejected',
       },
     );
     const unreadableTemp = join(runnerTemp, 'unreadable');
@@ -3568,6 +3625,10 @@ test('records only bounded child and evidence classification enums', () => {
       'evidence_login_record_rejected',
       'evidence_progress_refresh_sequence_rejected',
       'evidence_phase_record_rejected',
+      'evidence_phase_record_object_rejected',
+      'evidence_phase_record_shape_rejected',
+      'evidence_phase_record_order_rejected',
+      'evidence_phase_record_diagnostic_rejected',
       'evidence_final_summary_cross_check_rejected',
     ]) {
       writeDesktopJourneyParentDiagnostic({
@@ -3666,6 +3727,10 @@ test('classifies fixed evidence validation stages without exposing input', () =>
         expected: 'evidence_input_bounds_rejected',
       },
       {
+        input: 'null',
+        expected: 'evidence_phase_record_object_rejected',
+      },
+      {
         input: JSON.stringify({ loginStep: 'private-evidence-sentinel' }),
         expected: 'evidence_login_record_rejected',
       },
@@ -3680,7 +3745,24 @@ test('classifies fixed evidence validation stages without exposing input', () =>
       },
       {
         input: JSON.stringify({ privateValue: 'private-evidence-sentinel' }),
-        expected: 'evidence_phase_record_rejected',
+        expected: 'evidence_phase_record_shape_rejected',
+      },
+      {
+        input:
+          '{"phase":"desktop-login","status":"passed"}\n' +
+          '{"phase":"desktop-login","status":"passed"}',
+        expected: 'evidence_phase_record_order_rejected',
+      },
+      {
+        input: JSON.stringify({
+          phase: 'desktop-room-widget-read',
+          status: 'failed',
+          failurePoint: 'room-navigation',
+          roomNavigationDiagnostic: {
+            privateValue: 'private-evidence-sentinel',
+          },
+        }),
+        expected: 'evidence_phase_record_diagnostic_rejected',
       },
       {
         input: JSON.stringify({ phase: 'desktop-login', status: 'passed' }),
@@ -3744,7 +3826,7 @@ test('emits a sanitized unavailable summary when evidence validation fails', () 
       childOutcome: 'exited',
       childExitStatus: 23,
       evidenceState: 'invalid',
-      evidenceFailureCode: 'evidence_phase_record_rejected',
+      evidenceFailureCode: 'evidence_phase_record_shape_rejected',
     });
 
     const scriptPath = fileURLToPath(
@@ -3768,7 +3850,7 @@ test('emits a sanitized unavailable summary when evidence validation fails', () 
     assert.doesNotMatch(result.stderr, new RegExp(privateSentinel, 'u'));
 
     const summary = JSON.parse(result.stdout);
-    assert.equal(summary.schemaVersion, 21);
+    assert.equal(summary.schemaVersion, 22);
     assert.equal(summary.sourceSha, DESKTOP_REFRESH_SOURCE_SHA);
     assert.equal(summary.status, 'unavailable');
     assert.equal(summary.desktopChildCompletion.outcome, 'unknown');
@@ -3777,22 +3859,22 @@ test('emits a sanitized unavailable summary when evidence validation fails', () 
       childOutcome: 'exited',
       childExitStatus: 23,
       evidenceState: 'invalid',
-      evidenceFailureCode: 'evidence_phase_record_rejected',
+      evidenceFailureCode: 'evidence_phase_record_shape_rejected',
     });
     assert.equal(summary.cases['desktop-a-refresh'], 'not_run');
   });
 });
 
-test('declares the schema-21 CLI parent diagnostic shape', () => {
+test('declares the schema-22 CLI parent diagnostic shape', () => {
   const declarations = readFileSync(
     new URL('./element-desktop-journey.d.mts', import.meta.url),
     'utf8',
   );
-  assert.match(declarations, /schemaVersion: 21;/u);
+  assert.match(declarations, /schemaVersion: 22;/u);
   assert.match(declarations, /DesktopJourneyEvidenceFailureCode/u);
   assert.match(
     declarations,
-    /'path_file_rejected'[\s\S]*?'json_parse_failed'[\s\S]*?'evidence_validation_failed'[\s\S]*?'evidence_input_bounds_rejected'[\s\S]*?'evidence_login_record_rejected'[\s\S]*?'evidence_progress_refresh_sequence_rejected'[\s\S]*?'evidence_phase_record_rejected'[\s\S]*?'evidence_final_summary_cross_check_rejected'/u,
+    /'path_file_rejected'[\s\S]*?'json_parse_failed'[\s\S]*?'evidence_validation_failed'[\s\S]*?'evidence_input_bounds_rejected'[\s\S]*?'evidence_login_record_rejected'[\s\S]*?'evidence_progress_refresh_sequence_rejected'[\s\S]*?'evidence_phase_record_rejected'[\s\S]*?'evidence_phase_record_object_rejected'[\s\S]*?'evidence_phase_record_shape_rejected'[\s\S]*?'evidence_phase_record_order_rejected'[\s\S]*?'evidence_phase_record_diagnostic_rejected'[\s\S]*?'evidence_final_summary_cross_check_rejected'/u,
   );
   assert.match(
     declarations,

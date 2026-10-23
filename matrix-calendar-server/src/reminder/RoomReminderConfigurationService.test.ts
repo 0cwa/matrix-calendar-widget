@@ -52,7 +52,8 @@ const icalendar = fs
 describe('RoomReminderConfigurationService', () => {
   let configuration: IAppConfiguration;
   let listConfigurationPage: jest.Mock;
-  let upsertConfiguration: jest.Mock;
+  let compareAndUpsertConfiguration: jest.Mock;
+  let getConfiguration: jest.Mock;
   let deleteConfiguration: jest.Mock;
   let getJoinedRoomMembers: jest.Mock;
   let getPowerLevels: jest.Mock;
@@ -60,10 +61,12 @@ describe('RoomReminderConfigurationService', () => {
   let isRoomEncrypted: jest.Mock;
   let forAuthorizedTarget: jest.Mock;
   let getEventResource: jest.Mock;
+  let currentTime: number;
   let service: RoomReminderConfigurationService;
   let bindingRegistry: RoomCalendarBindingRegistry;
 
   beforeEach(() => {
+    currentTime = Date.parse('2026-10-01T00:00:00.000Z');
     configuration = {
       room_reminder_configuration_enabled: true,
       room_calendar_access_enabled: true,
@@ -81,12 +84,19 @@ describe('RoomReminderConfigurationService', () => {
     };
 
     listConfigurationPage = jest.fn().mockResolvedValue([]);
-    upsertConfiguration = jest.fn().mockResolvedValue(undefined);
+    compareAndUpsertConfiguration = jest.fn().mockResolvedValue(true);
+    getConfiguration = jest.fn().mockImplementation(async (identity) => ({
+      ...identity,
+      target: { kind: 'room' },
+      allDaySchedule: null,
+      revision: 1,
+    }));
     deleteConfiguration = jest.fn().mockResolvedValue(undefined);
     const store = {
       enabled: true,
       listConfigurationPage,
-      upsertConfiguration,
+      compareAndUpsertConfiguration,
+      getConfiguration,
       deleteConfiguration,
     } as unknown as RoomReminderStore;
 
@@ -126,10 +136,11 @@ describe('RoomReminderConfigurationService', () => {
       { forAuthorizedTarget } as unknown as RoomCalendarCalDavAccess,
       { getEventResource } as unknown as RoomCalendarEventOperations,
       bindingRegistry,
+      () => currentTime,
     );
   });
 
-  it('returns only canonical identity tuples from a bounded, room-scoped page', async () => {
+  it('returns target and schedule metadata with canonical identities from a bounded page', async () => {
     listConfigurationPage.mockResolvedValue([
       {
         roomId,
@@ -137,7 +148,6 @@ describe('RoomReminderConfigurationService', () => {
         eventUid: 'event@example.test',
         recurrenceId: null,
         alarmUid,
-        privateText: 'must not escape',
       },
     ]);
 
@@ -154,6 +164,9 @@ describe('RoomReminderConfigurationService', () => {
         eventUid: 'event@example.test',
         recurrenceId: null,
         alarmUid,
+        target: { kind: 'room' },
+        allDaySchedule: null,
+        revision: 1,
       },
     ]);
     expect(JSON.stringify(result)).not.toContain('private');
@@ -235,7 +248,7 @@ describe('RoomReminderConfigurationService', () => {
 
     expect(forAuthorizedTarget).not.toHaveBeenCalled();
     expect(getEventResource).not.toHaveBeenCalled();
-    expect(upsertConfiguration).not.toHaveBeenCalled();
+    expect(compareAndUpsertConfiguration).not.toHaveBeenCalled();
   });
 
   it.each(['encrypted', 'unknown encryption state'] as const)(
@@ -279,12 +292,12 @@ describe('RoomReminderConfigurationService', () => {
       expect(forAuthorizedTarget).not.toHaveBeenCalled();
       expect(getEventResource).not.toHaveBeenCalled();
       expect(listConfigurationPage).not.toHaveBeenCalled();
-      expect(upsertConfiguration).not.toHaveBeenCalled();
+      expect(compareAndUpsertConfiguration).not.toHaveBeenCalled();
       expect(deleteConfiguration).not.toHaveBeenCalled();
     },
   );
 
-  it('validates the live canonical source before persisting only its identity', async () => {
+  it('validates the live canonical source before persisting its sidecar target and schedule', async () => {
     const result = await service.upsert(actor, roomId, {
       eventId: 'https://dav.example.test/calendar/planning.ics',
       recurrenceId: null,
@@ -305,22 +318,39 @@ describe('RoomReminderConfigurationService', () => {
       },
       'https://dav.example.test/calendar/planning.ics',
     );
-    expect(upsertConfiguration).toHaveBeenCalledWith({
-      roomId,
-      calendarId,
-      eventUid: 'team-planning@example.test',
-      recurrenceId: null,
-      alarmUid,
-    });
+    expect(compareAndUpsertConfiguration).toHaveBeenCalledWith(
+      {
+        roomId,
+        calendarId,
+        eventUid: 'team-planning@example.test',
+        recurrenceId: null,
+        alarmUid,
+        target: { kind: 'room' },
+        allDaySchedule: null,
+      },
+      {
+        roomId,
+        calendarId,
+        eventUid: 'team-planning@example.test',
+        recurrenceId: null,
+        alarmUid,
+        target: { kind: 'room' },
+        allDaySchedule: null,
+        revision: 1,
+      },
+    );
     expect(result).toEqual({
       eventUid: 'team-planning@example.test',
       recurrenceId: null,
       alarmUid,
+      target: { kind: 'room' },
+      allDaySchedule: null,
+      revision: 1,
     });
     expect(JSON.stringify(result)).not.toContain('private');
-    expect(JSON.stringify(upsertConfiguration.mock.calls)).not.toContain(
-      'proof-secret',
-    );
+    expect(
+      JSON.stringify(compareAndUpsertConfiguration.mock.calls),
+    ).not.toContain('proof-secret');
     expect(getJoinedRoomMembers.mock.invocationCallOrder[0]).toBeLessThan(
       forAuthorizedTarget.mock.invocationCallOrder[0],
     );
@@ -328,8 +358,317 @@ describe('RoomReminderConfigurationService', () => {
       getEventResource.mock.invocationCallOrder[0],
     );
     expect(getEventResource.mock.invocationCallOrder[0]).toBeLessThan(
-      upsertConfiguration.mock.invocationCallOrder[0],
+      compareAndUpsertConfiguration.mock.invocationCallOrder[0],
     );
+    expect(getConfiguration).toHaveBeenCalledWith({
+      roomId,
+      calendarId,
+      eventUid: 'team-planning@example.test',
+      recurrenceId: null,
+      alarmUid,
+    });
+  });
+
+  it('validates selected users against current joined membership before reading CalDAV', async () => {
+    const target = {
+      kind: 'users' as const,
+      userIds: ['@bob:example.test', '@former:example.test'],
+    };
+    getJoinedRoomMembers.mockResolvedValue([
+      actor,
+      '@bob:example.test',
+      '@calendar-service:example.test',
+    ]);
+    getConfiguration.mockResolvedValue({
+      roomId,
+      calendarId,
+      eventUid: 'team-planning@example.test',
+      recurrenceId: null,
+      alarmUid,
+      target,
+      allDaySchedule: null,
+      revision: 2,
+    });
+
+    await expect(
+      service.upsert(actor, roomId, {
+        eventId: 'https://dav.example.test/calendar/planning.ics',
+        recurrenceId: null,
+        alarmUid,
+        target,
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(getJoinedRoomMembers).toHaveBeenCalledTimes(2);
+    expect(forAuthorizedTarget).not.toHaveBeenCalled();
+    expect(getEventResource).not.toHaveBeenCalled();
+    expect(compareAndUpsertConfiguration).not.toHaveBeenCalled();
+  });
+
+  it('rejects a selected user who left before configuration', async () => {
+    getJoinedRoomMembers
+      .mockResolvedValueOnce([actor])
+      .mockResolvedValueOnce([actor]);
+
+    await expect(
+      service.upsert(actor, roomId, {
+        eventId: 'https://dav.example.test/calendar/planning.ics',
+        recurrenceId: null,
+        alarmUid,
+        target: { kind: 'users', userIds: ['@former:example.test'] },
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      response: {
+        code: 'room-reminder-recipient-not-joined',
+      },
+    });
+    expect(forAuthorizedTarget).not.toHaveBeenCalled();
+    expect(getEventResource).not.toHaveBeenCalled();
+    expect(compareAndUpsertConfiguration).not.toHaveBeenCalled();
+  });
+
+  it('allows an explicitly scheduled DATE alarm and persists only its schedule sidecar', async () => {
+    const allDayIcalendar = icalendar
+      .replace('RRULE:FREQ=WEEKLY;COUNT=3', '')
+      .replace(
+        'DTSTART;TZID=Europe/Stockholm:20261005T090000',
+        'DTSTART;VALUE=DATE:20261005',
+      )
+      .replace(
+        'DTEND;TZID=Europe/Stockholm:20261005T100000',
+        'DTEND;VALUE=DATE:20261006',
+      );
+    getEventResource.mockResolvedValue({
+      event: { summary: 'private title' },
+      etag: 'private-etag',
+      icalendar: allDayIcalendar,
+    });
+    const allDaySchedule = {
+      daysBefore: 1,
+      localTime: '09:00',
+      timezone: 'Europe/Stockholm',
+    };
+    getConfiguration.mockImplementation(async (identity) => ({
+      ...identity,
+      target: { kind: 'room' },
+      allDaySchedule,
+      revision: 1,
+    }));
+
+    await expect(
+      service.upsert(actor, roomId, {
+        eventId: 'https://dav.example.test/calendar/planning.ics',
+        recurrenceId: null,
+        alarmUid,
+        allDaySchedule,
+      }),
+    ).resolves.toMatchObject({
+      eventUid: 'team-planning@example.test',
+      target: { kind: 'room' },
+      allDaySchedule,
+    });
+    expect(compareAndUpsertConfiguration).toHaveBeenCalledWith(
+      {
+        roomId,
+        calendarId,
+        eventUid: 'team-planning@example.test',
+        recurrenceId: null,
+        alarmUid,
+        target: { kind: 'room' },
+        allDaySchedule,
+      },
+      expect.objectContaining({ target: { kind: 'room' }, allDaySchedule }),
+    );
+  });
+
+  it('rejects a past one-time DATE reminder on the server before persistence', async () => {
+    const allDayIcalendar = icalendar
+      .replace('RRULE:FREQ=WEEKLY;COUNT=3', '')
+      .replace(
+        'DTSTART;TZID=Europe/Stockholm:20261005T090000',
+        'DTSTART;VALUE=DATE:20261005',
+      )
+      .replace(
+        'DTEND;TZID=Europe/Stockholm:20261005T100000',
+        'DTEND;VALUE=DATE:20261006',
+      );
+    getEventResource.mockResolvedValue({
+      event: { summary: 'private title' },
+      etag: 'private-etag',
+      icalendar: allDayIcalendar,
+    });
+    currentTime = Date.parse('2026-10-04T07:01:00.000Z');
+
+    await expect(
+      service.upsert(actor, roomId, {
+        eventId: 'https://dav.example.test/calendar/planning.ics',
+        recurrenceId: null,
+        alarmUid,
+        allDaySchedule: {
+          daysBefore: 1,
+          localTime: '09:00',
+          timezone: 'Europe/Stockholm',
+        },
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      response: {
+        code: 'room-reminder-time-in-past',
+      },
+    });
+    expect(compareAndUpsertConfiguration).not.toHaveBeenCalled();
+  });
+
+  it('allows a recipient-only edit after an existing DATE reminder becomes due', async () => {
+    const allDayIcalendar = icalendar
+      .replace('RRULE:FREQ=WEEKLY;COUNT=3', '')
+      .replace(
+        'DTSTART;TZID=Europe/Stockholm:20261005T090000',
+        'DTSTART;VALUE=DATE:20261005',
+      )
+      .replace(
+        'DTEND;TZID=Europe/Stockholm:20261005T100000',
+        'DTEND;VALUE=DATE:20261006',
+      );
+    getEventResource.mockResolvedValue({
+      event: { summary: 'private title' },
+      etag: 'private-etag',
+      icalendar: allDayIcalendar,
+    });
+    const allDaySchedule = {
+      daysBefore: 1,
+      localTime: '09:00',
+      timezone: 'Europe/Stockholm',
+    };
+    const existing = {
+      roomId,
+      calendarId,
+      eventUid: 'team-planning@example.test',
+      recurrenceId: null,
+      alarmUid,
+      target: { kind: 'room' as const },
+      allDaySchedule,
+      scheduleEffectiveAt: new Date('2026-10-03T07:00:00.000Z'),
+      revision: 4,
+    };
+    const target = { kind: 'users' as const, userIds: [actor] };
+    getConfiguration
+      .mockResolvedValueOnce(existing)
+      .mockResolvedValueOnce({ ...existing, target, revision: 5 });
+    currentTime = Date.parse('2026-10-04T07:01:00.000Z');
+
+    await expect(
+      service.upsert(actor, roomId, {
+        eventId: 'https://dav.example.test/calendar/planning.ics',
+        recurrenceId: null,
+        alarmUid,
+        target,
+        allDaySchedule,
+      }),
+    ).resolves.toMatchObject({ target, allDaySchedule, revision: 5 });
+    expect(compareAndUpsertConfiguration).toHaveBeenCalledWith(
+      expect.objectContaining({ target, allDaySchedule }),
+      existing,
+    );
+  });
+
+  it('rejects a stale recipient edit when its configuration snapshot changed', async () => {
+    const allDayIcalendar = icalendar
+      .replace('RRULE:FREQ=WEEKLY;COUNT=3', '')
+      .replace(
+        'DTSTART;TZID=Europe/Stockholm:20261005T090000',
+        'DTSTART;VALUE=DATE:20261005',
+      )
+      .replace(
+        'DTEND;TZID=Europe/Stockholm:20261005T100000',
+        'DTEND;VALUE=DATE:20261006',
+      );
+    getEventResource.mockResolvedValue({
+      event: { summary: 'private title' },
+      etag: 'private-etag',
+      icalendar: allDayIcalendar,
+    });
+    const allDaySchedule = {
+      daysBefore: 1,
+      localTime: '09:00',
+      timezone: 'Europe/Stockholm',
+    };
+    const existing = {
+      roomId,
+      calendarId,
+      eventUid: 'team-planning@example.test',
+      recurrenceId: null,
+      alarmUid,
+      target: { kind: 'room' as const },
+      allDaySchedule,
+      scheduleEffectiveAt: new Date('2026-10-03T07:00:00.000Z'),
+      revision: 4,
+    };
+    const target = { kind: 'users' as const, userIds: [actor] };
+    getConfiguration.mockResolvedValueOnce(existing);
+    compareAndUpsertConfiguration.mockResolvedValueOnce(false);
+    currentTime = Date.parse('2026-10-04T07:01:00.000Z');
+
+    await expect(
+      service.upsert(actor, roomId, {
+        eventId: 'https://dav.example.test/calendar/planning.ics',
+        recurrenceId: null,
+        alarmUid,
+        target,
+        allDaySchedule,
+      }),
+    ).rejects.toMatchObject({
+      status: 409,
+      response: { code: 'room-reminder-configuration-changed' },
+    });
+    expect(compareAndUpsertConfiguration).toHaveBeenCalledWith(
+      expect.objectContaining({ target, allDaySchedule }),
+      existing,
+    );
+    expect(getConfiguration).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows a past current DATE occurrence when the selected master is recurring', async () => {
+    const allDayRecurringIcalendar = icalendar
+      .replace(
+        'DTSTART;TZID=Europe/Stockholm:20261005T090000',
+        'DTSTART;VALUE=DATE:20261005',
+      )
+      .replace('RRULE:FREQ=WEEKLY;COUNT=3', 'RRULE:FREQ=DAILY;COUNT=3')
+      .replace(
+        'DTEND;TZID=Europe/Stockholm:20261005T100000',
+        'DTEND;VALUE=DATE:20261006',
+      );
+    getEventResource.mockResolvedValue({
+      event: { summary: 'private title' },
+      etag: 'private-etag',
+      icalendar: allDayRecurringIcalendar,
+    });
+    const allDaySchedule = {
+      daysBefore: 0,
+      localTime: '09:00',
+      timezone: 'Europe/Stockholm',
+    };
+    getConfiguration.mockImplementation(async (identity) => ({
+      ...identity,
+      target: { kind: 'room' },
+      allDaySchedule,
+      revision: 1,
+    }));
+    currentTime = Date.parse('2026-10-05T08:00:00.000Z');
+
+    await expect(
+      service.upsert(actor, roomId, {
+        eventId: 'https://dav.example.test/calendar/planning.ics',
+        recurrenceId: null,
+        alarmUid,
+        allDaySchedule,
+      }),
+    ).resolves.toMatchObject({
+      target: { kind: 'room' },
+      allDaySchedule,
+    });
+    expect(compareAndUpsertConfiguration).toHaveBeenCalledTimes(1);
   });
 
   it('shares the authorized current-source read with internal alarm-options code', async () => {
@@ -393,7 +732,7 @@ describe('RoomReminderConfigurationService', () => {
     expect(getJoinedRoomMembers).not.toHaveBeenCalled();
     expect(forAuthorizedTarget).not.toHaveBeenCalled();
     expect(getEventResource).not.toHaveBeenCalled();
-    expect(upsertConfiguration).not.toHaveBeenCalled();
+    expect(compareAndUpsertConfiguration).not.toHaveBeenCalled();
   });
 
   it('rejects stale relative reminder intent when the current alarm is absolute', async () => {
@@ -413,7 +752,7 @@ describe('RoomReminderConfigurationService', () => {
         alarmUid,
       }),
     ).rejects.toMatchObject({ status: 400 });
-    expect(upsertConfiguration).not.toHaveBeenCalled();
+    expect(compareAndUpsertConfiguration).not.toHaveBeenCalled();
     expect(forAuthorizedTarget).toHaveBeenCalledTimes(1);
   });
 
@@ -449,6 +788,6 @@ describe('RoomReminderConfigurationService', () => {
     expect(getJoinedRoomMembers).not.toHaveBeenCalled();
     expect(forAuthorizedTarget).not.toHaveBeenCalled();
     expect(getEventResource).not.toHaveBeenCalled();
-    expect(upsertConfiguration).not.toHaveBeenCalled();
+    expect(compareAndUpsertConfiguration).not.toHaveBeenCalled();
   });
 });

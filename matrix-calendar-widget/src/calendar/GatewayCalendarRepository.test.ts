@@ -587,6 +587,9 @@ describe('GatewayCalendarRepository', () => {
       eventUid: event.uid,
       recurrenceId: null,
       alarmUid: 'alarm-stable-1',
+      timingType: 'timed' as const,
+      supported: true,
+      requiresAllDaySchedule: false,
       relatedTo: 'start' as const,
       trigger: {
         weeks: 0,
@@ -612,6 +615,12 @@ describe('GatewayCalendarRepository', () => {
       eventUid: event.uid,
       recurrenceId: null,
       alarmUid: option.alarmUid,
+    };
+    const savedConfiguration = {
+      ...identity,
+      target: { kind: 'room' as const },
+      allDaySchedule: null,
+      revision: 1,
     };
     const fetchMock = mockFetch(
       jsonResponse([]),
@@ -640,7 +649,7 @@ describe('GatewayCalendarRepository', () => {
       }),
       jsonResponse({ options: [option] }),
       jsonResponse({ items: [] }),
-      jsonResponse(identity),
+      jsonResponse(savedConfiguration),
       jsonResponse({ deleted: true }),
     );
     const repository = createRepository(fetchMock, 'UTC', () => ({
@@ -669,8 +678,10 @@ describe('GatewayCalendarRepository', () => {
         publicEvent.id,
         option.alarmUid,
         null,
+        { kind: 'room' },
+        null,
       ),
-    ).resolves.toEqual(identity);
+    ).resolves.toEqual(savedConfiguration);
     await expect(
       repository.disableRoomReminder(identity),
     ).resolves.toBeUndefined();
@@ -695,6 +706,8 @@ describe('GatewayCalendarRepository', () => {
         eventId,
         recurrenceId: null,
         alarmUid: option.alarmUid,
+        target: { kind: 'room' },
+        allDaySchedule: null,
       }),
     );
     const [deleteUrl, deleteInit] = fetchMock.mock.calls[6];

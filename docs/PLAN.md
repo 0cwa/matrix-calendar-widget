@@ -40,7 +40,7 @@ Use the [recurrence and event decision index](./adrs/README.md#calendar-semantic
 
 **Implemented:** room membership/power checks, exact room bindings, selected server-side principal modes, authorized room event operations, independent reminder configuration/delivery gates, persistent scheduling, and room action notices. Moderator setup can create durable dynamic bindings under its own default-off gate. Current `main` reminders target the whole room for supported timed alarms in unencrypted rooms.
 
-**In progress:** selected-member and all-day Matrix reminder delivery in [PR #384](https://github.com/0cwa/matrix-calendar-widget/pull/384), under [#382](https://github.com/0cwa/matrix-calendar-widget/issues/382). Do not count the open PR as completed baseline support. See [bot/setup guidance](./bot-calendar.md), [configuration](./configuration.md), and the [Matrix decision index](./adrs/README.md#matrix-identity-rooms-and-reminders).
+**In progress:** selected-member and all-day Matrix reminder delivery in [PR #384](https://github.com/0cwa/matrix-calendar-widget/pull/384), under [#382](https://github.com/0cwa/matrix-calendar-widget/issues/382). The event-editor source now saves the canonical event before reopening Matrix settings against refreshed alarm options. Full acceptance and deployment qualification remain pending; do not count the open PR as completed baseline support. See [bot/setup guidance](./bot-calendar.md), [configuration](./configuration.md), and the [Matrix decision index](./adrs/README.md#matrix-identity-rooms-and-reminders).
 
 ## M7 — Non-widget fallback
 

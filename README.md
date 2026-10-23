@@ -4,6 +4,23 @@ A team calendar for Matrix rooms, with a widget for Element and calendar data st
 
 **Pre-alpha.** The controlled pilot targets Element Web and Desktop. The implementation is usable for development, but target deployment and recovery acceptance remain incomplete. See [project status](./docs/STATUS.md) for implemented features and [release evidence](./docs/RELEASE.md) for the exact source that has been qualified.
 
+## Screenshots
+
+These are captures of the actual widget calendar components using **fictional example events**, not a connected Matrix room or a live CalDAV installation. Dates are fixed to October 2026 so future captures are comparable. Each screenshot combines the **same view in light and dark mode**, split diagonally from bottom-left to top-right (light in the upper-left, dark in the lower-right).
+
+<table>
+  <tr>
+    <td width="50%" align="center"><a href="https://raw.githubusercontent.com/0cwa/matrix-calendar-widget/readme-gallery/images/month-desktop.png"><img src="https://raw.githubusercontent.com/0cwa/matrix-calendar-widget/readme-gallery/images/month-desktop.png" alt="Month view of a project team calendar with example events" width="520" /></a><br /><strong>Month view</strong></td>
+    <td width="50%" align="center"><a href="https://raw.githubusercontent.com/0cwa/matrix-calendar-widget/readme-gallery/images/event-details.png"><img src="https://raw.githubusercontent.com/0cwa/matrix-calendar-widget/readme-gallery/images/event-details.png" alt="Calendar event details with time, description and location" width="520" /></a><br /><strong>Event details</strong></td>
+  </tr>
+  <tr>
+    <td width="50%" align="center"><a href="https://raw.githubusercontent.com/0cwa/matrix-calendar-widget/readme-gallery/images/mobile-list.png"><img src="https://raw.githubusercontent.com/0cwa/matrix-calendar-widget/readme-gallery/images/mobile-list.png" alt="List of calendar events in a narrow widget" width="520" /></a><br /><strong>Narrow list view</strong></td>
+    <td width="50%" align="center"><a href="https://raw.githubusercontent.com/0cwa/matrix-calendar-widget/readme-gallery/images/mobile-create.png"><img src="https://raw.githubusercontent.com/0cwa/matrix-calendar-widget/readme-gallery/images/mobile-create.png" alt="Create event dialog on a narrow screen" width="520" /></a><br /><strong>Create event</strong></td>
+  </tr>
+</table>
+
+To refresh the images after UI changes, open [Refresh README gallery](https://github.com/0cwa/matrix-calendar-widget/actions/workflows/readme-gallery.yml) under GitHub Actions and select **Run workflow** on `main`. The workflow renders sanitized demo data and updates the dedicated [`readme-gallery` image branch](https://github.com/0cwa/matrix-calendar-widget/tree/readme-gallery); no deployment, credentials, or PR is needed. These screenshots show the browser fixture, not Element integration or production acceptance.
+
 ## Start here
 
 | I want to…                                 | Read                                                                                                                              |

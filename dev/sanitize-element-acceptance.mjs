@@ -102,6 +102,7 @@ const PHASES = new Set([
   'reminder-alarm-ui-readback',
   'reminder-room-configuration-enabled',
   'reminder-ui-readback',
+  'public-feed-browser-lifecycle',
   'reminder-initial-delivery',
   'reminder-restart-prior-state',
   'reminder-restart-scheduler-scan',
@@ -225,24 +226,127 @@ const REMINDER_ROOM_CONTEXT_RESPONSE_FIELDS = [
   'reminderWidgetContextResponseCount',
   'reminderWidgetContextResponseStatus',
 ];
+const PUBLIC_FEED_BROWSER_STATUS_FIELDS = [
+  'publicFeedManagementGetStatus',
+  'publicFeedPublishStatus',
+  'publicFeedGetStatus',
+  'publicFeedHeadStatus',
+  'publicFeedUnpublishStatus',
+  'publicFeedRevokedGetStatus',
+  'publicFeedRevokedHeadStatus',
+];
+const PUBLIC_FEED_BROWSER_ERROR_FIELDS = ['publicFeedManagementErrorCode'];
+const PUBLIC_FEED_BROWSER_ERROR_CODES = new Set([
+  'public-calendar-feed-upstream-unavailable',
+  'public-calendar-feeds-disabled',
+  'room-calendar-authorization-unavailable',
+  'room-calendar-caldav-disabled',
+  'unclassified',
+]);
+const PUBLIC_FEED_BROWSER_DIAGNOSTIC_FIELDS = [
+  'publicFeedLifecycleStep',
+  'publicFeedSettingsEnabled',
+  'publicFeedSettingsUnpublished',
+  'publicFeedTargetCalendarMatches',
+  'publicFeedManagementTargetMatches',
+  'publicFeedConsentCheckboxCount',
+  'publicFeedConsentCheckboxVisible',
+  'publicFeedConsentCheckboxChecked',
+  'publicFeedPublishButtonCount',
+  'publicFeedPublishDisabledBeforeConsent',
+  'publicFeedPublishDisabledAfterConsent',
+];
+const PUBLIC_FEED_BROWSER_LIFECYCLE_STEPS = new Set([
+  'opening-dialog',
+  'loading-settings',
+  'selecting-target-calendar',
+  'awaiting-consent-control',
+  'toggling-consent',
+  'verifying-consent',
+  'publishing',
+  'checking-public-feed',
+  'unpublishing',
+  'checking-revocation',
+  'complete',
+]);
+const PUBLIC_FEED_BROWSER_DIAGNOSTIC_BOOLEAN_FIELDS = [
+  'publicFeedSettingsEnabled',
+  'publicFeedSettingsUnpublished',
+  'publicFeedTargetCalendarMatches',
+  'publicFeedManagementTargetMatches',
+  'publicFeedConsentCheckboxVisible',
+  'publicFeedConsentCheckboxChecked',
+  'publicFeedPublishDisabledBeforeConsent',
+  'publicFeedPublishDisabledAfterConsent',
+];
+const PUBLIC_FEED_BROWSER_DIAGNOSTIC_COUNT_FIELDS = [
+  'publicFeedConsentCheckboxCount',
+  'publicFeedPublishButtonCount',
+];
+const PUBLIC_FEED_BROWSER_BOOLEAN_FIELDS = [
+  'publicConsentGateObserved',
+  'publicManagerPublishSucceeded',
+  'publicUrlOriginAndRouteMatch',
+  'anonymousGetContainsCanonicalEvent',
+  'anonymousHeadMatchesGet',
+  'unpublishSucceeded',
+  'anonymousGetDeniedAfterUnpublish',
+  'anonymousHeadDeniedAfterUnpublish',
+];
 const PHASE_BOOLEAN_FIELDS = new Map([
   ['service-room-ready', ['serviceUserJoined', 'powerPolicyVerified']],
   ['reminder-role-verified', ['rolePolicyVerified']],
   ['reminder-widget-context', ['canManageReminders']],
   ['reminder-alarm-ui-readback', ['relativeAlarmReadback']],
   ['reminder-room-configuration-enabled', ['reminderEnabled']],
-  ['reminder-ui-readback', ['relativeAlarmReadback', 'reminderEnabled']],
+  [
+    'reminder-ui-readback',
+    [
+      'relativeAlarmReadback',
+      'reminderEnabled',
+      'targetSettingsReadback',
+      'allDayScheduleReadback',
+    ],
+  ],
+  ['public-feed-browser-lifecycle', PUBLIC_FEED_BROWSER_BOOLEAN_FIELDS],
   [
     'reminder-initial-delivery',
-    ['canaryDelivered', 'roomMentioned', 'deliveredAfterDue', 'allMarkersOnce'],
+    [
+      'canaryDelivered',
+      'roomMentioned',
+      'selectedMemberMentioned',
+      'targetMentioned',
+      'expectedRoomRecipient',
+      'expectedSelectedRecipient',
+      'deliveredAfterDue',
+      'allMarkersOnce',
+    ],
   ],
   [
     'reminder-restart-scheduler-scan',
-    ['canaryDelivered', 'roomMentioned', 'deliveredAfterDue', 'allMarkersOnce'],
+    [
+      'canaryDelivered',
+      'roomMentioned',
+      'selectedMemberMentioned',
+      'targetMentioned',
+      'expectedRoomRecipient',
+      'expectedSelectedRecipient',
+      'deliveredAfterDue',
+      'allMarkersOnce',
+    ],
   ],
   [
     'reminder-restore-scheduler-scan',
-    ['canaryDelivered', 'roomMentioned', 'deliveredAfterDue', 'allMarkersOnce'],
+    [
+      'canaryDelivered',
+      'roomMentioned',
+      'selectedMemberMentioned',
+      'targetMentioned',
+      'expectedRoomRecipient',
+      'expectedSelectedRecipient',
+      'deliveredAfterDue',
+      'allMarkersOnce',
+    ],
   ],
   ['reminder-restart-no-duplicate', ['allMarkersOnce']],
   ['reminder-restart-prior-state', ['allMarkersOnce']],
@@ -255,7 +359,7 @@ const PHASE_BOOLEAN_FIELDS = new Map([
       'deliveryStateSent',
       'deliveryClaimClear',
       'deliveryKeyUnchanged',
-      'attemptCountUnchanged',
+      'deliveryMetadataUnchanged',
     ],
   ],
   [
@@ -270,7 +374,7 @@ const PHASE_BOOLEAN_FIELDS = new Map([
       'deliveryStateSent',
       'deliveryClaimClear',
       'deliveryKeyUnchanged',
-      'attemptCountUnchanged',
+      'deliveryMetadataUnchanged',
     ],
   ],
   ['g6-fixture-ready', ['openIdProofValid', 'allResourcesSeeded']],
@@ -350,6 +454,35 @@ const PHASE_BOOLEAN_FIELDS = new Map([
   ],
   ['g6-browser-egress', ['browserEgressClear']],
   ['g6-resource-cleanup', ['allOwnedResourcesRemoved']],
+]);
+const PHASE_REQUIRED_TRUE_FIELDS = new Map([
+  [
+    'reminder-initial-delivery',
+    [
+      'canaryDelivered',
+      'targetMentioned',
+      'deliveredAfterDue',
+      'allMarkersOnce',
+    ],
+  ],
+  [
+    'reminder-restart-scheduler-scan',
+    [
+      'canaryDelivered',
+      'targetMentioned',
+      'deliveredAfterDue',
+      'allMarkersOnce',
+    ],
+  ],
+  [
+    'reminder-restore-scheduler-scan',
+    [
+      'canaryDelivered',
+      'targetMentioned',
+      'deliveredAfterDue',
+      'allMarkersOnce',
+    ],
+  ],
 ]);
 const G6_NUMERIC_FIELDS_BY_PHASE = new Map([
   ['g6-fixture-ready', ['httpStatus', 'count']],
@@ -636,6 +769,16 @@ const REMINDER_DELIVERY_PHASES = new Set([
   'reminder-delivery-snapshot',
   'reminder-restart-delivery-row',
   'restore-delivery-row',
+]);
+const REMINDER_DELIVERY_SUCCESS_COUNTS = new Map([
+  ['reminder-delivery-snapshot', 1],
+  ['reminder-restart-delivery-row', 2],
+  ['restore-delivery-row', 3],
+]);
+const REMINDER_TARGET_DELIVERY_PHASES = new Set([
+  'reminder-initial-delivery',
+  'reminder-restart-scheduler-scan',
+  'reminder-restore-scheduler-scan',
 ]);
 const REMINDER_TIMELINE_COUNTS = new Map([
   ['reminder-initial-delivery', 1],
@@ -1037,38 +1180,47 @@ const POST_CREATE_VISIBILITY_COUNTER_FIELDS = [
 ];
 const REMINDER_CONFIGURATION_STEPS = new Set([
   'event-details',
-  'notify-control',
+  'settings-control',
   'options-load',
-  'eligible-option',
+  'destination-control',
+  'recipient-selection',
   'put-response',
   'complete',
 ]);
 const REMINDER_CONFIGURATION_FIELDS = [
   'reminderStep',
-  'notifyButtonCount',
-  'notifyButtonVisible',
+  'reminderSettingsButtonCount',
+  'reminderSettingsButtonVisible',
   'reminderOptionsGetCount',
   'reminderOptionsGetStatus',
   'reminderConfigGetCount',
   'reminderConfigGetStatus',
-  'reminderEligibleOptionCount',
-  'reminderOptionCheckedBefore',
-  'reminderOptionCheckAttempted',
+  'reminderDestinationControlCount',
+  'recipientKind',
+  'recipientSelectionAttempted',
+  'selectedMemberKeyboardFlow',
+  'reminderTargetMatches',
+  'allDayScheduleMatches',
+  'narrowSidePanelSafe',
   'reminderPutCount',
   'reminderPutStatus',
-  'reminderOptionCheckedAfter',
 ];
 const REMINDER_CONFIGURATION_COUNTER_FIELDS = [
-  'notifyButtonCount',
+  'reminderSettingsButtonCount',
   'reminderOptionsGetCount',
   'reminderConfigGetCount',
-  'reminderEligibleOptionCount',
+  'reminderDestinationControlCount',
   'reminderPutCount',
 ];
 const REMINDER_CONFIGURATION_STATUS_FIELDS = [
   'reminderOptionsGetStatus',
   'reminderConfigGetStatus',
   'reminderPutStatus',
+];
+const REMINDER_CONFIGURATION_STORED_FIELDS = [
+  'snapshotCompared',
+  'metadataUnchanged',
+  'schemaVersionMatches',
 ];
 const RUNTIME_COUNTER_FIELDS = [
   'gatewayContextRequestCount',
@@ -1138,14 +1290,25 @@ const ALLOWED_KEYS = new Set([
   'deliveryStateSent',
   'deliveryClaimClear',
   'deliveryKeyUnchanged',
-  'attemptCountUnchanged',
+  'deliveryMetadataUnchanged',
   'relativeAlarmReadback',
   'reminderEnabled',
+  'targetSettingsReadback',
+  'allDayScheduleReadback',
+  ...PUBLIC_FEED_BROWSER_STATUS_FIELDS,
+  ...PUBLIC_FEED_BROWSER_ERROR_FIELDS,
+  ...PUBLIC_FEED_BROWSER_DIAGNOSTIC_FIELDS,
+  ...PUBLIC_FEED_BROWSER_BOOLEAN_FIELDS,
   'canaryDelivered',
   'roomMentioned',
+  'selectedMemberMentioned',
+  'targetMentioned',
+  'expectedRoomRecipient',
+  'expectedSelectedRecipient',
   'deliveredAfterDue',
   'allMarkersOnce',
   'attemptCount',
+  'configurationCount',
   'checksum',
   'gatewayStoppedGracefully',
   'radicaleStoppedGracefully',
@@ -1176,6 +1339,7 @@ const ALLOWED_KEYS = new Set([
   ...POST_CREATE_VISIBILITY_FIELDS,
   'canManageReminders',
   ...REMINDER_CONFIGURATION_FIELDS,
+  ...REMINDER_CONFIGURATION_STORED_FIELDS,
   ...VERSION_FIELDS,
   'openIdProofValid',
   'allResourcesSeeded',
@@ -2117,47 +2281,109 @@ function validReminderConfigurationObservation(record) {
         (record[key] === 0 || (record[key] >= 100 && record[key] <= 599)),
     ) &&
     [
-      'notifyButtonVisible',
-      'reminderOptionCheckedBefore',
-      'reminderOptionCheckAttempted',
-      'reminderOptionCheckedAfter',
+      'reminderSettingsButtonVisible',
+      'recipientSelectionAttempted',
+      'selectedMemberKeyboardFlow',
+      'reminderTargetMatches',
+      'allDayScheduleMatches',
+      'narrowSidePanelSafe',
     ].every((key) => typeof record[key] === 'boolean') &&
-    (!record.notifyButtonVisible || record.notifyButtonCount === 1) &&
+    ['room', 'selected', 'unknown'].includes(record.recipientKind) &&
+    (!record.reminderSettingsButtonVisible ||
+      record.reminderSettingsButtonCount === 1) &&
     (record.reminderOptionsGetCount > 0 ||
       record.reminderOptionsGetStatus === 0) &&
     (record.reminderConfigGetCount > 0 ||
       record.reminderConfigGetStatus === 0) &&
     (record.reminderPutCount > 0 || record.reminderPutStatus === 0) &&
-    (!record.reminderOptionCheckedBefore ||
-      record.reminderEligibleOptionCount === 1) &&
-    (!record.reminderOptionCheckAttempted ||
-      (record.reminderEligibleOptionCount === 1 &&
-        !record.reminderOptionCheckedBefore)) &&
-    (!record.reminderOptionCheckedAfter ||
-      record.reminderEligibleOptionCount === 1) &&
     (!Object.hasOwn(record, 'count') ||
       (record.status === 'passed' && record.count === 1)) &&
     (record.status !== 'passed' ||
       (record.reminderStep === 'complete' &&
-        record.notifyButtonCount === 1 &&
-        record.notifyButtonVisible &&
+        record.reminderSettingsButtonCount === 1 &&
+        record.reminderSettingsButtonVisible &&
         record.reminderOptionsGetCount >= 1 &&
         record.reminderOptionsGetStatus >= 200 &&
         record.reminderOptionsGetStatus < 300 &&
         record.reminderConfigGetCount >= 1 &&
         record.reminderConfigGetStatus >= 200 &&
         record.reminderConfigGetStatus < 300 &&
-        record.reminderEligibleOptionCount === 1 &&
-        !record.reminderOptionCheckedBefore &&
-        record.reminderOptionCheckAttempted &&
+        record.reminderDestinationControlCount === 1 &&
+        ['room', 'selected'].includes(record.recipientKind) &&
+        record.recipientSelectionAttempted &&
+        record.reminderTargetMatches &&
+        record.allDayScheduleMatches &&
+        (record.recipientKind !== 'selected' ||
+          (record.selectedMemberKeyboardFlow && record.narrowSidePanelSafe)) &&
+        (record.recipientKind !== 'room' ||
+          !record.selectedMemberKeyboardFlow) &&
         record.reminderPutCount === 1 &&
         record.reminderPutStatus >= 200 &&
         record.reminderPutStatus < 300 &&
-        record.reminderOptionCheckedAfter &&
         record.reminderEnabled &&
         record.httpStatus === record.reminderPutStatus &&
         record.count === 1))
   );
+}
+
+function validReminderConfigurationStoredRecord(record) {
+  const keys = Object.keys(record).sort().join(',');
+  if (record.status === 'started') {
+    return keys === 'phase,status';
+  }
+  if (record.status === 'passed') {
+    return (
+      keys === 'count,phase,snapshotCompared,status' &&
+      Number.isInteger(record.count) &&
+      record.count >= 1 &&
+      record.count <= 3 &&
+      typeof record.snapshotCompared === 'boolean'
+    );
+  }
+  if (record.status !== 'failed') return false;
+  if (keys === 'phase,status') return true;
+  if (keys === 'phase,schemaVersionMatches,status') {
+    return record.schemaVersionMatches === false;
+  }
+  return (
+    keys === 'count,metadataUnchanged,phase,snapshotCompared,status' &&
+    Number.isInteger(record.count) &&
+    record.count >= 0 &&
+    record.count <= 100_000 &&
+    typeof record.snapshotCompared === 'boolean' &&
+    typeof record.metadataUnchanged === 'boolean' &&
+    (record.snapshotCompared || record.metadataUnchanged)
+  );
+}
+
+function validReminderDeliveryRecord(record) {
+  const keys = Object.keys(record).sort().join(',');
+  if (record.status === 'started') {
+    return keys === 'phase,status';
+  }
+
+  const phase = record.phase;
+  const terminalFields =
+    phase === 'reminder-delivery-snapshot'
+      ? 'attemptCount,configurationCount,count,deliveryClaimClear,deliveryStateSent,phase,status'
+      : 'attemptCount,count,deliveryClaimClear,deliveryKeyUnchanged,deliveryMetadataUnchanged,deliveryStateSent,phase,status';
+  if (record.status === 'passed') return keys === terminalFields;
+  if (record.status !== 'failed') return false;
+
+  if (
+    keys === 'phase,status' ||
+    keys === 'count,phase,status' ||
+    keys === 'phase,processExitCode,status'
+  ) {
+    return true;
+  }
+  if (
+    phase === 'reminder-delivery-snapshot' &&
+    keys === 'phase,schemaVersionMatches,status'
+  ) {
+    return record.schemaVersionMatches === false;
+  }
+  return keys === terminalFields;
 }
 
 const PROJECTION_DIAGNOSTIC_REASONS = [
@@ -2589,6 +2815,13 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       POST_CREATE_VISIBILITY_FIELDS.some((key) => Object.hasOwn(record, key));
     const hasReminderConfigurationObservation =
       REMINDER_CONFIGURATION_FIELDS.some((key) => Object.hasOwn(record, key));
+    const hasReminderConfigurationStoredField =
+      REMINDER_CONFIGURATION_STORED_FIELDS.some((key) =>
+        Object.hasOwn(record, key),
+      );
+    const hasReminderDeliveryRecord = REMINDER_DELIVERY_PHASES.has(
+      record.phase,
+    );
     if (
       (record.phase === 'widget-a-runtime-observed' &&
         !validRuntimeObservation(record)) ||
@@ -2604,7 +2837,17 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       (record.phase === 'reminder-room-configuration-enabled' &&
         !validReminderConfigurationObservation(record)) ||
       (record.phase !== 'reminder-room-configuration-enabled' &&
-        hasReminderConfigurationObservation)
+        hasReminderConfigurationObservation) ||
+      (hasReminderConfigurationStoredField &&
+        !(
+          (record.phase === 'reminder-configuration-stored' &&
+            validReminderConfigurationStoredRecord(record)) ||
+          (record.phase === 'reminder-delivery-snapshot' &&
+            validReminderDeliveryRecord(record))
+        )) ||
+      (record.phase === 'reminder-configuration-stored' &&
+        !validReminderConfigurationStoredRecord(record)) ||
+      (hasReminderDeliveryRecord && !validReminderDeliveryRecord(record))
     ) {
       throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
@@ -2675,6 +2918,29 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     }
 
     const phaseBooleans = PHASE_BOOLEAN_FIELDS.get(record.phase) ?? [];
+    const targetObservationFields = [
+      'roomMentioned',
+      'selectedMemberMentioned',
+      'targetMentioned',
+      'expectedRoomRecipient',
+      'expectedSelectedRecipient',
+    ];
+    const hasTargetObservation = targetObservationFields.some((key) =>
+      Object.hasOwn(record, key),
+    );
+    const validTargetObservation =
+      !REMINDER_TARGET_DELIVERY_PHASES.has(record.phase) ||
+      record.status === 'started' ||
+      (!hasTargetObservation && record.status === 'failed') ||
+      (targetObservationFields.every((key) => Object.hasOwn(record, key)) &&
+        ((record.expectedRoomRecipient === true &&
+          record.expectedSelectedRecipient === false) ||
+          (record.expectedRoomRecipient === false &&
+            record.expectedSelectedRecipient === true)) &&
+        record.targetMentioned ===
+          (record.expectedRoomRecipient
+            ? record.roomMentioned && !record.selectedMemberMentioned
+            : record.selectedMemberMentioned && !record.roomMentioned));
     if (
       [...PHASE_BOOLEAN_FIELDS.values()]
         .flat()
@@ -2684,7 +2950,59 @@ export function sanitizeElementAcceptance(input, sourceSha) {
             (!phaseBooleans.includes(key) || typeof record[key] !== 'boolean'),
         ) ||
       (record.status === 'passed' &&
-        phaseBooleans.some((key) => record[key] !== true))
+        (PHASE_REQUIRED_TRUE_FIELDS.get(record.phase) ?? phaseBooleans).some(
+          (key) => record[key] !== true,
+        )) ||
+      PUBLIC_FEED_BROWSER_STATUS_FIELDS.some(
+        (key) =>
+          Object.hasOwn(record, key) &&
+          (record.phase !== 'public-feed-browser-lifecycle' ||
+            !Number.isInteger(record[key]) ||
+            record[key] < 100 ||
+            record[key] > 599),
+      ) ||
+      (Object.hasOwn(record, 'publicFeedManagementErrorCode') &&
+        (record.phase !== 'public-feed-browser-lifecycle' ||
+          record.publicFeedManagementGetStatus !== 503 ||
+          !PUBLIC_FEED_BROWSER_ERROR_CODES.has(
+            record.publicFeedManagementErrorCode,
+          ))) ||
+      (record.phase === 'public-feed-browser-lifecycle' &&
+        record.status === 'failed' &&
+        record.publicFeedManagementGetStatus === 503 &&
+        !Object.hasOwn(record, 'publicFeedManagementErrorCode')) ||
+      PUBLIC_FEED_BROWSER_DIAGNOSTIC_FIELDS.some(
+        (key) =>
+          Object.hasOwn(record, key) &&
+          record.phase !== 'public-feed-browser-lifecycle',
+      ) ||
+      (Object.hasOwn(record, 'publicFeedLifecycleStep') &&
+        !PUBLIC_FEED_BROWSER_LIFECYCLE_STEPS.has(
+          record.publicFeedLifecycleStep,
+        )) ||
+      PUBLIC_FEED_BROWSER_DIAGNOSTIC_BOOLEAN_FIELDS.some(
+        (key) => Object.hasOwn(record, key) && typeof record[key] !== 'boolean',
+      ) ||
+      PUBLIC_FEED_BROWSER_DIAGNOSTIC_COUNT_FIELDS.some(
+        (key) =>
+          Object.hasOwn(record, key) &&
+          (!Number.isInteger(record[key]) ||
+            record[key] < 0 ||
+            record[key] > 10),
+      ) ||
+      (record.phase === 'public-feed-browser-lifecycle' &&
+        record.status === 'passed' &&
+        record.publicFeedManagementTargetMatches !== true) ||
+      (record.phase === 'public-feed-browser-lifecycle' &&
+        record.status === 'passed' &&
+        (record.publicFeedManagementGetStatus !== 200 ||
+          record.publicFeedPublishStatus !== 200 ||
+          record.publicFeedGetStatus !== 200 ||
+          record.publicFeedHeadStatus !== 200 ||
+          record.publicFeedUnpublishStatus !== 200 ||
+          record.publicFeedRevokedGetStatus !== 404 ||
+          record.publicFeedRevokedHeadStatus !== 404)) ||
+      !validTargetObservation
     ) {
       throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
@@ -2694,6 +3012,11 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         (!REMINDER_DELIVERY_PHASES.has(record.phase) ||
           !Number.isSafeInteger(record.attemptCount) ||
           record.attemptCount < 0)) ||
+      (Object.hasOwn(record, 'configurationCount') &&
+        (record.phase !== 'reminder-delivery-snapshot' ||
+          !Number.isInteger(record.configurationCount) ||
+          record.configurationCount < 0 ||
+          record.configurationCount > 100_000)) ||
       (Object.hasOwn(record, 'checksum') &&
         (!PRIVATE_CHECKSUM_PHASES.has(record.phase) ||
           typeof record.checksum !== 'string' ||
@@ -2701,7 +3024,13 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       (record.status === 'passed' &&
         REMINDER_DELIVERY_PHASES.has(record.phase) &&
         (!Number.isSafeInteger(record.attemptCount) ||
-          record.attemptCount < 1)) ||
+          record.attemptCount <
+            REMINDER_DELIVERY_SUCCESS_COUNTS.get(record.phase) ||
+          record.count !==
+            REMINDER_DELIVERY_SUCCESS_COUNTS.get(record.phase))) ||
+      (record.status === 'passed' &&
+        record.phase === 'reminder-delivery-snapshot' &&
+        record.configurationCount !== record.count) ||
       (record.status === 'passed' &&
         PRIVATE_CHECKSUM_PHASES.has(record.phase) &&
         !Object.hasOwn(record, 'checksum'))
@@ -2803,11 +3132,6 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       (record.phase === 'restore-element-ready' &&
         record.status === 'passed' &&
         record.count !== 2) ||
-      (record.phase === 'reminder-configuration-stored' &&
-        record.status === 'passed' &&
-        (!Number.isInteger(record.count) ||
-          record.count < 1 ||
-          record.count > 3)) ||
       (record.phase === 'reminder-delivery-snapshot' &&
         record.status === 'passed' &&
         (!Number.isInteger(record.count) ||
@@ -3579,18 +3903,21 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           `phase=${phase}`,
           `status=${record.status}`,
           `reminder_step=${record.reminderStep}`,
-          `notify_button_count=${record.notifyButtonCount}`,
-          `notify_button_visible=${record.notifyButtonVisible}`,
+          `reminder_settings_button_count=${record.reminderSettingsButtonCount}`,
+          `reminder_settings_button_visible=${record.reminderSettingsButtonVisible}`,
           `options_get_count=${record.reminderOptionsGetCount}`,
           `options_http_status=${record.reminderOptionsGetStatus}`,
           `configuration_get_count=${record.reminderConfigGetCount}`,
           `configuration_http_status=${record.reminderConfigGetStatus}`,
-          `eligible_option_count=${record.reminderEligibleOptionCount}`,
-          `option_checked_before=${record.reminderOptionCheckedBefore}`,
-          `option_check_attempted=${record.reminderOptionCheckAttempted}`,
+          `destination_control_count=${record.reminderDestinationControlCount}`,
+          `recipient_kind=${record.recipientKind}`,
+          `recipient_selection_attempted=${record.recipientSelectionAttempted}`,
+          `selected_member_keyboard_flow=${record.selectedMemberKeyboardFlow}`,
+          `reminder_target_matches=${record.reminderTargetMatches}`,
+          `all_day_schedule_matches=${record.allDayScheduleMatches}`,
+          `narrow_side_panel_safe=${record.narrowSidePanelSafe}`,
           `put_count=${record.reminderPutCount}`,
           `put_http_status=${record.reminderPutStatus}`,
-          `option_checked_after=${record.reminderOptionCheckedAfter}`,
         ].join(' '),
       );
       continue;
@@ -3668,6 +3995,25 @@ export function sanitizeElementAcceptance(input, sourceSha) {
     if (Object.hasOwn(record, 'count')) {
       fields.push(`count=${record.count}`);
     }
+    if (phase === 'reminder-configuration-stored') {
+      if (Object.hasOwn(record, 'snapshotCompared')) {
+        fields.push(`snapshot_compared=${record.snapshotCompared}`);
+      }
+      if (Object.hasOwn(record, 'metadataUnchanged')) {
+        fields.push(`metadata_unchanged=${record.metadataUnchanged}`);
+      }
+      if (Object.hasOwn(record, 'schemaVersionMatches')) {
+        fields.push(`schema_version_matches=${record.schemaVersionMatches}`);
+      }
+    }
+    if (phase === 'reminder-delivery-snapshot') {
+      if (Object.hasOwn(record, 'configurationCount')) {
+        fields.push(`configuration_count=${record.configurationCount}`);
+      }
+      if (Object.hasOwn(record, 'schemaVersionMatches')) {
+        fields.push(`schema_version_matches=${record.schemaVersionMatches}`);
+      }
+    }
     if (record.elementQuiesceSkipped === true) {
       fields.push('element_quiesce_skipped=true');
     }
@@ -3689,16 +4035,6 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           fields.push(`${outputKey}=${record[key]}`);
         }
       }
-    }
-    for (const [key, name] of [
-      ['relativeAlarmReadback', 'relative_alarm_readback'],
-      ['reminderEnabled', 'reminder_enabled'],
-      ['canaryDelivered', 'canary_delivered'],
-      ['roomMentioned', 'room_mentioned'],
-      ['deliveredAfterDue', 'delivered_after_due'],
-      ['allMarkersOnce', 'all_markers_once'],
-    ]) {
-      if (Object.hasOwn(record, key)) fields.push(`${name}=${record[key]}`);
     }
     if (Object.hasOwn(record, 'controlVisible')) {
       fields.push(`control_visible=${record.controlVisible}`);
@@ -3922,6 +4258,29 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           (letter) => `_${letter.toLowerCase()}`,
         );
         fields.push(`${outputKey}=${record[key]}`);
+      }
+    }
+    if (phase === 'public-feed-browser-lifecycle') {
+      for (const key of PUBLIC_FEED_BROWSER_DIAGNOSTIC_FIELDS) {
+        if (!Object.hasOwn(record, key)) continue;
+        const outputKey = key.replace(
+          /[A-Z]/gu,
+          (letter) => `_${letter.toLowerCase()}`,
+        );
+        fields.push(`${outputKey}=${record[key]}`);
+      }
+      for (const key of PUBLIC_FEED_BROWSER_STATUS_FIELDS) {
+        if (!Object.hasOwn(record, key)) continue;
+        const outputKey = key.replace(
+          /[A-Z]/gu,
+          (letter) => `_${letter.toLowerCase()}`,
+        );
+        fields.push(`${outputKey}=${record[key]}`);
+      }
+      if (Object.hasOwn(record, 'publicFeedManagementErrorCode')) {
+        fields.push(
+          `public_feed_management_error_code=${record.publicFeedManagementErrorCode}`,
+        );
       }
     }
     for (const key of G6_NUMERIC_FIELDS_BY_PHASE.get(phase) ?? []) {

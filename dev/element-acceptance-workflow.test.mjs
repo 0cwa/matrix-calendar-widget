@@ -27,6 +27,36 @@ test('the existing required Element acceptance job keeps its context', () => {
   assert.match(workflow, /principal-mode: appservice/u);
 });
 
+test('the browser fixture enables public feeds with an isolated signing key', () => {
+  const setup = readFileSync(
+    resolve(ROOT, 'dev/element-acceptance-setup.mjs'),
+    'utf8',
+  );
+  const compose = readFileSync(
+    resolve(ROOT, 'dev/element-acceptance.compose.yaml'),
+    'utf8',
+  );
+
+  assert.match(
+    setup,
+    /const publicFeedSigningKey = randomBytes\(32\)\.toString\('base64url'\)/u,
+  );
+  assert.match(setup, /addMask\(publicFeedSigningKey\)/u);
+  assert.match(setup, /MATRIX_CALENDAR_PUBLIC_FEED_ORIGIN: GATEWAY_URL/u);
+  assert.match(
+    setup,
+    /MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY: publicFeedSigningKey/u,
+  );
+  assert.match(
+    compose,
+    /MATRIX_CALENDAR_PUBLIC_FEED_ORIGIN: \$\{MATRIX_CALENDAR_PUBLIC_FEED_ORIGIN:-\}/u,
+  );
+  assert.match(
+    compose,
+    /MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY: \$\{MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY:-\}/u,
+  );
+});
+
 test('Element workflow retains manual and all non-documentation pull request triggers', () => {
   assert.match(
     workflow,
@@ -130,7 +160,7 @@ test('the shared runner preserves the Element, restart, restore, and cleanup gat
   );
   assert.match(
     runner,
-    /--grep "Element Web delivers a relative room reminder"/u,
+    /--grep "Element Web delivers room-timed and selected-member all-day reminders across restart and restore"/u,
   );
   assert.match(
     runner,

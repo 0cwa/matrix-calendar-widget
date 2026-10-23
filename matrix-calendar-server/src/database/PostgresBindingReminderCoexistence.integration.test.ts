@@ -161,17 +161,23 @@ async function expectBothSchemasOwnedByRole(
     { name: 'matrix_calendar_bindings', owner: 'matrix_calendar_app' },
   ]);
 
-  const versions = await sql<{ schema: string; version: number }[]>`
-    SELECT 'matrix_calendar' AS schema, version
+  const versions = await sql<
+    { schema: string; version: number; version_count: number }[]
+  >`
+    SELECT 'matrix_calendar' AS schema,
+           MAX(version) AS version,
+           COUNT(*)::int AS version_count
     FROM matrix_calendar.schema_migrations
     UNION ALL
-    SELECT 'matrix_calendar_bindings' AS schema, version
+    SELECT 'matrix_calendar_bindings' AS schema,
+           MAX(version) AS version,
+           COUNT(*)::int AS version_count
     FROM matrix_calendar_bindings.schema_migrations
     ORDER BY schema
   `;
   expect(versions).toEqual([
-    { schema: 'matrix_calendar', version: 1 },
-    { schema: 'matrix_calendar_bindings', version: 1 },
+    { schema: 'matrix_calendar', version: 4, version_count: 4 },
+    { schema: 'matrix_calendar_bindings', version: 1, version_count: 1 },
   ]);
 }
 
@@ -288,14 +294,23 @@ describeWithDatabase('shared PostgreSQL binding and reminder database', () => {
       eventUid: `event-${id}`,
       recurrenceId: null,
       alarmUid: `alarm-${id}`,
+      target: { kind: 'room' as const },
+      allDaySchedule: {
+        daysBefore: 3,
+        localTime: '09:00',
+        timezone: 'Europe/Stockholm',
+      },
     };
     await reminder.upsertConfiguration(reminderState);
+    const persistedReminderState =
+      await reminder.getConfiguration(reminderState);
+    expect(persistedReminderState?.scheduleEffectiveAt).toBeInstanceOf(Date);
     expect(
       await reminder.listConfigurations(
         reminderState.roomId,
         reminderState.calendarId,
       ),
-    ).toEqual([reminderState]);
+    ).toEqual([persistedReminderState]);
 
     const bindingState = {
       roomId: `!coexist-binding-${id}:example.test`,
@@ -347,7 +362,7 @@ describeWithDatabase('shared PostgreSQL binding and reminder database', () => {
           reminderState.roomId,
           reminderState.calendarId,
         ),
-      ).resolves.toEqual([reminderState]);
+      ).resolves.toEqual([persistedReminderState]);
       await expect(restoredBinding.listAll()).resolves.toContainEqual(
         expect.objectContaining({ ...bindingState, status: 'ready' }),
       );
