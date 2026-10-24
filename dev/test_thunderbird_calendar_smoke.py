@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -144,6 +145,67 @@ class ThunderbirdSmokeDiagnosticTests(unittest.TestCase):
         self.assertFalse(result["marionette_session_created"])
         self.assertEqual(result["child_state"], "exited")
         self.assertEqual(result["child_exit_code"], 23)
+
+    def test_nonzero_version_probe_emits_redacted_bounded_artifact_before_cleanup(
+        self,
+    ) -> None:
+        stderr = (
+            b"libmoz.so: cannot load /private/build/profile/libmoz.so "
+            b"from https://example.invalid/private?token=hidden\x1b[31m\x00\n"
+            + b"x" * 4096
+        )
+        completed = subprocess.CompletedProcess(
+            ["thunderbird", "--version"], 255, stdout="", stderr=stderr
+        )
+        environment = {
+            "XDG_RUNTIME_DIR": str(self.runtime_dir),
+            "RUNNER_TEMP": str(self.base),
+        }
+        with (
+            patch.object(SMOKE, "CONTAINER_TASK_ROOT", self.task_root),
+            patch.object(SMOKE, "CONTAINER_RUNTIME_DIR", self.runtime_dir),
+            patch.dict(os.environ, environment),
+            patch.object(SMOKE.subprocess, "run", return_value=completed),
+        ):
+            self.assertEqual(SMOKE._smoke_worker(self.task_root), 1)
+            result = SMOKE._read_worker_result(self.task_root)
+            self.assertEqual(result["binary_version_probe"], "nonzero_exit")
+            worker_diagnostic = SMOKE._worker_startup_diagnostic_path(self.task_root)
+            self.assertTrue(worker_diagnostic.is_file())
+            self.assertLessEqual(
+                worker_diagnostic.stat().st_size,
+                SMOKE.MAX_STARTUP_DIAGNOSTIC_BYTES + 1,
+            )
+            SMOKE._persist_worker_startup_diagnostic(self.task_root, result)
+
+        host_diagnostic = self.base / SMOKE.HOST_STARTUP_DIAGNOSTIC
+        self.assertTrue(host_diagnostic.is_file())
+        self.assertEqual(host_diagnostic.stat().st_mode & 0o777, 0o600)
+        safe_text = host_diagnostic.read_text(encoding="utf-8")
+        self.assertIn("libmoz.so: cannot load", safe_text)
+        self.assertIn("[redacted-path]", safe_text)
+        self.assertIn("[redacted-url]", safe_text)
+        self.assertNotIn("/private/build/profile", safe_text)
+        self.assertNotIn("https://example.invalid", safe_text)
+        self.assertNotIn("token=hidden", safe_text)
+        self.assertNotIn("\x1b", safe_text)
+        self.assertNotIn("\x00", safe_text)
+        self.assertLessEqual(
+            len(safe_text.encode("utf-8")),
+            SMOKE.MAX_STARTUP_DIAGNOSTIC_BYTES + 1,
+        )
+
+        shutil.rmtree(self.task_root)
+        self.assertTrue(host_diagnostic.is_file())
+
+    def test_successful_version_probe_creates_no_startup_diagnostic_artifact(
+        self,
+    ) -> None:
+        result = self._run_worker(ConstructorFailure, port_ready=False)
+        self.assertEqual(result["binary_version_probe"], "passed")
+        SMOKE._persist_worker_startup_diagnostic(self.task_root, result)
+        self.assertFalse(SMOKE._worker_startup_diagnostic_path(self.task_root).exists())
+        self.assertFalse((self.base / SMOKE.HOST_STARTUP_DIAGNOSTIC).exists())
 
 
 if __name__ == "__main__":

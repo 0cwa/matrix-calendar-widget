@@ -122,6 +122,12 @@ BOUNDED_VERSION_RE = re.compile(
 )
 MAX_STARTUP_PROBE_SECONDS = 10
 MAX_VERSION_OUTPUT_CHARS = 512
+MAX_STARTUP_DIAGNOSTIC_BYTES = 2048
+WORKER_STARTUP_DIAGNOSTIC = ".startup-version-probe.stderr.txt"
+HOST_STARTUP_DIAGNOSTIC = "thunderbird-startup-probe-diagnostic.txt"
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+STARTUP_URL_RE = re.compile(r"(?i)\b(?:https?|ftp|file)://[^\s<>\"']+")
+ABSOLUTE_PATH_RE = re.compile(r"(?<![A-Za-z0-9:])/(?:[^\s<>\"']+)")
 PYTHON_ARTIFACT_NAMES = frozenset(
     {
         "setuptools",
@@ -1381,14 +1387,101 @@ def _bounded_exit_code(value: Any) -> bool:
     return type(value) is int and -255 <= value <= 255
 
 
-def _probe_binary_version(binary: Path, result: dict[str, Any]) -> bool:
+def _sanitize_startup_probe_stderr(value: Any) -> str:
+    if isinstance(value, bytes):
+        text = value[:MAX_STARTUP_DIAGNOSTIC_BYTES].decode("utf-8", errors="replace")
+    elif isinstance(value, str):
+        text = value.encode("utf-8", errors="replace")[:MAX_STARTUP_DIAGNOSTIC_BYTES].decode(
+            "utf-8", errors="ignore"
+        )
+    else:
+        return ""
+    text = ANSI_ESCAPE_RE.sub("", text)
+    text = STARTUP_URL_RE.sub("[redacted-url]", text)
+    text = ABSOLUTE_PATH_RE.sub("[redacted-path]", text)
+    text = "".join(character for character in text if character.isprintable() or character == " ")
+    text = re.sub(r"\s+", " ", text).strip()
+    return text.encode("utf-8")[:MAX_STARTUP_DIAGNOSTIC_BYTES].decode("utf-8", errors="ignore")
+
+
+def _worker_startup_diagnostic_path(root: Path) -> Path:
+    return root / "workspace" / WORKER_STARTUP_DIAGNOSTIC
+
+
+def _write_worker_startup_diagnostic(root: Path, stderr: Any) -> None:
+    diagnostic = _sanitize_startup_probe_stderr(stderr)
+    if not diagnostic:
+        return
+    path = _worker_startup_diagnostic_path(root)
+    try:
+        descriptor = os.open(
+            path,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+    except OSError:
+        return
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            output.write(diagnostic + "\n")
+            output.flush()
+            os.fsync(output.fileno())
+    except OSError:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+
+
+def _persist_worker_startup_diagnostic(root: Path, result: dict[str, Any]) -> None:
+    if result.get("binary_version_probe") != "nonzero_exit":
+        return
+    source = _worker_startup_diagnostic_path(root)
+    try:
+        metadata = source.lstat()
+        if (
+            source.is_symlink()
+            or not source.is_file()
+            or metadata.st_size > MAX_STARTUP_DIAGNOSTIC_BYTES + 1
+        ):
+            return
+        with source.open("rb") as input_file:
+            diagnostic = _sanitize_startup_probe_stderr(
+                input_file.read(MAX_STARTUP_DIAGNOSTIC_BYTES + 1)
+            )
+    except OSError:
+        return
+    if not diagnostic:
+        return
+    destination = _summary_path().parent / HOST_STARTUP_DIAGNOSTIC
+    try:
+        descriptor = os.open(
+            destination,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+    except OSError:
+        return
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            output.write(diagnostic + "\n")
+            output.flush()
+            os.fsync(output.fileno())
+    except OSError:
+        try:
+            destination.unlink()
+        except OSError:
+            pass
+
+
+def _probe_binary_version(binary: Path, result: dict[str, Any], root: Path) -> bool:
     result["startup_stage"] = "binary_version_probe"
     try:
         completed = subprocess.run(
             [str(binary), "--version"],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
             errors="replace",
@@ -1418,6 +1511,7 @@ def _probe_binary_version(binary: Path, result: dict[str, Any]) -> bool:
     if completed.returncode != 0:
         result["binary_version_probe"] = "nonzero_exit"
         result["error_class"] = "marionette_error"
+        _write_worker_startup_diagnostic(root, completed.stderr)
         return False
     version = _bounded_version(completed.stdout)
     if version is None:
@@ -1501,7 +1595,7 @@ def _smoke_worker(root: Path) -> int:
         runtime.mkdir(mode=0o700, exist_ok=True)
         os.chmod(runtime, 0o700)
         binary = root / "app" / "thunderbird" / "thunderbird"
-        if not _probe_binary_version(binary, result):
+        if not _probe_binary_version(binary, result, root):
             return 1
         result["startup_stage"] = "marionette_import"
         from marionette_driver.marionette import Marionette
@@ -1728,6 +1822,7 @@ def _smoke(payload: dict[str, Any], source_sha: str, root: Path) -> None:
         except SmokeFailure:
             payload["startup_stage"] = "worker_result_read"
             raise
+        _persist_worker_startup_diagnostic(root, result)
     except SmokeFailure:
         raise
     except (OSError, ValueError):
