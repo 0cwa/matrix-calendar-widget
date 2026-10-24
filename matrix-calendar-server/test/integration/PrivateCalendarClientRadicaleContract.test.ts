@@ -142,6 +142,157 @@ const publicFeedMetrics = {
   status200Count: 0,
   status404Count: 0,
 };
+const PUBLIC_NATIVE_RESULT_PATH =
+  '/task/workspace/public-feed-native-result.json';
+const PUBLIC_NATIVE_RESULT_PREDICATES = [
+  'calendarTab',
+  'providerTypeICS',
+  'readOnlyCalendar',
+  'storedCredentialsAbsent',
+  'initialFeedObserved',
+  'canonicalEventObserved',
+  'explicitRefreshObserved',
+  'revokedRefreshObserved',
+  'revokedResponseNotFound',
+  'exactGatewayRoute',
+  'gatewayAuthorizationAbsent',
+] as const;
+const PUBLIC_NATIVE_RESULT_COUNTS = [
+  'gatewayGetCount',
+  'exactRouteCount',
+  'authorizationAbsentCount',
+  'http200Count',
+  'http404Count',
+] as const;
+const PUBLIC_NATIVE_FAILURE_STAGES = new Set([
+  'input_preflight',
+  'profile_setup',
+  'application_startup',
+  'calendar_tab',
+  'provider_setup',
+  'initial_refresh',
+  'event_observation',
+  'explicit_refresh',
+  'unpublish',
+  'revoked_refresh',
+  'cleanup',
+  'complete',
+]);
+const PUBLIC_NATIVE_FAILURE_CLASSES = new Set([
+  'invalid_input',
+  'input_missing',
+  'trust_setup_failed',
+  'startup_failed',
+  'version_mismatch',
+  'calendar_tab_unavailable',
+  'provider_unavailable',
+  'invalid_public_url',
+  'calendar_setup_failed',
+  'calendar_not_read_only',
+  'calendar_not_registered',
+  'refresh_failed',
+  'stored_credentials_present',
+  'public_route_not_observed',
+  'canonical_event_not_observed',
+  'unpublish_failed',
+  'revoked_route_not_observed',
+  'cleanup_failed',
+  'qualification_predicate_failed',
+  'unexpected_error',
+]);
+
+function persistPublicNativeResult(value: Record<string, unknown>): void {
+  const resultPath = process.env.MCW_PUBLIC_ICS_RESULT_FILE;
+  if (resultPath === undefined) return;
+  if (!publicFeedNativeProfile || resultPath !== PUBLIC_NATIVE_RESULT_PATH) {
+    throw new Error('Native public-feed result destination was invalid.');
+  }
+
+  let safeResult: Record<string, unknown>;
+  if (value.status === 'failed') {
+    const expectedFailureFields = [
+      'schema',
+      'status',
+      'failure_stage',
+      'failure_class',
+    ].sort();
+    if (
+      Object.keys(value).sort().join('\0') !==
+        expectedFailureFields.join('\0') ||
+      value.schema !== 'thunderbird-public-ics-qualification@1' ||
+      typeof value.failure_stage !== 'string' ||
+      !PUBLIC_NATIVE_FAILURE_STAGES.has(value.failure_stage) ||
+      typeof value.failure_class !== 'string' ||
+      !PUBLIC_NATIVE_FAILURE_CLASSES.has(value.failure_class)
+    ) {
+      throw new Error('Native public-feed result was invalid.');
+    }
+    safeResult = {
+      schema: 'thunderbird-public-ics-qualification@1',
+      status: 'failed',
+      failure_stage: value.failure_stage,
+      failure_class: value.failure_class,
+    };
+  } else {
+    const expectedFields = [
+      'schema',
+      'status',
+      'appVersion',
+      ...PUBLIC_NATIVE_RESULT_PREDICATES,
+      ...PUBLIC_NATIVE_RESULT_COUNTS,
+    ].sort();
+    const counts = PUBLIC_NATIVE_RESULT_COUNTS.map((field) => value[field]);
+    const countsAreValid = counts.every(
+      (count) =>
+        typeof count === 'number' &&
+        Number.isSafeInteger(count) &&
+        count >= 0 &&
+        count <= 100,
+    );
+    const [
+      gatewayGetCount,
+      exactRouteCount,
+      authorizationAbsentCount,
+      http200Count,
+      http404Count,
+    ] = counts as number[];
+    if (
+      value.status !== 'passed' ||
+      value.schema !== 'thunderbird-public-ics-qualification@1' ||
+      value.appVersion !== '158.0.1' ||
+      Object.keys(value).sort().join('\0') !== expectedFields.join('\0') ||
+      PUBLIC_NATIVE_RESULT_PREDICATES.some(
+        (predicate) => value[predicate] !== true,
+      ) ||
+      !countsAreValid ||
+      gatewayGetCount < 3 ||
+      exactRouteCount !== gatewayGetCount ||
+      authorizationAbsentCount !== gatewayGetCount ||
+      http200Count < 2 ||
+      http404Count < 1 ||
+      http200Count + http404Count !== gatewayGetCount
+    ) {
+      throw new Error('Native public-feed result was invalid.');
+    }
+    safeResult = {
+      schema: 'thunderbird-public-ics-qualification@1',
+      status: 'passed',
+      appVersion: '158.0.1',
+    };
+    for (const predicate of PUBLIC_NATIVE_RESULT_PREDICATES) {
+      safeResult[predicate] = true;
+    }
+    for (const count of PUBLIC_NATIVE_RESULT_COUNTS) {
+      safeResult[count] = value[count];
+    }
+  }
+
+  writeFileSync(resultPath, `${JSON.stringify(safeResult)}\n`, {
+    flag: 'wx',
+    mode: 0o600,
+  });
+  chmodSync(resultPath, 0o600);
+}
 
 const configProvider = {
   getOrThrow: () => contractConfig,
@@ -539,8 +690,12 @@ describeContract(
         contractConfig = {
           private_calendar_clients_enabled: privateFixtureEnabled,
           private_calendar_client_origin: `https://localhost:${apiAddress}`,
-          private_calendar_client_epoch_key: epochKey,
-          private_calendar_client_callback_key: callbackKey,
+          private_calendar_client_epoch_key: privateFixtureEnabled
+            ? epochKey
+            : undefined,
+          private_calendar_client_callback_key: privateFixtureEnabled
+            ? callbackKey
+            : undefined,
           radicale_url: `http://127.0.0.1:${radicalePort}`,
           public_calendar_feed_enabled: publicFeedNativeProfile,
           public_calendar_feed_origin: publicFeedNativeProfile
@@ -551,6 +706,11 @@ describeContract(
           calendar_gateway_rate_limit_window_ms: 60_000,
           calendar_gateway_rate_limit_max_keys: 50,
         } as IAppConfiguration;
+        if (publicFeedNativeProfile) {
+          expect(contractConfig.private_calendar_clients_enabled).toBe(false);
+          expect(records?.size).toBe(0);
+          expect(clientSecrets.size).toBe(0);
+        }
         callbackGateway = new PrivateCalendarClientCallbackGateway(
           contractConfig,
           policy,
@@ -721,16 +881,34 @@ describeContract(
           { mode: 0o600 },
         );
         const callbackKeyText = callbackKey.toString('base64url');
+        const publicPythonEnvironment = Object.fromEntries(
+          [
+            'PATH',
+            'LD_LIBRARY_PATH',
+            'XDG_CONFIG_HOME',
+            'XDG_CACHE_HOME',
+            'XDG_DATA_HOME',
+            'XDG_STATE_HOME',
+            'XDG_RUNTIME_DIR',
+            'DISPLAY',
+          ]
+            .filter((name) => typeof process.env[name] === 'string')
+            .map((name) => [name, process.env[name] as string] as const),
+        );
         const pyEnv = {
-          ...process.env,
+          ...(publicFeedNativeProfile ? publicPythonEnvironment : process.env),
           PYTHONPATH: [pluginSource, caldavSitePackages, process.env.PYTHONPATH]
             .filter(Boolean)
             .join(delimiter),
           SSL_CERT_FILE: certificates.caCert,
           RADICALE_MATRIX_HOMESERVER_URL: `http://127.0.0.1:${userInfoActualPort}`,
           RADICALE_MATRIX_SERVER_NAME: TEST_MATRIX_SERVER,
-          RADICALE_PRIVATE_CLIENT_CALLBACK_ORIGIN: `https://localhost:${apiAddress}`,
-          RADICALE_PRIVATE_CLIENT_CALLBACK_KEY: callbackKeyText,
+          ...(privateFixtureEnabled
+            ? {
+                RADICALE_PRIVATE_CLIENT_CALLBACK_ORIGIN: `https://localhost:${apiAddress}`,
+                RADICALE_PRIVATE_CLIENT_CALLBACK_KEY: callbackKeyText,
+              }
+            : {}),
         };
         const radicaleEnv = {
           ...pyEnv,
@@ -738,6 +916,17 @@ describeContract(
             .filter(Boolean)
             .join(delimiter),
         };
+        if (publicFeedNativeProfile) {
+          expect(privateFixtureEnabled).toBe(false);
+          expect(records?.size).toBe(0);
+          expect(clientSecrets.size).toBe(0);
+          expect(
+            radicaleEnv.RADICALE_PRIVATE_CLIENT_CALLBACK_ORIGIN,
+          ).toBeUndefined();
+          expect(
+            radicaleEnv.RADICALE_PRIVATE_CLIENT_CALLBACK_KEY,
+          ).toBeUndefined();
+        }
         radicale = spawn(
           radicalePython,
           ['-m', 'radicale', '--config', configPath],
@@ -828,6 +1017,8 @@ describeContract(
               MCW_PUBLIC_ICS_CA_FILE: certificates.caCert,
               MCW_PUBLIC_ICS_CONTROL_PORT: String(portOf(controlServer!)),
               MCW_PUBLIC_ICS_CONTROL_KEY: controlKey,
+              MCW_PUBLIC_ICS_RESULT_FILE:
+                process.env.MCW_PUBLIC_ICS_RESULT_FILE ?? '',
               MCW_PUBLIC_ICS_NATIVE_THUNDERBIRD_BIN: nativeThunderbirdBinary,
               MCW_PUBLIC_ICS_NATIVE_WORKSPACE: nativeThunderbirdWorkspace,
             },
@@ -854,6 +1045,7 @@ describeContract(
             } catch {
               throw new Error('Native public-feed result was invalid.');
             }
+            persistPublicNativeResult(publicResult);
             if (publicExit !== 0 || publicResult.status !== 'passed') {
               const safeFailureValue = (value: unknown) =>
                 typeof value === 'string' && /^[a-z_]{1,64}$/u.test(value)
