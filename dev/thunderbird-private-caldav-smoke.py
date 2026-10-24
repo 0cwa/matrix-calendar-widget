@@ -14,7 +14,6 @@ import shutil
 import stat
 import subprocess
 import sys
-import time
 from pathlib import Path
 from typing import Any
 from zipfile import ZipFile
@@ -124,6 +123,16 @@ FIXTURE_FAILURE_STAGES = {
     "canonical_assert",
     "cleanup",
     "worker_setup",
+    "profile_setup",
+    "marionette_import",
+    "marionette_constructor",
+    "profile_validation",
+    "session_creation",
+    "application_version",
+    "chrome_context",
+    "main_window",
+    "calendar_tab_observation",
+    "calendar_tab_open",
     "application_startup",
     "calendar_tab",
     "provider_discovery",
@@ -180,6 +189,10 @@ FIXTURE_FAILURE_CLASSES = {
     "callback_not_observed",
     "profile_setup_failed",
     "marionette_error",
+    "script_timeout",
+    "script_error",
+    "session_error",
+    "other",
     "invalid_provider_result",
     "calendar_mode_unavailable",
     "calendar_tab_not_open",
@@ -246,6 +259,42 @@ NATIVE_FAILURE_PAIRS = {
     ("complete", "qualification_predicate_failed"),
     ("cleanup", "cleanup_failed"),
     ("internal", "unexpected_error"),
+} | {
+    (stage, error_class)
+    for stage in {
+        "profile_setup",
+        "marionette_import",
+        "marionette_constructor",
+        "profile_validation",
+        "session_creation",
+        "application_version",
+        "chrome_context",
+        "main_window",
+        "calendar_tab_observation",
+        "calendar_tab_open",
+        "provider_discovery",
+        "provider_refresh",
+        "provider_edit",
+        "provider_create",
+        "provider_delete",
+        "post_revoke_provider_request",
+    }
+    for error_class in {"script_timeout", "script_error", "session_error", "other"}
+} | {
+    (stage, "invalid_provider_result")
+    for stage in {
+        "provider_discovery",
+        "provider_refresh",
+        "provider_edit",
+        "provider_create",
+        "provider_delete",
+        "post_revoke_provider_request",
+    }
+} | {
+    ("calendar_tab_observation", "calendar_mode_unavailable"),
+    ("calendar_tab_open", "calendar_tab_not_open"),
+    ("main_window", "main_window_missing"),
+    ("application_version", "version_mismatch"),
 }
 NATIVE_FAILURE_MESSAGE = re.compile(
     r"Native Thunderbird CalDAV contract failed \(([a-z_]{1,64})/([a-z_]{1,64})\)\."

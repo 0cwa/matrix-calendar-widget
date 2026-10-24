@@ -44,6 +44,33 @@ CREATED_SUMMARY = "Created by native Thunderbird CalDAV provider"
 REVOKED_SUMMARY = "This post-revoke edit must not reach Radicale"
 OPAQUE_PROPERTY = "X-COMPANY-OPAQUE"
 COUNTER_TIMEOUT_SECONDS = 20
+NATIVE_MARIONETTE_FAILURE_STAGES = {
+    "marionette_import",
+    "profile_setup",
+    "marionette_constructor",
+    "profile_validation",
+    "session_creation",
+    "application_version",
+    "chrome_context",
+    "main_window",
+    "calendar_tab_observation",
+    "calendar_tab_open",
+    "provider_discovery",
+    "provider_refresh",
+    "provider_edit",
+    "provider_create",
+    "provider_delete",
+    "post_revoke_provider_request",
+}
+MARIONETTE_EXCEPTION_CLASSES = {
+    "TimeoutException": "session_error",
+    "ScriptTimeoutException": "script_timeout",
+    "JavascriptException": "script_error",
+    "MarionetteException": "session_error",
+    "InvalidSessionIdException": "session_error",
+    "NoSuchWindowException": "session_error",
+    "SessionNotCreatedException": "session_error",
+}
 
 TABMAIL_OBSERVATION = """
 const tabmail = document.getElementById("tabmail");
@@ -252,6 +279,23 @@ class ContractFailure(RuntimeError):
         self.error_class = error_class
 
 
+def _marionette_error_class(error: Exception) -> str:
+    # Only fixed categories escape; exception text and arbitrary type names do not.
+    class_name = type(error).__name__
+    known_class = MARIONETTE_EXCEPTION_CLASSES.get(class_name)
+    if known_class is not None:
+        return known_class
+    if isinstance(error, (ConnectionError, OSError, TimeoutError)):
+        return "session_error"
+    return "other"
+
+
+def _marionette_failure(stage: str, error: Exception) -> ContractFailure:
+    if stage not in NATIVE_MARIONETTE_FAILURE_STAGES:
+        return ContractFailure("internal", "unexpected_error")
+    return ContractFailure(stage, _marionette_error_class(error))
+
+
 def _control_request(
     method: str, path: str, body: bytes = b""
 ) -> tuple[int, bytes]:
@@ -356,13 +400,18 @@ def _run_certutil(profile: Path) -> None:
             raise ContractFailure("profile_ca_import", "profile_setup_failed")
 
 
-def _async_script(marionette: object, script: str, args: list[object]) -> dict[str, object]:
+def _async_script(
+    marionette: object,
+    script: str,
+    args: list[object],
+    stage: str,
+) -> dict[str, object]:
     try:
         result = marionette.execute_async_script(script, script_args=args)
-    except Exception:
-        raise ContractFailure("provider_operation", "marionette_error") from None
+    except Exception as error:
+        raise _marionette_failure(stage, error) from None
     if not isinstance(result, dict) or type(result.get("ok")) is not bool:
-        raise ContractFailure("provider_operation", "invalid_provider_result")
+        raise ContractFailure(stage, "invalid_provider_result")
     return result
 
 
@@ -377,8 +426,8 @@ def _assert_ok(result: dict[str, object], stage: str) -> None:
 def _ensure_calendar_tab(marionette: object) -> dict[str, bool]:
     try:
         observed = marionette.execute_script(TABMAIL_OBSERVATION)
-    except Exception:
-        raise ContractFailure("calendar_tab", "marionette_error") from None
+    except Exception as error:
+        raise _marionette_failure("calendar_tab_observation", error) from None
     expected = {
         "tabmailPresent",
         "calendarModeRegistered",
@@ -394,22 +443,25 @@ def _ensure_calendar_tab(marionette: object) -> dict[str, bool]:
         or not observed["calendarModeRegistered"]
         or observed["calendarTabOpenError"]
     ):
-        raise ContractFailure("calendar_tab", "calendar_mode_unavailable")
+        raise ContractFailure("calendar_tab_observation", "calendar_mode_unavailable")
     deadline = time.monotonic() + 15
     while True:
         try:
             opened = marionette.execute_script(CALENDAR_TAB_OPEN)
-        except Exception:
-            raise ContractFailure("calendar_tab", "marionette_error") from None
+        except Exception as error:
+            raise _marionette_failure("calendar_tab_open", error) from None
         if opened is True:
             return observed
         if time.monotonic() >= deadline:
-            raise ContractFailure("calendar_tab", "calendar_tab_not_open")
+            raise ContractFailure("calendar_tab_open", "calendar_tab_not_open")
         time.sleep(0.25)
 
 
 def run() -> dict[str, object]:
-    from marionette_driver.marionette import Marionette
+    try:
+        from marionette_driver.marionette import Marionette
+    except Exception as error:
+        raise _marionette_failure("marionette_import", error) from None
 
     if not CA_FILE.is_file() or not THUNDERBIRD.is_file():
         raise ContractFailure("worker_setup", "input_missing")
@@ -424,9 +476,17 @@ def run() -> dict[str, object]:
     if not _is_local_https_origin(API_ORIGIN):
         raise ContractFailure("worker_setup", "invalid_origin")
 
-    workspace = WORKSPACE.resolve(strict=True)
-    profile_seed = Path(tempfile.mkdtemp(prefix="mcw-private-profile-seed-", dir=workspace))
-    os.chmod(profile_seed, 0o700)
+    try:
+        workspace = WORKSPACE.resolve(strict=True)
+    except Exception as error:
+        raise _marionette_failure("profile_validation", error) from None
+    try:
+        profile_seed = Path(
+            tempfile.mkdtemp(prefix="mcw-private-profile-seed-", dir=workspace)
+        )
+        os.chmod(profile_seed, 0o700)
+    except Exception as error:
+        raise _marionette_failure("profile_setup", error) from None
     marionette = None
     profile_path: Path | None = None
     result: dict[str, object] = {
@@ -459,27 +519,47 @@ def run() -> dict[str, object]:
             "startup.homepage_welcome_url.additional": "",
             "signon.rememberSignons": True,
         }
-        marionette = Marionette(
-            bin=str(THUNDERBIRD),
-            app="thunderbird",
-            workspace=str(workspace),
-            gecko_log=str(workspace / "private-caldav-gecko.log"),
-            app_args=["--calendar", "--headless"],
-            prefs=prefs,
-            headless=False,
-            startup_timeout=85,
-            profile=str(profile_seed),
-        )
-        profile_path = Path(marionette.profile_path).resolve(strict=True)
-        profile_path.relative_to(workspace)
-        capabilities = marionette.start_session()
-        if capabilities.get("browserVersion") != EXPECTED_VERSION:
-            raise ContractFailure("application_startup", "version_mismatch")
-        marionette.set_context(marionette.CONTEXT_CHROME)
-        if marionette.get_window_type() != "mail:3pane":
-            raise ContractFailure("application_startup", "main_window_missing")
+        try:
+            marionette = Marionette(
+                bin=str(THUNDERBIRD),
+                app="thunderbird",
+                workspace=str(workspace),
+                gecko_log=str(workspace / "private-caldav-gecko.log"),
+                app_args=["--calendar", "--headless"],
+                prefs=prefs,
+                headless=False,
+                startup_timeout=85,
+                profile=str(profile_seed),
+            )
+        except Exception as error:
+            raise _marionette_failure("marionette_constructor", error) from None
+        try:
+            profile_path = Path(marionette.profile_path).resolve(strict=True)
+            profile_path.relative_to(workspace)
+        except Exception as error:
+            raise _marionette_failure("profile_validation", error) from None
+        try:
+            capabilities = marionette.start_session()
+        except Exception as error:
+            raise _marionette_failure("session_creation", error) from None
+        try:
+            browser_version = capabilities.get("browserVersion")
+        except Exception as error:
+            raise _marionette_failure("session_creation", error) from None
+        if browser_version != EXPECTED_VERSION:
+            raise ContractFailure("application_version", "version_mismatch")
+        try:
+            marionette.set_context(marionette.CONTEXT_CHROME)
+        except Exception as error:
+            raise _marionette_failure("chrome_context", error) from None
+        try:
+            window_type = marionette.get_window_type()
+        except Exception as error:
+            raise _marionette_failure("main_window", error) from None
+        if window_type != "mail:3pane":
+            raise ContractFailure("main_window", "main_window_missing")
 
-        observed = _ensure_calendar_tab(marionette)
+        _ensure_calendar_tab(marionette)
         result["calendarTab"] = True
         location = f"{API_ORIGIN}/{PERSONAL_APP_ID}/calendar/"
         expected_path = f"/{PERSONAL_APP_ID}/calendar/"
@@ -487,6 +567,7 @@ def run() -> dict[str, object]:
             marionette,
             DISCOVER_CALENDAR,
             [PERSONAL_APP_ID, PERSONAL_SECRET, location, API_ORIGIN, expected_path],
+            "provider_discovery",
         )
         _assert_ok(discovered, "provider_discovery")
         result["providerDiscovery"] = discovered.get("providerDiscovery") is True
@@ -495,7 +576,9 @@ def run() -> dict[str, object]:
             raise ContractFailure("provider_discovery", "provider_discovery_failed")
 
         before_refresh = _state()
-        refresh = _async_script(marionette, REFRESH_CALENDAR, [])
+        refresh = _async_script(
+            marionette, REFRESH_CALENDAR, [], "provider_refresh"
+        )
         _assert_ok(refresh, "provider_refresh")
         _wait_for_callback(int(before_refresh["callbackCount"]))
         result["refreshNetworkRequest"] = True
@@ -504,6 +587,7 @@ def run() -> dict[str, object]:
             marionette,
             EDIT_EVENT,
             [EVENT_UID, OPAQUE_PROPERTY, "keep-this-value", EDITED_SUMMARY],
+            "provider_edit",
         )
         _assert_ok(edit, "provider_edit")
         _control_post("/native-verify-edited")
@@ -515,6 +599,7 @@ def run() -> dict[str, object]:
             marionette,
             CREATE_EVENT,
             [EVENT_UID, CREATED_UID, CREATED_SUMMARY],
+            "provider_create",
         )
         _assert_ok(create, "provider_create")
         _wait_for_callback(int(before_create["callbackCount"]))
@@ -522,7 +607,9 @@ def run() -> dict[str, object]:
         result["canonicalCreateRoundtrip"] = True
 
         before_delete = _state()
-        delete = _async_script(marionette, DELETE_EVENT, [CREATED_UID])
+        delete = _async_script(
+            marionette, DELETE_EVENT, [CREATED_UID], "provider_delete"
+        )
         _assert_ok(delete, "provider_delete")
         _wait_for_callback(int(before_delete["callbackCount"]))
         _control_post("/native-verify-deleted")
@@ -543,6 +630,7 @@ def run() -> dict[str, object]:
             marionette,
             POST_REVOKE_EDIT,
             [EVENT_UID, REVOKED_SUMMARY],
+            "post_revoke_provider_request",
         )
         _assert_ok(post_revoke, "post_revoke_provider_request")
         after_revoke = _wait_for_callback(int(revoked["callbackCount"]))

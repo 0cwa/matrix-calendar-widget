@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -20,6 +21,12 @@ CONTRACT_SCRIPT = (
     / "radicale-auth"
     / "tests"
     / "private_client_caldav_contract.py"
+)
+NATIVE_THUNDERBIRD_CONTRACT = (
+    Path(__file__).parents[1]
+    / "radicale-auth"
+    / "tests"
+    / "private_client_thunderbird_contract.py"
 )
 RADICALE_DOCKERFILE = Path(__file__).parents[1] / "radicale-auth" / "Dockerfile"
 CALLBACK_MODULE_SOURCE = (
@@ -39,6 +46,30 @@ SPEC.loader.exec_module(SMOKE)
 
 
 class PrivateCalDavSmokeTests(unittest.TestCase):
+    def _load_native_thunderbird_contract(self):
+        environment = {
+            "MCW_PRIVATE_CALDAV_API_ORIGIN": "https://localhost:8443",
+            "MCW_PRIVATE_CALDAV_CONTROL_PORT": "4242",
+            "MCW_PRIVATE_CALDAV_CONTROL_KEY": "test-only-control-key",
+            "MCW_PRIVATE_CALDAV_PERSONAL_APP_ID": "mcwpc~" + "a" * 48,
+            "MCW_PRIVATE_CALDAV_PERSONAL_SECRET": "test-only-personal-secret",
+            "MCW_PRIVATE_CALDAV_CA_FILE": "/tmp/test-only-ca.pem",
+            "MCW_PRIVATE_CALDAV_NATIVE_THUNDERBIRD_BIN": (
+                "/task/app/thunderbird/thunderbird"
+            ),
+            "MCW_PRIVATE_CALDAV_NATIVE_WORKSPACE": "/task/workspace",
+        }
+        with patch.dict(os.environ, environment):
+            spec = importlib.util.spec_from_file_location(
+                "private_client_thunderbird_contract_test",
+                NATIVE_THUNDERBIRD_CONTRACT,
+            )
+            if spec is None or spec.loader is None:
+                raise RuntimeError("private Thunderbird contract is unavailable")
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+        return module
+
     def test_radicale_image_copies_dependency_light_callback_module(self) -> None:
         dockerfile = RADICALE_DOCKERFILE.read_text(encoding="utf-8")
         self.assertTrue(CALLBACK_MODULE_SOURCE.is_file())
@@ -773,6 +804,154 @@ class PrivateCalDavSmokeTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 SMOKE._read_native_result(result)
 
+    def test_native_marionette_failures_use_fixed_types_and_stages(self) -> None:
+        contract = self._load_native_thunderbird_contract()
+        self.assertTrue(
+            contract.NATIVE_MARIONETTE_FAILURE_STAGES
+            <= SMOKE.FIXTURE_FAILURE_STAGES
+        )
+        exception_classes = {
+            "script_timeout",
+            "script_error",
+            "session_error",
+            "other",
+        }
+        self.assertTrue(
+            {
+                (stage, error_class)
+                for stage in contract.NATIVE_MARIONETTE_FAILURE_STAGES
+                for error_class in exception_classes
+            }
+            <= SMOKE.NATIVE_FAILURE_PAIRS
+        )
+        cases = (
+            (type("ScriptTimeoutException", (Exception,), {}), "script_timeout"),
+            (type("TimeoutException", (Exception,), {}), "session_error"),
+            (type("JavascriptException", (Exception,), {}), "script_error"),
+            (type("InvalidSessionIdException", (Exception,), {}), "session_error"),
+            (OSError, "session_error"),
+            (type("PrivateExceptionWithSensitiveMessage", (Exception,), {}), "other"),
+        )
+        for exception_type, expected_class in cases:
+            with self.subTest(class_name=exception_type.__name__):
+                error = exception_type("private message must not escape")
+                observed = contract._marionette_error_class(error)
+                self.assertEqual(observed, expected_class)
+                self.assertIn(
+                    observed,
+                    {"script_timeout", "script_error", "session_error", "other"},
+                )
+                self.assertNotIn(str(error), observed)
+
+        startup_failure = contract._marionette_failure(
+            "session_creation",
+            type("ScriptTimeoutException", (Exception,), {})("private detail"),
+        )
+        self.assertEqual(startup_failure.stage, "session_creation")
+        self.assertEqual(startup_failure.error_class, "script_timeout")
+        unknown_stage = contract._marionette_failure("private_stage", RuntimeError())
+        self.assertEqual(unknown_stage.stage, "internal")
+        self.assertEqual(unknown_stage.error_class, "unexpected_error")
+
+    def test_each_async_native_operation_preserves_its_fixed_failure_phase(self) -> None:
+        contract = self._load_native_thunderbird_contract()
+        cases = (
+            ("provider_discovery", "ScriptTimeoutException", "script_timeout"),
+            ("provider_refresh", "JavascriptException", "script_error"),
+            ("provider_edit", "InvalidSessionIdException", "session_error"),
+            ("provider_create", "PrivateFailure", "other"),
+            ("provider_delete", "ScriptTimeoutException", "script_timeout"),
+            (
+                "post_revoke_provider_request",
+                "JavascriptException",
+                "script_error",
+            ),
+        )
+        for stage, class_name, expected_class in cases:
+            with self.subTest(stage=stage):
+                error = type(class_name, (Exception,), {})("private detail")
+
+                class RaisingMarionette:
+                    def execute_async_script(self, _script, script_args):
+                        del script_args
+                        raise error
+
+                with self.assertRaises(contract.ContractFailure) as raised:
+                    contract._async_script(
+                        RaisingMarionette(), "private script", [], stage
+                    )
+                self.assertEqual(raised.exception.stage, stage)
+                self.assertEqual(raised.exception.error_class, expected_class)
+                self.assertNotIn("private detail", str(raised.exception))
+
+    def test_native_ca_and_calendar_tab_failures_use_fixed_phases(self) -> None:
+        contract = self._load_native_thunderbird_contract()
+        with patch.object(
+            contract.subprocess, "run", return_value=SimpleNamespace(returncode=1)
+        ):
+            with self.assertRaises(contract.ContractFailure) as ca_failure:
+                contract._run_certutil(Path("/tmp/test-only-profile"))
+        self.assertEqual(ca_failure.exception.stage, "profile_ca_import")
+        self.assertEqual(ca_failure.exception.error_class, "profile_setup_failed")
+
+        class FailingObservation:
+            def execute_script(self, _script):
+                raise type("JavascriptException", (Exception,), {})("private detail")
+
+        with self.assertRaises(contract.ContractFailure) as tab_failure:
+            contract._ensure_calendar_tab(FailingObservation())
+        self.assertEqual(tab_failure.exception.stage, "calendar_tab_observation")
+        self.assertEqual(tab_failure.exception.error_class, "script_error")
+        self.assertNotIn("private detail", str(tab_failure.exception))
+
+        class FailingOpen:
+            calls = 0
+
+            def execute_script(self, _script):
+                self.calls += 1
+                if self.calls == 1:
+                    return {
+                        "tabmailPresent": True,
+                        "calendarModeRegistered": True,
+                        "calendarTabOpenBeforeAction": False,
+                        "calendarTabOpenAttempted": True,
+                        "calendarTabOpenError": False,
+                    }
+                raise type("ScriptTimeoutException", (Exception,), {})(
+                    "private detail"
+                )
+
+        with self.assertRaises(contract.ContractFailure) as open_failure:
+            contract._ensure_calendar_tab(FailingOpen())
+        self.assertEqual(open_failure.exception.stage, "calendar_tab_open")
+        self.assertEqual(open_failure.exception.error_class, "script_timeout")
+
+    def test_native_contract_marks_every_closed_marionette_boundary(self) -> None:
+        contract = self._load_native_thunderbird_contract()
+        tree = ast.parse(NATIVE_THUNDERBIRD_CONTRACT.read_text(encoding="utf-8"))
+        observed_stages = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+                continue
+            if (
+                node.func.id in {"_marionette_failure", "ContractFailure"}
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)
+            ):
+                observed_stages.add(node.args[0].value)
+            if (
+                node.func.id == "_async_script"
+                and len(node.args) >= 4
+                and isinstance(node.args[3], ast.Constant)
+                and isinstance(node.args[3].value, str)
+            ):
+                observed_stages.add(node.args[3].value)
+        self.assertEqual(
+            observed_stages & contract.NATIVE_MARIONETTE_FAILURE_STAGES,
+            contract.NATIVE_MARIONETTE_FAILURE_STAGES,
+        )
+
     def test_jest_report_projects_only_a_known_native_failure_pair(self) -> None:
         self.assertTrue(
             all(
@@ -802,6 +981,28 @@ class PrivateCalDavSmokeTests(unittest.TestCase):
             SMOKE._classify_jest_report(report),
             ("provider_discovery", "discovery_cardinality"),
         )
+
+        native_failures = (
+            ("profile_ca_import", "profile_setup_failed"),
+            ("marionette_constructor", "session_error"),
+            ("session_creation", "script_timeout"),
+            ("calendar_tab_open", "script_error"),
+            ("provider_discovery", "script_timeout"),
+            ("provider_refresh", "script_error"),
+            ("provider_edit", "session_error"),
+            ("post_revoke_provider_request", "other"),
+        )
+        for stage, error_class in native_failures:
+            with self.subTest(stage=stage, error_class=error_class):
+                report["testResults"][0]["assertionResults"][0][
+                    "failureMessages"
+                ] = [
+                    "Error: Native Thunderbird CalDAV contract failed "
+                    f"({stage}/{error_class}). private marker must not escape"
+                ]
+                self.assertEqual(
+                    SMOKE._classify_jest_report(report), (stage, error_class)
+                )
 
         report["testResults"][0]["assertionResults"][0]["failureMessages"] = [
             "Error: Native Thunderbird CalDAV contract failed "
