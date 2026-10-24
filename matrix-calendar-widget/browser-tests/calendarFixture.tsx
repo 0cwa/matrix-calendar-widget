@@ -686,7 +686,7 @@ async function start() {
   );
   createRoot(document.getElementById('root')!).render(
     <WidgetApiMockProvider value={syntheticRoomWidgetApi}>
-      {roomMode === 'room-manager' ? (
+      {query.get('mode') === 'room-manager' ? (
         <MuiThemeProvider>{fixture}</MuiThemeProvider>
       ) : (
         <ThemeProvider theme={theme}>
