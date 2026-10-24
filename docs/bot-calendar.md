@@ -73,12 +73,14 @@ sender membership and power requirements.
 | `!calendar delete <resource-id>`                                                | Conditionally delete the whole supported VEVENT series. `cancel` is an alias.                                  |
 
 Send these as ordinary text messages in the room. Start with `!calendar help`
-for the command list. For calendar data commands, the room needs a configured
-calendar and room access enabled; create and delete also require event writes
-to be enabled and the sender to pass the room's permission checks. Inviting the
-bot alone does not configure a room calendar. When setup is enabled, an eligible
-moderator can run `!calendar setup`; otherwise ask a room moderator or calendar
-administrator to check the server binding.
+for the command list. Ordinary members can use read commands such as
+`!calendar upcoming` and `!calendar event` when room access is enabled and they
+pass the room's access checks. `!calendar create` and `!calendar delete`
+additionally require event writes and the sender's room permission. When the
+operator enables moderator setup, a joined moderator with calendar-manage
+permission can run `!calendar setup`; regular members should ask a moderator
+or calendar administrator to configure the room. Inviting the bot alone does
+not configure a room calendar.
 
 The selected server-side room principal is process-wide: `appservice` is the
 default, and deployments may explicitly select `bot-account` (ADR041). This
