@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -122,6 +123,8 @@ BOUNDED_VERSION_RE = re.compile(
     r"(?<![0-9])([0-9]{1,3}\.[0-9]{1,3}(?:\.[0-9]{1,3})?)(?![0-9])"
 )
 MAX_STARTUP_PROBE_SECONDS = 10
+CALENDAR_TAB_READY_TIMEOUT_SECONDS = 15
+CALENDAR_TAB_POLL_INTERVAL_SECONDS = 0.25
 MAX_VERSION_OUTPUT_CHARS = 512
 MAX_STARTUP_DIAGNOSTIC_BYTES = 2048
 WORKER_STARTUP_DIAGNOSTIC = ".startup-version-probe.stderr.txt"
@@ -1606,6 +1609,21 @@ def _observe_marionette_child(result: dict[str, Any], marionette: Any) -> None:
         result["child_exit_code"] = exit_code
 
 
+def _wait_for_calendar_tab(marionette: Any) -> bool:
+    deadline = time.monotonic() + CALENDAR_TAB_READY_TIMEOUT_SECONDS
+    while True:
+        modes = marionette.execute_script(
+            "const tabs = document.getElementById('tabmail'); "
+            "return tabs ? tabs.tabInfo.map(info => info.mode.name) : [];"
+        )
+        if isinstance(modes, list) and "calendar" in modes:
+            return True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(CALENDAR_TAB_POLL_INTERVAL_SECONDS, remaining))
+
+
 def _smoke_worker(root: Path) -> int:
     result: dict[str, Any] = {
         "marionette_handshake": False,
@@ -1685,11 +1703,7 @@ def _smoke_worker(root: Path) -> int:
         marionette.set_context(marionette.CONTEXT_CHROME)
         result["main_window"] = marionette.get_window_type() == "mail:3pane"
         result["startup_stage"] = "calendar_tab_check"
-        modes = marionette.execute_script(
-            "const tabs = document.getElementById('tabmail'); "
-            "return tabs.tabInfo.map(info => info.mode.name);"
-        )
-        result["calendar_tab"] = isinstance(modes, list) and "calendar" in modes
+        result["calendar_tab"] = _wait_for_calendar_tab(marionette)
         if result["app_version"] != "158.0.1" or not result["main_window"] or not result["calendar_tab"]:
             result["error_class"] = "marionette_error"
             return 1

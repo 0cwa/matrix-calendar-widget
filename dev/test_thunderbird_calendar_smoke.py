@@ -97,6 +97,18 @@ class SuccessfulStartup:
         pass
 
 
+class DelayedCalendarStartup(SuccessfulStartup):
+    def __init__(self, workspace: str, gecko_log: str, **kwargs: object):
+        super().__init__(workspace, gecko_log, **kwargs)
+        self.calendar_mode_checks = 0
+
+    def execute_script(self, _script: str) -> list[str]:
+        self.calendar_mode_checks += 1
+        if self.calendar_mode_checks < 3:
+            return []
+        return ["calendar"]
+
+
 class ThunderbirdSmokeDiagnosticTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(prefix="tb-smoke-diagnostic-")
@@ -310,9 +322,10 @@ class ThunderbirdSmokeDiagnosticTests(unittest.TestCase):
             SMOKE._clear_host_startup_diagnostic()
 
         result = self._run_worker(
-            SuccessfulStartup, port_ready=True, expected_exit=0
+            DelayedCalendarStartup, port_ready=True, expected_exit=0
         )
         self.assertEqual(result["binary_version_probe"], "passed")
+        self.assertTrue(result["calendar_tab"])
         gecko_log = self.task_root / "workspace" / "gecko.log"
         self.assertTrue(gecko_log.is_file())
         gecko_log.resolve().relative_to((self.task_root / "workspace").resolve())
