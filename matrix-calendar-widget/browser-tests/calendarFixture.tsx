@@ -38,7 +38,7 @@ import i18next from 'i18next';
 import { useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { I18nextProvider, initReactI18next } from 'react-i18next';
-import { of } from 'rxjs';
+import { Subject } from 'rxjs';
 import en from '../public/locales/en/translation.json';
 import type {
   CalendarRoomCapabilities,
@@ -131,9 +131,18 @@ const syntheticRoomMembers = [
     content: { membership: 'join', displayname: 'Calendar bot' },
   },
 ] as unknown as StateEvent[];
+const syntheticRoomMemberUpdates = new Subject<StateEvent>();
+declare global {
+  interface Window {
+    __updateSyntheticRoomMember?: (event: StateEvent) => void;
+    __syntheticRoomReminderTarget?: CalendarRoomReminderTarget;
+  }
+}
+window.__updateSyntheticRoomMember = (event) =>
+  syntheticRoomMemberUpdates.next(event);
 const syntheticRoomWidgetApi = {
   receiveStateEvents: async () => syntheticRoomMembers,
-  observeStateEvents: () => of(...syntheticRoomMembers),
+  observeStateEvents: () => syntheticRoomMemberUpdates.asObservable(),
 } as unknown as WidgetApi;
 const roomEvent: CalendarEvent = {
   id: 'synthetic-room-event',
@@ -554,6 +563,7 @@ class SyntheticRoomCalendarRepository
       revision: 1,
     };
     this.reminderConfigurations.set(alarmUid, configuration);
+    window.__syntheticRoomReminderTarget = target;
     return configuration;
   }
 
