@@ -1293,7 +1293,11 @@ const REMINDER_CONFIGURATION_FIELDS = [
   'recipientSelectionAttempted',
   'recipientSelectionStep',
   'recipientOptionCount',
+  'memberQueryMatchesTargetAfterFill',
+  'memberQueryMatchesTargetAtOptionCount',
+  'memberListboxCount',
   'memberOptionCount',
+  'memberOptionsContainingTargetIdCount',
   'selectedMemberTagCount',
   'selectedMemberKeyboardFlow',
   'reminderTargetMatches',
@@ -1308,7 +1312,9 @@ const REMINDER_CONFIGURATION_COUNTER_FIELDS = [
   'reminderConfigGetCount',
   'reminderDestinationControlCount',
   'recipientOptionCount',
+  'memberListboxCount',
   'memberOptionCount',
+  'memberOptionsContainingTargetIdCount',
   'selectedMemberTagCount',
   'reminderPutCount',
 ];
@@ -2548,6 +2554,8 @@ function validReminderConfigurationObservation(record) {
     [
       'reminderSettingsButtonVisible',
       'recipientSelectionAttempted',
+      'memberQueryMatchesTargetAfterFill',
+      'memberQueryMatchesTargetAtOptionCount',
       'selectedMemberKeyboardFlow',
       'reminderTargetMatches',
       'allDayScheduleMatches',
@@ -4300,6 +4308,10 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           `narrow_side_panel_safe=${record.narrowSidePanelSafe}`,
           `put_count=${record.reminderPutCount}`,
           `put_http_status=${record.reminderPutStatus}`,
+          `member_query_matches_target_after_fill=${record.memberQueryMatchesTargetAfterFill}`,
+          `member_query_matches_target_at_option_count=${record.memberQueryMatchesTargetAtOptionCount}`,
+          `member_listbox_count=${record.memberListboxCount}`,
+          `member_options_containing_target_id_count=${record.memberOptionsContainingTargetIdCount}`,
         ].join(' '),
       );
       continue;

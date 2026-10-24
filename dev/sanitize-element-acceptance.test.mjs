@@ -88,7 +88,11 @@ function reminderConfigurationObservation(overrides = {}) {
     recipientSelectionAttempted: true,
     recipientSelectionStep: 'complete',
     recipientOptionCount: 1,
+    memberQueryMatchesTargetAfterFill: true,
+    memberQueryMatchesTargetAtOptionCount: true,
+    memberListboxCount: selectedRecipient ? 1 : 0,
     memberOptionCount: selectedRecipient ? 1 : 0,
+    memberOptionsContainingTargetIdCount: selectedRecipient ? 1 : 0,
     selectedMemberTagCount: selectedRecipient ? 1 : 0,
     selectedMemberKeyboardFlow: false,
     reminderTargetMatches: true,
@@ -168,7 +172,11 @@ function missingReminderOptionObservation() {
     recipientSelectionAttempted: false,
     recipientSelectionStep: 'destination-clicked',
     recipientOptionCount: 0,
+    memberQueryMatchesTargetAfterFill: false,
+    memberQueryMatchesTargetAtOptionCount: false,
+    memberListboxCount: 0,
     memberOptionCount: 0,
+    memberOptionsContainingTargetIdCount: 0,
     selectedMemberTagCount: 0,
     selectedMemberKeyboardFlow: false,
     reminderTargetMatches: false,
@@ -1142,6 +1150,14 @@ test('requires UI, Matrix delivery, and timeline evidence for reminder recovery'
     reminderConfigurationObservation({ reminderOptionsGetStatus: 999 }),
     reminderConfigurationObservation({ reminderPutCount: 3 }),
     reminderConfigurationObservation({
+      memberQueryMatchesTargetAfterFill: 'true',
+    }),
+    reminderConfigurationObservation({ memberListboxCount: 3 }),
+    reminderConfigurationObservation({
+      memberOptionsContainingTargetIdCount: 3,
+    }),
+    reminderConfigurationObservation({ unexpectedMemberText: 'private value' }),
+    reminderConfigurationObservation({
       recipientKind: 'selected',
       selectedMemberKeyboardFlow: false,
     }),
@@ -1485,6 +1501,8 @@ test('projects selected-recipient success and failed selection steps', () => {
   const selectedSuccess = reminderConfigurationObservation({
     recipientKind: 'selected',
     memberOptionCount: 1,
+    memberOptionsContainingTargetIdCount: 1,
+    memberListboxCount: 1,
     selectedMemberTagCount: 1,
     selectedMemberKeyboardFlow: true,
     narrowSidePanelSafe: true,
@@ -1495,7 +1513,7 @@ test('projects selected-recipient success and failed selection steps', () => {
   );
   assert.match(
     successSummary,
-    /phase=reminder-room-configuration-enabled status=passed reminder_step=complete reminder_settings_button_count=1 reminder_settings_button_visible=true options_get_count=1 options_http_status=200 configuration_get_count=1 configuration_http_status=200 destination_control_count=1 recipient_kind=selected recipient_selection_attempted=true recipient_selection_step=complete recipient_option_count=1 member_option_count=1 selected_member_tag_count=1 selected_member_keyboard_flow=true reminder_target_matches=true all_day_schedule_matches=true narrow_side_panel_safe=true put_count=1 put_http_status=200/u,
+    /phase=reminder-room-configuration-enabled status=passed reminder_step=complete reminder_settings_button_count=1 reminder_settings_button_visible=true options_get_count=1 options_http_status=200 configuration_get_count=1 configuration_http_status=200 destination_control_count=1 recipient_kind=selected recipient_selection_attempted=true recipient_selection_step=complete recipient_option_count=1 member_option_count=1 selected_member_tag_count=1 selected_member_keyboard_flow=true reminder_target_matches=true all_day_schedule_matches=true narrow_side_panel_safe=true put_count=1 put_http_status=200 member_query_matches_target_after_fill=true member_query_matches_target_at_option_count=true member_listbox_count=1 member_options_containing_target_id_count=1/u,
   );
   for (const inconsistentObservation of [
     { recipientSelectionStep: 'unrecognized-step' },
@@ -1522,8 +1540,12 @@ test('projects selected-recipient success and failed selection steps', () => {
     recipientKind: 'selected',
     recipientSelectionAttempted: true,
     recipientSelectionStep: 'member-option-ready',
+    memberQueryMatchesTargetAfterFill: true,
+    memberQueryMatchesTargetAtOptionCount: true,
+    memberListboxCount: 1,
     recipientOptionCount: 1,
     memberOptionCount: 0,
+    memberOptionsContainingTargetIdCount: 0,
     selectedMemberTagCount: 0,
     selectedMemberKeyboardFlow: false,
     reminderTargetMatches: false,
@@ -1539,7 +1561,7 @@ test('projects selected-recipient success and failed selection steps', () => {
   );
   assert.match(
     failureSummary,
-    /phase=reminder-room-configuration-enabled status=failed reminder_step=recipient-selection reminder_settings_button_count=1 reminder_settings_button_visible=true options_get_count=1 options_http_status=200 configuration_get_count=1 configuration_http_status=200 destination_control_count=1 recipient_kind=selected recipient_selection_attempted=true recipient_selection_step=member-option-ready recipient_option_count=1 member_option_count=0 selected_member_tag_count=0 selected_member_keyboard_flow=false reminder_target_matches=false all_day_schedule_matches=false narrow_side_panel_safe=true put_count=0 put_http_status=0/u,
+    /phase=reminder-room-configuration-enabled status=failed reminder_step=recipient-selection reminder_settings_button_count=1 reminder_settings_button_visible=true options_get_count=1 options_http_status=200 configuration_get_count=1 configuration_http_status=200 destination_control_count=1 recipient_kind=selected recipient_selection_attempted=true recipient_selection_step=member-option-ready recipient_option_count=1 member_option_count=0 selected_member_tag_count=0 selected_member_keyboard_flow=false reminder_target_matches=false all_day_schedule_matches=false narrow_side_panel_safe=true put_count=0 put_http_status=0 member_query_matches_target_after_fill=true member_query_matches_target_at_option_count=true member_listbox_count=1 member_options_containing_target_id_count=0/u,
   );
 });
 

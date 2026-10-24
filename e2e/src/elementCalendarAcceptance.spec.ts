@@ -166,7 +166,11 @@ type ReminderConfigurationObservation = {
   recipientSelectionAttempted: boolean;
   recipientSelectionStep: ReminderRecipientSelectionStep;
   recipientOptionCount: number;
+  memberQueryMatchesTargetAfterFill: boolean;
+  memberQueryMatchesTargetAtOptionCount: boolean;
+  memberListboxCount: number;
   memberOptionCount: number;
+  memberOptionsContainingTargetIdCount: number;
   selectedMemberTagCount: number;
   selectedMemberKeyboardFlow: boolean;
   reminderTargetMatches: boolean;
@@ -5624,7 +5628,11 @@ async function setRoomReminder(
     recipientSelectionAttempted: false,
     recipientSelectionStep: 'destination-clicked',
     recipientOptionCount: 0,
+    memberQueryMatchesTargetAfterFill: false,
+    memberQueryMatchesTargetAtOptionCount: false,
+    memberListboxCount: 0,
     memberOptionCount: 0,
+    memberOptionsContainingTargetIdCount: 0,
     selectedMemberTagCount: 0,
     selectedMemberKeyboardFlow: false,
     reminderTargetMatches: false,
@@ -5816,16 +5824,30 @@ async function setRoomReminder(
       });
       observation.recipientSelectionStep = 'member-query-entered';
       await memberInput.fill(fixture.users.memberB.userId);
+      observation.memberQueryMatchesTargetAfterFill =
+        (await memberInput.inputValue()) === fixture.users.memberB.userId;
       const memberListbox = frame
         .getByRole('listbox')
         .filter({ visible: true });
       observation.recipientSelectionStep = 'member-listbox-ready';
       await expect(memberListbox).toHaveCount(1, { timeout: 15_000 });
+      observation.memberListboxCount = Math.min(await memberListbox.count(), 2);
       const memberOptions = memberListbox.getByRole('option');
       const memberOption = memberOptions.first();
       observation.recipientSelectionStep = 'member-option-ready';
       await memberOption.waitFor({ state: 'visible', timeout: 15_000 });
+      observation.memberQueryMatchesTargetAtOptionCount =
+        (await memberInput.inputValue()) === fixture.users.memberB.userId;
       observation.memberOptionCount = Math.min(await memberOptions.count(), 2);
+      observation.memberOptionsContainingTargetIdCount = Math.min(
+        await memberOptions.evaluateAll(
+          (options, expectedId) =>
+            options.filter((option) => option.textContent?.includes(expectedId))
+              .length,
+          fixture.users.memberB.userId,
+        ),
+        2,
+      );
       observation.recipientSelectionStep = 'member-option-count-checked';
       await expect(memberOptions).toHaveCount(1);
       observation.recipientSelectionStep = 'member-arrow-down';
