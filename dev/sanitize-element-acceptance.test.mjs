@@ -1757,6 +1757,244 @@ test('projects selected-recipient success and failed selection steps', () => {
   );
 });
 
+test('sanitizes bounded post-PUT layout measurements and legacy observations', () => {
+  const postPutLayoutFailure = reminderConfigurationObservation({
+    status: 'failed',
+    reminderEnabled: false,
+    reminderStep: 'post-put-layout',
+    recipientKind: 'selected',
+    narrowSidePanelSafe: false,
+    narrowViewportWithinRange: false,
+    narrowDialogWithinViewport: true,
+    narrowDialogContentsFit: true,
+    narrowDocumentContentsFit: false,
+    narrowViewportWidth: 448,
+    narrowDialogWidth: 447.5,
+    narrowDialogClientWidth: 448,
+    narrowDialogScrollWidth: 448,
+    narrowDocumentClientWidth: 448,
+    narrowDocumentScrollWidth: 451,
+  });
+  delete postPutLayoutFailure.count;
+
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(postPutLayoutFailure),
+    sourceSha,
+  );
+  assert.match(summary, /reminder_step=post-put-layout/u);
+  assert.match(
+    summary,
+    /narrow_side_panel_safe=false .*narrow_viewport_within_range=false narrow_dialog_within_viewport=true narrow_dialog_contents_fit=true narrow_document_contents_fit=false narrow_viewport_width=448 narrow_dialog_width=447\.5 narrow_dialog_client_width=448 narrow_dialog_scroll_width=448 narrow_document_client_width=448 narrow_document_scroll_width=451/u,
+  );
+  assert.doesNotMatch(
+    summary,
+    /sensitive-title|private-dom-text|@member|Member B|<[^>]*>/u,
+  );
+
+  const exactBoundary = reminderConfigurationObservation({
+    narrowSidePanelSafe: true,
+    narrowViewportWithinRange: true,
+    narrowDialogWithinViewport: true,
+    narrowDialogContentsFit: true,
+    narrowDocumentContentsFit: true,
+    narrowViewportWidth: 420,
+    narrowDialogWidth: 421,
+    narrowDialogClientWidth: 420.2,
+    narrowDialogScrollWidth: 421.2,
+    narrowDocumentClientWidth: 420,
+    narrowDocumentScrollWidth: 421,
+  });
+  const exactBoundarySummary = sanitizeElementAcceptance(
+    JSON.stringify(exactBoundary),
+    sourceSha,
+  );
+  assert.match(
+    exactBoundarySummary,
+    /narrow_viewport_width=420 narrow_dialog_width=421 narrow_dialog_client_width=420\.2 narrow_dialog_scroll_width=421\.2 narrow_document_client_width=420 narrow_document_scroll_width=421/u,
+  );
+
+  const elementPanelMinimumBoundary = reminderConfigurationObservation({
+    recipientKind: 'selected',
+    selectedMemberKeyboardFlow: true,
+    narrowSidePanelSafe: true,
+    narrowViewportWithinRange: true,
+    narrowDialogWithinViewport: true,
+    narrowDialogContentsFit: true,
+    narrowDocumentContentsFit: true,
+    narrowViewportWidth: 319,
+    narrowDialogWidth: 255,
+    narrowDialogClientWidth: 255,
+    narrowDialogScrollWidth: 255,
+    narrowDocumentClientWidth: 319,
+    narrowDocumentScrollWidth: 319,
+  });
+  const elementPanelMinimumSummary = sanitizeElementAcceptance(
+    JSON.stringify(elementPanelMinimumBoundary),
+    sourceSha,
+  );
+  assert.match(
+    elementPanelMinimumSummary,
+    /status=passed .*narrow_side_panel_safe=true .*narrow_viewport_within_range=true .*narrow_viewport_width=319 narrow_dialog_width=255/u,
+  );
+
+  const justBelowElementPanelMinimum = reminderConfigurationObservation({
+    status: 'failed',
+    reminderEnabled: false,
+    reminderStep: 'post-put-layout',
+    recipientKind: 'selected',
+    selectedMemberKeyboardFlow: true,
+    narrowSidePanelSafe: false,
+    narrowViewportWithinRange: false,
+    narrowDialogWithinViewport: true,
+    narrowDialogContentsFit: true,
+    narrowDocumentContentsFit: true,
+    narrowViewportWidth: 318.9,
+    narrowDialogWidth: 255,
+    narrowDialogClientWidth: 255,
+    narrowDialogScrollWidth: 255,
+    narrowDocumentClientWidth: 318.9,
+    narrowDocumentScrollWidth: 318.9,
+  });
+  delete justBelowElementPanelMinimum.count;
+  const justBelowElementPanelSummary = sanitizeElementAcceptance(
+    JSON.stringify(justBelowElementPanelMinimum),
+    sourceSha,
+  );
+  assert.match(
+    justBelowElementPanelSummary,
+    /reminder_step=post-put-layout .*narrow_side_panel_safe=false .*narrow_viewport_within_range=false narrow_dialog_within_viewport=true narrow_dialog_contents_fit=true narrow_document_contents_fit=true narrow_viewport_width=318\.9/u,
+  );
+
+  const passedWithoutLayoutMeasurement = reminderConfigurationObservation({
+    narrowViewportWithinRange: 'not-observed',
+    narrowDialogWithinViewport: 'not-observed',
+    narrowDialogContentsFit: 'not-observed',
+    narrowDocumentContentsFit: 'not-observed',
+    narrowViewportWidth: 'not-observed',
+    narrowDialogWidth: 'not-observed',
+    narrowDialogClientWidth: 'not-observed',
+    narrowDialogScrollWidth: 'not-observed',
+    narrowDocumentClientWidth: 'not-observed',
+    narrowDocumentScrollWidth: 'not-observed',
+  });
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(passedWithoutLayoutMeasurement),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+
+  const legacyFailure = { ...postPutLayoutFailure };
+  legacyFailure.reminderStep = 'put-response';
+  delete legacyFailure.narrowViewportWithinRange;
+  delete legacyFailure.narrowDialogWithinViewport;
+  delete legacyFailure.narrowDialogContentsFit;
+  delete legacyFailure.narrowDocumentContentsFit;
+  delete legacyFailure.narrowViewportWidth;
+  delete legacyFailure.narrowDialogWidth;
+  delete legacyFailure.narrowDialogClientWidth;
+  delete legacyFailure.narrowDialogScrollWidth;
+  delete legacyFailure.narrowDocumentClientWidth;
+  delete legacyFailure.narrowDocumentScrollWidth;
+  assert.match(
+    sanitizeElementAcceptance(JSON.stringify(legacyFailure), sourceSha),
+    /narrow_viewport_within_range=not-observed narrow_dialog_within_viewport=not-observed narrow_dialog_contents_fit=not-observed narrow_document_contents_fit=not-observed narrow_viewport_width=not-observed narrow_dialog_width=not-observed narrow_dialog_client_width=not-observed narrow_dialog_scroll_width=not-observed narrow_document_client_width=not-observed narrow_document_scroll_width=not-observed/u,
+  );
+
+  for (const invalidLayoutMeasurement of [
+    { narrowDialogWidth: -1 },
+    { narrowDocumentScrollWidth: 100_001 },
+    { narrowViewportWithinRange: 'sensitive-title' },
+    { narrowDialogClientWidth: 'private-dom-text' },
+  ]) {
+    let failure;
+    assert.throws(
+      () =>
+        sanitizeElementAcceptance(
+          JSON.stringify({
+            ...postPutLayoutFailure,
+            ...invalidLayoutMeasurement,
+          }),
+          sourceSha,
+        ),
+      (error) => {
+        failure = error;
+        return error.message === 'invalid element acceptance summary';
+      },
+    );
+    assert.doesNotMatch(
+      formatSanitizerFailureSummary(failure, sourceSha),
+      /sensitive-title|private-dom-text/u,
+    );
+  }
+
+  for (const inconsistentPostPutStep of [
+    { recipientKind: 'room' },
+    { reminderPutCount: 0 },
+    { reminderPutStatus: 503 },
+    { narrowSidePanelSafe: true },
+    { narrowViewportWithinRange: true },
+    { narrowDocumentClientWidth: 449 },
+    { narrowDialogWidth: 449.0001 },
+    { narrowDialogScrollWidth: 449.0001 },
+  ]) {
+    assert.throws(
+      () =>
+        sanitizeElementAcceptance(
+          JSON.stringify({
+            ...postPutLayoutFailure,
+            ...inconsistentPostPutStep,
+          }),
+          sourceSha,
+        ),
+      /invalid element acceptance summary/u,
+    );
+  }
+
+  for (const nearBoundaryMismatch of [
+    { narrowViewportWidth: 318.9 },
+    { narrowViewportWidth: 420.0001 },
+    { narrowViewportWidth: 420.1 },
+    { narrowDialogWidth: 421.0001 },
+    { narrowDialogScrollWidth: 421.2001 },
+    { narrowDocumentScrollWidth: 421.0001 },
+    { narrowDocumentClientWidth: 420.0001 },
+  ]) {
+    assert.throws(
+      () =>
+        sanitizeElementAcceptance(
+          JSON.stringify({ ...exactBoundary, ...nearBoundaryMismatch }),
+          sourceSha,
+        ),
+      /invalid element acceptance summary/u,
+      'raw fractional dimensions must be checked before one-decimal summary formatting',
+    );
+  }
+
+  const incompletePostPutLayout = { ...postPutLayoutFailure };
+  incompletePostPutLayout.narrowDialogContentsFit = 'not-observed';
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(incompletePostPutLayout),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+  const partialPredicateGroup = { ...postPutLayoutFailure };
+  delete partialPredicateGroup.narrowDialogContentsFit;
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(partialPredicateGroup),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+});
+
 test('requires selected-user Matrix mentions to exclude a room broadcast', () => {
   const summary = sanitizeElementAcceptance(
     JSON.stringify({

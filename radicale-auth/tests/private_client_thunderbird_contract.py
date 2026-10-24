@@ -367,6 +367,19 @@ const done = arguments[arguments.length - 1];
 
 POST_REVOKE_EDIT = r"""
 const done = arguments[arguments.length - 1];
+const receiptWindow = window;
+function finish(value) {
+  let receipt = "called_other";
+  if (value === undefined) {
+    receipt = "called_undefined";
+  } else if (value !== null && typeof value === "object") {
+    receipt = "called_object";
+  }
+  try {
+    receiptWindow.__mcwPrivatePostRevokeCallbackReceipt = receipt;
+  } catch (_error) {}
+  done(value);
+}
 (async () => {
   try {
     const calendar = window.__mcwPrivateCalDavCalendar;
@@ -385,8 +398,51 @@ const done = arguments[arguments.length - 1];
   } catch (_error) {
     return { ok: false, failure: "revoke_probe_failed" };
   }
-})().then(done, () => done({ ok: false, failure: "revoke_probe_failed" }));
+})().then(finish, () => finish({ ok: false, failure: "revoke_probe_failed" }));
 """
+
+POST_REVOKE_CALLBACK_RECEIPT_SCRIPT = r"""
+const action = arguments[0];
+try {
+  if (typeof window === "undefined" || !window) {
+    return "unavailable";
+  }
+  if (action === "reset") {
+    window.__mcwPrivatePostRevokeCallbackReceipt = "not_called_at_probe";
+    return window.__mcwPrivatePostRevokeCallbackReceipt === "not_called_at_probe"
+      ? "ready"
+      : "unavailable";
+  }
+  if (action === "read_clear") {
+    const receipt = window.__mcwPrivatePostRevokeCallbackReceipt;
+    delete window.__mcwPrivatePostRevokeCallbackReceipt;
+    switch (receipt) {
+      case "not_called_at_probe":
+      case "called_object":
+      case "called_undefined":
+      case "called_other":
+        return receipt;
+      default:
+        return "unavailable";
+    }
+  }
+  if (action === "clear") {
+    delete window.__mcwPrivatePostRevokeCallbackReceipt;
+    return "cleared";
+  }
+  return "unavailable";
+} catch (_error) {
+  return "unavailable";
+}
+"""
+
+POST_REVOKE_CALLBACK_RECEIPT_FAILURES = {
+    "not_called_at_probe": "invalid_provider_result_none_not_called_at_probe",
+    "called_object": "invalid_provider_result_none_called_object",
+    "called_undefined": "invalid_provider_result_none_called_undefined",
+    "called_other": "invalid_provider_result_none_called_other",
+    "unavailable": "invalid_provider_result_none_unavailable",
+}
 
 
 class ContractFailure(RuntimeError):
@@ -548,6 +604,72 @@ def _async_script(
     return result
 
 
+def _same_chrome_window(marionette: object, expected_handle: object) -> bool:
+    if not isinstance(expected_handle, str) or not expected_handle:
+        return False
+    try:
+        return marionette.current_chrome_window_handle == expected_handle
+    except Exception:
+        return False
+
+
+def _post_revoke_callback_receipt_action(
+    marionette: object, expected_handle: object, action: str
+) -> str:
+    if not _same_chrome_window(marionette, expected_handle):
+        return "unavailable"
+    try:
+        result = marionette.execute_script(
+            POST_REVOKE_CALLBACK_RECEIPT_SCRIPT, script_args=[action]
+        )
+    except Exception:
+        return "unavailable"
+    if action == "reset":
+        return "ready" if result == "ready" else "unavailable"
+    if (
+        action == "read_clear"
+        and isinstance(result, str)
+        and result in POST_REVOKE_CALLBACK_RECEIPT_FAILURES
+    ):
+        return result
+    return result if action == "clear" and result == "cleared" else "unavailable"
+
+
+def _post_revoke_async_script(
+    marionette: object,
+    script: str,
+    args: list[object],
+    expected_window_handle: object,
+) -> dict[str, object]:
+    receipt_ready = (
+        _post_revoke_callback_receipt_action(
+            marionette, expected_window_handle, "reset"
+        )
+        == "ready"
+    )
+    stage = "post_revoke_provider_request"
+    try:
+        result = _async_script(marionette, script, args, stage)
+    except ContractFailure as error:
+        if error.error_class == "invalid_provider_result_none":
+            receipt = _post_revoke_callback_receipt_action(
+                marionette, expected_window_handle, "read_clear"
+            )
+            if not receipt_ready:
+                receipt = "unavailable"
+            raise ContractFailure(
+                stage, POST_REVOKE_CALLBACK_RECEIPT_FAILURES[receipt]
+            ) from None
+        _post_revoke_callback_receipt_action(
+            marionette, expected_window_handle, "clear"
+        )
+        raise
+    _post_revoke_callback_receipt_action(
+        marionette, expected_window_handle, "clear"
+    )
+    return result
+
+
 def _assert_ok(result: dict[str, object], stage: str) -> None:
     if result.get("ok") is not True:
         failure_stage = result.get("failureStage")
@@ -704,6 +826,10 @@ def run() -> dict[str, object]:
 
         _ensure_calendar_tab(marionette)
         result["calendarTab"] = True
+        try:
+            post_revoke_window_handle = marionette.current_chrome_window_handle
+        except Exception:
+            post_revoke_window_handle = None
         location = f"{API_ORIGIN}/{PERSONAL_APP_ID}/calendar/"
         expected_path = f"/{PERSONAL_APP_ID}/calendar/"
         discovered = _async_script(
@@ -769,11 +895,11 @@ def run() -> dict[str, object]:
             raise ContractFailure("revoke_setup", "revoked_state_missing")
         result["revokedState"] = True
 
-        post_revoke = _async_script(
+        post_revoke = _post_revoke_async_script(
             marionette,
             POST_REVOKE_EDIT,
             [EVENT_UID, REVOKED_SUMMARY],
-            "post_revoke_provider_request",
+            post_revoke_window_handle,
         )
         _assert_ok(post_revoke, "post_revoke_provider_request")
         after_revoke = _wait_for_callback(int(revoked["callbackCount"]))

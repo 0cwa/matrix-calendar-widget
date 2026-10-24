@@ -153,7 +153,11 @@ type ReminderConfigurationStep =
   | 'destination-control'
   | 'recipient-selection'
   | 'put-response'
+  | 'post-put-layout'
   | 'complete';
+
+type ReminderLayoutPredicate = boolean | 'not-observed';
+type ReminderLayoutDimension = number | 'not-observed';
 
 type MemberInputExpandedState =
   | 'true'
@@ -240,10 +244,23 @@ type ReminderConfigurationObservation = {
   reminderTargetMatches: boolean;
   allDayScheduleMatches: boolean;
   narrowSidePanelSafe: boolean;
+  narrowViewportWithinRange: ReminderLayoutPredicate;
+  narrowDialogWithinViewport: ReminderLayoutPredicate;
+  narrowDialogContentsFit: ReminderLayoutPredicate;
+  narrowDocumentContentsFit: ReminderLayoutPredicate;
+  narrowViewportWidth: ReminderLayoutDimension;
+  narrowDialogWidth: ReminderLayoutDimension;
+  narrowDialogClientWidth: ReminderLayoutDimension;
+  narrowDialogScrollWidth: ReminderLayoutDimension;
+  narrowDocumentClientWidth: ReminderLayoutDimension;
+  narrowDocumentScrollWidth: ReminderLayoutDimension;
   reminderPutCount: number;
   reminderPutStatus: number;
 };
 
+// The standard Element side panel measured a 319 CSS-pixel content viewport.
+const MIN_REMINDER_LAYOUT_VIEWPORT_WIDTH = 319;
+const MAX_REMINDER_LAYOUT_VIEWPORT_WIDTH = 420;
 const MAX_REMINDER_RECIPIENT_ROSTER_SIZE = 20_000;
 
 function summarizeReminderRecipientRoster(
@@ -5814,6 +5831,16 @@ async function setRoomReminder(
     reminderTargetMatches: false,
     allDayScheduleMatches: false,
     narrowSidePanelSafe: false,
+    narrowViewportWithinRange: 'not-observed',
+    narrowDialogWithinViewport: 'not-observed',
+    narrowDialogContentsFit: 'not-observed',
+    narrowDocumentContentsFit: 'not-observed',
+    narrowViewportWidth: 'not-observed',
+    narrowDialogWidth: 'not-observed',
+    narrowDialogClientWidth: 'not-observed',
+    narrowDialogScrollWidth: 'not-observed',
+    narrowDocumentClientWidth: 'not-observed',
+    narrowDocumentScrollWidth: 'not-observed',
     reminderPutCount: 0,
     reminderPutStatus: 0,
   };
@@ -6040,18 +6067,62 @@ async function setRoomReminder(
       throw new Error('Matrix reminder destination control is unavailable');
     }
 
-    const narrowLayout = await details.evaluate((element) => {
-      const viewportWidth = document.documentElement.clientWidth;
-      const elementWidth = element.getBoundingClientRect().width;
-      return (
-        viewportWidth >= 320 &&
-        viewportWidth <= 420 &&
-        elementWidth <= viewportWidth + 1 &&
-        element.scrollWidth <= element.clientWidth + 1 &&
-        document.documentElement.scrollWidth <= viewportWidth + 1
-      );
-    });
-    observation.narrowSidePanelSafe = narrowLayout;
+    const layout = await details.evaluate(
+      (element, viewportBounds) => {
+        const viewportWidth = document.documentElement.clientWidth;
+        const dialogWidth = element.getBoundingClientRect().width;
+        const dialogClientWidth = element.clientWidth;
+        const dialogScrollWidth = element.scrollWidth;
+        const documentClientWidth = document.documentElement.clientWidth;
+        const documentScrollWidth = document.documentElement.scrollWidth;
+        const viewportWithinRange =
+          viewportWidth >= viewportBounds.minimum &&
+          viewportWidth <= viewportBounds.maximum;
+        const dialogWithinViewport = dialogWidth <= viewportWidth + 1;
+        const dialogContentsFit = dialogScrollWidth <= dialogClientWidth + 1;
+        const documentContentsFit = documentScrollWidth <= viewportWidth + 1;
+        const safe =
+          viewportWidth >= viewportBounds.minimum &&
+          viewportWidth <= viewportBounds.maximum &&
+          dialogWidth <= viewportWidth + 1 &&
+          dialogScrollWidth <= dialogClientWidth + 1 &&
+          documentScrollWidth <= viewportWidth + 1;
+        // Keep raw dimensions for validation; only sanitizer output is rounded.
+        const boundedDimension = (value: number): number | 'not-observed' =>
+          Number.isFinite(value) && value >= 0 && value <= 100_000
+            ? value
+            : 'not-observed';
+
+        return {
+          safe,
+          viewportWithinRange,
+          dialogWithinViewport,
+          dialogContentsFit,
+          documentContentsFit,
+          viewportWidth: boundedDimension(viewportWidth),
+          dialogWidth: boundedDimension(dialogWidth),
+          dialogClientWidth: boundedDimension(dialogClientWidth),
+          dialogScrollWidth: boundedDimension(dialogScrollWidth),
+          documentClientWidth: boundedDimension(documentClientWidth),
+          documentScrollWidth: boundedDimension(documentScrollWidth),
+        };
+      },
+      {
+        minimum: MIN_REMINDER_LAYOUT_VIEWPORT_WIDTH,
+        maximum: MAX_REMINDER_LAYOUT_VIEWPORT_WIDTH,
+      },
+    );
+    observation.narrowSidePanelSafe = layout.safe;
+    observation.narrowViewportWithinRange = layout.viewportWithinRange;
+    observation.narrowDialogWithinViewport = layout.dialogWithinViewport;
+    observation.narrowDialogContentsFit = layout.dialogContentsFit;
+    observation.narrowDocumentContentsFit = layout.documentContentsFit;
+    observation.narrowViewportWidth = layout.viewportWidth;
+    observation.narrowDialogWidth = layout.dialogWidth;
+    observation.narrowDialogClientWidth = layout.dialogClientWidth;
+    observation.narrowDialogScrollWidth = layout.dialogScrollWidth;
+    observation.narrowDocumentClientWidth = layout.documentClientWidth;
+    observation.narrowDocumentScrollWidth = layout.documentScrollWidth;
 
     observation.reminderStep = 'recipient-selection';
     observation.recipientSelectionAttempted = true;
@@ -6557,10 +6628,16 @@ async function setRoomReminder(
       observation.reminderPutStatus >= 300 ||
       !observation.reminderTargetMatches ||
       !observation.allDayScheduleMatches ||
-      (plan.recipient === 'selected' && !selectedMemberKeyboardFlow) ||
-      (plan.recipient === 'selected' && !observation.narrowSidePanelSafe)
+      (plan.recipient === 'selected' && !selectedMemberKeyboardFlow)
     ) {
       throw new Error('Matrix reminder configuration did not match its target');
+    }
+    if (plan.recipient === 'selected') {
+      observation.reminderStep = 'post-put-layout';
+      if (!observation.narrowSidePanelSafe) {
+        throw new Error('Selected-recipient layout safety check failed');
+      }
+      observation.reminderStep = 'put-response';
     }
 
     await details

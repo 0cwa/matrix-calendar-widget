@@ -1944,6 +1944,9 @@ describeContract(contractDescription, () => {
     };
 
     let privatePolicyBodyFailed = false;
+    let privatePolicyBodyError: unknown;
+    let privatePolicyCleanupFailed = false;
+    let privatePolicyCleanupError: unknown;
     try {
       await inviteAndJoin(issuerUserId, issuerToken);
       await inviteAndJoin(readerUserId, policyReaderToken);
@@ -2172,7 +2175,7 @@ describeContract(contractDescription, () => {
       expect(contractStore.revocationCount()).toBe(1);
     } catch (error) {
       privatePolicyBodyFailed = true;
-      throw error;
+      privatePolicyBodyError = error;
     } finally {
       markPrivatePolicyBodyResult(
         privatePolicyBodyFailed ? 'failed' : 'completed',
@@ -2183,7 +2186,8 @@ describeContract(contractDescription, () => {
           await writePowerLevels(actorAccessToken, originalPowerLevels);
         } catch (error) {
           markPrivatePolicyCleanupFailure('restore-power-levels');
-          if (!privatePolicyBodyFailed) throw error;
+          if (!privatePolicyCleanupFailed) privatePolicyCleanupError = error;
+          privatePolicyCleanupFailed = true;
         }
       }
       markPrivatePolicyCleanupOperation('lookup-members');
@@ -2192,7 +2196,8 @@ describeContract(contractDescription, () => {
         joinedMembers = await ownerMatrixClient.getJoinedRoomMembers(roomId);
       } catch (error) {
         markPrivatePolicyCleanupFailure('lookup-members');
-        if (!privatePolicyBodyFailed) throw error;
+        if (!privatePolicyCleanupFailed) privatePolicyCleanupError = error;
+        privatePolicyCleanupFailed = true;
         joinedMembers = [];
       }
       if (joinedMembers.includes(issuerUserId)) {
@@ -2201,7 +2206,8 @@ describeContract(contractDescription, () => {
           await leaveMember(issuerToken);
         } catch (error) {
           markPrivatePolicyCleanupFailure('leave-issuer');
-          if (!privatePolicyBodyFailed) throw error;
+          if (!privatePolicyCleanupFailed) privatePolicyCleanupError = error;
+          privatePolicyCleanupFailed = true;
         }
       }
       if (joinedMembers.includes(readerUserId)) {
@@ -2210,10 +2216,13 @@ describeContract(contractDescription, () => {
           await leaveMember(policyReaderToken);
         } catch (error) {
           markPrivatePolicyCleanupFailure('leave-reader');
-          if (!privatePolicyBodyFailed) throw error;
+          if (!privatePolicyCleanupFailed) privatePolicyCleanupError = error;
+          privatePolicyCleanupFailed = true;
         }
       }
     }
+    if (privatePolicyBodyFailed) throw privatePolicyBodyError;
+    if (privatePolicyCleanupFailed) throw privatePolicyCleanupError;
   }, 90_000);
 
   it('lists only the exact room binding through the selected principal', async () => {
