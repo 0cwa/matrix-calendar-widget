@@ -155,6 +155,14 @@ type ReminderConfigurationStep =
 
 type ReminderConfigurationObservation = {
   reminderStep: ReminderConfigurationStep;
+  alarmUiStep: ReminderAlarmUiStep;
+  alarmUiPatchStatus: number;
+  alarmUiRelativeAlarmReadback: boolean;
+  alarmUiAlarmToggleReadback: boolean;
+  alarmUiRelativeTriggerReadback: boolean;
+  alarmUiOffsetReadback: boolean;
+  alarmUiEditorClosed: boolean;
+  alarmUiDetailsClosed: boolean;
   reminderSettingsButtonCount: number;
   reminderSettingsButtonVisible: boolean;
   reminderOptionsGetCount: number;
@@ -164,6 +172,10 @@ type ReminderConfigurationObservation = {
   reminderDestinationControlCount: number;
   recipientKind: 'room' | 'selected' | 'unknown';
   recipientSelectionAttempted: boolean;
+  recipientSelectionStep: ReminderRecipientSelectionStep;
+  recipientOptionCount: number;
+  memberOptionCount: number;
+  selectedMemberTagCount: number;
   selectedMemberKeyboardFlow: boolean;
   reminderTargetMatches: boolean;
   allDayScheduleMatches: boolean;
@@ -171,6 +183,46 @@ type ReminderConfigurationObservation = {
   reminderPutCount: number;
   reminderPutStatus: number;
 };
+
+type ReminderAlarmUiStep =
+  | 'event-row-visible'
+  | 'event-open'
+  | 'details-ready'
+  | 'settings-open'
+  | 'edit-button-ready'
+  | 'editor-ready'
+  | 'alarm-toggle-read'
+  | 'alarm-toggle-enabled'
+  | 'relative-option-selected'
+  | 'offset-entered'
+  | 'save-response-armed'
+  | 'save-clicked'
+  | 'patch-response-received'
+  | 'editor-hidden'
+  | 'details-ready-after-save'
+  | 'details-hidden'
+  | 'readback-editor-open'
+  | 'readback-editor-ready'
+  | 'readback-alarm-toggle'
+  | 'readback-relative-option'
+  | 'readback-offset'
+  | 'readback-editor-cancelled'
+  | 'readback-editor-hidden'
+  | 'readback-details-hidden'
+  | 'complete';
+
+type ReminderRecipientSelectionStep =
+  | 'destination-clicked'
+  | 'destination-listbox-ready'
+  | 'destination-option-selected'
+  | 'member-query-entered'
+  | 'member-listbox-ready'
+  | 'member-option-ready'
+  | 'member-option-count-checked'
+  | 'member-arrow-down'
+  | 'member-enter'
+  | 'member-keyboard-closed'
+  | 'complete';
 
 type PublicFeedBrowserObservation = {
   publicFeedLifecycleStep: PublicFeedLifecycleStep;
@@ -5295,20 +5347,53 @@ async function createAndConfigureReminder(
   record(activePhase, 'passed', status, 1);
 
   activePhase = 'reminder-alarm-ui-readback';
-  const alarmRouteReady = await addCalDavAlarmFromReminderSettings(
+  const alarmObservation: Pick<
+    ReminderConfigurationObservation,
+    | 'alarmUiStep'
+    | 'alarmUiPatchStatus'
+    | 'alarmUiRelativeAlarmReadback'
+    | 'alarmUiAlarmToggleReadback'
+    | 'alarmUiRelativeTriggerReadback'
+    | 'alarmUiOffsetReadback'
+    | 'alarmUiEditorClosed'
+    | 'alarmUiDetailsClosed'
+  > = {
+    alarmUiStep: 'event-row-visible',
+    alarmUiPatchStatus: 0,
+    alarmUiRelativeAlarmReadback: false,
+    alarmUiAlarmToggleReadback: false,
+    alarmUiRelativeTriggerReadback: false,
+    alarmUiOffsetReadback: false,
+    alarmUiEditorClosed: false,
+    alarmUiDetailsClosed: false,
+  };
+  const alarmSaved = await addCalDavAlarmFromReminderSettings(
     frame,
     page,
     title,
+    alarmObservation,
   );
   const alarmReadback =
-    alarmRouteReady && (await readBackRelativeAlarm(frame, title));
+    alarmSaved && (await readBackRelativeAlarm(frame, title, alarmObservation));
   if (!alarmReadback) {
-    record(activePhase, 'failed', undefined, 1, {
-      relativeAlarmReadback: false,
-    });
+    record(
+      activePhase,
+      'failed',
+      alarmObservation.alarmUiPatchStatus || undefined,
+      1,
+      {
+        ...alarmObservation,
+        relativeAlarmReadback: false,
+      },
+    );
     throw new Error('The relative alarm did not reload from the event');
   }
-  record(activePhase, 'passed', undefined, 1, { relativeAlarmReadback: true });
+  alarmObservation.alarmUiStep = 'complete';
+  alarmObservation.alarmUiRelativeAlarmReadback = true;
+  record(activePhase, 'passed', alarmObservation.alarmUiPatchStatus, 1, {
+    ...alarmObservation,
+    relativeAlarmReadback: true,
+  });
 
   activePhase = 'reminder-room-configuration-enabled';
   const reminderConfiguration = await setRoomReminder(
@@ -5355,74 +5440,158 @@ function localDateTimeInput(
 async function readBackRelativeAlarm(
   frame: FrameLocator,
   title: string,
+  observation: Pick<
+    ReminderConfigurationObservation,
+    | 'alarmUiStep'
+    | 'alarmUiRelativeAlarmReadback'
+    | 'alarmUiAlarmToggleReadback'
+    | 'alarmUiRelativeTriggerReadback'
+    | 'alarmUiOffsetReadback'
+    | 'alarmUiEditorClosed'
+    | 'alarmUiDetailsClosed'
+  > = {
+    alarmUiStep: 'event-row-visible',
+    alarmUiRelativeAlarmReadback: false,
+    alarmUiAlarmToggleReadback: false,
+    alarmUiRelativeTriggerReadback: false,
+    alarmUiOffsetReadback: false,
+    alarmUiEditorClosed: false,
+    alarmUiDetailsClosed: false,
+  },
 ): Promise<boolean> {
-  await openEventEditor(frame, title);
-  const editor = frame.getByRole('dialog').last();
-  const alarmEnabled = await editor
-    .getByLabel('CalDAV reminder')
-    .isChecked()
-    .catch(() => false);
-  const relativeSelected = await editor
-    .getByRole('radio', { name: 'Before the event' })
-    .isChecked()
-    .catch(() => false);
-  const minutesBefore = await editor
-    .getByRole('spinbutton', { name: 'Minutes before' })
-    .inputValue()
-    .catch(() => '');
-  await editor.getByRole('button', { name: 'Cancel', exact: true }).click();
-  const details = frame.getByRole('dialog').last();
-  await details.getByRole('button', { name: 'Close', exact: true }).click();
-  return alarmEnabled && relativeSelected && minutesBefore === '1';
+  try {
+    const row = frame.getByRole('listitem', { name: title });
+    observation.alarmUiStep = 'event-row-visible';
+    await expect(row).toBeVisible();
+    observation.alarmUiStep = 'event-open';
+    await row.click();
+    const details = frame.getByRole('dialog').last();
+    observation.alarmUiStep = 'details-ready';
+    await expect(
+      details.getByRole('button', { name: 'Edit', exact: true }),
+    ).toBeVisible();
+    observation.alarmUiStep = 'readback-editor-open';
+    await details.getByRole('button', { name: 'Edit', exact: true }).click();
+    const editor = frame.getByRole('dialog').last();
+    observation.alarmUiStep = 'readback-editor-ready';
+    await expect(editor.getByRole('textbox', { name: 'Title' })).toBeVisible();
+    observation.alarmUiStep = 'readback-alarm-toggle';
+    observation.alarmUiAlarmToggleReadback = await editor
+      .getByLabel('CalDAV reminder')
+      .isChecked();
+    observation.alarmUiStep = 'readback-relative-option';
+    observation.alarmUiRelativeTriggerReadback = await editor
+      .getByRole('radio', { name: 'Before the event' })
+      .isChecked();
+    observation.alarmUiStep = 'readback-offset';
+    observation.alarmUiOffsetReadback =
+      (await editor
+        .getByRole('spinbutton', { name: 'Minutes before' })
+        .inputValue()) === '1';
+    observation.alarmUiStep = 'readback-editor-cancelled';
+    await editor.getByRole('button', { name: 'Cancel', exact: true }).click();
+    observation.alarmUiStep = 'readback-editor-hidden';
+    await expect(editor).toBeHidden({ timeout: 20_000 });
+    observation.alarmUiEditorClosed = true;
+    const parentDetails = frame.getByRole('dialog').last();
+    observation.alarmUiStep = 'details-ready-after-save';
+    await expect(parentDetails).toBeVisible();
+    observation.alarmUiStep = 'readback-details-hidden';
+    await parentDetails
+      .getByRole('button', { name: 'Close', exact: true })
+      .click();
+    await expect(parentDetails).toBeHidden({ timeout: 20_000 });
+    observation.alarmUiDetailsClosed = true;
+    observation.alarmUiRelativeAlarmReadback =
+      observation.alarmUiAlarmToggleReadback &&
+      observation.alarmUiRelativeTriggerReadback &&
+      observation.alarmUiOffsetReadback;
+    return observation.alarmUiRelativeAlarmReadback;
+  } catch {
+    return false;
+  }
 }
 
 async function addCalDavAlarmFromReminderSettings(
   frame: FrameLocator,
   page: Page,
   title: string,
+  observation: Pick<
+    ReminderConfigurationObservation,
+    | 'alarmUiStep'
+    | 'alarmUiPatchStatus'
+    | 'alarmUiEditorClosed'
+    | 'alarmUiDetailsClosed'
+  >,
 ): Promise<boolean> {
-  const row = frame.getByRole('listitem', { name: title });
-  await expect(row).toBeVisible();
-  await row.click();
-  const details = frame.getByRole('dialog').last();
-  await expect(details).toBeVisible();
-  await details
-    .getByRole('button', { name: 'Reminder settings', exact: true })
-    .click();
-  const editCalDavButton = details.getByRole('button', {
-    name: 'Edit CalDAV reminder',
-    exact: true,
-  });
-  await expect(editCalDavButton).toBeVisible({ timeout: 20_000 });
-  await editCalDavButton.click();
+  try {
+    const row = frame.getByRole('listitem', { name: title });
+    observation.alarmUiStep = 'event-row-visible';
+    await expect(row).toBeVisible();
+    observation.alarmUiStep = 'event-open';
+    await row.click();
+    const details = frame.getByRole('dialog').last();
+    observation.alarmUiStep = 'details-ready';
+    await expect(details).toBeVisible();
+    observation.alarmUiStep = 'settings-open';
+    await details
+      .getByRole('button', { name: 'Reminder settings', exact: true })
+      .click();
+    const editCalDavButton = details.getByRole('button', {
+      name: 'Edit CalDAV reminder',
+      exact: true,
+    });
+    observation.alarmUiStep = 'edit-button-ready';
+    await expect(editCalDavButton).toBeVisible({ timeout: 20_000 });
+    await editCalDavButton.click();
 
-  const editor = frame.getByRole('dialog').last();
-  await expect(editor).toBeVisible();
-  const alarmToggle = editor.getByLabel('CalDAV reminder');
-  if (!(await alarmToggle.isChecked())) await alarmToggle.check();
-  await editor.getByRole('radio', { name: 'Before the event' }).check();
-  await editor.getByRole('spinbutton', { name: 'Minutes before' }).fill('1');
-  const saveResponse = page.waitForResponse(
-    (response) => {
-      const url = new URL(response.url());
-      return (
-        url.origin === new URL(fixture.gatewayUrl).origin &&
-        url.pathname === '/v1/calendar/events' &&
-        response.request().method() === 'PATCH'
-      );
-    },
-    { timeout: 30_000 },
-  );
-  await editor.getByRole('button', { name: 'Save', exact: true }).click();
-  const response = await saveResponse;
-  await expect(editor).toBeHidden({ timeout: 20_000 });
-  const parentDetails = frame.getByRole('dialog').last();
-  await expect(parentDetails).toBeVisible();
-  await parentDetails
-    .getByRole('button', { name: 'Close', exact: true })
-    .click();
-  await expect(parentDetails).toBeHidden({ timeout: 20_000 });
-  return response.status() >= 200 && response.status() < 300;
+    const editor = frame.getByRole('dialog').last();
+    observation.alarmUiStep = 'editor-ready';
+    await expect(editor).toBeVisible();
+    const alarmToggle = editor.getByLabel('CalDAV reminder');
+    observation.alarmUiStep = 'alarm-toggle-read';
+    if (!(await alarmToggle.isChecked())) {
+      observation.alarmUiStep = 'alarm-toggle-enabled';
+      await alarmToggle.check();
+    }
+    observation.alarmUiStep = 'relative-option-selected';
+    await editor.getByRole('radio', { name: 'Before the event' }).check();
+    observation.alarmUiStep = 'offset-entered';
+    await editor.getByRole('spinbutton', { name: 'Minutes before' }).fill('1');
+    const saveResponse = page.waitForResponse(
+      (response) => {
+        const url = new URL(response.url());
+        return (
+          url.origin === new URL(fixture.gatewayUrl).origin &&
+          url.pathname === '/v1/calendar/events' &&
+          response.request().method() === 'PATCH'
+        );
+      },
+      { timeout: 30_000 },
+    );
+    observation.alarmUiStep = 'save-response-armed';
+    await editor.getByRole('button', { name: 'Save', exact: true }).click();
+    observation.alarmUiStep = 'save-clicked';
+    const response = await saveResponse;
+    observation.alarmUiPatchStatus = response.status();
+    observation.alarmUiStep = 'patch-response-received';
+    observation.alarmUiStep = 'editor-hidden';
+    await expect(editor).toBeHidden({ timeout: 20_000 });
+    observation.alarmUiEditorClosed = true;
+    const parentDetails = frame.getByRole('dialog').last();
+    observation.alarmUiStep = 'details-ready-after-save';
+    await expect(parentDetails).toBeVisible();
+    await parentDetails
+      .getByRole('button', { name: 'Close', exact: true })
+      .click();
+    observation.alarmUiDetailsClosed = true;
+    observation.alarmUiStep = 'details-hidden';
+    await expect(parentDetails).toBeHidden({ timeout: 20_000 });
+    observation.alarmUiDetailsClosed = true;
+    return response.status() >= 200 && response.status() < 300;
+  } catch {
+    return false;
+  }
 }
 
 async function setRoomReminder(
@@ -5439,6 +5608,14 @@ async function setRoomReminder(
   const details = frame.getByRole('dialog').last();
   const observation: ReminderConfigurationObservation = {
     reminderStep: 'event-details',
+    alarmUiStep: 'event-row-visible',
+    alarmUiPatchStatus: 0,
+    alarmUiRelativeAlarmReadback: false,
+    alarmUiAlarmToggleReadback: false,
+    alarmUiRelativeTriggerReadback: false,
+    alarmUiOffsetReadback: false,
+    alarmUiEditorClosed: false,
+    alarmUiDetailsClosed: false,
     reminderSettingsButtonCount: 0,
     reminderSettingsButtonVisible: false,
     reminderOptionsGetCount: 0,
@@ -5448,6 +5625,10 @@ async function setRoomReminder(
     reminderDestinationControlCount: 0,
     recipientKind: 'unknown',
     recipientSelectionAttempted: false,
+    recipientSelectionStep: 'destination-clicked',
+    recipientOptionCount: 0,
+    memberOptionCount: 0,
+    selectedMemberTagCount: 0,
     selectedMemberKeyboardFlow: false,
     reminderTargetMatches: false,
     allDayScheduleMatches: false,
@@ -5612,40 +5793,58 @@ async function setRoomReminder(
     observation.reminderStep = 'recipient-selection';
     observation.recipientSelectionAttempted = true;
     observation.recipientKind = plan.recipient;
+    observation.recipientSelectionStep = 'destination-clicked';
     await destination.click();
     // MUI renders Select and Autocomplete listboxes in a frame-level portal,
     // outside the event details dialog subtree.
     const destinationListbox = frame
       .getByRole('listbox')
       .filter({ visible: true });
+    observation.recipientSelectionStep = 'destination-listbox-ready';
     await expect(destinationListbox).toHaveCount(1);
-    await destinationListbox
-      .getByRole('option', {
-        name: plan.recipient === 'room' ? 'Whole room' : 'Selected people',
-        exact: true,
-      })
-      .click();
+    const destinationOption = destinationListbox.getByRole('option', {
+      name: plan.recipient === 'room' ? 'Whole room' : 'Selected people',
+      exact: true,
+    });
+    observation.recipientOptionCount = Math.min(
+      await destinationOption.count(),
+      2,
+    );
+    observation.recipientSelectionStep = 'destination-option-selected';
+    await destinationOption.click();
     let selectedMemberKeyboardFlow = false;
     if (plan.recipient === 'selected') {
       const memberInput = details.getByRole('combobox', {
         name: 'Selected people',
       });
+      observation.recipientSelectionStep = 'member-query-entered';
       await memberInput.fill(fixture.users.memberB.userId);
       const memberListbox = frame
         .getByRole('listbox')
         .filter({ visible: true });
+      observation.recipientSelectionStep = 'member-listbox-ready';
       await expect(memberListbox).toHaveCount(1, { timeout: 15_000 });
       const memberOptions = memberListbox.getByRole('option');
       const memberOption = memberOptions.first();
+      observation.recipientSelectionStep = 'member-option-ready';
       await memberOption.waitFor({ state: 'visible', timeout: 15_000 });
+      observation.memberOptionCount = Math.min(await memberOptions.count(), 2);
+      observation.recipientSelectionStep = 'member-option-count-checked';
       await expect(memberOptions).toHaveCount(1);
+      observation.recipientSelectionStep = 'member-arrow-down';
       await memberInput.press('ArrowDown');
+      observation.recipientSelectionStep = 'member-enter';
       await memberInput.press('Enter');
+      observation.recipientSelectionStep = 'member-keyboard-closed';
       await memberInput.press('Escape');
-      selectedMemberKeyboardFlow =
-        (await details.locator('.MuiAutocomplete-tag').count()) === 1;
+      observation.selectedMemberTagCount = Math.min(
+        await details.locator('.MuiAutocomplete-tag').count(),
+        2,
+      );
+      selectedMemberKeyboardFlow = observation.selectedMemberTagCount === 1;
       observation.selectedMemberKeyboardFlow = selectedMemberKeyboardFlow;
     }
+    observation.recipientSelectionStep = 'complete';
 
     if (plan.allDay && plan.allDayEventDate) {
       dueAt =
