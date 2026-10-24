@@ -30,11 +30,11 @@ import { UserContextParam } from '../decorator/UserContextParam';
 import { MatrixAuthGuard } from '../guard/MatrixAuthGuard';
 import { IMatrixOpenIdCredential } from '../model/IMatrixOpenIdCredential';
 import { IUserContext } from '../model/IUserContext';
+import { PrivateCalendarClientService } from '../service/private-client/PrivateCalendarClientService';
 import {
   parsePublicCalendarFeedTarget,
   parsePublicCalendarFeedTargetBody,
 } from '../service/public-feed/PublicCalendarFeedService';
-import { PrivateCalendarClientService } from '../service/private-client/PrivateCalendarClientService';
 
 @Controller({ path: 'calendar/private-clients', version: ['1'] })
 @UseGuards(MatrixAuthGuard)
