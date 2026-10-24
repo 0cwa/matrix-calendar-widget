@@ -264,6 +264,7 @@ test('room manager sees writable event controls at a narrow width', async ({
   ).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'Edit' })).toBeEnabled();
   await expect(dialog.getByRole('button', { name: 'Delete' })).toBeEnabled();
+  await expect(page.locator('body')).not.toHaveAttribute('aria-hidden', 'true');
   await dialog
     .getByRole('button', { name: 'Reminder settings', exact: true })
     .click();

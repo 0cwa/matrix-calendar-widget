@@ -25,7 +25,6 @@ import {
   InMemoryCalendarRepository,
 } from '@matrix-calendar-widget/calendar';
 import type { StateEvent, WidgetApi } from '@matrix-widget-toolkit/api';
-import { MuiThemeProvider } from '@matrix-widget-toolkit/mui';
 import { WidgetApiMockProvider } from '@matrix-widget-toolkit/react';
 import {
   Box,
@@ -59,6 +58,7 @@ import { CalendarEventsList } from '../src/components/calendar/CalendarEventsLis
 import { CalendarEventsSurface } from '../src/components/calendar/CalendarEventsSurface';
 import type { CalendarSurfaceView } from '../src/components/calendar/CalendarNavigation';
 import { CalendarToolbar } from '../src/components/calendar/CalendarToolbar';
+import { CalendarMuiThemeProvider } from '../src/components/common/CalendarMuiThemeProvider';
 import { LocalizationProvider } from '../src/components/common/LocalizationProvider';
 import { registerDateRangeFormatter } from '../src/dateRangeFormatter';
 import { setLocale } from '../src/lib/locale';
@@ -687,7 +687,7 @@ async function start() {
   createRoot(document.getElementById('root')!).render(
     <WidgetApiMockProvider value={syntheticRoomWidgetApi}>
       {query.get('mode') === 'room-manager' ? (
-        <MuiThemeProvider>{fixture}</MuiThemeProvider>
+        <CalendarMuiThemeProvider>{fixture}</CalendarMuiThemeProvider>
       ) : (
         <ThemeProvider theme={theme}>
           <CssBaseline />
