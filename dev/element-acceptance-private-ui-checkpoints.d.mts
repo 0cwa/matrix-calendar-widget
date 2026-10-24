@@ -31,6 +31,9 @@ export type PrivateUiCheckpointPhase =
   | 'private-ui-dav-deny-after-revoke'
   | 'private-ui-egress-check'
   | 'private-ui-context-cleanup';
+export type PrivateUiCleanupPhase =
+  | 'private-ui-dav-cleanup'
+  | 'private-ui-context-cleanup';
 
 export declare const PRIVATE_UI_CHECKPOINT_PHASES: readonly PrivateUiCheckpointPhase[];
 export declare const PRIVATE_UI_RESULT_PHASE: 'private-ui-test-result';
@@ -41,7 +44,7 @@ export interface PrivateUiCheckpointJournal {
     operation: () => Promise<T> | T,
   ): Promise<T>;
   cleanup<T>(
-    phase: PrivateUiCheckpointPhase,
+    phase: PrivateUiCleanupPhase,
     operation: () => Promise<T> | T,
   ): Promise<T | undefined>;
   finish(testStatus: string | undefined): void;

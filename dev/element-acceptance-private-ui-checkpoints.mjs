@@ -39,6 +39,10 @@ export const PRIVATE_UI_CHECKPOINT_PHASES = Object.freeze([
 export const PRIVATE_UI_RESULT_PHASE = 'private-ui-test-result';
 
 const checkpointPhases = new Set(PRIVATE_UI_CHECKPOINT_PHASES);
+const cleanupPhases = new Set([
+  'private-ui-dav-cleanup',
+  'private-ui-context-cleanup',
+]);
 const testStatuses = new Set([
   'passed',
   'failed',
@@ -74,6 +78,7 @@ export function createPrivateUiCheckpointJournal({
   let lastCompletedPhase = null;
   let activePhase = null;
   let failurePhase = null;
+  let cleanupFailed = false;
   let finished = false;
 
   const writeRecord = (record) => {
@@ -134,17 +139,17 @@ export function createPrivateUiCheckpointJournal({
     },
 
     /**
-     * Run best-effort teardown even when Playwright has already finalized the
-     * test result. A finalized receipt remains immutable while teardown
-     * errors never replace the test result.
+     * Run teardown even when Playwright has already finalized the test result.
+     * A new pre-finalization cleanup error fails acceptance; a prior test
+     * failure remains primary. A finalized receipt is immutable.
      *
      * @template T
-     * @param {string} phase
+     * @param {'private-ui-dav-cleanup' | 'private-ui-context-cleanup'} phase
      * @param {() => Promise<T> | T} operation
      * @returns {Promise<T | undefined>}
      */
     async cleanup(phase, operation) {
-      if (!checkpointPhases.has(phase) || typeof operation !== 'function') {
+      if (!cleanupPhases.has(phase) || typeof operation !== 'function') {
         throw new Error('Private acceptance checkpoint is invalid');
       }
 
@@ -174,14 +179,19 @@ export function createPrivateUiCheckpointJournal({
         }
         return value;
       } catch {
+        const hadPriorFailure = failurePhase !== null;
         if (checkpointStarted && !finished) {
           activePhase = null;
-          failurePhase ??= phase;
+          if (!hadPriorFailure) failurePhase = phase;
           try {
             writeRecord({ phase, status: 'failed' });
           } catch {
             // Keep the test result and never retain a teardown error.
           }
+        }
+        if (!finished && !hadPriorFailure) {
+          cleanupFailed = true;
+          throw new Error('Private acceptance cleanup failed');
         }
         return undefined;
       }
@@ -195,14 +205,23 @@ export function createPrivateUiCheckpointJournal({
      */
     finish(testStatus) {
       if (finished) return;
-      const boundedTestStatus = testStatuses.has(testStatus)
+      const reportedTestStatus = testStatuses.has(testStatus)
         ? testStatus
         : 'unknown';
+      const activePhaseAtFinish = activePhase;
       if (activePhase) {
-        failurePhase = activePhase;
+        failurePhase ??= activePhase;
         writeRecord({ phase: activePhase, status: 'failed' });
         activePhase = null;
       }
+      const recordedFailureRequiresPromotion =
+        reportedTestStatus === 'passed' &&
+        (cleanupFailed ||
+          failurePhase !== null ||
+          activePhaseAtFinish !== null);
+      const boundedTestStatus = recordedFailureRequiresPromotion
+        ? 'failed'
+        : reportedTestStatus;
       const failed = boundedTestStatus !== 'passed';
       const resultStatus = failed
         ? boundedTestStatus === 'skipped'
@@ -218,6 +237,13 @@ export function createPrivateUiCheckpointJournal({
         failurePhase: failed ? (failurePhase ?? lastEnteredPhase) : null,
       });
       finished = true;
+      if (recordedFailureRequiresPromotion) {
+        throw new Error(
+          cleanupFailed
+            ? 'Private acceptance cleanup failed'
+            : 'Private acceptance phase failed',
+        );
+      }
     },
   };
 }

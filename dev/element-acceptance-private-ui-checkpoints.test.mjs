@@ -117,6 +117,78 @@ test('checkpoints successful cleanup before test finalization', async () => {
   }
 });
 
+test('cleanup failure fails acceptance and preserves an earlier phase failure', async () => {
+  const { directory, stageFile } = createStageFile();
+  try {
+    const cleanupJournal = createPrivateUiCheckpointJournal({
+      stageFile,
+      sourceSha,
+      profile: 'normal-bot',
+    });
+    await assert.rejects(
+      cleanupJournal.cleanup('private-ui-context-cleanup', () => {
+        throw new Error('private-cleanup-sentinel-do-not-record');
+      }),
+      { message: 'Private acceptance cleanup failed' },
+    );
+    assert.throws(() => cleanupJournal.finish('passed'), {
+      message: 'Private acceptance cleanup failed',
+    });
+    const cleanupRecords = readFileSync(stageFile, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    assert.equal(cleanupRecords[1].status, 'failed');
+    assert.equal(cleanupRecords.at(-1).status, 'failed');
+    assert.equal(cleanupRecords.at(-1).testStatus, 'failed');
+    assert.equal(
+      cleanupRecords.at(-1).failurePhase,
+      'private-ui-context-cleanup',
+    );
+    assert.doesNotMatch(
+      readFileSync(stageFile, 'utf8'),
+      /private-cleanup-sentinel-do-not-record/u,
+    );
+
+    const priorFailureStage = join(directory, 'prior-failure.jsonl');
+    const priorFailureJournal = createPrivateUiCheckpointJournal({
+      stageFile: priorFailureStage,
+      sourceSha,
+      profile: 'normal-bot',
+    });
+    await assert.rejects(
+      priorFailureJournal.run('private-ui-dav-delete', () => {
+        throw new Error('private-primary-sentinel-do-not-record');
+      }),
+    );
+    const cleanupResult = await priorFailureJournal.cleanup(
+      'private-ui-dav-cleanup',
+      () => {
+        throw new Error('private-secondary-sentinel-do-not-record');
+      },
+    );
+    priorFailureJournal.finish('failed');
+    const priorFailureRecords = readFileSync(priorFailureStage, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    assert.equal(cleanupResult, undefined);
+    assert.equal(priorFailureRecords[1].status, 'failed');
+    assert.equal(priorFailureRecords[3].status, 'failed');
+    assert.equal(priorFailureRecords.at(-1).testStatus, 'failed');
+    assert.equal(
+      priorFailureRecords.at(-1).failurePhase,
+      'private-ui-dav-delete',
+    );
+    assert.doesNotMatch(
+      readFileSync(priorFailureStage, 'utf8'),
+      /private-(?:primary|secondary)-sentinel-do-not-record/u,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('preserves failed and timed-out test status without retaining operation errors', async () => {
   const { directory, stageFile } = createStageFile();
   try {
