@@ -486,7 +486,7 @@ def _require_startup_artifacts(root: Path, source_sha: str) -> None:
 
     try:
         SMOKE._capture_container(
-            "verify-public-venv",
+            "verify-pub-venv",
             [
                 "/task/venv/bin/python",
                 "-B",

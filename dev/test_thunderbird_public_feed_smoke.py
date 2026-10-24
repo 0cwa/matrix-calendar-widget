@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -506,6 +507,8 @@ class PublicFeedSmokeTests(unittest.TestCase):
             node.parent.mkdir(parents=True)
             node.write_text("#!/bin/sh\nprintf 'v22.23.3\\n'\n", encoding="utf-8")
             node.chmod(0o700)
+            runner_home = base / "runner-home"
+            runner_home.mkdir()
 
             environment = {
                 "RUNNER_TEMP": str(runner_temp),
@@ -515,6 +518,8 @@ class PublicFeedSmokeTests(unittest.TestCase):
                 "GITHUB_WORKSPACE": str(workspace),
                 "RUNNER_TOOL_CACHE": str(tool_cache),
                 "PATH": str(node.parent),
+                "HOME": str(runner_home),
+                "TB_DOCKER_IMAGE": f"thunderbird-calendar-smoke:{SOURCE_SHA}",
             }
             startup = PUBLIC.SMOKE
             preflight = startup._initial_summary(SOURCE_SHA)
@@ -580,10 +585,21 @@ class PublicFeedSmokeTests(unittest.TestCase):
                     PUBLIC._startup_artifacts_verified(startup_summary, SOURCE_SHA)
                 )
 
+                docker_calls = []
+                real_subprocess_run = subprocess.run
+
+                def fake_subprocess_run(command, **kwargs):
+                    if command and command[0] == "docker":
+                        docker_calls.append((list(command), kwargs.copy()))
+                        return subprocess.CompletedProcess(
+                            command, 0, stdout="", stderr=""
+                        )
+                    return real_subprocess_run(command, **kwargs)
+
                 with (
                     patch.object(
-                        startup, "_capture_container", return_value=""
-                    ) as probe,
+                        startup.subprocess, "run", side_effect=fake_subprocess_run
+                    ),
                     patch.object(PUBLIC.platform, "machine", return_value="x86_64"),
                 ):
                     self.assertTrue(PUBLIC._prepare())
@@ -594,10 +610,52 @@ class PublicFeedSmokeTests(unittest.TestCase):
                 self.assertTrue(summary["thunderbirdArchiveVerified"])
                 self.assertTrue(summary["marionetteArtifactsVerified"])
                 self.assertEqual(summary["nodeVersion"], NODE_VERSION)
-                self.assertEqual(probe.call_args.args[0], "verify-public-venv")
+                self.assertEqual(len(docker_calls), 2)
+                run_args, run_kwargs = docker_calls[0]
+                cleanup_args, _ = docker_calls[1]
+                self.assertEqual(run_args[:2], ["docker", "run"])
+                self.assertEqual(cleanup_args[1:4], ["container", "rm", "--force"])
+                container_name = run_args[run_args.index("--name") + 1]
+                self.assertRegex(container_name, r"^tbcal-17-1-[a-z0-9-]{1,16}$")
+                self.assertTrue(container_name.endswith("-verify-pub-venv"))
+                self.assertEqual(cleanup_args[4], container_name)
+                self.assertLessEqual(len("verify-pub-venv"), 16)
+                self.assertEqual(run_kwargs["timeout"], 30)
+                self.assertIn("--platform=linux/amd64", run_args)
+                self.assertIn("--network=none", run_args)
+                self.assertIn("--read-only", run_args)
+                self.assertIn("--cap-drop=ALL", run_args)
+                self.assertIn("--security-opt=no-new-privileges", run_args)
+                self.assertRegex(
+                    run_args[run_args.index("--user") + 1], r"^[0-9]+:[0-9]+$"
+                )
+                container_environment = [
+                    run_args[index + 1]
+                    for index, argument in enumerate(run_args[:-1])
+                    if argument == "-e"
+                ]
+                self.assertIn(f"HOME={environment['HOME']}", container_environment)
+                self.assertEqual(run_args.count("--mount"), 2)
+                mount_values = [
+                    run_args[index + 1]
+                    for index, argument in enumerate(run_args[:-1])
+                    if argument == "--mount"
+                ]
+                venv_mounts = [
+                    mount
+                    for mount in mount_values
+                    if mount.endswith("dst=/task/venv,readonly")
+                ]
+                self.assertEqual(len(venv_mounts), 1)
+                probe_command = [
+                    "/task/venv/bin/python",
+                    "-B",
+                    "-c",
+                    "from marionette_driver.geckoinstance import apps; assert 'thunderbird' in apps",
+                ]
+                self.assertEqual(run_args[-len(probe_command) :], probe_command)
                 self.assertEqual(
-                    probe.call_args.kwargs["mounts"],
-                    [(task_root / "venv", "/task/venv", True)],
+                    run_args[-len(probe_command) - 1], environment["TB_DOCKER_IMAGE"]
                 )
 
                 public_environment = PUBLIC._public_container_environment()
