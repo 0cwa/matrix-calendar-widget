@@ -26,9 +26,36 @@ SPEC.loader.exec_module(PUBLIC)
 SOURCE_SHA = "a" * 40
 APP_VERSION = "158.0.1"
 NODE_VERSION = "22.23.3"
+KNOWN_FIXTURE_FRAME = (
+    "at Object.<anonymous> (/task/source/matrix-calendar-server/test/integration/"
+    "PrivateCalendarClientRadicaleContract.test.ts:804:19)"
+)
 
 
 class PublicFeedSmokeTests(unittest.TestCase):
+    def _write_jest_report(self, path: Path, value: object) -> Path:
+        path.write_text(json.dumps(value), encoding="utf-8")
+        path.chmod(0o600)
+        return path
+
+    def _failed_jest_report(self, message: str = KNOWN_FIXTURE_FRAME) -> dict:
+        return {
+            "success": False,
+            "testResults": [
+                {
+                    "name": "/task/source/matrix-calendar-server/test/integration/"
+                    "PrivateCalendarClientRadicaleContract.test.ts",
+                    "status": "failed",
+                    "assertionResults": [
+                        {
+                            "status": "failed",
+                            "failureMessages": [message],
+                        }
+                    ],
+                }
+            ],
+        }
+
     def _native_result(self) -> dict[str, object]:
         return {
             "schema": PUBLIC.RESULT_SCHEMA,
@@ -538,12 +565,324 @@ class PublicFeedSmokeTests(unittest.TestCase):
             )
         )
 
+    def test_public_jest_projection_is_closed_and_only_keeps_known_frame_numbers(
+        self,
+    ) -> None:
+        projected = PUBLIC._classify_public_jest_report(
+            self._failed_jest_report("private fixture value\n" + KNOWN_FIXTURE_FRAME)
+        )
+        self.assertEqual(
+            projected,
+            ("fixture_run", "jest_assertion_failed", 804, 19),
+        )
+        self.assertNotIn("private fixture value", repr(projected))
+        self.assertNotIn(
+            "PrivateCalendarClientRadicaleContract.test.ts", repr(projected)
+        )
+
+        unknown_frame = self._failed_jest_report(
+            "at Object.<anonymous> (/tmp/unrelated/Other.test.ts:44:7)"
+        )
+        self.assertEqual(
+            PUBLIC._classify_public_jest_report(unknown_frame),
+            ("fixture_run", "jest_assertion_failed", None, None),
+        )
+        forged_frame = self._failed_jest_report(
+            "assertion data mentions matrix-calendar-server/test/integration/"
+            "PrivateCalendarClientRadicaleContract.test.ts:804:19"
+        )
+        self.assertEqual(
+            PUBLIC._classify_public_jest_report(forged_frame),
+            ("fixture_run", "jest_assertion_failed", None, None),
+        )
+        self.assertEqual(
+            PUBLIC._classify_public_jest_report(
+                {
+                    "success": False,
+                    "testResults": [
+                        {
+                            "status": "failed",
+                            "assertionResults": [],
+                        }
+                    ],
+                }
+            ),
+            ("suite_load", "jest_suite_failed", None, None),
+        )
+        self.assertEqual(
+            PUBLIC._classify_public_jest_report({"success": False}),
+            ("jest_runner", "jest_report_invalid", None, None),
+        )
+        self.assertIsNone(
+            PUBLIC._classify_public_jest_report(
+                {
+                    "success": True,
+                    "testResults": [
+                        {
+                            "status": "passed",
+                            "assertionResults": [{"status": "passed"}],
+                        }
+                    ],
+                }
+            )
+        )
+
+    def test_public_jest_report_reader_rejects_unsafe_or_malformed_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            report = self._write_jest_report(
+                root / "report.json", self._failed_jest_report()
+            )
+            self.assertEqual(
+                PUBLIC.JEST_REPORT.read_owned_json_object(
+                    report, max_bytes=PUBLIC.MAX_JEST_REPORT_BYTES
+                )["success"],
+                False,
+            )
+
+            report.write_text(
+                '{"success":false,"success":false,"testResults":[]}',
+                encoding="utf-8",
+            )
+            report.chmod(0o600)
+            with self.assertRaises(ValueError):
+                PUBLIC.JEST_REPORT.read_owned_json_object(
+                    report, max_bytes=PUBLIC.MAX_JEST_REPORT_BYTES
+                )
+
+            report.write_text("{malformed", encoding="utf-8")
+            report.chmod(0o600)
+            with self.assertRaises(ValueError):
+                PUBLIC.JEST_REPORT.read_owned_json_object(
+                    report, max_bytes=PUBLIC.MAX_JEST_REPORT_BYTES
+                )
+
+            report.write_bytes(b" " * (PUBLIC.MAX_JEST_REPORT_BYTES + 1))
+            report.chmod(0o600)
+            with self.assertRaises(ValueError):
+                PUBLIC.JEST_REPORT.read_owned_json_object(
+                    report, max_bytes=PUBLIC.MAX_JEST_REPORT_BYTES
+                )
+
+            report.write_text("{}", encoding="utf-8")
+            report.chmod(0o644)
+            with self.assertRaises(ValueError):
+                PUBLIC.JEST_REPORT.read_owned_json_object(
+                    report, max_bytes=PUBLIC.MAX_JEST_REPORT_BYTES
+                )
+
+            report.chmod(0o600)
+            link = root / "report-link.json"
+            link.symlink_to(report)
+            with self.assertRaises(ValueError):
+                PUBLIC.JEST_REPORT.read_owned_json_object(
+                    link, max_bytes=PUBLIC.MAX_JEST_REPORT_BYTES
+                )
+
+            with patch.object(PUBLIC.os, "getuid", return_value=os.getuid() + 1):
+                with self.assertRaises(ValueError):
+                    PUBLIC.JEST_REPORT.read_owned_json_object(
+                        report, max_bytes=PUBLIC.MAX_JEST_REPORT_BYTES
+                    )
+
+    def test_public_jest_runner_requests_report_and_always_removes_it(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            working_directory = root / "project"
+            test_path = (
+                working_directory
+                / "matrix-calendar-server"
+                / "test"
+                / "integration"
+                / "PrivateCalendarClientRadicaleContract.test.ts"
+            )
+            test_path.parent.mkdir(parents=True)
+            test_path.write_text("// synthetic test path\n", encoding="utf-8")
+            report_path = root / "workspace" / PUBLIC.JEST_REPORT_FILENAME
+            report_path.parent.mkdir()
+            log_path = root / "jest.log"
+            observed: dict[str, object] = {}
+
+            def failed_jest(command: list[str], **_kwargs: object):
+                observed["command"] = command
+                output = Path(command[command.index("--outputFile") + 1])
+                output.write_text(
+                    json.dumps(self._failed_jest_report()), encoding="utf-8"
+                )
+                output.chmod(0o600)
+                return subprocess.CompletedProcess(command, 1)
+
+            with patch.object(PUBLIC.subprocess, "run", side_effect=failed_jest):
+                exit_code, failure = PUBLIC._invoke_public_jest(
+                    node=Path("/cached/node22"),
+                    test_runner=Path("/cached/jest.js"),
+                    test_path=test_path,
+                    working_directory=working_directory,
+                    report_path=report_path,
+                    log_path=log_path,
+                    cache_directory=str(root / "cache"),
+                    timeout=10,
+                )
+
+            command = observed["command"]
+            self.assertIsInstance(command, list)
+            self.assertIn("--json", command)
+            self.assertIn("--outputFile", command)
+            self.assertEqual(exit_code, 1)
+            self.assertEqual(
+                failure,
+                ("fixture_run", "jest_assertion_failed", 804, 19),
+            )
+            self.assertFalse(report_path.exists())
+            self.assertEqual(log_path.stat().st_mode & 0o777, 0o600)
+
+            def passing_jest(command: list[str], **_kwargs: object):
+                output = Path(command[command.index("--outputFile") + 1])
+                output.write_text(
+                    json.dumps(
+                        {
+                            "success": True,
+                            "testResults": [
+                                {
+                                    "status": "passed",
+                                    "assertionResults": [{"status": "passed"}],
+                                }
+                            ],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                output.chmod(0o600)
+                return subprocess.CompletedProcess(command, 0)
+
+            log_path.unlink()
+            with patch.object(PUBLIC.subprocess, "run", side_effect=passing_jest):
+                exit_code, failure = PUBLIC._invoke_public_jest(
+                    node=Path("/cached/node22"),
+                    test_runner=Path("/cached/jest.js"),
+                    test_path=test_path,
+                    working_directory=working_directory,
+                    report_path=report_path,
+                    log_path=log_path,
+                    cache_directory=str(root / "cache"),
+                    timeout=10,
+                )
+            self.assertEqual(exit_code, 0)
+            self.assertIsNone(failure)
+            self.assertFalse(report_path.exists())
+
+    def test_fixture_diagnostic_is_source_bound_closed_and_mode_checked(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = root / PUBLIC.FIXTURE_DIAGNOSTIC_FILENAME
+            invalid_path = root / "invalid-diagnostic.json"
+            with self.assertRaises(ValueError):
+                PUBLIC._write_fixture_diagnostic(
+                    invalid_path,
+                    SOURCE_SHA,
+                    "fixture_run",
+                    "private assertion value",
+                )
+            self.assertFalse(invalid_path.exists())
+            PUBLIC._write_fixture_diagnostic(
+                path, SOURCE_SHA, "fixture_run", "jest_assertion_failed", 804, 19
+            )
+            expected = {
+                "fixtureFailureStage": "fixture_run",
+                "fixtureFailureClass": "jest_assertion_failed",
+                "fixtureFailureLine": 804,
+                "fixtureFailureColumn": 19,
+            }
+            self.assertEqual(
+                PUBLIC._read_fixture_diagnostic(path, SOURCE_SHA), expected
+            )
+            self.assertIsNone(PUBLIC._read_fixture_diagnostic(path, "b" * 40))
+
+            path.chmod(0o644)
+            self.assertIsNone(PUBLIC._read_fixture_diagnostic(path, SOURCE_SHA))
+            path.chmod(0o600)
+            link = root / "diagnostic-link.json"
+            link.symlink_to(path)
+            self.assertIsNone(PUBLIC._read_fixture_diagnostic(link, SOURCE_SHA))
+
+            path.write_text('{"schema":"bad","schema":"duplicate"}', encoding="utf-8")
+            path.chmod(0o600)
+            self.assertIsNone(PUBLIC._read_fixture_diagnostic(path, SOURCE_SHA))
+
+            path.write_text("not json", encoding="utf-8")
+            path.chmod(0o600)
+            self.assertIsNone(PUBLIC._read_fixture_diagnostic(path, SOURCE_SHA))
+
+            path.write_bytes(b" " * (PUBLIC.MAX_FIXTURE_DIAGNOSTIC_BYTES + 1))
+            path.chmod(0o600)
+            self.assertIsNone(PUBLIC._read_fixture_diagnostic(path, SOURCE_SHA))
+
+    def test_run_projects_fixture_failure_without_setting_native_success_flags(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            runner_temp = base / "runner-temp"
+            runner_temp.mkdir()
+            task_root = base / "task-root"
+            workspace = base / "workspace"
+            task_workspace = task_root / "workspace"
+            task_workspace.mkdir(parents=True)
+            summary = PUBLIC._initial_summary(SOURCE_SHA)
+            summary["phase"] = "prepare"
+
+            def fail_before_native_result(*_args: object, **kwargs: object) -> int:
+                self.assertEqual(
+                    kwargs["extra_environment"]["MCW_PUBLIC_ICS_SOURCE_SHA"],
+                    SOURCE_SHA,
+                )
+                PUBLIC._write_fixture_diagnostic(
+                    task_workspace / PUBLIC.FIXTURE_DIAGNOSTIC_FILENAME,
+                    SOURCE_SHA,
+                    "fixture_run",
+                    "jest_assertion_failed",
+                    804,
+                    19,
+                )
+                return 1
+
+            with (
+                patch.dict(
+                    os.environ,
+                    {"RUNNER_TEMP": str(runner_temp), "GITHUB_SHA": SOURCE_SHA},
+                ),
+                patch.object(
+                    PUBLIC,
+                    "_prepared",
+                    return_value=(task_root, summary, workspace),
+                ),
+                patch.object(
+                    PUBLIC.SMOKE,
+                    "_run_container_bounded",
+                    side_effect=fail_before_native_result,
+                ),
+            ):
+                self.assertFalse(PUBLIC._run())
+                saved = PUBLIC._load_summary()
+
+            self.assertEqual(saved["failure_stage"], "fixture_run")
+            self.assertEqual(saved["failure_class"], "jest_failed")
+            self.assertEqual(saved["fixtureFailureStage"], "fixture_run")
+            self.assertEqual(saved["fixtureFailureClass"], "jest_assertion_failed")
+            self.assertEqual(saved["fixtureFailureLine"], 804)
+            self.assertEqual(saved["fixtureFailureColumn"], 19)
+            self.assertTrue(
+                all(not saved[field] for field in PUBLIC.SUMMARY_BOOLEAN_FIELDS)
+            )
+            self.assertTrue(all(saved[field] == 0 for field in PUBLIC.COUNT_FIELDS))
+            self.assertEqual(set(saved), set(PUBLIC._initial_summary(SOURCE_SHA)))
+
     def test_container_environment_rejects_private_or_extra_public_credentials(
         self,
     ) -> None:
         environment = {
             "MCW_PUBLIC_FEED_NATIVE_PROFILE": "1",
-            **PUBLIC._public_container_environment(),
+            **PUBLIC._public_container_environment(SOURCE_SHA),
         }
         self.assertTrue(PUBLIC._public_container_environment_matches(environment))
         self.assertFalse(
@@ -691,7 +1030,7 @@ class PublicFeedSmokeTests(unittest.TestCase):
                 ):
                     self.assertTrue(PUBLIC._prepare())
                 summary = PUBLIC._load_summary()
-                self.assertEqual(summary["schema"], "thunderbird-public-ics-summary@2")
+                self.assertEqual(summary["schema"], "thunderbird-public-ics-summary@3")
                 self.assertTrue(summary["startupArtifactsVerified"])
                 self.assertIsNone(summary["startupArtifactsFailure"])
                 self.assertTrue(summary["thunderbirdArchiveVerified"])
@@ -745,7 +1084,7 @@ class PublicFeedSmokeTests(unittest.TestCase):
                     run_args[-len(probe_command) - 1], environment["TB_DOCKER_IMAGE"]
                 )
 
-                public_environment = PUBLIC._public_container_environment()
+                public_environment = PUBLIC._public_container_environment(SOURCE_SHA)
                 self.assertNotIn("PRIVATE_CALDAV_CONTRACT", public_environment)
                 self.assertFalse(
                     any(name.startswith("MCW_PRIVATE_") for name in public_environment)

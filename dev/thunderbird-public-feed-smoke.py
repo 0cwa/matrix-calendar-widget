@@ -25,14 +25,30 @@ if SMOKE_SPEC is None or SMOKE_SPEC.loader is None:
     raise RuntimeError("Thunderbird startup helper is unavailable")
 SMOKE = importlib.util.module_from_spec(SMOKE_SPEC)
 SMOKE_SPEC.loader.exec_module(SMOKE)
+JEST_REPORT_SPEC = importlib.util.spec_from_file_location(
+    "thunderbird_jest_report", SCRIPT_DIR / "thunderbird_jest_report.py"
+)
+if JEST_REPORT_SPEC is None or JEST_REPORT_SPEC.loader is None:
+    raise RuntimeError("Jest report reader is unavailable")
+JEST_REPORT = importlib.util.module_from_spec(JEST_REPORT_SPEC)
+JEST_REPORT_SPEC.loader.exec_module(JEST_REPORT)
 
-# Summary @2 adds one closed, privacy-safe subreason for startup artifact preflight.
-SUMMARY_SCHEMA = "thunderbird-public-ics-summary@2"
+# Summary @3 adds closed, source-bound fixture failure projection fields.
+SUMMARY_SCHEMA = "thunderbird-public-ics-summary@3"
 RESULT_SCHEMA = "thunderbird-public-ics-qualification@1"
+FIXTURE_DIAGNOSTIC_SCHEMA = "thunderbird-public-feed-jest-diagnostic@1"
 EXPECTED_APP_VERSION = "158.0.1"
 EXPECTED_NODE_PREFIX = (22, 12, 0)
 NATIVE_RESULT_FILENAME = "public-feed-native-result.json"
+JEST_REPORT_FILENAME = "public-feed-jest-report.json"
+FIXTURE_DIAGNOSTIC_FILENAME = "public-feed-jest-diagnostic.json"
 CONTAINER_RESULT_PATH = Path("/task/workspace") / NATIVE_RESULT_FILENAME
+CONTAINER_JEST_REPORT_PATH = Path("/task/workspace") / JEST_REPORT_FILENAME
+CONTAINER_FIXTURE_DIAGNOSTIC_PATH = (
+    Path("/task/workspace") / FIXTURE_DIAGNOSTIC_FILENAME
+)
+MAX_JEST_REPORT_BYTES = 1_000_000
+MAX_FIXTURE_DIAGNOSTIC_BYTES = 512
 JEST_PROCESS_MARGIN_SECONDS = 60
 CONTAINER_CLEANUP_MARGIN_SECONDS = 60
 # The fixture is allowed 843 seconds, Jest 903, and the Docker invocation 963.
@@ -129,6 +145,23 @@ STARTUP_ARTIFACT_FAILURES = {
     "container_interpreter_probe_failed",
     "unknown",
 }
+FIXTURE_FAILURE_STAGES = {"fixture_run", "jest_runner", "native_result", "suite_load"}
+FIXTURE_FAILURE_CLASSES = {
+    "jest_assertion_failed",
+    "jest_process_error",
+    "jest_report_invalid",
+    "jest_report_missing",
+    "jest_suite_failed",
+    "jest_timeout",
+    "native_result_invalid",
+    "worker_input_invalid",
+}
+KNOWN_FIXTURE_FRAME = re.compile(
+    r"(?m)^\s*at [^\r\n]*\((?:[^\r\n]*[\\/])?"
+    r"matrix-calendar-server[\\/]test[\\/]integration[\\/]"
+    r"PrivateCalendarClientRadicaleContract\.test\.ts:"
+    r"(?P<line>[1-9][0-9]{0,5}):(?P<column>[1-9][0-9]{0,5})\)\s*$"
+)
 NATIVE_FAILURE_STAGES = {
     "input_preflight",
     "profile_setup",
@@ -184,6 +217,10 @@ def _initial_summary(source_sha: str) -> dict[str, Any]:
         "failure_stage": None,
         "failure_class": None,
         "startupArtifactsFailure": None,
+        "fixtureFailureStage": None,
+        "fixtureFailureClass": None,
+        "fixtureFailureLine": None,
+        "fixtureFailureColumn": None,
         "dockerBackendVerified": False,
         "dockerIsolationVerified": False,
         "workspaceJestReady": False,
@@ -243,10 +280,56 @@ def _success_gates(value: dict[str, Any]) -> bool:
     return (
         value.get("status") in {"running", "passed"}
         and value.get("startupArtifactsFailure") is None
+        and all(
+            value.get(key) is None
+            for key in (
+                "fixtureFailureStage",
+                "fixtureFailureClass",
+                "fixtureFailureLine",
+                "fixtureFailureColumn",
+            )
+        )
         and all(value.get(key) is True for key in SUMMARY_BOOLEAN_FIELDS)
         and value.get("appVersion") == EXPECTED_APP_VERSION
         and _supported_node_version(value.get("nodeVersion"))
         and counts_are_valid
+    )
+
+
+def _fixture_failure_values_valid(
+    stage: Any, error_class: Any, line: Any, column: Any
+) -> bool:
+    if stage is None and error_class is None:
+        return line is None and column is None
+    if (
+        not isinstance(stage, str)
+        or stage not in FIXTURE_FAILURE_STAGES
+        or not isinstance(error_class, str)
+        or error_class not in FIXTURE_FAILURE_CLASSES
+    ):
+        return False
+    expected_classes = {
+        "fixture_run": {"jest_assertion_failed"},
+        "suite_load": {"jest_suite_failed"},
+        "native_result": {"native_result_invalid"},
+        "jest_runner": {
+            "jest_process_error",
+            "jest_report_invalid",
+            "jest_report_missing",
+            "jest_timeout",
+            "worker_input_invalid",
+        },
+    }
+    if error_class not in expected_classes[stage]:
+        return False
+    if line is None and column is None:
+        return True
+    return (
+        stage in {"fixture_run", "suite_load"}
+        and type(line) is int
+        and 1 <= line <= 999_999
+        and type(column) is int
+        and 1 <= column <= 999_999
     )
 
 
@@ -269,6 +352,13 @@ def _write_summary(payload: dict[str, Any]) -> None:
         or safe["failure_stage"] not in (None, *FAILURE_STAGES)
         or safe["failure_class"] not in (None, *FAILURE_CLASSES)
         or safe["startupArtifactsFailure"] not in (None, *STARTUP_ARTIFACT_FAILURES)
+        or not _fixture_failure_values_valid(
+            safe["fixtureFailureStage"],
+            safe["fixtureFailureClass"],
+            safe["fixtureFailureLine"],
+            safe["fixtureFailureColumn"],
+        )
+        or (safe["fixtureFailureStage"] is not None and safe["status"] != "failed")
         or (safe["startupArtifactsFailure"] is not None and safe["status"] != "failed")
         or any(type(safe[key]) is not bool for key in SUMMARY_BOOLEAN_FIELDS)
         or any(
@@ -358,6 +448,16 @@ def _load_summary() -> dict[str, Any]:
         or set(value) != set(_initial_summary("0" * 40))
         or value.get("startupArtifactsFailure")
         not in (None, *STARTUP_ARTIFACT_FAILURES)
+        or not _fixture_failure_values_valid(
+            value.get("fixtureFailureStage"),
+            value.get("fixtureFailureClass"),
+            value.get("fixtureFailureLine"),
+            value.get("fixtureFailureColumn"),
+        )
+        or (
+            value.get("fixtureFailureStage") is not None
+            and value.get("status") != "failed"
+        )
     ):
         raise ValueError("public feed summary is invalid")
     return value
@@ -713,9 +813,278 @@ def _read_native_result(path: Path, *, allow_failed: bool = False) -> dict[str, 
     return value
 
 
-def _public_container_environment() -> dict[str, str]:
+def _classify_public_jest_report(
+    value: Any,
+) -> tuple[str, str, int | None, int | None] | None:
+    if not isinstance(value, dict) or type(value.get("success")) is not bool:
+        return "jest_runner", "jest_report_invalid", None, None
+    suites = value.get("testResults")
+    if not isinstance(suites, list) or not suites or len(suites) > 8:
+        return "jest_runner", "jest_report_invalid", None, None
+
+    messages: list[str] = []
+    failed_assertion = False
+    suite_error = value.get("testExecError") is not None
+    top_level_error = value.get("testExecError")
+    if isinstance(top_level_error, dict):
+        for key in ("message", "stack"):
+            message = top_level_error.get(key)
+            if isinstance(message, str):
+                if len(message) > 100_000:
+                    return "jest_runner", "jest_report_invalid", None, None
+                messages.append(message)
+
+    for suite in suites:
+        if not isinstance(suite, dict):
+            return "jest_runner", "jest_report_invalid", None, None
+        suite_status = suite.get("status")
+        suite_error = (
+            suite_error
+            or suite.get("testExecError") is not None
+            or suite_status == "failed"
+        )
+        if suite_status not in {"passed", "failed"}:
+            suite_error = True
+        if suite_status == "failed" and not suite.get(
+            "assertionResults", suite.get("testResults", [])
+        ):
+            suite_error = True
+
+        suite_message = suite.get("message")
+        if isinstance(suite_message, str):
+            if len(suite_message) > 100_000:
+                return "jest_runner", "jest_report_invalid", None, None
+            messages.append(suite_message)
+        suite_exec_error = suite.get("testExecError")
+        if isinstance(suite_exec_error, dict):
+            for key in ("message", "stack"):
+                message = suite_exec_error.get(key)
+                if isinstance(message, str):
+                    if len(message) > 100_000:
+                        return "jest_runner", "jest_report_invalid", None, None
+                    messages.append(message)
+
+        assertions = suite.get("assertionResults", suite.get("testResults", []))
+        if not isinstance(assertions, list) or len(assertions) > 64:
+            return "jest_runner", "jest_report_invalid", None, None
+        for assertion in assertions:
+            if not isinstance(assertion, dict):
+                return "jest_runner", "jest_report_invalid", None, None
+            if assertion.get("status") != "failed":
+                continue
+            failed_assertion = True
+            failure_messages = assertion.get("failureMessages", [])
+            if not isinstance(failure_messages, list) or len(failure_messages) > 64:
+                return "jest_runner", "jest_report_invalid", None, None
+            for message in failure_messages:
+                if not isinstance(message, str) or len(message) > 100_000:
+                    return "jest_runner", "jest_report_invalid", None, None
+                messages.append(message)
+
+    if value["success"] and (failed_assertion or suite_error):
+        return "jest_runner", "jest_report_invalid", None, None
+    if value["success"]:
+        return None
+    locations = {
+        (int(match.group("line")), int(match.group("column")))
+        for message in messages
+        for match in KNOWN_FIXTURE_FRAME.finditer(message)
+    }
+    line, column = next(iter(locations)) if len(locations) == 1 else (None, None)
+    if failed_assertion:
+        return "fixture_run", "jest_assertion_failed", line, column
+    if suite_error:
+        return "suite_load", "jest_suite_failed", line, column
+    return "jest_runner", "jest_report_invalid", None, None
+
+
+def _jest_report_failure(path: Path) -> tuple[str, str, int | None, int | None]:
+    try:
+        report = JEST_REPORT.read_owned_json_object(
+            path, max_bytes=MAX_JEST_REPORT_BYTES
+        )
+    except ValueError:
+        try:
+            metadata = path.lstat()
+        except OSError:
+            return "jest_runner", "jest_report_missing", None, None
+        if (
+            not path.is_symlink()
+            and stat.S_ISREG(metadata.st_mode)
+            and metadata.st_uid == os.getuid()
+            and stat.S_IMODE(metadata.st_mode) == 0o600
+            and metadata.st_size == 0
+        ):
+            return "jest_runner", "jest_report_missing", None, None
+        return "jest_runner", "jest_report_invalid", None, None
+    failure = _classify_public_jest_report(report)
+    return failure or ("jest_runner", "jest_report_invalid", None, None)
+
+
+def _write_fixture_diagnostic(
+    path: Path,
+    source_sha: str,
+    stage: str,
+    error_class: str,
+    line: int | None = None,
+    column: int | None = None,
+) -> None:
+    if (
+        not isinstance(source_sha, str)
+        or re.fullmatch(r"[0-9a-f]{40}", source_sha) is None
+        or not _fixture_failure_values_valid(stage, error_class, line, column)
+    ):
+        raise ValueError("public Jest diagnostic is invalid")
+    payload = {
+        "schema": FIXTURE_DIAGNOSTIC_SCHEMA,
+        "status": "failed",
+        "source_sha": source_sha,
+        "fixtureFailureStage": stage,
+        "fixtureFailureClass": error_class,
+        "fixtureFailureLine": line,
+        "fixtureFailureColumn": column,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n"
+    if len(encoded.encode("utf-8")) > MAX_FIXTURE_DIAGNOSTIC_BYTES:
+        raise ValueError("public Jest diagnostic is invalid")
+    descriptor = os.open(
+        path,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+    )
+    with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+        output.write(encoded)
+        output.flush()
+        os.fsync(output.fileno())
+
+
+def _read_fixture_diagnostic(path: Path, source_sha: str) -> dict[str, Any] | None:
+    if re.fullmatch(r"[0-9a-f]{40}", source_sha) is None:
+        return None
+    try:
+        value = JEST_REPORT.read_owned_json_object(
+            path, max_bytes=MAX_FIXTURE_DIAGNOSTIC_BYTES
+        )
+    except ValueError:
+        return None
+    expected = {
+        "schema",
+        "status",
+        "source_sha",
+        "fixtureFailureStage",
+        "fixtureFailureClass",
+        "fixtureFailureLine",
+        "fixtureFailureColumn",
+    }
+    if (
+        not isinstance(value, dict)
+        or set(value) != expected
+        or value.get("schema") != FIXTURE_DIAGNOSTIC_SCHEMA
+        or value.get("status") != "failed"
+        or value.get("source_sha") != source_sha
+        or not _fixture_failure_values_valid(
+            value.get("fixtureFailureStage"),
+            value.get("fixtureFailureClass"),
+            value.get("fixtureFailureLine"),
+            value.get("fixtureFailureColumn"),
+        )
+    ):
+        return None
+    return {
+        key: value[key]
+        for key in (
+            "fixtureFailureStage",
+            "fixtureFailureClass",
+            "fixtureFailureLine",
+            "fixtureFailureColumn",
+        )
+    }
+
+
+def _remove_jest_report(path: Path) -> bool:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _invoke_public_jest(
+    *,
+    node: Path,
+    test_runner: Path,
+    test_path: Path,
+    working_directory: Path,
+    report_path: Path,
+    log_path: Path,
+    cache_directory: str,
+    timeout: int,
+) -> tuple[int, tuple[str, str, int | None, int | None] | None]:
+    if report_path.exists() or report_path.is_symlink():
+        return 1, ("jest_runner", "jest_report_invalid", None, None)
+    command = [
+        str(node),
+        str(test_runner),
+        "--runInBand",
+        "--runTestsByPath",
+        str(test_path.relative_to(working_directory)),
+        "--cacheDirectory",
+        cache_directory,
+        "--json",
+        "--outputFile",
+        str(report_path),
+    ]
+    report_created = False
+    result_code = 1
+    failure: tuple[str, str, int | None, int | None] | None = None
+    try:
+        descriptor = os.open(
+            report_path,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        report_created = True
+        os.close(descriptor)
+        log_descriptor = os.open(
+            log_path,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        with os.fdopen(log_descriptor, "wb") as log:
+            previous_umask = os.umask(0o077)
+            try:
+                result = subprocess.run(
+                    command,
+                    cwd=working_directory,
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    check=False,
+                    timeout=timeout,
+                )
+            finally:
+                os.umask(previous_umask)
+        result_code = result.returncode
+        if result_code != 0:
+            failure = _jest_report_failure(report_path)
+    except subprocess.TimeoutExpired:
+        failure = ("jest_runner", "jest_timeout", None, None)
+    except (OSError, subprocess.SubprocessError):
+        failure = ("jest_runner", "jest_process_error", None, None)
+    finally:
+        if report_created and not _remove_jest_report(report_path):
+            failure = ("jest_runner", "jest_report_invalid", None, None)
+    return result_code, failure
+
+
+def _public_container_environment(source_sha: str) -> dict[str, str]:
+    if re.fullmatch(r"[0-9a-f]{40}", source_sha) is None:
+        raise ValueError("source identity is invalid")
     return {
         "MCW_PUBLIC_FEED_NATIVE_PROFILE": "1",
+        "MCW_PUBLIC_ICS_SOURCE_SHA": source_sha,
         "MCW_PUBLIC_ICS_PYTHON": "/task/venv/bin/python",
         "MCW_PUBLIC_ICS_SITE_PACKAGES": "/task/venv/lib/python3.13/site-packages",
         "MCW_PUBLIC_ICS_RADICALE_PYTHON": "/app/bin/python",
@@ -726,7 +1095,10 @@ def _public_container_environment() -> dict[str, str]:
 
 
 def _public_container_environment_matches(environment: dict[str, str]) -> bool:
-    expected = _public_container_environment()
+    source_sha = environment.get("MCW_PUBLIC_ICS_SOURCE_SHA", "")
+    if re.fullmatch(r"[0-9a-f]{40}", source_sha) is None:
+        return False
+    expected = _public_container_environment(source_sha)
     public_ics_keys = {key for key in environment if key.startswith("MCW_PUBLIC_ICS_")}
     expected_public_ics_keys = {
         key for key in expected if key.startswith("MCW_PUBLIC_ICS_")
@@ -743,8 +1115,10 @@ def _public_container_environment_matches(environment: dict[str, str]) -> bool:
 def _container_worker() -> int:
     if Path("/task").resolve() != Path("/task"):
         return 1
-    if not _public_container_environment_matches(dict(os.environ)):
+    environment = dict(os.environ)
+    if not _public_container_environment_matches(environment):
         return 1
+    source_sha = environment["MCW_PUBLIC_ICS_SOURCE_SHA"]
 
     source = Path("/task/source")
     node = Path("/task/node/node")
@@ -757,47 +1131,62 @@ def _container_worker() -> int:
         / "PrivateCalendarClientRadicaleContract.test.ts"
     )
     if (
+        CONTAINER_RESULT_PATH.exists()
+        or CONTAINER_RESULT_PATH.is_symlink()
+        or CONTAINER_JEST_REPORT_PATH.exists()
+        or CONTAINER_JEST_REPORT_PATH.is_symlink()
+        or CONTAINER_FIXTURE_DIAGNOSTIC_PATH.exists()
+        or CONTAINER_FIXTURE_DIAGNOSTIC_PATH.is_symlink()
+    ):
+        return 1
+
+    def record_failure(
+        stage: str,
+        error_class: str,
+        line: int | None = None,
+        column: int | None = None,
+    ) -> None:
+        try:
+            _write_fixture_diagnostic(
+                CONTAINER_FIXTURE_DIAGNOSTIC_PATH,
+                source_sha,
+                stage,
+                error_class,
+                line,
+                column,
+            )
+        except Exception:
+            pass
+
+    if (
         not node.is_file()
         or not os.access(node, os.X_OK)
         or not test_runner.is_file()
         or not test_path.is_file()
-        or CONTAINER_RESULT_PATH.exists()
-        or CONTAINER_RESULT_PATH.is_symlink()
     ):
+        record_failure("jest_runner", "worker_input_invalid")
         return 1
 
-    log_path = Path("/tmp/thunderbird-public-feed-jest.log")
-    try:
-        descriptor = os.open(
-            log_path,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
-            0o600,
-        )
-        with os.fdopen(descriptor, "wb") as log:
-            result = subprocess.run(
-                [
-                    str(node),
-                    str(test_runner),
-                    "--runInBand",
-                    "--runTestsByPath",
-                    str(test_path.relative_to(source / "matrix-calendar-server")),
-                    "--cacheDirectory",
-                    "/tmp/public-feed-jest-cache",
-                ],
-                cwd=source / "matrix-calendar-server",
-                stdin=subprocess.DEVNULL,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                check=False,
-                timeout=JEST_TIMEOUT_SECONDS,
-            )
-    except (OSError, subprocess.SubprocessError):
+    result_code, failure = _invoke_public_jest(
+        node=node,
+        test_runner=test_runner,
+        test_path=test_path,
+        working_directory=source / "matrix-calendar-server",
+        report_path=CONTAINER_JEST_REPORT_PATH,
+        log_path=Path("/tmp/thunderbird-public-feed-jest.log"),
+        cache_directory="/tmp/public-feed-jest-cache",
+        timeout=JEST_TIMEOUT_SECONDS,
+    )
+
+    if failure is not None:
+        record_failure(*failure)
         return 1
-    if result.returncode != 0:
+    if result_code != 0:
         return 1
     try:
-        native_result = _read_native_result(CONTAINER_RESULT_PATH)
+        native_result = _read_native_result(CONTAINER_RESULT_PATH, allow_failed=True)
     except ValueError:
+        record_failure("native_result", "native_result_invalid")
         return 1
     return 0 if native_result.get("status") == "passed" else 1
 
@@ -807,7 +1196,12 @@ def _run() -> bool:
         source_sha = _source_sha()
         root, summary, workspace = _prepared(source_sha)
         host_result_path = root / "workspace" / NATIVE_RESULT_FILENAME
-        if host_result_path.exists() or host_result_path.is_symlink():
+        host_diagnostic_path = root / "workspace" / FIXTURE_DIAGNOSTIC_FILENAME
+        host_report_path = root / "workspace" / JEST_REPORT_FILENAME
+        if any(
+            path.exists() or path.is_symlink()
+            for path in (host_result_path, host_diagnostic_path, host_report_path)
+        ):
             raise ValueError("native result already exists")
         mounts = [
             (root / "app", "/task/app", True),
@@ -834,7 +1228,7 @@ def _run() -> bool:
             timeout_class="native_timeout",
             failure_phase="fixture_run",
             failure_class="jest_failed",
-            extra_environment=_public_container_environment(),
+            extra_environment=_public_container_environment(source_sha),
         )
         if exit_code != 0:
             try:
@@ -850,6 +1244,11 @@ def _run() -> bool:
                     }
                 )
             else:
+                fixture_diagnostic = _read_fixture_diagnostic(
+                    host_diagnostic_path, source_sha
+                )
+                if fixture_diagnostic is not None:
+                    summary.update(fixture_diagnostic)
                 summary.update(
                     {
                         "status": "failed",
