@@ -297,7 +297,18 @@ const PHASE_BOOLEAN_FIELDS = new Map([
   ['service-room-ready', ['serviceUserJoined', 'powerPolicyVerified']],
   ['reminder-role-verified', ['rolePolicyVerified']],
   ['reminder-widget-context', ['canManageReminders']],
-  ['reminder-alarm-ui-readback', ['relativeAlarmReadback']],
+  [
+    'reminder-alarm-ui-readback',
+    [
+      'relativeAlarmReadback',
+      'alarmUiRelativeAlarmReadback',
+      'alarmUiAlarmToggleReadback',
+      'alarmUiRelativeTriggerReadback',
+      'alarmUiOffsetReadback',
+      'alarmUiEditorClosed',
+      'alarmUiDetailsClosed',
+    ],
+  ],
   ['reminder-room-configuration-enabled', ['reminderEnabled']],
   [
     'reminder-ui-readback',
@@ -1187,6 +1198,59 @@ const REMINDER_CONFIGURATION_STEPS = new Set([
   'put-response',
   'complete',
 ]);
+const REMINDER_RECIPIENT_SELECTION_STEPS = new Set([
+  'destination-clicked',
+  'destination-listbox-ready',
+  'destination-option-selected',
+  'member-query-entered',
+  'member-listbox-ready',
+  'member-option-ready',
+  'member-option-count-checked',
+  'member-arrow-down',
+  'member-enter',
+  'member-keyboard-closed',
+  'complete',
+]);
+const REMINDER_ALARM_UI_STEPS = new Set([
+  'event-row-visible',
+  'event-open',
+  'details-ready',
+  'settings-open',
+  'edit-button-ready',
+  'editor-ready',
+  'alarm-toggle-read',
+  'alarm-toggle-enabled',
+  'relative-option-selected',
+  'offset-entered',
+  'save-response-armed',
+  'save-clicked',
+  'patch-response-received',
+  'editor-hidden',
+  'details-ready-after-save',
+  'details-hidden',
+  'readback-editor-open',
+  'readback-editor-ready',
+  'readback-alarm-toggle',
+  'readback-relative-option',
+  'readback-offset',
+  'readback-editor-cancelled',
+  'readback-editor-hidden',
+  'readback-details-hidden',
+  'complete',
+]);
+const REMINDER_ALARM_UI_BOOLEAN_FIELDS = [
+  'alarmUiRelativeAlarmReadback',
+  'alarmUiAlarmToggleReadback',
+  'alarmUiRelativeTriggerReadback',
+  'alarmUiOffsetReadback',
+  'alarmUiEditorClosed',
+  'alarmUiDetailsClosed',
+];
+const REMINDER_ALARM_UI_FIELDS = [
+  'alarmUiStep',
+  'alarmUiPatchStatus',
+  ...REMINDER_ALARM_UI_BOOLEAN_FIELDS,
+];
 const REMINDER_CONFIGURATION_FIELDS = [
   'reminderStep',
   'reminderSettingsButtonCount',
@@ -1198,6 +1262,10 @@ const REMINDER_CONFIGURATION_FIELDS = [
   'reminderDestinationControlCount',
   'recipientKind',
   'recipientSelectionAttempted',
+  'recipientSelectionStep',
+  'recipientOptionCount',
+  'memberOptionCount',
+  'selectedMemberTagCount',
   'selectedMemberKeyboardFlow',
   'reminderTargetMatches',
   'allDayScheduleMatches',
@@ -1210,6 +1278,9 @@ const REMINDER_CONFIGURATION_COUNTER_FIELDS = [
   'reminderOptionsGetCount',
   'reminderConfigGetCount',
   'reminderDestinationControlCount',
+  'recipientOptionCount',
+  'memberOptionCount',
+  'selectedMemberTagCount',
   'reminderPutCount',
 ];
 const REMINDER_CONFIGURATION_STATUS_FIELDS = [
@@ -1295,6 +1366,7 @@ const ALLOWED_KEYS = new Set([
   'reminderEnabled',
   'targetSettingsReadback',
   'allDayScheduleReadback',
+  ...REMINDER_ALARM_UI_FIELDS,
   ...PUBLIC_FEED_BROWSER_STATUS_FIELDS,
   ...PUBLIC_FEED_BROWSER_ERROR_FIELDS,
   ...PUBLIC_FEED_BROWSER_DIAGNOSTIC_FIELDS,
@@ -2257,6 +2329,47 @@ function validPostCreateVisibilityObservation(record) {
   );
 }
 
+function validReminderAlarmUiObservation(record) {
+  const expectedKeys = new Set([
+    'phase',
+    'status',
+    'count',
+    ...(Object.hasOwn(record, 'httpStatus') ? ['httpStatus'] : []),
+    'relativeAlarmReadback',
+    ...REMINDER_ALARM_UI_FIELDS,
+  ]);
+  return (
+    Object.keys(record).length === expectedKeys.size &&
+    Object.keys(record).every((key) => expectedKeys.has(key)) &&
+    (record.status === 'passed' || record.status === 'failed') &&
+    Number.isInteger(record.count) &&
+    record.count === 1 &&
+    REMINDER_ALARM_UI_STEPS.has(record.alarmUiStep) &&
+    Number.isInteger(record.alarmUiPatchStatus) &&
+    (record.alarmUiPatchStatus === 0 ||
+      (record.alarmUiPatchStatus >= 100 && record.alarmUiPatchStatus <= 599)) &&
+    REMINDER_ALARM_UI_BOOLEAN_FIELDS.every(
+      (key) => typeof record[key] === 'boolean',
+    ) &&
+    (record.alarmUiPatchStatus === 0
+      ? !Object.hasOwn(record, 'httpStatus')
+      : record.httpStatus === record.alarmUiPatchStatus) &&
+    (record.status === 'passed'
+      ? record.alarmUiStep === 'complete' &&
+        record.relativeAlarmReadback === true &&
+        record.alarmUiRelativeAlarmReadback === true &&
+        record.alarmUiAlarmToggleReadback === true &&
+        record.alarmUiRelativeTriggerReadback === true &&
+        record.alarmUiOffsetReadback === true &&
+        record.alarmUiEditorClosed === true &&
+        record.alarmUiDetailsClosed === true &&
+        record.alarmUiPatchStatus >= 200 &&
+        record.alarmUiPatchStatus < 300
+      : record.alarmUiStep !== 'complete' &&
+        record.relativeAlarmReadback === false)
+  );
+}
+
 function validReminderConfigurationObservation(record) {
   const expectedKeys = new Set([
     'phase',
@@ -2271,6 +2384,7 @@ function validReminderConfigurationObservation(record) {
     (record.status === 'passed' || record.status === 'failed') &&
     typeof record.reminderEnabled === 'boolean' &&
     REMINDER_CONFIGURATION_STEPS.has(record.reminderStep) &&
+    REMINDER_RECIPIENT_SELECTION_STEPS.has(record.recipientSelectionStep) &&
     REMINDER_CONFIGURATION_COUNTER_FIELDS.every(
       (key) =>
         Number.isInteger(record[key]) && record[key] >= 0 && record[key] <= 2,
@@ -2311,12 +2425,19 @@ function validReminderConfigurationObservation(record) {
         record.reminderDestinationControlCount === 1 &&
         ['room', 'selected'].includes(record.recipientKind) &&
         record.recipientSelectionAttempted &&
+        record.recipientSelectionStep === 'complete' &&
+        record.recipientOptionCount === 1 &&
         record.reminderTargetMatches &&
         record.allDayScheduleMatches &&
         (record.recipientKind !== 'selected' ||
-          (record.selectedMemberKeyboardFlow && record.narrowSidePanelSafe)) &&
+          (record.selectedMemberKeyboardFlow &&
+            record.narrowSidePanelSafe &&
+            record.memberOptionCount === 1 &&
+            record.selectedMemberTagCount === 1)) &&
         (record.recipientKind !== 'room' ||
-          !record.selectedMemberKeyboardFlow) &&
+          (!record.selectedMemberKeyboardFlow &&
+            record.memberOptionCount === 0 &&
+            record.selectedMemberTagCount === 0)) &&
         record.reminderPutCount === 1 &&
         record.reminderPutStatus >= 200 &&
         record.reminderPutStatus < 300 &&
@@ -2815,6 +2936,9 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       POST_CREATE_VISIBILITY_FIELDS.some((key) => Object.hasOwn(record, key));
     const hasReminderConfigurationObservation =
       REMINDER_CONFIGURATION_FIELDS.some((key) => Object.hasOwn(record, key));
+    const hasReminderAlarmUiObservation = REMINDER_ALARM_UI_FIELDS.some((key) =>
+      Object.hasOwn(record, key),
+    );
     const hasReminderConfigurationStoredField =
       REMINDER_CONFIGURATION_STORED_FIELDS.some((key) =>
         Object.hasOwn(record, key),
@@ -2838,6 +2962,10 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         !validReminderConfigurationObservation(record)) ||
       (record.phase !== 'reminder-room-configuration-enabled' &&
         hasReminderConfigurationObservation) ||
+      (record.phase === 'reminder-alarm-ui-readback' &&
+        !validReminderAlarmUiObservation(record)) ||
+      (record.phase !== 'reminder-alarm-ui-readback' &&
+        hasReminderAlarmUiObservation) ||
       (hasReminderConfigurationStoredField &&
         !(
           (record.phase === 'reminder-configuration-stored' &&
@@ -3897,6 +4025,29 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       continue;
     }
 
+    if (phase === 'reminder-alarm-ui-readback') {
+      lines.push(
+        [
+          `phase=${phase}`,
+          `status=${record.status}`,
+          `count=${record.count}`,
+          ...(Object.hasOwn(record, 'httpStatus')
+            ? [`http_status=${record.httpStatus}`]
+            : []),
+          `alarm_ui_step=${record.alarmUiStep}`,
+          `alarm_ui_patch_status=${record.alarmUiPatchStatus}`,
+          `relative_alarm_readback=${record.relativeAlarmReadback}`,
+          `alarm_ui_relative_alarm_readback=${record.alarmUiRelativeAlarmReadback}`,
+          `alarm_ui_alarm_toggle_readback=${record.alarmUiAlarmToggleReadback}`,
+          `alarm_ui_relative_trigger_readback=${record.alarmUiRelativeTriggerReadback}`,
+          `alarm_ui_offset_readback=${record.alarmUiOffsetReadback}`,
+          `alarm_ui_editor_closed=${record.alarmUiEditorClosed}`,
+          `alarm_ui_details_closed=${record.alarmUiDetailsClosed}`,
+        ].join(' '),
+      );
+      continue;
+    }
+
     if (phase === 'reminder-room-configuration-enabled') {
       lines.push(
         [
@@ -3912,6 +4063,10 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           `destination_control_count=${record.reminderDestinationControlCount}`,
           `recipient_kind=${record.recipientKind}`,
           `recipient_selection_attempted=${record.recipientSelectionAttempted}`,
+          `recipient_selection_step=${record.recipientSelectionStep}`,
+          `recipient_option_count=${record.recipientOptionCount}`,
+          `member_option_count=${record.memberOptionCount}`,
+          `selected_member_tag_count=${record.selectedMemberTagCount}`,
           `selected_member_keyboard_flow=${record.selectedMemberKeyboardFlow}`,
           `reminder_target_matches=${record.reminderTargetMatches}`,
           `all_day_schedule_matches=${record.allDayScheduleMatches}`,

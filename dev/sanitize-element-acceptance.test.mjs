@@ -69,6 +69,7 @@ function projectionDiagnosticCounts(overrides = {}) {
 }
 
 function reminderConfigurationObservation(overrides = {}) {
+  const selectedRecipient = overrides.recipientKind === 'selected';
   return {
     phase: 'reminder-room-configuration-enabled',
     status: 'passed',
@@ -85,12 +86,35 @@ function reminderConfigurationObservation(overrides = {}) {
     reminderDestinationControlCount: 1,
     recipientKind: 'room',
     recipientSelectionAttempted: true,
+    recipientSelectionStep: 'complete',
+    recipientOptionCount: 1,
+    memberOptionCount: selectedRecipient ? 1 : 0,
+    selectedMemberTagCount: selectedRecipient ? 1 : 0,
     selectedMemberKeyboardFlow: false,
     reminderTargetMatches: true,
     allDayScheduleMatches: true,
     narrowSidePanelSafe: true,
     reminderPutCount: 1,
     reminderPutStatus: 200,
+    ...overrides,
+  };
+}
+
+function reminderAlarmUiObservation(overrides = {}) {
+  return {
+    phase: 'reminder-alarm-ui-readback',
+    status: 'passed',
+    httpStatus: 200,
+    count: 1,
+    relativeAlarmReadback: true,
+    alarmUiStep: 'complete',
+    alarmUiPatchStatus: 200,
+    alarmUiRelativeAlarmReadback: true,
+    alarmUiAlarmToggleReadback: true,
+    alarmUiRelativeTriggerReadback: true,
+    alarmUiOffsetReadback: true,
+    alarmUiEditorClosed: true,
+    alarmUiDetailsClosed: true,
     ...overrides,
   };
 }
@@ -111,6 +135,10 @@ function missingReminderOptionObservation() {
     reminderDestinationControlCount: 0,
     recipientKind: 'unknown',
     recipientSelectionAttempted: false,
+    recipientSelectionStep: 'destination-clicked',
+    recipientOptionCount: 0,
+    memberOptionCount: 0,
+    selectedMemberTagCount: 0,
     selectedMemberKeyboardFlow: false,
     reminderTargetMatches: false,
     allDayScheduleMatches: false,
@@ -535,7 +563,7 @@ test('accepts and projects the complete reminder producer stream for room and se
   );
   assert.match(
     selectedTargetSummary,
-    /recipient_kind=selected recipient_selection_attempted=true selected_member_keyboard_flow=true reminder_target_matches=true all_day_schedule_matches=true narrow_side_panel_safe=true/u,
+    /recipient_kind=selected recipient_selection_attempted=true recipient_selection_step=complete recipient_option_count=1 member_option_count=1 selected_member_tag_count=1 selected_member_keyboard_flow=true reminder_target_matches=true all_day_schedule_matches=true narrow_side_panel_safe=true/u,
   );
 });
 
@@ -898,12 +926,7 @@ test('requires UI, Matrix delivery, and timeline evidence for reminder recovery'
         httpStatus: 201,
         count: 1,
       }),
-      JSON.stringify({
-        phase: 'reminder-alarm-ui-readback',
-        status: 'passed',
-        count: 1,
-        relativeAlarmReadback: true,
-      }),
+      JSON.stringify(reminderAlarmUiObservation()),
       JSON.stringify({
         phase: 'reminder-ui-readback',
         status: 'passed',
@@ -1002,7 +1025,11 @@ test('requires UI, Matrix delivery, and timeline evidence for reminder recovery'
   );
   assert.match(
     summary,
-    /phase=reminder-room-configuration-enabled status=passed reminder_step=complete reminder_settings_button_count=1 reminder_settings_button_visible=true options_get_count=1 options_http_status=200 configuration_get_count=1 configuration_http_status=200 destination_control_count=1 recipient_kind=room recipient_selection_attempted=true selected_member_keyboard_flow=false reminder_target_matches=true all_day_schedule_matches=true narrow_side_panel_safe=true put_count=1 put_http_status=200/u,
+    /phase=reminder-room-configuration-enabled status=passed reminder_step=complete reminder_settings_button_count=1 reminder_settings_button_visible=true options_get_count=1 options_http_status=200 configuration_get_count=1 configuration_http_status=200 destination_control_count=1 recipient_kind=room recipient_selection_attempted=true recipient_selection_step=complete recipient_option_count=1 member_option_count=0 selected_member_tag_count=0 selected_member_keyboard_flow=false reminder_target_matches=true all_day_schedule_matches=true narrow_side_panel_safe=true put_count=1 put_http_status=200/u,
+  );
+  assert.match(
+    summary,
+    /phase=reminder-alarm-ui-readback status=passed count=1 http_status=200 alarm_ui_step=complete alarm_ui_patch_status=200 relative_alarm_readback=true alarm_ui_relative_alarm_readback=true alarm_ui_alarm_toggle_readback=true alarm_ui_relative_trigger_readback=true alarm_ui_offset_readback=true alarm_ui_editor_closed=true alarm_ui_details_closed=true/u,
   );
   assert.match(
     summary,
@@ -1139,7 +1166,7 @@ test('sanitizes selected-member reminder configuration with keyboard and narrow-
 
   assert.match(
     summary,
-    /recipient_kind=selected recipient_selection_attempted=true selected_member_keyboard_flow=true reminder_target_matches=true all_day_schedule_matches=true narrow_side_panel_safe=true/u,
+    /recipient_kind=selected recipient_selection_attempted=true recipient_selection_step=complete recipient_option_count=1 member_option_count=1 selected_member_tag_count=1 selected_member_keyboard_flow=true reminder_target_matches=true all_day_schedule_matches=true narrow_side_panel_safe=true/u,
   );
   assert.doesNotMatch(summary, /user_id|matrix_id|https?:/iu);
   assert.match(
@@ -1245,6 +1272,108 @@ test('validates reminder configuration snapshot rows without accepting target id
     /status=unavailable category=invalid-stage-record rejected_phase=reminder-configuration-stored/u,
   );
   assert.doesNotMatch(safeFailure, /private-sentinel|@private/u);
+});
+
+test('projects failed reminder alarm editor steps and rejects private fields', () => {
+  const alarmFailure = reminderAlarmUiObservation({
+    status: 'failed',
+    relativeAlarmReadback: false,
+    alarmUiStep: 'readback-alarm-toggle',
+    alarmUiRelativeAlarmReadback: false,
+    alarmUiAlarmToggleReadback: false,
+    alarmUiRelativeTriggerReadback: false,
+    alarmUiOffsetReadback: false,
+    alarmUiEditorClosed: false,
+    alarmUiDetailsClosed: false,
+  });
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(alarmFailure),
+    sourceSha,
+  );
+  assert.match(
+    summary,
+    /phase=reminder-alarm-ui-readback status=failed count=1 http_status=200 alarm_ui_step=readback-alarm-toggle alarm_ui_patch_status=200 relative_alarm_readback=false alarm_ui_relative_alarm_readback=false alarm_ui_alarm_toggle_readback=false alarm_ui_relative_trigger_readback=false alarm_ui_offset_readback=false alarm_ui_editor_closed=false alarm_ui_details_closed=false/u,
+  );
+
+  let failure;
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify({ ...alarmFailure, rawError: 'private sentinel' }),
+        sourceSha,
+      ),
+    (error) => {
+      failure = error;
+      return true;
+    },
+  );
+  assert.equal(failure.category, 'invalid-stage-record');
+  assert.doesNotMatch(
+    formatSanitizerFailureSummary(failure, sourceSha),
+    /private sentinel|rawError/u,
+  );
+});
+
+test('projects selected-recipient success and failed selection steps', () => {
+  const selectedSuccess = reminderConfigurationObservation({
+    recipientKind: 'selected',
+    memberOptionCount: 1,
+    selectedMemberTagCount: 1,
+    selectedMemberKeyboardFlow: true,
+    narrowSidePanelSafe: true,
+  });
+  const successSummary = sanitizeElementAcceptance(
+    JSON.stringify(selectedSuccess),
+    sourceSha,
+  );
+  assert.match(
+    successSummary,
+    /phase=reminder-room-configuration-enabled status=passed reminder_step=complete reminder_settings_button_count=1 reminder_settings_button_visible=true options_get_count=1 options_http_status=200 configuration_get_count=1 configuration_http_status=200 destination_control_count=1 recipient_kind=selected recipient_selection_attempted=true recipient_selection_step=complete recipient_option_count=1 member_option_count=1 selected_member_tag_count=1 selected_member_keyboard_flow=true reminder_target_matches=true all_day_schedule_matches=true narrow_side_panel_safe=true put_count=1 put_http_status=200/u,
+  );
+  for (const inconsistentObservation of [
+    { recipientSelectionStep: 'unrecognized-step' },
+    { recipientOptionCount: 2 },
+    { memberOptionCount: 0 },
+    { selectedMemberTagCount: 2 },
+    { allDayScheduleMatches: false },
+  ]) {
+    assert.throws(
+      () =>
+        sanitizeElementAcceptance(
+          JSON.stringify({ ...selectedSuccess, ...inconsistentObservation }),
+          sourceSha,
+        ),
+      /invalid element acceptance summary/u,
+    );
+  }
+
+  const selectedFailure = reminderConfigurationObservation({
+    status: 'failed',
+    httpStatus: 200,
+    reminderEnabled: false,
+    reminderStep: 'recipient-selection',
+    recipientKind: 'selected',
+    recipientSelectionAttempted: true,
+    recipientSelectionStep: 'member-option-ready',
+    recipientOptionCount: 1,
+    memberOptionCount: 0,
+    selectedMemberTagCount: 0,
+    selectedMemberKeyboardFlow: false,
+    reminderTargetMatches: false,
+    allDayScheduleMatches: false,
+    narrowSidePanelSafe: true,
+    reminderPutCount: 0,
+    reminderPutStatus: 0,
+  });
+  delete selectedFailure.count;
+  const failureSummary = sanitizeElementAcceptance(
+    JSON.stringify(selectedFailure),
+    sourceSha,
+  );
+  assert.match(
+    failureSummary,
+    /phase=reminder-room-configuration-enabled status=failed reminder_step=recipient-selection reminder_settings_button_count=1 reminder_settings_button_visible=true options_get_count=1 options_http_status=200 configuration_get_count=1 configuration_http_status=200 destination_control_count=1 recipient_kind=selected recipient_selection_attempted=true recipient_selection_step=member-option-ready recipient_option_count=1 member_option_count=0 selected_member_tag_count=0 selected_member_keyboard_flow=false reminder_target_matches=false all_day_schedule_matches=false narrow_side_panel_safe=true put_count=0 put_http_status=0/u,
+  );
 });
 
 test('requires selected-user Matrix mentions to exclude a room broadcast', () => {
@@ -1539,7 +1668,7 @@ test('sanitizes the fixed reminder option failure boundary', () => {
   );
   assert.match(
     summary,
-    /phase=reminder-room-configuration-enabled status=failed reminder_step=destination-control reminder_settings_button_count=1 reminder_settings_button_visible=true options_get_count=1 options_http_status=200 configuration_get_count=1 configuration_http_status=200 destination_control_count=0 recipient_kind=unknown recipient_selection_attempted=false selected_member_keyboard_flow=false reminder_target_matches=false all_day_schedule_matches=false narrow_side_panel_safe=false put_count=0 put_http_status=0/u,
+    /phase=reminder-room-configuration-enabled status=failed reminder_step=destination-control reminder_settings_button_count=1 reminder_settings_button_visible=true options_get_count=1 options_http_status=200 configuration_get_count=1 configuration_http_status=200 destination_control_count=0 recipient_kind=unknown recipient_selection_attempted=false recipient_selection_step=destination-clicked recipient_option_count=0 member_option_count=0 selected_member_tag_count=0 selected_member_keyboard_flow=false reminder_target_matches=false all_day_schedule_matches=false narrow_side_panel_safe=false put_count=0 put_http_status=0/u,
   );
   assert.doesNotMatch(summary, /https?:|access_token|event_id|error_text/iu);
 });
