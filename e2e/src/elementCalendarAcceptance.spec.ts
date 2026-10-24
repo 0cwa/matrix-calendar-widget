@@ -5830,8 +5830,15 @@ async function setRoomReminder(
         .getByRole('listbox')
         .filter({ visible: true });
       observation.recipientSelectionStep = 'member-listbox-ready';
-      await expect(memberListbox).toHaveCount(1, { timeout: 15_000 });
       observation.memberListboxCount = Math.min(await memberListbox.count(), 2);
+      try {
+        await expect(memberListbox).toHaveCount(1, { timeout: 15_000 });
+      } finally {
+        observation.memberListboxCount = await memberListbox
+          .count()
+          .then((count) => Math.min(count, 2))
+          .catch(() => observation.memberListboxCount);
+      }
       const memberOptions = memberListbox.getByRole('option');
       const memberOption = memberOptions.first();
       observation.recipientSelectionStep = 'member-option-ready';
