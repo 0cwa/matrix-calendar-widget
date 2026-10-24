@@ -1198,6 +1198,14 @@ const REMINDER_CONFIGURATION_STEPS = new Set([
   'put-response',
   'complete',
 ]);
+const REMINDER_RECIPIENT_ROSTER_OUTCOMES = new Set([
+  'unobserved',
+  'http_error',
+  'empty',
+  'invalid_shape',
+  'nonempty',
+]);
+const MAX_REMINDER_RECIPIENT_ROSTER_COUNT = 20_000;
 const REMINDER_RECIPIENT_SELECTION_STEPS = new Set([
   'destination-clicked',
   'destination-listbox-ready',
@@ -1294,6 +1302,11 @@ const REMINDER_CONFIGURATION_FIELDS = [
   'reminderOptionsGetStatus',
   'reminderConfigGetCount',
   'reminderConfigGetStatus',
+  'recipientRosterGetCount',
+  'recipientRosterHttpStatus',
+  'recipientRosterCount',
+  'recipientRosterShapeValid',
+  'recipientRosterOutcome',
   'reminderDestinationControlCount',
   'recipientKind',
   'recipientSelectionAttempted',
@@ -1325,6 +1338,7 @@ const REMINDER_CONFIGURATION_COUNTER_FIELDS = [
   'reminderSettingsButtonCount',
   'reminderOptionsGetCount',
   'reminderConfigGetCount',
+  'recipientRosterGetCount',
   'reminderDestinationControlCount',
   'recipientOptionCount',
   'memberInputBlurEventCount',
@@ -1337,6 +1351,7 @@ const REMINDER_CONFIGURATION_COUNTER_FIELDS = [
 const REMINDER_CONFIGURATION_STATUS_FIELDS = [
   'reminderOptionsGetStatus',
   'reminderConfigGetStatus',
+  'recipientRosterHttpStatus',
   'reminderPutStatus',
 ];
 const REMINDER_CONFIGURATION_STORED_FIELDS = [
@@ -2543,6 +2558,63 @@ function validReminderAlarmUiObservation(record) {
   return diagnoseReminderAlarmUiObservation(record, 1, 1) === null;
 }
 
+function validReminderRecipientRosterObservation(record) {
+  const {
+    recipientRosterCount,
+    recipientRosterGetCount,
+    recipientRosterHttpStatus,
+    recipientRosterOutcome,
+    recipientRosterShapeValid,
+  } = record;
+  if (
+    !Number.isInteger(recipientRosterCount) ||
+    recipientRosterCount < 0 ||
+    recipientRosterCount > MAX_REMINDER_RECIPIENT_ROSTER_COUNT ||
+    !REMINDER_RECIPIENT_ROSTER_OUTCOMES.has(recipientRosterOutcome) ||
+    typeof recipientRosterShapeValid !== 'boolean'
+  ) {
+    return false;
+  }
+
+  const successfulHttpResponse =
+    recipientRosterHttpStatus >= 200 && recipientRosterHttpStatus < 300;
+  switch (recipientRosterOutcome) {
+    case 'unobserved':
+      return (
+        recipientRosterHttpStatus === 0 &&
+        recipientRosterCount === 0 &&
+        !recipientRosterShapeValid
+      );
+    case 'http_error':
+      return (
+        recipientRosterGetCount > 0 &&
+        !successfulHttpResponse &&
+        recipientRosterCount === 0 &&
+        !recipientRosterShapeValid
+      );
+    case 'empty':
+      return (
+        recipientRosterGetCount > 0 &&
+        successfulHttpResponse &&
+        recipientRosterCount === 0 &&
+        recipientRosterShapeValid
+      );
+    case 'invalid_shape':
+      return (
+        recipientRosterGetCount > 0 &&
+        successfulHttpResponse &&
+        !recipientRosterShapeValid
+      );
+    case 'nonempty':
+      return (
+        recipientRosterGetCount > 0 &&
+        successfulHttpResponse &&
+        recipientRosterCount > 0 &&
+        recipientRosterShapeValid
+      );
+  }
+}
+
 function validReminderConfigurationObservation(record) {
   const expectedKeys = new Set([
     'phase',
@@ -2567,9 +2639,11 @@ function validReminderConfigurationObservation(record) {
         Number.isInteger(record[key]) &&
         (record[key] === 0 || (record[key] >= 100 && record[key] <= 599)),
     ) &&
+    validReminderRecipientRosterObservation(record) &&
     [
       'reminderSettingsButtonVisible',
       'recipientSelectionAttempted',
+      'recipientRosterShapeValid',
       'memberInputProbeInstalled',
       'memberQueryMatchesTargetAfterFill',
       'memberQueryMatchesTargetAtOptionCount',
@@ -2616,6 +2690,9 @@ function validReminderConfigurationObservation(record) {
           (record.selectedMemberKeyboardFlow &&
             record.memberInputControlsUniqueListbox &&
             record.narrowSidePanelSafe &&
+            record.recipientRosterOutcome === 'nonempty' &&
+            record.recipientRosterCount > 0 &&
+            record.recipientRosterShapeValid &&
             record.memberOptionCount === 1 &&
             record.selectedMemberTagCount === 1)) &&
         (record.recipientKind !== 'room' ||
@@ -4320,6 +4397,11 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           `options_http_status=${record.reminderOptionsGetStatus}`,
           `configuration_get_count=${record.reminderConfigGetCount}`,
           `configuration_http_status=${record.reminderConfigGetStatus}`,
+          `recipient_roster_get_count=${record.recipientRosterGetCount}`,
+          `recipient_roster_http_status=${record.recipientRosterHttpStatus}`,
+          `recipient_roster_count=${record.recipientRosterCount}`,
+          `recipient_roster_shape_valid=${record.recipientRosterShapeValid}`,
+          `recipient_roster_outcome=${record.recipientRosterOutcome}`,
           `destination_control_count=${record.reminderDestinationControlCount}`,
           `recipient_kind=${record.recipientKind}`,
           `recipient_selection_attempted=${record.recipientSelectionAttempted}`,
