@@ -1196,6 +1196,7 @@ const REMINDER_CONFIGURATION_STEPS = new Set([
   'destination-control',
   'recipient-selection',
   'put-response',
+  'post-put-layout',
   'complete',
 ]);
 const REMINDER_RECIPIENT_ROSTER_OUTCOMES = new Set([
@@ -1381,9 +1382,53 @@ const REMINDER_CONFIGURATION_FIELDS = [
   'reminderTargetMatches',
   'allDayScheduleMatches',
   'narrowSidePanelSafe',
+  'narrowViewportWithinRange',
+  'narrowDialogWithinViewport',
+  'narrowDialogContentsFit',
+  'narrowDocumentContentsFit',
+  'narrowViewportWidth',
+  'narrowDialogWidth',
+  'narrowDialogClientWidth',
+  'narrowDialogScrollWidth',
+  'narrowDocumentClientWidth',
+  'narrowDocumentScrollWidth',
   'reminderPutCount',
   'reminderPutStatus',
 ];
+const OPTIONAL_REMINDER_LAYOUT_DIAGNOSTIC_FIELDS = [
+  'narrowViewportWithinRange',
+  'narrowDialogWithinViewport',
+  'narrowDialogContentsFit',
+  'narrowDocumentContentsFit',
+  'narrowViewportWidth',
+  'narrowDialogWidth',
+  'narrowDialogClientWidth',
+  'narrowDialogScrollWidth',
+  'narrowDocumentClientWidth',
+  'narrowDocumentScrollWidth',
+];
+const REMINDER_LAYOUT_PREDICATE_FIELDS = [
+  'narrowViewportWithinRange',
+  'narrowDialogWithinViewport',
+  'narrowDialogContentsFit',
+  'narrowDocumentContentsFit',
+];
+const REMINDER_LAYOUT_DIMENSION_FIELDS = [
+  'narrowViewportWidth',
+  'narrowDialogWidth',
+  'narrowDialogClientWidth',
+  'narrowDialogScrollWidth',
+  'narrowDocumentClientWidth',
+  'narrowDocumentScrollWidth',
+];
+const MAX_REMINDER_LAYOUT_DIMENSION = 100_000;
+
+function formatReminderLayoutDimension(value) {
+  if (value === 'not-observed' || value === undefined) {
+    return 'not-observed';
+  }
+  return String(Math.round(value * 10) / 10);
+}
 const REMINDER_CONFIGURATION_COUNTER_FIELDS = [
   'reminderSettingsButtonCount',
   'reminderOptionsGetCount',
@@ -2673,12 +2718,61 @@ function validReminderRecipientRosterObservation(record) {
 }
 
 function validReminderConfigurationObservation(record) {
+  const optionalLayoutFields = new Set(
+    OPTIONAL_REMINDER_LAYOUT_DIAGNOSTIC_FIELDS,
+  );
+  const hasAnyLayoutDiagnostic =
+    OPTIONAL_REMINDER_LAYOUT_DIAGNOSTIC_FIELDS.some((key) =>
+      Object.hasOwn(record, key),
+    );
+  const hasAllLayoutDiagnostics =
+    OPTIONAL_REMINDER_LAYOUT_DIAGNOSTIC_FIELDS.every((key) =>
+      Object.hasOwn(record, key),
+    );
+  const hasObservedLayoutPredicates = REMINDER_LAYOUT_PREDICATE_FIELDS.every(
+    (key) => typeof record[key] === 'boolean',
+  );
+  const layoutPredicatesNotObserved = REMINDER_LAYOUT_PREDICATE_FIELDS.every(
+    (key) => record[key] === 'not-observed',
+  );
+  const layoutMeasurements = (keys) =>
+    keys.every((key) => typeof record[key] === 'number');
+  const predicateMatchesDimensions = (predicate, keys, expected) =>
+    !layoutMeasurements(keys) || record[predicate] === expected;
+  const layoutDimensionsConsistent =
+    predicateMatchesDimensions(
+      'narrowViewportWithinRange',
+      ['narrowViewportWidth'],
+      record.narrowViewportWidth >= 320 && record.narrowViewportWidth <= 420,
+    ) &&
+    predicateMatchesDimensions(
+      'narrowDialogWithinViewport',
+      ['narrowDialogWidth', 'narrowViewportWidth'],
+      record.narrowDialogWidth <= record.narrowViewportWidth + 1,
+    ) &&
+    predicateMatchesDimensions(
+      'narrowDialogContentsFit',
+      ['narrowDialogScrollWidth', 'narrowDialogClientWidth'],
+      record.narrowDialogScrollWidth <= record.narrowDialogClientWidth + 1,
+    ) &&
+    predicateMatchesDimensions(
+      'narrowDocumentContentsFit',
+      ['narrowDocumentScrollWidth', 'narrowViewportWidth'],
+      record.narrowDocumentScrollWidth <= record.narrowViewportWidth + 1,
+    ) &&
+    (!layoutMeasurements([
+      'narrowViewportWidth',
+      'narrowDocumentClientWidth',
+    ]) ||
+      record.narrowViewportWidth === record.narrowDocumentClientWidth);
   const expectedKeys = new Set([
     'phase',
     'status',
     ...['httpStatus', 'count'].filter((key) => Object.hasOwn(record, key)),
     'reminderEnabled',
-    ...REMINDER_CONFIGURATION_FIELDS,
+    ...REMINDER_CONFIGURATION_FIELDS.filter(
+      (key) => !optionalLayoutFields.has(key) || Object.hasOwn(record, key),
+    ),
   ]);
   return (
     Object.keys(record).length === expectedKeys.size &&
@@ -2694,6 +2788,32 @@ function validReminderConfigurationObservation(record) {
     MEMBER_INERT_STATES.has(record.memberListboxAncestorInert) &&
     MEMBER_CSS_VISIBILITY_STATES.has(record.memberListboxCssVisibility) &&
     MEMBER_PICKER_OBSERVATION_ERRORS.has(record.memberPickerObservationError) &&
+    (!hasAnyLayoutDiagnostic || hasAllLayoutDiagnostics) &&
+    REMINDER_LAYOUT_PREDICATE_FIELDS.every(
+      (key) =>
+        !Object.hasOwn(record, key) ||
+        typeof record[key] === 'boolean' ||
+        record[key] === 'not-observed',
+    ) &&
+    (!hasAllLayoutDiagnostics ||
+      hasObservedLayoutPredicates ||
+      layoutPredicatesNotObserved) &&
+    (record.status !== 'passed' ||
+      !hasAnyLayoutDiagnostic ||
+      hasObservedLayoutPredicates) &&
+    REMINDER_LAYOUT_DIMENSION_FIELDS.every(
+      (key) =>
+        !Object.hasOwn(record, key) ||
+        record[key] === 'not-observed' ||
+        (typeof record[key] === 'number' &&
+          Number.isFinite(record[key]) &&
+          record[key] >= 0 &&
+          record[key] <= MAX_REMINDER_LAYOUT_DIMENSION),
+    ) &&
+    layoutDimensionsConsistent &&
+    (!hasObservedLayoutPredicates ||
+      record.narrowSidePanelSafe ===
+        REMINDER_LAYOUT_PREDICATE_FIELDS.every((key) => record[key])) &&
     REMINDER_CONFIGURATION_COUNTER_FIELDS.every(
       (key) =>
         Number.isInteger(record[key]) && record[key] >= 0 && record[key] <= 2,
@@ -2736,6 +2856,15 @@ function validReminderConfigurationObservation(record) {
     (record.reminderConfigGetCount > 0 ||
       record.reminderConfigGetStatus === 0) &&
     (record.reminderPutCount > 0 || record.reminderPutStatus === 0) &&
+    (record.reminderStep !== 'post-put-layout' ||
+      (record.status === 'failed' &&
+        record.recipientKind === 'selected' &&
+        record.reminderPutCount === 1 &&
+        record.reminderPutStatus >= 200 &&
+        record.reminderPutStatus < 300 &&
+        hasAllLayoutDiagnostics &&
+        hasObservedLayoutPredicates &&
+        !record.narrowSidePanelSafe)) &&
     (!Object.hasOwn(record, 'count') ||
       (record.status === 'passed' && record.count === 1)) &&
     (record.status !== 'passed' ||
@@ -4513,6 +4642,16 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           `member_no_options_text_present=${record.memberNoOptionsTextPresent}`,
           `member_load_error_visible=${record.memberLoadErrorVisible}`,
           `member_picker_observation_error=${record.memberPickerObservationError}`,
+          `narrow_viewport_within_range=${record.narrowViewportWithinRange ?? 'not-observed'}`,
+          `narrow_dialog_within_viewport=${record.narrowDialogWithinViewport ?? 'not-observed'}`,
+          `narrow_dialog_contents_fit=${record.narrowDialogContentsFit ?? 'not-observed'}`,
+          `narrow_document_contents_fit=${record.narrowDocumentContentsFit ?? 'not-observed'}`,
+          `narrow_viewport_width=${formatReminderLayoutDimension(record.narrowViewportWidth)}`,
+          `narrow_dialog_width=${formatReminderLayoutDimension(record.narrowDialogWidth)}`,
+          `narrow_dialog_client_width=${formatReminderLayoutDimension(record.narrowDialogClientWidth)}`,
+          `narrow_dialog_scroll_width=${formatReminderLayoutDimension(record.narrowDialogScrollWidth)}`,
+          `narrow_document_client_width=${formatReminderLayoutDimension(record.narrowDocumentClientWidth)}`,
+          `narrow_document_scroll_width=${formatReminderLayoutDimension(record.narrowDocumentScrollWidth)}`,
         ].join(' '),
       );
       continue;
