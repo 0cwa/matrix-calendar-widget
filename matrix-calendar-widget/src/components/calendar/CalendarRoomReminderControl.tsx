@@ -122,6 +122,9 @@ export function CalendarRoomReminderControl({
     CalendarRoomReminderConfiguration[]
   >([]);
   const [drafts, setDrafts] = useState<Record<string, ReminderDraft>>({});
+  const [memberSearchQueries, setMemberSearchQueries] = useState<
+    Record<string, string>
+  >({});
   const [roomMemberEvents, setRoomMemberEvents] = useState<
     Record<string, StateEvent<RoomMemberStateEventContent>>
   >({});
@@ -161,6 +164,7 @@ export function CalendarRoomReminderControl({
     setConfigurations({});
     setOrphanedConfigurations([]);
     setDrafts({});
+    setMemberSearchQueries({});
     setRoomMembersUnavailable(false);
     try {
       let memberReadFailed = false;
@@ -225,6 +229,7 @@ export function CalendarRoomReminderControl({
         ),
       );
       setDrafts(draftByKey);
+      setMemberSearchQueries({});
     } catch {
       if (requestSequence.current === requestId) setError(true);
     } finally {
@@ -251,6 +256,7 @@ export function CalendarRoomReminderControl({
     setConfigurations({});
     setOrphanedConfigurations([]);
     setDrafts({});
+    setMemberSearchQueries({});
     setRoomMemberEvents({});
     setRoomMembersUnavailable(false);
   }, [
@@ -542,13 +548,31 @@ export function CalendarRoomReminderControl({
                   }
                   limitTags={4}
                   multiple
-                  onChange={(_, selected) =>
+                  onClose={() =>
+                    setMemberSearchQueries((current) => ({
+                      ...current,
+                      [key]: '',
+                    }))
+                  }
+                  onChange={(_, selected) => {
                     updateDraft(key, {
                       userIds: selected
                         .slice(0, 50)
                         .map((member) => member.userId),
-                    })
-                  }
+                    });
+                    setMemberSearchQueries((current) => ({
+                      ...current,
+                      [key]: '',
+                    }));
+                  }}
+                  onInputChange={(_, value, reason) => {
+                    if (reason === 'reset') return;
+                    setMemberSearchQueries((current) => ({
+                      ...current,
+                      [key]: value,
+                    }));
+                  }}
+                  inputValue={memberSearchQueries[key] ?? ''}
                   options={members as CalendarReminderMember[]}
                   renderInput={(params) => (
                     <TextField

@@ -17,10 +17,16 @@
 import { InMemoryCalendarRepository } from '@matrix-calendar-widget/calendar';
 import type { WidgetApi } from '@matrix-widget-toolkit/api';
 import { WidgetApiMockProvider } from '@matrix-widget-toolkit/react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ComponentProps, PropsWithChildren } from 'react';
-import { of } from 'rxjs';
+import { of, Subject } from 'rxjs';
 import { afterEach, vi } from 'vitest';
 import {
   CalendarRepositoryProvider,
@@ -142,6 +148,8 @@ function createRepository(
 function createWrapper(
   repository: InMemoryCalendarRepository,
   memberReadUnavailable = false,
+  memberEvents = roomMemberEvents,
+  memberObserver?: Subject<unknown>,
 ) {
   return function Wrapper({ children }: PropsWithChildren<{}>) {
     return (
@@ -150,10 +158,10 @@ function createWrapper(
           {
             receiveStateEvents: memberReadUnavailable
               ? vi.fn().mockRejectedValue(new Error('member list unavailable'))
-              : vi.fn().mockResolvedValue(roomMemberEvents),
+              : vi.fn().mockResolvedValue(memberEvents),
             observeStateEvents: vi
               .fn()
-              .mockReturnValue(of(...roomMemberEvents)),
+              .mockReturnValue(memberObserver ?? of(...memberEvents)),
           } as unknown as WidgetApi
         }
       >
@@ -169,6 +177,8 @@ function renderControl(
   repository: InMemoryCalendarRepository,
   overrides: Partial<ComponentProps<typeof CalendarRoomReminderControl>> = {},
   memberReadUnavailable = false,
+  memberEvents = roomMemberEvents,
+  memberObserver?: Subject<unknown>,
 ) {
   return render(
     <CalendarRoomReminderControl
@@ -196,7 +206,14 @@ function renderControl(
       onEditCalendarReminder={vi.fn()}
       {...overrides}
     />,
-    { wrapper: createWrapper(repository, memberReadUnavailable) },
+    {
+      wrapper: createWrapper(
+        repository,
+        memberReadUnavailable,
+        memberEvents,
+        memberObserver,
+      ),
+    },
   );
 }
 
@@ -634,5 +651,92 @@ describe('<CalendarRoomReminderControl />', () => {
     expect(
       screen.queryByRole('button', { name: 'Reminder settings' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('keeps the full-ID filter through a roster update and clears it on selection', async () => {
+    const suffix = '73abc1d00f';
+    const targetId = `@element-${suffix}-b:localhost`;
+    const botId = `@element-${suffix}-bot:localhost`;
+    const fixtureMembers = [
+      { userId: `@element-${suffix}-a:localhost`, displayName: 'member-a' },
+      { userId: targetId, displayName: 'member-b' },
+      { userId: botId, displayName: 'bot' },
+    ];
+    const fixtureEvents = fixtureMembers.map((member) => ({
+      type: 'm.room.member',
+      room_id: roomId,
+      state_key: member.userId,
+      content: { membership: 'join', displayname: member.displayName },
+    }));
+    const previousLocation = window.location.href;
+    window.history.replaceState(
+      {},
+      '',
+      `/?meetings_bot_user_id=${encodeURIComponent(botId)}`,
+    );
+    const memberObserver = new Subject<unknown>();
+    const { repository } = createRepository([timedOption]);
+    try {
+      renderControl(repository, {}, false, fixtureEvents, memberObserver);
+      await userEvent.click(
+        screen.getByRole('button', { name: 'Reminder settings' }),
+      );
+      await screen.findByText('Alarm 1: −15m relative to event start');
+      await chooseDestination('users', 'Selected people');
+      const input = screen.getByRole('combobox', { name: 'Selected people' });
+
+      await userEvent.type(input, targetId);
+      expect(input).toHaveValue(targetId);
+      const listbox = await screen.findByRole('listbox');
+      expect(input).toHaveAttribute(
+        'aria-controls',
+        listbox.getAttribute('id'),
+      );
+      expect(await screen.findAllByRole('option')).toHaveLength(1);
+
+      await act(async () => {
+        memberObserver.next({
+          ...fixtureEvents[0],
+          content: { membership: 'join', displayname: 'member-a-updated' },
+        });
+      });
+
+      await waitFor(() => expect(input).toHaveValue(targetId));
+      expect(input).toHaveAttribute(
+        'aria-controls',
+        listbox.getAttribute('id'),
+      );
+      expect(screen.getAllByRole('option')).toHaveLength(1);
+      expect(screen.getByRole('option', { name: 'member-b' })).toBeVisible();
+
+      await userEvent.clear(input);
+      expect(input).toHaveValue('');
+      expect(screen.getAllByRole('option')).toHaveLength(2);
+      await userEvent.type(input, targetId);
+      expect(input).toHaveValue(targetId);
+      expect(screen.getAllByRole('option')).toHaveLength(1);
+
+      await userEvent.keyboard('{ArrowDown}{Enter}');
+      expect(input).toHaveValue('');
+      expect(screen.getByRole('button', { name: 'member-b' })).toBeVisible();
+
+      await act(async () => {
+        memberObserver.next({
+          ...fixtureEvents[1],
+          content: { membership: 'join', displayname: 'member-b-renamed' },
+        });
+      });
+      expect(
+        await screen.findByRole('button', { name: 'member-b-renamed' }),
+      ).toBeVisible();
+
+      await userEvent.keyboard('{Backspace}');
+      expect(
+        screen.queryByRole('button', { name: 'member-b-renamed' }),
+      ).not.toBeInTheDocument();
+    } finally {
+      memberObserver.complete();
+      window.history.replaceState({}, '', previousLocation);
+    }
   });
 });
