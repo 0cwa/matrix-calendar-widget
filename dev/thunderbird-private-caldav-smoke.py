@@ -221,6 +221,34 @@ def _startup_artifacts_verified(value: Any, source_sha: str) -> bool:
     )
 
 
+def _owned_regular_file(path: Path) -> bool:
+    try:
+        metadata = path.lstat()
+    except OSError:
+        return False
+    return stat.S_ISREG(metadata.st_mode) and metadata.st_uid == os.getuid()
+
+
+def _owned_venv_python_link(root: Path) -> bool:
+    venv = root / "venv"
+    binary_directory = venv / "bin"
+    interpreter = binary_directory / "python"
+    try:
+        venv_metadata = venv.lstat()
+        bin_metadata = binary_directory.lstat()
+        interpreter_metadata = interpreter.lstat()
+    except OSError:
+        return False
+    return (
+        stat.S_ISDIR(venv_metadata.st_mode)
+        and venv_metadata.st_uid == os.getuid()
+        and stat.S_ISDIR(bin_metadata.st_mode)
+        and bin_metadata.st_uid == os.getuid()
+        and stat.S_ISLNK(interpreter_metadata.st_mode)
+        and interpreter_metadata.st_uid == os.getuid()
+    )
+
+
 def _require_startup_artifacts(root: Path, source_sha: str) -> None:
     summary_path = SMOKE._summary_path()
     try:
@@ -236,15 +264,31 @@ def _require_startup_artifacts(root: Path, source_sha: str) -> None:
     except (OSError, ValueError, json.JSONDecodeError):
         raise ValueError("startup artifact summary is invalid") from None
     binary = root / "app" / "thunderbird" / "thunderbird"
-    runtime = root / "venv" / "bin" / "python"
     marionette = root / "venv" / "lib" / "python3.13" / "site-packages" / "marionette_driver" / "marionette.py"
     if (
         not _startup_artifacts_verified(startup_summary, source_sha)
-        or not binary.is_file()
-        or not runtime.is_file()
-        or not marionette.is_file()
+        or not _owned_regular_file(binary)
+        or not _owned_venv_python_link(root)
+        or not _owned_regular_file(marionette)
     ):
         raise ValueError("startup artifacts are unavailable")
+    try:
+        SMOKE._capture_container(
+            "verify-venv",
+            [
+                "/task/venv/bin/python",
+                "-B",
+                "-c",
+                "from marionette_driver.geckoinstance import apps; assert 'thunderbird' in apps",
+            ],
+            root=root,
+            mounts=[(root / "venv", "/task/venv", True)],
+            timeout=30,
+            failure_phase="preflight",
+            failure_class="invalid_input",
+        )
+    except SMOKE.SmokeFailure:
+        raise ValueError("startup artifacts are unavailable") from None
 
 
 def _require_prepared(source_sha: str, *, installed: bool = False) -> tuple[Path, dict[str, Any]]:

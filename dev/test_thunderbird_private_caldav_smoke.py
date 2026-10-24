@@ -7,7 +7,6 @@ import importlib.util
 import json
 import os
 from pathlib import Path
-import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -77,7 +76,7 @@ class PrivateCalDavSmokeTests(unittest.TestCase):
         def dummy_install(_root: Path, _packages: list[dict]) -> None:
             runtime = _root / "venv" / "bin" / "python"
             runtime.parent.mkdir(parents=True)
-            runtime.symlink_to(Path(sys.executable).resolve())
+            runtime.symlink_to("/usr/local/bin/python3.13")
             marionette = (
                 _root
                 / "venv"
@@ -151,18 +150,71 @@ class PrivateCalDavSmokeTests(unittest.TestCase):
                     / "marionette_driver"
                     / "marionette.py"
                 )
+                startup = SMOKE.SMOKE
                 self.assertTrue(binary.is_file())
                 self.assertFalse(binary.is_symlink())
                 self.assertTrue(runtime.is_symlink())
-                self.assertTrue(runtime.is_file())
+                self.assertFalse(runtime.exists())
                 self.assertTrue(marionette.is_file())
+                self.assertFalse(marionette.is_symlink())
                 self.assertTrue(jest_entry.is_file())
                 self.assertTrue((workspace / "node_modules" / ".bin" / "jest").is_symlink())
                 self.assertTrue((workspace / "node_modules" / ".bin" / "jest").is_file())
 
-                SMOKE._require_startup_artifacts(task_root, source_sha)
+                with patch.object(startup, "_capture_container", return_value="") as probe:
+                    SMOKE._require_startup_artifacts(task_root, source_sha)
+                self.assertEqual(
+                    probe.call_args.args,
+                    (
+                        "verify-venv",
+                        [
+                            "/task/venv/bin/python",
+                            "-B",
+                            "-c",
+                            "from marionette_driver.geckoinstance import apps; assert 'thunderbird' in apps",
+                        ],
+                    ),
+                )
+                self.assertEqual(
+                    probe.call_args.kwargs["mounts"],
+                    [(task_root / "venv", "/task/venv", True)],
+                )
+                self.assertEqual(probe.call_args.kwargs["timeout"], 30)
+
+                with patch.object(
+                    startup,
+                    "_capture_container",
+                    side_effect=startup.SmokeFailure("preflight", "invalid_input"),
+                ):
+                    with self.assertRaises(ValueError):
+                        SMOKE._require_startup_artifacts(task_root, source_sha)
+
+                runtime.unlink()
+                with self.assertRaises(ValueError):
+                    SMOKE._require_startup_artifacts(task_root, source_sha)
+                runtime.write_text("not an interpreter link\n", encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    SMOKE._require_startup_artifacts(task_root, source_sha)
+                runtime.unlink()
+                runtime.symlink_to("/usr/local/bin/python3.13")
+
+                binary.unlink()
+                with self.assertRaises(ValueError):
+                    SMOKE._require_startup_artifacts(task_root, source_sha)
+                binary.write_bytes(b"temporary dummy Thunderbird binary")
+                binary.chmod(0o700)
+                binary_target = binary.with_name("thunderbird-copy")
+                binary_target.write_bytes(b"temporary dummy Thunderbird binary")
+                binary.unlink()
+                binary.symlink_to(binary_target)
+                with self.assertRaises(ValueError):
+                    SMOKE._require_startup_artifacts(task_root, source_sha)
+                binary.unlink()
+                binary_target.unlink()
+                binary.write_bytes(b"temporary dummy Thunderbird binary")
+                binary.chmod(0o700)
+
                 self.assertEqual(SMOKE._workspace(), workspace.resolve())
-                startup = SMOKE.SMOKE
                 with (
                     patch.object(startup, "ROOT_PARENT", task_root.parent),
                     patch.object(startup, "_root_path", return_value=task_root),
@@ -177,6 +229,7 @@ class PrivateCalDavSmokeTests(unittest.TestCase):
                         "_download_private_wheels",
                         return_value=(SMOKE.EXPECTED_WHEEL_COUNT, 1000),
                     ),
+                    patch.object(startup, "_capture_container", return_value=""),
                 ):
                     SMOKE._prepare()
                     _, prepared = SMOKE._require_prepared(source_sha)
@@ -184,6 +237,12 @@ class PrivateCalDavSmokeTests(unittest.TestCase):
                 self.assertTrue(prepared["startup_artifacts_verified"])
 
                 marionette.unlink()
+                with self.assertRaises(ValueError):
+                    SMOKE._require_startup_artifacts(task_root, source_sha)
+                marionette.write_text("# temporary fixture target\n", encoding="utf-8")
+                marionette_target = marionette.with_name("marionette-copy.py")
+                marionette.rename(marionette_target)
+                marionette.symlink_to(marionette_target)
                 with self.assertRaises(ValueError):
                     SMOKE._require_startup_artifacts(task_root, source_sha)
                 jest_entry.unlink()
@@ -226,7 +285,11 @@ class PrivateCalDavSmokeTests(unittest.TestCase):
                     patch.object(startup, "ROOT_PARENT", task_root.parent),
                     patch.object(startup, "_root_path", return_value=task_root),
                     patch.object(SMOKE, "_workspace", return_value=workspace.resolve()),
-                    patch.object(SMOKE, "_require_startup_artifacts", side_effect=ValueError),
+                    patch.object(
+                        startup,
+                        "_capture_container",
+                        side_effect=startup.SmokeFailure("preflight", "invalid_input"),
+                    ),
                     self.assertRaises(ValueError),
                 ):
                     SMOKE._prepare()
