@@ -29,7 +29,7 @@ from typing import Any
 
 from radicale.auth import BaseAuth
 from .public_feed_logging import install_public_feed_token_path_filter
-from .private_client_callback import PrivateClientCallbackClient
+from matrix_calendar_private_client_callback import PrivateClientCallbackClient
 from .private_client_rights import Rights
 
 MATRIX_OPENID_PREFIX = "matrix-openid:"

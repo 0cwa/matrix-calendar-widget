@@ -16,20 +16,25 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import importlib.util
 import io
 import json
 import ssl
+import subprocess
+import sys
 import unittest
 import urllib.error
 import urllib.request
+from pathlib import Path
 from unittest.mock import patch
 
-from matrix_calendar_radicale_auth.private_client_callback import (
+from matrix_calendar_private_client_callback import (
     AUTH_PATH,
     CALLBACK_TIMEOUT_SECONDS,
     CALLBACK_KEY_ENV,
     CALLBACK_ORIGIN_ENV,
     PrivateClientCallbackClient,
+    _request_signature,
     _build_opener,
     _response_signature,
     configured_callback_key,
@@ -77,6 +82,41 @@ class FakeOpener:
 
 
 class PrivateClientCallbackTests(unittest.TestCase):
+    def test_callback_module_imports_without_radicale_installed(self) -> None:
+        source = Path(__file__).parents[1] / "src"
+        program = """
+import importlib.util
+import sys
+sys.path.insert(0, sys.argv[1])
+assert importlib.util.find_spec("radicale") is None
+import matrix_calendar_private_client_callback
+assert not any(
+    name == "radicale" or name.startswith("radicale.")
+    for name in sys.modules
+)
+assert matrix_calendar_private_client_callback.AUTH_PATH.endswith("/auth")
+"""
+        result = subprocess.run(
+            [sys.executable, "-S", "-c", program, str(source)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0)
+
+    def test_package_callback_submodule_reexports_dependency_light_symbols(self) -> None:
+        if importlib.util.find_spec("radicale") is None:
+            self.skipTest("Radicale is needed to import its compatibility package")
+        from matrix_calendar_radicale_auth.private_client_callback import (
+            PrivateClientCallbackClient as CompatibilityClient,
+            _request_signature as compatibility_request_signature,
+        )
+
+        self.assertIs(CompatibilityClient, PrivateClientCallbackClient)
+        self.assertIs(compatibility_request_signature, _request_signature)
+
     def test_request_is_signed_and_response_is_authenticated(self) -> None:
         nonce_bytes = b"n" * 16
         nonce = "bm5ubm5ubm5ubm5ubm5ubg"

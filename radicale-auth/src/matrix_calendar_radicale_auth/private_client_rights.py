@@ -23,7 +23,7 @@ from radicale import pathutils
 from radicale.rights import BaseRights
 from radicale.rights.owner_only import Rights as OwnerOnlyRights
 
-from .private_client_callback import PrivateClientCallbackClient
+from matrix_calendar_private_client_callback import PrivateClientCallbackClient
 
 _APP_ID_PREFIX = "mcwpc~"
 _APP_ID_PATTERN = re.compile(r"^mcwpc~[a-f0-9]{48}$")
