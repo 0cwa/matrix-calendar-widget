@@ -550,10 +550,10 @@ describeContract(
         accessToken: 'contract-owner-proof',
         matrixServerName: TEST_MATRIX_SERVER,
       };
-      const publicFeedTarget = {
+      const publicFeedTarget = (radicalePort: number) => ({
         target: 'personal' as const,
-        calendarId: 'personal',
-      };
+        calendarId: `http://127.0.0.1:${radicalePort}/alice/personal/`,
+      });
       expect(APP_ID_PATTERN.test(personalAppId)).toBe(true);
       expect(APP_ID_PATTERN.test(roomAppId)).toBe(true);
       if (privateFixtureEnabled) {
@@ -937,7 +937,7 @@ describeContract(
                 await publicFeedService!.unpublish(
                   publicFeedUser,
                   publicFeedCredential,
-                  publicFeedTarget,
+                  publicFeedTarget(radicalePort),
                 );
               },
             },
@@ -1045,7 +1045,7 @@ describeContract(
           const publication = await publicFeedService!.publish(
             publicFeedUser,
             publicFeedCredential,
-            publicFeedTarget,
+            publicFeedTarget(radicalePort),
             true,
           );
           expect(publication.published).toBe(true);
@@ -1201,7 +1201,7 @@ describeContract(
             await publicFeedService!.unpublish(
               publicFeedUser,
               publicFeedCredential,
-              publicFeedTarget,
+              publicFeedTarget(radicalePort),
             );
           }
           return;
