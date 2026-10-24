@@ -96,7 +96,13 @@ class PrivateCalDavSmokeTests(unittest.TestCase):
 const fs = require("node:fs");
 const input = JSON.parse(fs.readFileSync(0, "utf8"));
 const args = input.args;
-const calendar = { type: "caldav", uri: { spec: args[2] }, id: "synthetic" };
+const calendarProperties = new Map();
+const calendar = {
+  type: "caldav",
+  uri: { spec: args[2] },
+  id: "synthetic",
+  setProperty(name, value) { calendarProperties.set(name, value); },
+};
 const calendars = new Map();
 let providerArguments;
 globalThis.cal = {
@@ -123,7 +129,8 @@ function executeAsyncScript() { eval(input.script); }
   if (
     !result || result.ok !== true || result.providerDiscovery !== true ||
     result.calendarUriScope !== true || result.calendarRegistered !== true ||
-    window.__mcwPrivateCalDavCalendar !== calendar
+    window.__mcwPrivateCalDavCalendar !== calendar ||
+    calendarProperties.get("disabled") !== false || "enabled" in calendar
   ) {
     throw new Error("calendar discovery result changed");
   }
@@ -177,8 +184,27 @@ function makeError(name) {
 
 async function runCase(testCase) {
   const [username, _password, location, expectedOrigin, expectedPath] = input.args;
-  const calendar = { type: "caldav", uri: { spec: location }, id: "synthetic" };
+  const calendar = {
+    type: "caldav",
+    uri: { spec: location },
+    get id() {
+      if (testCase.throwCalendarId) {
+        throw makeError(testCase.errorName);
+      }
+      return "synthetic";
+    },
+    setProperty(name, value) {
+      if (testCase.stage === "calendar_enable") {
+        throw makeError(testCase.errorName);
+      }
+      if (name !== "disabled") {
+        throw new Error(marker);
+      }
+      this.disabled = value;
+    },
+  };
   const registeredCalendars = new Map();
+  let lookupCount = 0;
   const provider = {
     detectCalendars: async () => {
       if (testCase.stage === "provider_invocation") {
@@ -192,19 +218,45 @@ async function runCase(testCase) {
       return [calendar];
     },
   };
-  globalThis.cal = {
-    provider: { caldav: provider },
-    manager: {
-      getCalendarById: (id) => {
-        if (testCase.stage === "calendar_registration") {
-          throw makeError(testCase.errorName);
-        }
-        return registeredCalendars.get(id) || null;
-      },
-      registerCalendar: (value) => registeredCalendars.set(value.id, value),
+  const manager = {
+    getCalendarById: (id) => {
+      lookupCount += 1;
+      if (
+        testCase.stage === "calendar_existing_lookup" ||
+        (testCase.stage === "calendar_readback" && lookupCount === 2)
+      ) {
+        throw makeError(testCase.errorName);
+      }
+      return registeredCalendars.get(id) || null;
+    },
+    registerCalendar: (value) => {
+      if (testCase.stage === "calendar_register") {
+        throw makeError(testCase.errorName);
+      }
+      registeredCalendars.set(value.id, value);
     },
   };
-  globalThis.window = {};
+  const calendarApi = {
+    provider: { caldav: provider },
+  };
+  Object.defineProperty(calendarApi, "manager", {
+    get() {
+      if (testCase.stage === "calendar_id_manager_lookup" && !testCase.throwCalendarId) {
+        throw makeError(testCase.errorName);
+      }
+      return manager;
+    },
+  });
+  globalThis.cal = calendarApi;
+  globalThis.window = new Proxy({}, {
+    set(target, property, value) {
+      if (testCase.stage === "calendar_window_handoff") {
+        throw makeError(testCase.errorName);
+      }
+      target[property] = value;
+      return true;
+    },
+  });
   function executeAsyncScript() { eval(input.script); }
   return new Promise((resolve) => {
     executeAsyncScript(username, input.args[1], location, expectedOrigin, expectedPath, resolve);
@@ -241,7 +293,13 @@ async function runCase(testCase) {
             {"stage": "provider_invocation", "errorName": "ReferenceError"},
             {"stage": "provider_invocation", "errorName": "PrivateErrorName"},
             {"stage": "result_normalization", "errorName": "ReferenceError"},
-            {"stage": "calendar_registration", "errorName": "TypeError"},
+            {"stage": "calendar_id_manager_lookup", "errorName": "TypeError"},
+            {"stage": "calendar_id_manager_lookup", "errorName": "ReferenceError", "throwCalendarId": True},
+            {"stage": "calendar_existing_lookup", "errorName": "TypeError"},
+            {"stage": "calendar_register", "errorName": "PrivateErrorName"},
+            {"stage": "calendar_readback", "errorName": "CertError"},
+            {"stage": "calendar_enable", "errorName": "TypeError"},
+            {"stage": "calendar_window_handoff", "errorName": "ReferenceError"},
         ]
         completed = subprocess.run(
             [node, "-e", harness],
@@ -272,7 +330,13 @@ async function runCase(testCase) {
             ("provider_invocation", "reference_error"),
             ("provider_invocation", "other"),
             ("result_normalization", "reference_error"),
-            ("calendar_registration", "type_error"),
+            ("calendar_id_manager_lookup", "type_error"),
+            ("calendar_id_manager_lookup", "reference_error"),
+            ("calendar_existing_lookup", "type_error"),
+            ("calendar_register", "other"),
+            ("calendar_readback", "certificate_failed"),
+            ("calendar_enable", "type_error"),
+            ("calendar_window_handoff", "reference_error"),
         )
         self.assertEqual(len(results), len(expected))
         for result, (failure_stage, failure_class) in zip(results, expected, strict=True):
@@ -1044,7 +1108,17 @@ async function runCase(testCase) {
         )
         self.assertEqual(
             contract.NATIVE_DISCOVERY_FAILURE_STAGES,
-            {"provider_invocation", "result_normalization", "calendar_registration"},
+            {
+                "provider_invocation",
+                "result_normalization",
+                "calendar_registration",
+                "calendar_id_manager_lookup",
+                "calendar_existing_lookup",
+                "calendar_register",
+                "calendar_readback",
+                "calendar_enable",
+                "calendar_window_handoff",
+            },
         )
         self.assertTrue(
             contract.NATIVE_DISCOVERY_FAILURE_PAIRS <= SMOKE.NATIVE_FAILURE_PAIRS
