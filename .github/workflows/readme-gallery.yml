@@ -6,13 +6,14 @@ on:
   workflow_dispatch:
     inputs:
       profile:
-        description: Select the gallery capture, Thunderbird startup smoke, or private CalDAV client qualification.
+        description: Select the gallery capture or a Thunderbird calendar qualification profile.
         required: true
         type: choice
         default: gallery
         options:
           - gallery
           - calendar-client-smoke
+          - public-ics-feed-smoke
           - private-caldav-client-smoke
   pull_request:
     paths:
@@ -306,5 +307,98 @@ jobs:
         with:
           name: thunderbird-private-caldav-summary
           path: ${{ runner.temp }}/thunderbird-private-caldav-summary.json
+          if-no-files-found: error
+          retention-days: 1
+
+  public-ics-feed-smoke:
+    name: Thunderbird public ICS feed qualification
+    if: github.event_name == 'workflow_dispatch' && inputs.profile == 'public-ics-feed-smoke'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      TB_DOCKER_IMAGE: thunderbird-calendar-smoke:${{ github.sha }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: yarn
+
+      - name: Install workspace dependencies
+        id: tb_public_workspace
+        run: yarn install --frozen-lockfile
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+
+      - name: Build the isolated Thunderbird and pinned Radicale runtime image
+        id: tb_public_image
+        run: |
+          set -euo pipefail
+          image_context="$RUNNER_TEMP/thunderbird-public-feed-image-context"
+          runner_uid="$(id -u)"
+          runner_gid="$(id -g)"
+          [[ "$runner_uid" =~ ^[0-9]+$ && "$runner_gid" =~ ^[0-9]+$ ]]
+          [[ "$runner_uid" -gt 0 && "$runner_gid" -gt 0 ]]
+          mkdir -m 0700 "$image_context"
+          install -m 0600 dev/thunderbird-private-caldav.Dockerfile "$image_context/Dockerfile"
+          docker build --platform linux/amd64 --pull \
+            --build-context "radicale-auth=$GITHUB_WORKSPACE/radicale-auth" \
+            --build-arg "TASK_UID=$runner_uid" --build-arg "TASK_GID=$runner_gid" \
+            --file "$image_context/Dockerfile" --tag "$TB_DOCKER_IMAGE" "$image_context"
+          docker image inspect --format '{{.Id}}' "$TB_DOCKER_IMAGE" >/dev/null
+
+      - name: Check closed Thunderbird startup diagnostics offline
+        run: python -B dev/test_thunderbird_calendar_smoke.py
+
+      - name: Check the native public ICS worker offline
+        run: python -B radicale-auth/tests/test_public_calendar_feed_thunderbird_contract.py
+
+      - name: Check closed public ICS runner evidence offline
+        run: python -B dev/test_thunderbird_public_feed_smoke.py
+
+      - name: Check Docker isolation before application download
+        id: tb_public_preflight
+        run: python -B dev/thunderbird-calendar-smoke.py preflight
+
+      - name: Download and prepare pinned Thunderbird and Marionette artifacts
+        id: tb_public_startup_prepare
+        run: python -B dev/thunderbird-calendar-smoke.py prepare
+
+      - name: Prepare the public ICS profile and Node runtime
+        id: tb_public_profile_prepare
+        run: python -B dev/thunderbird-public-feed-smoke.py prepare
+
+      - name: Run native Thunderbird against the anonymous public feed
+        id: tb_public_run
+        run: python -B dev/thunderbird-public-feed-smoke.py run
+
+      - name: Close public ICS qualification evidence
+        if: always()
+        env:
+          TB_PUBLIC_IMAGE_OUTCOME: ${{ steps.tb_public_image.outcome }}
+          TB_PUBLIC_WORKSPACE_OUTCOME: ${{ steps.tb_public_workspace.outcome }}
+          TB_PUBLIC_PREFLIGHT_OUTCOME: ${{ steps.tb_public_preflight.outcome }}
+          TB_PUBLIC_STARTUP_PREPARE_OUTCOME: ${{ steps.tb_public_startup_prepare.outcome }}
+          TB_PUBLIC_PROFILE_PREPARE_OUTCOME: ${{ steps.tb_public_profile_prepare.outcome }}
+          TB_PUBLIC_RUN_OUTCOME: ${{ steps.tb_public_run.outcome }}
+        run: python3 -B dev/thunderbird-public-feed-smoke.py finalize
+
+      - name: Add the closed public ICS summary to this run
+        if: always()
+        run: cat "$RUNNER_TEMP/thunderbird-public-feed-summary.json" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload closed public ICS evidence only
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: thunderbird-public-ics-summary
+          path: ${{ runner.temp }}/thunderbird-public-feed-summary.json
           if-no-files-found: error
           retention-days: 1
