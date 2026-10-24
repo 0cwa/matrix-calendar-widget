@@ -142,7 +142,7 @@ const configProvider = {
 class PrivateCalendarClientRadicaleContractModule {}
 
 describeContract(
-  'private CalDAV clients with Radicale',
+  'private CalDAV client contracts with Radicale (python-caldav and Thunderbird)',
   () => {
     jest.setTimeout(nativeThunderbirdProfile ? 240_000 : 90_000);
 
@@ -176,7 +176,11 @@ describeContract(
       ).toBe(true);
       if (nativeThunderbirdProfile) {
         expect(existsSync(thunderbirdContract)).toBe(true);
-        expect(existsSync(process.env.MCW_PRIVATE_CALDAV_NATIVE_THUNDERBIRD_BIN ?? '')).toBe(true);
+        expect(
+          existsSync(
+            process.env.MCW_PRIVATE_CALDAV_NATIVE_THUNDERBIRD_BIN ?? '',
+          ),
+        ).toBe(true);
       }
 
       const temp = await mkdtemp(join(tmpdir(), 'mcw-private-client-runtime-'));
@@ -464,7 +468,9 @@ describeContract(
                 const text = canonical.body.toString('utf8');
                 return (
                   canonical.status === 200 &&
-                  text.includes('SUMMARY:Edited by native Thunderbird CalDAV provider') &&
+                  text.includes(
+                    'SUMMARY:Edited by native Thunderbird CalDAV provider',
+                  ) &&
                   text.includes('X-COMPANY-OPAQUE') &&
                   text.includes('X-KEEP') &&
                   text.includes('keep-this-value')
@@ -482,7 +488,9 @@ describeContract(
                   canonical.status === 200 &&
                   canonical.body
                     .toString('utf8')
-                    .includes('SUMMARY:Created by native Thunderbird CalDAV provider')
+                    .includes(
+                      'SUMMARY:Created by native Thunderbird CalDAV provider',
+                    )
                 );
               }
               if (operation === 'deleted') {
@@ -506,8 +514,12 @@ describeContract(
                 const text = canonical.body.toString('utf8');
                 return (
                   canonical.status === 200 &&
-                  text.includes('SUMMARY:Edited by native Thunderbird CalDAV provider') &&
-                  !text.includes('SUMMARY:This post-revoke edit must not reach Radicale')
+                  text.includes(
+                    'SUMMARY:Edited by native Thunderbird CalDAV provider',
+                  ) &&
+                  !text.includes(
+                    'SUMMARY:This post-revoke edit must not reach Radicale',
+                  )
                 );
               }
               return false;
@@ -541,11 +553,15 @@ describeContract(
             .filter(Boolean)
             .join(delimiter),
         };
-        radicale = spawn(radicalePython, ['-m', 'radicale', '--config', configPath], {
-          cwd: temp,
-          env: radicaleEnv,
-          stdio: ['ignore', logFd, logFd],
-        });
+        radicale = spawn(
+          radicalePython,
+          ['-m', 'radicale', '--config', configPath],
+          {
+            cwd: temp,
+            env: radicaleEnv,
+            stdio: ['ignore', logFd, logFd],
+          },
+        );
         await waitForRadicale(radicale, radicalePort, logPath);
 
         await seedCollection(
@@ -1631,10 +1647,7 @@ async function handleControlRequest(
       response.writeHead(204).end();
       return;
     }
-    const nativeOperation = request.url?.replace(
-      /^\/native-verify-/u,
-      '',
-    );
+    const nativeOperation = request.url?.replace(/^\/native-verify-/u, '');
     if (
       nativeOperation &&
       ['edited', 'created', 'deleted', 'revoked'].includes(nativeOperation)
