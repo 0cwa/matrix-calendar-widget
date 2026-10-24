@@ -29,6 +29,13 @@ if SMOKE_SPEC is None or SMOKE_SPEC.loader is None:
     raise RuntimeError("Thunderbird smoke helper is unavailable")
 SMOKE = importlib.util.module_from_spec(SMOKE_SPEC)
 SMOKE_SPEC.loader.exec_module(SMOKE)
+JEST_REPORT_SPEC = importlib.util.spec_from_file_location(
+    "thunderbird_jest_report", SCRIPT_DIR / "thunderbird_jest_report.py"
+)
+if JEST_REPORT_SPEC is None or JEST_REPORT_SPEC.loader is None:
+    raise RuntimeError("Jest report reader is unavailable")
+JEST_REPORT = importlib.util.module_from_spec(JEST_REPORT_SPEC)
+JEST_REPORT_SPEC.loader.exec_module(JEST_REPORT)
 
 SUMMARY_SCHEMA = "thunderbird-private-caldav-summary@3"
 RESULT_SCHEMA = "thunderbird-private-caldav-qualification@1"
@@ -1074,24 +1081,11 @@ def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 def _read_jest_report(path: Path) -> dict[str, Any]:
     try:
-        metadata = path.lstat()
-        if (
-            path.is_symlink()
-            or not stat.S_ISREG(metadata.st_mode)
-            or metadata.st_uid != os.getuid()
-            or stat.S_IMODE(metadata.st_mode) != 0o600
-            or metadata.st_size <= 0
-            or metadata.st_size > MAX_JEST_REPORT_BYTES
-        ):
-            raise ValueError
-        value = json.loads(
-            path.read_text(encoding="utf-8"), object_pairs_hook=_unique_json_object
+        return JEST_REPORT.read_owned_json_object(
+            path, max_bytes=MAX_JEST_REPORT_BYTES
         )
-    except (OSError, ValueError, json.JSONDecodeError):
+    except ValueError:
         raise ValueError("Jest report is invalid") from None
-    if not isinstance(value, dict):
-        raise ValueError("Jest report is invalid")
-    return value
 
 
 def _jest_report_failure_class(path: Path) -> str:
