@@ -214,6 +214,11 @@ FIXTURE_FAILURE_CLASSES = {
     "invalid_provider_result_non_object",
     "invalid_provider_result_missing_ok",
     "invalid_provider_result_non_boolean_ok",
+    "invalid_provider_result_none_not_called_at_probe",
+    "invalid_provider_result_none_called_object",
+    "invalid_provider_result_none_called_undefined",
+    "invalid_provider_result_none_called_other",
+    "invalid_provider_result_none_unavailable",
     "calendar_mode_unavailable",
     "calendar_tab_not_open",
     "input_missing",
@@ -345,6 +350,11 @@ NATIVE_FAILURE_PAIRS = {
         "invalid_provider_result_non_object",
         "invalid_provider_result_missing_ok",
         "invalid_provider_result_non_boolean_ok",
+        "invalid_provider_result_none_not_called_at_probe",
+        "invalid_provider_result_none_called_object",
+        "invalid_provider_result_none_called_undefined",
+        "invalid_provider_result_none_called_other",
+        "invalid_provider_result_none_unavailable",
     }
 } | {
     ("calendar_tab_observation", "calendar_mode_unavailable"),

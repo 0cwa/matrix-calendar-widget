@@ -167,6 +167,80 @@ function executeAsyncScript() { eval(input.script); }
         )
         self.assertEqual(completed.stdout, "pass\n")
 
+    def test_post_revoke_script_records_and_clears_fixed_callback_receipt(self) -> None:
+        node = self._node22()
+        contract = self._load_native_thunderbird_contract()
+        harness = r"""
+const fs = require("node:fs");
+const input = JSON.parse(fs.readFileSync(0, "utf8"));
+const receiptKey = "__mcwPrivatePostRevokeCallbackReceipt";
+const marker = "SYNTHETIC_PRIVATE_DETAIL";
+globalThis.window = {};
+
+async function runCase(rejectModify) {
+  const item = {
+    title: "original",
+    clone() { return { title: this.title, clone: this.clone }; },
+  };
+  window.__mcwPrivateCalDavCalendar = {
+    async getItem() { return item; },
+    async modifyItem() {
+      if (rejectModify) {
+        throw new Error(marker);
+      }
+    },
+  };
+  window[receiptKey] = "stale_receipt";
+  if (Function(input.receiptScript)("reset") !== "ready") {
+    throw new Error(marker);
+  }
+  function executeAsyncScript() { eval(input.script); }
+  const result = await new Promise((resolve) => {
+    executeAsyncScript("synthetic-uid", marker, resolve);
+  });
+  const receipt = Function(input.receiptScript)("read_clear");
+  if (receipt !== "called_object" || Object.hasOwn(window, receiptKey)) {
+    throw new Error(marker);
+  }
+  return result;
+}
+
+(async () => {
+  const denied = await runCase(true);
+  const resolved = await runCase(false);
+  if (
+    denied.ok !== true || denied.requestRejected !== true ||
+    resolved.ok !== false || resolved.requestRejected !== false
+  ) {
+    throw new Error(marker);
+  }
+  process.stdout.write("pass\n");
+})().catch(() => {
+  process.stderr.write("post-revoke callback receipt regression failed\n");
+  process.exitCode = 1;
+});
+"""
+        completed = subprocess.run(
+            [node, "-e", harness],
+            input=json.dumps(
+                {
+                    "script": contract.POST_REVOKE_EDIT,
+                    "receiptScript": contract.POST_REVOKE_CALLBACK_RECEIPT_SCRIPT,
+                }
+            ),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=10,
+            text=True,
+        )
+        self.assertEqual(
+            completed.returncode,
+            0,
+            "actual post-revoke script failed in a Marionette-style arguments context",
+        )
+        self.assertEqual(completed.stdout, "pass\n")
+
     def test_discovery_script_projects_only_closed_native_failures(self) -> None:
         node = self._node22()
         contract = self._load_native_thunderbird_contract()
@@ -1270,6 +1344,151 @@ async function runCase(testCase) {
             SMOKE.NATIVE_FAILURE_PAIRS,
         )
 
+    def test_post_revoke_receipts_are_closed_and_fail_closed(self) -> None:
+        contract = self._load_native_thunderbird_contract()
+
+        class FakeMarionette:
+            def __init__(
+                self,
+                receipt="not_called_at_probe",
+                result=None,
+                reset_available=True,
+                change_window=False,
+            ):
+                self.current_chrome_window_handle = "synthetic-window"
+                self.receipt = receipt
+                self.result = result
+                self.reset_available = reset_available
+                self.change_window = change_window
+                self.marker = "stale_private_detail"
+                self.read_count = 0
+                self.clear_count = 0
+
+            def execute_script(self, script, script_args):
+                if script != contract.POST_REVOKE_CALLBACK_RECEIPT_SCRIPT:
+                    raise AssertionError("unexpected synthetic script")
+                action = script_args[0]
+                if action == "reset":
+                    if not self.reset_available:
+                        return "unavailable"
+                    self.marker = "not_called_at_probe"
+                    return "ready"
+                if action == "read_clear":
+                    self.read_count += 1
+                    receipt = self.marker
+                    self.marker = None
+                    return receipt
+                if action == "clear":
+                    self.clear_count += 1
+                    self.marker = None
+                    return "cleared"
+                raise AssertionError("unexpected synthetic action")
+
+            def execute_async_script(self, _script, script_args):
+                del script_args
+                if isinstance(self.result, Exception):
+                    raise self.result
+                if self.result is None:
+                    if self.receipt != "not_called_at_probe":
+                        self.marker = self.receipt
+                    if self.change_window:
+                        self.current_chrome_window_handle = "changed-window"
+                return self.result
+
+        cases = (
+            ("not_called_at_probe", "not_called_at_probe"),
+            ("called_object", "called_object"),
+            ("called_undefined", "called_undefined"),
+            ("called_other", "called_other"),
+            ("SYNTHETIC_PRIVATE_DETAIL", "unavailable"),
+        )
+        for recorded, expected in cases:
+            with self.subTest(receipt=expected):
+                marionette = FakeMarionette(receipt=recorded)
+                with self.assertRaises(contract.ContractFailure) as raised:
+                    contract._post_revoke_async_script(
+                        marionette,
+                        contract.POST_REVOKE_EDIT,
+                        [],
+                        "synthetic-window",
+                    )
+                self.assertEqual(
+                    raised.exception.stage, "post_revoke_provider_request"
+                )
+                self.assertEqual(
+                    raised.exception.error_class,
+                    contract.POST_REVOKE_CALLBACK_RECEIPT_FAILURES[expected],
+                )
+                self.assertNotIn("SYNTHETIC_PRIVATE_DETAIL", str(raised.exception))
+                self.assertEqual(marionette.read_count, 1)
+                self.assertIsNone(marionette.marker)
+
+        changed = FakeMarionette(receipt="called_object", change_window=True)
+        with self.assertRaises(contract.ContractFailure) as unavailable:
+            contract._post_revoke_async_script(
+                changed, contract.POST_REVOKE_EDIT, [], "synthetic-window"
+            )
+        self.assertEqual(
+            unavailable.exception.error_class,
+            contract.POST_REVOKE_CALLBACK_RECEIPT_FAILURES["unavailable"],
+        )
+        self.assertEqual(changed.read_count, 0)
+
+        missing_window = FakeMarionette(receipt="called_object")
+        with self.assertRaises(contract.ContractFailure) as missing:
+            contract._post_revoke_async_script(
+                missing_window, contract.POST_REVOKE_EDIT, [], None
+            )
+        self.assertEqual(
+            missing.exception.error_class,
+            contract.POST_REVOKE_CALLBACK_RECEIPT_FAILURES["unavailable"],
+        )
+        self.assertEqual(missing_window.read_count, 0)
+
+        reset_unavailable = FakeMarionette(reset_available=False)
+        with self.assertRaises(contract.ContractFailure) as reset_failure:
+            contract._post_revoke_async_script(
+                reset_unavailable,
+                contract.POST_REVOKE_EDIT,
+                [],
+                "synthetic-window",
+            )
+        self.assertEqual(
+            reset_failure.exception.error_class,
+            contract.POST_REVOKE_CALLBACK_RECEIPT_FAILURES["unavailable"],
+        )
+        self.assertEqual(reset_unavailable.read_count, 1)
+        self.assertIsNone(reset_unavailable.marker)
+
+        denied = {"ok": True, "requestRejected": True}
+        success_path = FakeMarionette(result=denied)
+        self.assertIs(
+            contract._post_revoke_async_script(
+                success_path, contract.POST_REVOKE_EDIT, [], "synthetic-window"
+            ),
+            denied,
+        )
+        contract._assert_ok(denied, "post_revoke_provider_request")
+        self.assertEqual(success_path.read_count, 0)
+        self.assertEqual(success_path.clear_count, 1)
+        self.assertIsNone(success_path.marker)
+
+        exception_path = FakeMarionette(
+            result=type("JavascriptException", (Exception,), {})("private detail")
+        )
+        with self.assertRaises(contract.ContractFailure) as raised:
+            contract._post_revoke_async_script(
+                exception_path,
+                contract.POST_REVOKE_EDIT,
+                [],
+                "synthetic-window",
+            )
+        self.assertEqual(raised.exception.error_class, "script_error")
+        self.assertNotIn("private detail", str(raised.exception))
+        self.assertEqual(exception_path.read_count, 0)
+        self.assertEqual(exception_path.clear_count, 1)
+        self.assertIsNone(exception_path.marker)
+
     def test_native_ca_and_calendar_tab_failures_use_fixed_phases(self) -> None:
         contract = self._load_native_thunderbird_contract()
         with patch.object(
@@ -1388,6 +1607,26 @@ async function runCase(testCase) {
             (
                 "post_revoke_provider_request",
                 "invalid_provider_result_non_boolean_ok",
+            ),
+            (
+                "post_revoke_provider_request",
+                "invalid_provider_result_none_not_called_at_probe",
+            ),
+            (
+                "post_revoke_provider_request",
+                "invalid_provider_result_none_called_object",
+            ),
+            (
+                "post_revoke_provider_request",
+                "invalid_provider_result_none_called_undefined",
+            ),
+            (
+                "post_revoke_provider_request",
+                "invalid_provider_result_none_called_other",
+            ),
+            (
+                "post_revoke_provider_request",
+                "invalid_provider_result_none_unavailable",
             ),
             *sorted(contract.NATIVE_DISCOVERY_FAILURE_PAIRS),
         )
