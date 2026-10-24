@@ -240,6 +240,49 @@
     "chooseMonth": "Choose month, selected month is {{date, datetime}}",
     "label": "{{date, datetime}}"
   },
+  "calendarPrivateClient": {
+    "action": "Calendar app access",
+    "calendar": "Calendar",
+    "calendarHelp": "Each app access entry works with one calendar.",
+    "capacity": "This calendar has reached its app access limit. Revoke an unused entry and try again.",
+    "cleanupFailed": "App access created for “{{calendar}}” on {{date}} may still be active. Open that calendar’s app access settings and check for an entry created then; revoke it if present.",
+    "confirmRevoke": "Revoke access",
+    "copied": "Copied",
+    "copyFailed": "Copy failed. Select and copy the value above.",
+    "copyPassword": "Copy password",
+    "copyUrl": "Copy URL",
+    "copyUsername": "Copy username",
+    "create": "Create app access",
+    "createdLabel": "Access created {{date}}",
+    "createdTitle": "Access created",
+    "createFailed": "Could not create app access. Check your permissions and try again.",
+    "creating": "Creating app access…",
+    "empty": "No calendar app access has been created for this calendar.",
+    "expiresLabel": "Expires {{date}}",
+    "hideSetupDetails": "Hide setup details",
+    "intro": "Create app-specific access for a calendar app to read and edit this calendar.",
+    "loadFailed": "Could not load calendar app access. Check your connection and permissions, then try again.",
+    "loading": "Loading app access…",
+    "oneTimeWarning": "Save these app-specific details now. The password is shown only once. Store it in your calendar app’s credential manager; never use your Matrix password.",
+    "password": "App password",
+    "retry": "Try again",
+    "revoke": "Revoke",
+    "revokeConfirm": "Revoke access created {{date}} for “{{calendar}}”? This app will stop receiving future changes. Copies already downloaded to the app cannot be removed.",
+    "revokeFailed": "Could not revoke app access. Check your permissions and try again.",
+    "setupHelp": "In your calendar app, choose CalDAV and enter the URL, username, and password below. Access expires after 90 days.",
+    "status": {
+      "active": "Active",
+      "attention": "Needs attention",
+      "pending": "Setting up",
+      "revoked": "Revoked"
+    },
+    "statusLabel": "Status: {{status}}",
+    "title": "Calendar app access",
+    "unavailable": "Calendar app access is not available on this server.",
+    "unknownCalendar": "the selected calendar",
+    "url": "CalDAV URL",
+    "username": "Username"
+  },
   "calendarPublicFeed": {
     "action": "Public feed",
     "additionalComponents": "This calendar reports component types beyond VEVENT, such as tasks or journal entries, or does not advertise VEVENT support. Public feeds require VEVENT-only content; the server checks the feed before publishing and on every read.",
@@ -319,6 +362,7 @@
   },
   "cancel": "Cancel",
   "common": {
+    "cancel": "Cancel",
     "close": "Close"
   },
   "copyableTextButton": {

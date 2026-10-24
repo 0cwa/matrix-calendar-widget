@@ -272,6 +272,159 @@ describe('GatewayCalendarRepository', () => {
     expect(roomStateUrl.searchParams.get('roomId')).toBe('!team:example.test');
   });
 
+  it('lists, creates, and revokes app-specific CalDAV access through the gateway contract', async () => {
+    const appId = `mcwpc~${'a'.repeat(48)}`;
+    const secret = 'A'.repeat(43);
+    const target = { target: 'personal', calendarId } as const;
+    const metadata = {
+      appId,
+      target,
+      state: 'active',
+      mapState: 'present',
+      createdAt: '2026-10-21T10:00:00.000Z',
+      expiresAt: '2027-01-19T10:00:00.000Z',
+    };
+    const revoked = {
+      ...metadata,
+      state: 'revoked',
+      mapState: 'removed',
+      revokedAt: '2026-10-21T11:00:00.000Z',
+    };
+    const fetchMock = mockFetch(
+      jsonResponse([{ id: calendarId, name: 'Personal', readOnly: false }]),
+      jsonResponse([metadata]),
+      jsonResponse({
+        client: metadata,
+        secret,
+        calendarUrl: `https://widget-api.example.test/${appId}/calendar/`,
+      }),
+      jsonResponse(revoked),
+    );
+    const repository = createRepository(fetchMock);
+    const [calendar] = await repository.listCalendars();
+
+    await expect(
+      repository.listPrivateCalendarClients(calendar.id),
+    ).resolves.toEqual([metadata]);
+    const [listUrl, listInit] = fetchMock.mock.calls[1];
+    expect(new URL(String(listUrl)).pathname).toBe(
+      '/v1/calendar/private-clients',
+    );
+    expect(new URL(String(listUrl)).searchParams.get('target')).toBe(
+      'personal',
+    );
+    expect(new URL(String(listUrl)).searchParams.get('calendarId')).toBe(
+      calendarId,
+    );
+    expect(listInit?.cache).toBe('no-store');
+
+    await expect(
+      repository.createPrivateCalendarClient(calendar.id),
+    ).resolves.toEqual({
+      client: metadata,
+      secret,
+      calendarUrl: `https://widget-api.example.test/${appId}/calendar/`,
+    });
+    expect(fetchMock.mock.calls[2][1]?.method).toBe('POST');
+    expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body))).toEqual(
+      target,
+    );
+    expect(
+      new Headers(fetchMock.mock.calls[2][1]?.headers).get('Authorization'),
+    ).toBe('MX-Identity delegated');
+
+    await expect(
+      repository.revokePrivateCalendarClient(appId),
+    ).resolves.toEqual(revoked);
+    expect(fetchMock.mock.calls[3][1]?.method).toBe('DELETE');
+    expect(new URL(String(fetchMock.mock.calls[3][0])).pathname).toBe(
+      `/v1/calendar/private-clients/${appId}`,
+    );
+  });
+
+  it('rejects private client URLs outside the HTTPS gateway alias', async () => {
+    const appId = `mcwpc~${'a'.repeat(48)}`;
+    const fetchMock = mockFetch(
+      jsonResponse([{ id: calendarId, name: 'Personal', readOnly: false }]),
+      jsonResponse({
+        client: {
+          appId,
+          target: { target: 'personal', calendarId },
+          state: 'active',
+          mapState: 'present',
+          createdAt: '2026-10-21T10:00:00.000Z',
+          expiresAt: '2027-01-19T10:00:00.000Z',
+        },
+        secret: 'A'.repeat(43),
+        calendarUrl: `http://private-service.invalid/${appId}/calendar/`,
+      }),
+    );
+    const repository = createRepository(fetchMock);
+    const [calendar] = await repository.listCalendars();
+
+    await expect(
+      repository.createPrivateCalendarClient(calendar.id),
+    ).rejects.toMatchObject({ code: 'request-failed' });
+  });
+
+  it('scopes app access requests to the selected room calendar', async () => {
+    const appId = `mcwpc~${'d'.repeat(48)}`;
+    const target = {
+      target: 'room',
+      roomId: '!team:example.test',
+      calendarId: 'team-calendar',
+    } as const;
+    const metadata = {
+      appId,
+      target,
+      state: 'active',
+      mapState: 'present',
+      createdAt: '2026-10-21T10:00:00.000Z',
+      expiresAt: '2027-01-19T10:00:00.000Z',
+    };
+    const fetchMock = mockFetch(
+      jsonResponse([{ id: calendarId, name: 'Personal', readOnly: false }]),
+      jsonResponse([
+        {
+          id: 'team-calendar',
+          name: 'Room calendar',
+          readOnly: false,
+          operatorManaged: true,
+        },
+      ]),
+      jsonResponse([metadata]),
+      jsonResponse({
+        client: metadata,
+        secret: 'D'.repeat(43),
+        calendarUrl: `https://widget-api.example.test/${appId}/calendar/`,
+      }),
+    );
+    const repository = createRepository(fetchMock, 'UTC', () => ({
+      calendarId: 'team-calendar',
+      canReadEvents: true,
+      canWriteEvents: true,
+      canManageReminders: false,
+    }));
+    const roomCalendar = (await repository.listCalendars()).find(
+      (calendar) => calendar.operatorManaged,
+    );
+    if (!roomCalendar) throw new Error('Expected a room calendar');
+
+    await expect(
+      repository.listPrivateCalendarClients(roomCalendar.id),
+    ).resolves.toEqual([metadata]);
+    const listUrl = new URL(String(fetchMock.mock.calls[2][0]));
+    expect(listUrl.pathname).toBe('/v1/calendar/private-clients');
+    expect(listUrl.searchParams.get('target')).toBe('room');
+    expect(listUrl.searchParams.get('calendarId')).toBe('team-calendar');
+    expect(listUrl.searchParams.get('roomId')).toBe('!team:example.test');
+
+    await repository.createPrivateCalendarClient(roomCalendar.id);
+    expect(JSON.parse(String(fetchMock.mock.calls[3][1]?.body))).toEqual(
+      target,
+    );
+  });
+
   it('keeps room and personal resources separately namespaced and scoped', async () => {
     const roomCalendar = {
       id: calendarId,

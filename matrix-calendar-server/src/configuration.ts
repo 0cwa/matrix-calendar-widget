@@ -16,6 +16,7 @@
  */
 
 import Joi from 'joi';
+import { timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { isIP } from 'node:net';
 import { IAppConfiguration } from './IAppConfiguration';
@@ -142,6 +143,21 @@ function decodePublicCalendarFeedSigningKey(
   return key;
 }
 
+function decodePrivateCalendarClientKey(
+  value: string | undefined,
+  label: 'epoch' | 'callback',
+): Buffer | undefined {
+  if (!value) return undefined;
+  if (!/^[A-Za-z0-9_-]{43}$/u.test(value)) {
+    throw new Error(`Private calendar client ${label} key is invalid`);
+  }
+  const key = Buffer.from(value, 'base64url');
+  if (key.byteLength !== 32 || key.toString('base64url') !== value) {
+    throw new Error(`Private calendar client ${label} key is invalid`);
+  }
+  return key;
+}
+
 function validatePublicCalendarFeedConfiguration(
   value: Record<string, unknown>,
 ): boolean {
@@ -153,6 +169,54 @@ function validatePublicCalendarFeedConfiguration(
     typeof value.MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY_FILE === 'string';
   if (hasDirectKey && hasFileKey) return false;
   return hasOrigin === (hasDirectKey || hasFileKey);
+}
+
+function validatePrivateCalendarClientConfiguration(
+  value: Record<string, unknown>,
+): boolean {
+  if (value.MATRIX_CALENDAR_PRIVATE_CLIENTS_ENABLED !== true) return true;
+  if (
+    typeof value.MATRIX_CALENDAR_PRIVATE_CLIENT_ORIGIN === 'string' &&
+    typeof value.MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_URL === 'string' &&
+    typeof value.MATRIX_CALENDAR_PRIVATE_CLIENT_EPOCH_KEY === 'string' &&
+    typeof value.MATRIX_CALENDAR_PRIVATE_CLIENT_CALLBACK_KEY === 'string' &&
+    typeof value.RADICALE_URL === 'string'
+  ) {
+    try {
+      const epochKey = decodePrivateCalendarClientKey(
+        value.MATRIX_CALENDAR_PRIVATE_CLIENT_EPOCH_KEY,
+        'epoch',
+      );
+      const callbackKey = decodePrivateCalendarClientKey(
+        value.MATRIX_CALENDAR_PRIVATE_CLIENT_CALLBACK_KEY,
+        'callback',
+      );
+      const publicFeedKey = decodePublicCalendarFeedSigningKey(
+        typeof value.MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY === 'string'
+          ? value.MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY
+          : undefined,
+        typeof value.MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY_FILE === 'string'
+          ? value.MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY_FILE
+          : undefined,
+      );
+
+      return (
+        epochKey !== undefined &&
+        callbackKey !== undefined &&
+        !sameSecretKeyBytes(epochKey, callbackKey) &&
+        (publicFeedKey === undefined ||
+          (!sameSecretKeyBytes(epochKey, publicFeedKey) &&
+            !sameSecretKeyBytes(callbackKey, publicFeedKey)))
+      );
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+function sameSecretKeyBytes(left: Buffer, right: Buffer): boolean {
+  return left.byteLength === right.byteLength && timingSafeEqual(left, right);
 }
 
 function isValidRoomCalendarSetupServerName(value: string): boolean {
@@ -240,6 +304,18 @@ function createConfiguration() {
       process.env.MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY_FILE,
     ),
   );
+  const privateCalendarClientEpochKey = decodePrivateCalendarClientKey(
+    optionalEnvironmentValue(
+      process.env.MATRIX_CALENDAR_PRIVATE_CLIENT_EPOCH_KEY,
+    ),
+    'epoch',
+  );
+  const privateCalendarClientCallbackKey = decodePrivateCalendarClientKey(
+    optionalEnvironmentValue(
+      process.env.MATRIX_CALENDAR_PRIVATE_CLIENT_CALLBACK_KEY,
+    ),
+    'callback',
+  );
   const config: IAppConfiguration = {
     port: toNumber(process.env.PORT),
 
@@ -254,6 +330,22 @@ function createConfiguration() {
     public_calendar_feed_enabled: Boolean(
       publicCalendarFeedOrigin && publicCalendarFeedSigningKey,
     ),
+    private_calendar_clients_enabled: toBoolean(
+      process.env.MATRIX_CALENDAR_PRIVATE_CLIENTS_ENABLED,
+      false,
+    ),
+    private_calendar_client_origin: optionalEnvironmentValue(
+      process.env.MATRIX_CALENDAR_PRIVATE_CLIENT_ORIGIN,
+    ),
+    private_calendar_client_database_url: optionalEnvironmentValue(
+      process.env.MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_URL,
+    ),
+    private_calendar_client_database_tls_mode: (process.env
+      .MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_TLS_MODE ?? 'verify-full') as
+      | 'verify-full'
+      | 'trusted-private-network',
+    private_calendar_client_epoch_key: privateCalendarClientEpochKey,
+    private_calendar_client_callback_key: privateCalendarClientCallbackKey,
     caldav_max_event_response_bytes: toNumber(
       process.env.MATRIX_CALENDAR_CALDAV_MAX_EVENT_RESPONSE_BYTES,
       DEFAULT_CALDAV_EVENT_RESPONSE_MAX_BYTES,
@@ -413,6 +505,20 @@ export const ValidationSchema = Joi.object({
     .empty('')
     .pattern(/^[A-Za-z0-9_-]{43}$/u),
   MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY_FILE: Joi.string().empty(''),
+  MATRIX_CALENDAR_PRIVATE_CLIENTS_ENABLED: Joi.boolean().default(false),
+  MATRIX_CALENDAR_PRIVATE_CLIENT_ORIGIN: publicCalendarFeedOriginSchema,
+  MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_URL: Joi.string()
+    .empty('')
+    .uri({ scheme: ['postgres', 'postgresql'] }),
+  MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_TLS_MODE: Joi.string()
+    .valid('verify-full', 'trusted-private-network')
+    .default('verify-full'),
+  MATRIX_CALENDAR_PRIVATE_CLIENT_EPOCH_KEY: Joi.string()
+    .empty('')
+    .pattern(/^[A-Za-z0-9_-]{43}$/u),
+  MATRIX_CALENDAR_PRIVATE_CLIENT_CALLBACK_KEY: Joi.string()
+    .empty('')
+    .pattern(/^[A-Za-z0-9_-]{43}$/u),
   MATRIX_CALENDAR_CALDAV_MAX_EVENT_RESPONSE_BYTES: Joi.number()
     .integer()
     .min(1)
@@ -511,7 +617,8 @@ export const ValidationSchema = Joi.object({
   GUEST_USER_DEFAULT_POWER_LEVEL: Joi.number(),
   GUEST_USER_DELETE_POWER_LEVEL_ON_LEAVE: Joi.boolean(),
 }).custom((value, helpers) =>
-  validatePublicCalendarFeedConfiguration(value)
+  validatePublicCalendarFeedConfiguration(value) &&
+  validatePrivateCalendarClientConfiguration(value)
     ? value
     : helpers.error('any.invalid'),
 );

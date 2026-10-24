@@ -29,10 +29,14 @@ from typing import Any
 
 from radicale.auth import BaseAuth
 from .public_feed_logging import install_public_feed_token_path_filter
+from .private_client_callback import PrivateClientCallbackClient
+from .private_client_rights import Rights
 
 MATRIX_OPENID_PREFIX = "matrix-openid:"
 HOMESERVER_URL_ENV = "RADICALE_MATRIX_HOMESERVER_URL"
 MATRIX_SERVER_NAME_ENV = "RADICALE_MATRIX_SERVER_NAME"
+PRIVATE_CLIENT_APP_ID_PREFIX = "mcwpc~"
+PRIVATE_CLIENT_APP_ID_PATTERN = re.compile(r"^mcwpc~[a-f0-9]{48}$")
 USERINFO_PATH = "/_matrix/federation/v1/openid/userinfo"
 REQUEST_TIMEOUT_SECONDS = 5
 MAX_CREDENTIAL_LENGTH = 16 * 1024
@@ -253,6 +257,7 @@ def _authenticate(
         subject_localpart != username
         or subject_server_name != payload_server_name
         or subject_server_name != matrix_server_name
+        or subject_localpart.startswith(PRIVATE_CLIENT_APP_ID_PREFIX)
     ):
         return ""
 
@@ -267,11 +272,22 @@ class Auth(BaseAuth):
         homeserver_url = _configured_homeserver_url()
         matrix_server_name = _configured_matrix_server_name()
         super().__init__(configuration.copy(PLUGIN_CONFIG_SCHEMA))
+        # Authentication and room-policy revocation are checked for every DAV
+        # request. Never let Radicale's successful-login cache outlive policy.
+        self._cache_logins = False
         self._homeserver_url = homeserver_url
         self._matrix_server_name = matrix_server_name
         self._opener = _build_opener()
+        self._private_client_callback = PrivateClientCallbackClient.from_environment()
 
     def _login(self, login: str, password: str) -> str:
+        if login.startswith(PRIVATE_CLIENT_APP_ID_PREFIX):
+            if (
+                not PRIVATE_CLIENT_APP_ID_PATTERN.fullmatch(login)
+                or not self._private_client_callback.authenticate(login, password)
+            ):
+                return ""
+            return login
         return _authenticate(
             login,
             password,

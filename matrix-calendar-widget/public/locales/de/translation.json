@@ -240,6 +240,49 @@
     "chooseMonth": "Wähle einen Monat, der gewählte Monat ist {{date, datetime}}",
     "label": "{{date, datetime}}"
   },
+  "calendarPrivateClient": {
+    "action": "Kalender-App-Zugriff",
+    "calendar": "Kalender",
+    "calendarHelp": "Jeder App-Zugriff gilt für einen Kalender.",
+    "capacity": "Dieser Kalender hat die Höchstzahl an App-Zugriffen erreicht. Widerrufe einen nicht mehr verwendeten Zugang und versuche es erneut.",
+    "cleanupFailed": "Der am {{date}} für „{{calendar}}“ erstellte App-Zugriff ist möglicherweise noch aktiv. Öffne die App-Zugriffseinstellungen dieses Kalenders, prüfe den Eintrag mit diesem Erstellungsdatum und widerrufe ihn, falls er noch vorhanden ist.",
+    "confirmRevoke": "Zugriff widerrufen",
+    "copied": "Kopiert",
+    "copyFailed": "Kopieren fehlgeschlagen. Markiere und kopiere den Wert oben.",
+    "copyPassword": "Passwort kopieren",
+    "copyUrl": "URL kopieren",
+    "copyUsername": "Benutzernamen kopieren",
+    "create": "App-Zugriff erstellen",
+    "createdLabel": "Zugriff erstellt {{date}}",
+    "createdTitle": "Zugriff erstellt",
+    "createFailed": "Der App-Zugriff konnte nicht erstellt werden. Prüfe deine Berechtigungen und versuche es erneut.",
+    "creating": "App-Zugriff wird erstellt…",
+    "empty": "Für diesen Kalender wurde noch kein Zugriff für eine Kalender-App erstellt.",
+    "expiresLabel": "Läuft ab {{date}}",
+    "hideSetupDetails": "Einrichtungsdaten ausblenden",
+    "intro": "Erstelle einen App-spezifischen Zugang, damit eine Kalender-App diesen Kalender lesen und bearbeiten kann.",
+    "loadFailed": "Die Kalender-App-Zugriffe konnten nicht geladen werden. Prüfe deine Verbindung und Berechtigungen und versuche es erneut.",
+    "loading": "App-Zugriffe werden geladen…",
+    "oneTimeWarning": "Speichere diese App-spezifischen Angaben jetzt. Das Passwort wird nur einmal angezeigt. Speichere es im Anmeldedatenmanager deiner Kalender-App; verwende niemals dein Matrix-Passwort.",
+    "password": "App-Passwort",
+    "retry": "Erneut versuchen",
+    "revoke": "Widerrufen",
+    "revokeConfirm": "Den am {{date}} für „{{calendar}}“ erstellten Zugriff widerrufen? Diese App erhält keine künftigen Änderungen mehr. Bereits heruntergeladene Kopien können nicht aus der App entfernt werden.",
+    "revokeFailed": "Der App-Zugriff konnte nicht widerrufen werden. Prüfe deine Berechtigungen und versuche es erneut.",
+    "setupHelp": "Wähle in deiner Kalender-App CalDAV und gib die URL, den Benutzernamen und das Passwort unten ein. Der Zugriff läuft nach 90 Tagen ab.",
+    "status": {
+      "active": "Aktiv",
+      "attention": "Muss geprüft werden",
+      "pending": "Wird eingerichtet",
+      "revoked": "Widerrufen"
+    },
+    "statusLabel": "Status: {{status}}",
+    "title": "Kalender-App-Zugriff",
+    "unavailable": "Kalender-App-Zugriff ist auf diesem Server nicht verfügbar.",
+    "unknownCalendar": "der ausgewählte Kalender",
+    "url": "CalDAV-URL",
+    "username": "Benutzername"
+  },
   "calendarPublicFeed": {
     "action": "Öffentlicher Feed",
     "additionalComponents": "Dieser Kalender enthält weitere Komponententypen als VEVENT, etwa Aufgaben oder Journaleinträge, oder gibt die VEVENT-Unterstützung nicht an. Öffentliche Feeds setzen ausschließlich VEVENT-Inhalte voraus; der Server prüft den Feed vor der Veröffentlichung und bei jedem Abruf.",
@@ -319,6 +362,7 @@
   },
   "cancel": "Abbrechen",
   "common": {
+    "cancel": "Abbrechen",
     "close": "Schließen"
   },
   "copyableTextButton": {

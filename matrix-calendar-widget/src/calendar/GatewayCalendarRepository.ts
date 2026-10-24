@@ -31,6 +31,12 @@ import {
 import { DateTime } from 'luxon';
 import type { CalendarDiagnostics } from './CalendarDiagnosticsRepository';
 import type {
+  CalendarPrivateClientRepository,
+  CreatedPrivateCalendarClient,
+  PrivateCalendarClientMetadata,
+  PrivateCalendarClientTarget,
+} from './CalendarPrivateClientRepository';
+import type {
   CalendarPublicFeedPublication,
   CalendarPublicFeedRepository,
 } from './CalendarPublicFeedRepository';
@@ -99,7 +105,8 @@ export class GatewayCalendarRepository
     CalendarEventDiagnosticsRepository,
     CalendarTargetAvailabilityRepository,
     CalendarRoomReminderRepository,
-    CalendarPublicFeedRepository
+    CalendarPublicFeedRepository,
+    CalendarPrivateClientRepository
 {
   private readonly calendarReferences = new Map<
     CalendarId,
@@ -304,6 +311,81 @@ export class GatewayCalendarRepository
         }),
       },
     );
+  }
+
+  async listPrivateCalendarClients(
+    calendarId: CalendarId,
+  ): Promise<readonly PrivateCalendarClientMetadata[]> {
+    const target = this.privateClientTargetForCalendar(calendarId);
+    const clients = await this.transport.requestJson<unknown>(
+      this.transport.url('/v1/calendar/private-clients', {
+        target: target.target,
+        calendarId: target.calendarId,
+        ...(target.target === 'room' ? { roomId: target.roomId } : {}),
+      }),
+      { cache: 'no-store' },
+    );
+    if (!Array.isArray(clients)) throw invalidPrivateCalendarClients();
+    return Object.freeze(
+      clients.map((client) =>
+        validatePrivateCalendarClientMetadata(client, target),
+      ),
+    );
+  }
+
+  async createPrivateCalendarClient(
+    calendarId: CalendarId,
+  ): Promise<CreatedPrivateCalendarClient> {
+    const target = this.privateClientTargetForCalendar(calendarId);
+    const result = await this.transport.requestJson<unknown>(
+      this.transport.url('/v1/calendar/private-clients', {}),
+      {
+        method: 'POST',
+        body: JSON.stringify(target),
+      },
+    );
+    if (!isRecord(result) || !('client' in result)) {
+      throw invalidPrivateCalendarClients();
+    }
+    const client = validatePrivateCalendarClientMetadata(result.client, target);
+    if (
+      typeof result.secret !== 'string' ||
+      !/^[A-Za-z0-9_-]{43}$/u.test(result.secret) ||
+      typeof result.calendarUrl !== 'string' ||
+      !isPrivateClientGatewayUrl(
+        result.calendarUrl,
+        client.appId,
+        this.options.baseUrl,
+      )
+    ) {
+      throw invalidPrivateCalendarClients();
+    }
+    return Object.freeze({
+      client,
+      secret: result.secret,
+      calendarUrl: result.calendarUrl,
+    });
+  }
+
+  async revokePrivateCalendarClient(
+    appId: string,
+  ): Promise<PrivateCalendarClientMetadata> {
+    if (!/^mcwpc~[a-f0-9]{48}$/u.test(appId)) {
+      throw invalidPrivateCalendarClients();
+    }
+    const result = await this.transport.requestJson<unknown>(
+      this.transport.url(
+        `/v1/calendar/private-clients/${encodeURIComponent(appId)}`,
+        {},
+      ),
+      { method: 'DELETE' },
+    );
+    if (!isRecord(result) || !('target' in result)) {
+      throw invalidPrivateCalendarClients();
+    }
+    const metadata = validatePrivateCalendarClientMetadata(result);
+    if (metadata.appId !== appId) throw invalidPrivateCalendarClients();
+    return metadata;
   }
 
   async listRoomReminderAlarmOptions(
@@ -781,6 +863,23 @@ export class GatewayCalendarRepository
       target: 'personal',
       calendarId: publicCalendarId,
       publicCalendarId,
+    };
+  }
+
+  private privateClientTargetForCalendar(
+    publicCalendarId: CalendarId,
+  ): PrivateCalendarClientTarget {
+    const reference = this.referenceForCalendar(publicCalendarId);
+    if (reference.target === 'room') {
+      return {
+        target: 'room',
+        roomId: this.options.roomId,
+        calendarId: reference.calendarId,
+      };
+    }
+    return {
+      target: 'personal',
+      calendarId: reference.calendarId,
     };
   }
 
@@ -1276,6 +1375,111 @@ function isBoundedString(value: unknown, maxLength: number): value is string {
   );
 }
 
+function validatePrivateCalendarClientMetadata(
+  value: unknown,
+  expectedTarget?: PrivateCalendarClientTarget,
+): PrivateCalendarClientMetadata {
+  if (
+    !isRecord(value) ||
+    typeof value.appId !== 'string' ||
+    !/^mcwpc~[a-f0-9]{48}$/u.test(value.appId) ||
+    !isRecord(value.target) ||
+    !isBoundedString(value.target.calendarId, 4096) ||
+    (value.target.target !== 'personal' && value.target.target !== 'room') ||
+    (value.state !== 'pending' &&
+      value.state !== 'active' &&
+      value.state !== 'revoked') ||
+    (value.mapState !== 'pending' &&
+      value.mapState !== 'present' &&
+      value.mapState !== 'cleanup-pending' &&
+      value.mapState !== 'removed') ||
+    !isValidTimestamp(value.createdAt) ||
+    !isValidTimestamp(value.expiresAt) ||
+    (value.revokedAt !== undefined && !isValidTimestamp(value.revokedAt))
+  ) {
+    throw invalidPrivateCalendarClients();
+  }
+
+  let target: PrivateCalendarClientTarget;
+  if (value.target.target === 'personal') {
+    if ('roomId' in value.target) throw invalidPrivateCalendarClients();
+    target = { target: 'personal', calendarId: value.target.calendarId };
+  } else {
+    if (!isSafeMatrixRoomId(value.target.roomId)) {
+      throw invalidPrivateCalendarClients();
+    }
+    target = {
+      target: 'room',
+      roomId: value.target.roomId,
+      calendarId: value.target.calendarId,
+    };
+  }
+
+  if (expectedTarget && !samePrivateCalendarTarget(target, expectedTarget)) {
+    throw invalidPrivateCalendarClients();
+  }
+
+  return Object.freeze({
+    appId: value.appId,
+    target,
+    state: value.state,
+    mapState: value.mapState,
+    createdAt: value.createdAt,
+    expiresAt: value.expiresAt,
+    ...(value.revokedAt ? { revokedAt: value.revokedAt } : {}),
+  });
+}
+
+function samePrivateCalendarTarget(
+  left: PrivateCalendarClientTarget,
+  right: PrivateCalendarClientTarget,
+): boolean {
+  return (
+    left.target === right.target &&
+    left.calendarId === right.calendarId &&
+    (left.target === 'personal' ||
+      (right.target === 'room' && left.roomId === right.roomId))
+  );
+}
+
+function isPrivateClientGatewayUrl(
+  value: string,
+  appId: string,
+  baseUrl: string,
+): boolean {
+  try {
+    const url = new URL(value);
+    const gateway = new URL(baseUrl);
+    const secureOrLocal =
+      url.protocol === 'https:' ||
+      (url.protocol === 'http:' &&
+        ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname));
+    return (
+      secureOrLocal &&
+      url.origin === gateway.origin &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash &&
+      url.pathname === `/${appId}/calendar/`
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isValidTimestamp(value: unknown): value is string {
+  return (
+    isBoundedString(value, 64) &&
+    Number.isFinite(Date.parse(value)) &&
+    !containsControlCharacters(value)
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
 function containsControlCharacters(value: string): boolean {
   for (const character of value) {
     const codePoint = character.codePointAt(0);
@@ -1293,5 +1497,12 @@ function invalidRoomReminderResponse(): CalendarRepositoryError {
   return new CalendarRepositoryError(
     'request-failed',
     'Room reminder settings are unavailable',
+  );
+}
+
+function invalidPrivateCalendarClients(): CalendarRepositoryError {
+  return new CalendarRepositoryError(
+    'request-failed',
+    'Private calendar app access is unavailable',
   );
 }
