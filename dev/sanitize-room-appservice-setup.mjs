@@ -34,6 +34,7 @@ import {
   getPrivatePolicyCleanupHttpStatus,
   getPrivatePolicyCleanupMatrixErrorCode,
   getPrivatePolicyCleanupOperation,
+  getPrivatePolicyCleanupRetryDelayMs,
   getRoomAppServiceCaseFailureStage,
   getRoomAppServiceSetupStage,
   getRoomAppServiceTeardownFailure,
@@ -82,10 +83,7 @@ const ROOM_FAILURE_CASES = new Map([
   ['room-appservice-unauthorized-write', 'unauthorized-write'],
   ['room-appservice-bot-command-write', 'bot-command-write'],
   ['room-appservice-bot-command-denial', 'bot-command-denial'],
-  [
-    'room-appservice-private-client-live-policy',
-    'private-client-live-policy',
-  ],
+  ['room-appservice-private-client-live-policy', 'private-client-live-policy'],
 ]);
 const ALLOWED_ERROR_NAMES = new Set([
   'AbortError',
@@ -320,8 +318,10 @@ export function formatRoomAppServiceFailureDiagnostic(
     if (!testCase) continue;
     const stage = getRoomAppServiceCaseFailureStage(stageContent, testCase);
     if (testCase === 'private-client-live-policy') {
+      const cleanupRetryDelayMs =
+        getPrivatePolicyCleanupRetryDelayMs(stageContent);
       failureLines.push(
-        `room-appservice-test-failure case=${match[1]} body-result=${getPrivatePolicyBodyResult(stageContent) ?? 'unavailable'} phase=${stage ?? 'unavailable'} cleanup-operation=${getPrivatePolicyCleanupOperation(stageContent) ?? 'none'} cleanup-failure=${getPrivatePolicyCleanupFailure(stageContent) ?? 'none'} cleanup-http-status=${getPrivatePolicyCleanupHttpStatus(stageContent) ?? 'unavailable'} cleanup-matrix-error=${getPrivatePolicyCleanupMatrixErrorCode(stageContent) ?? 'unavailable'} error-class=${getPrivatePolicyFailureClass(suite)}`,
+        `room-appservice-test-failure case=${match[1]} body-result=${getPrivatePolicyBodyResult(stageContent) ?? 'unavailable'} phase=${stage ?? 'unavailable'} cleanup-operation=${getPrivatePolicyCleanupOperation(stageContent) ?? 'none'} cleanup-failure=${getPrivatePolicyCleanupFailure(stageContent) ?? 'none'} cleanup-http-status=${getPrivatePolicyCleanupHttpStatus(stageContent) ?? 'unavailable'} cleanup-matrix-error=${getPrivatePolicyCleanupMatrixErrorCode(stageContent) ?? 'unavailable'} cleanup-retry=${cleanupRetryDelayMs === undefined ? 'none' : 'rate-limited'} cleanup-retry-delay-ms=${cleanupRetryDelayMs ?? 'unavailable'} error-class=${getPrivatePolicyFailureClass(suite)}`,
       );
       continue;
     }

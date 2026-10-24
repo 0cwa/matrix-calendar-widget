@@ -236,7 +236,7 @@ test('projects private-client policy failures to fixed phase and error class', (
 
   assert.equal(
     diagnostic,
-    'room-appservice-test-failure case=room-appservice-private-client-live-policy body-result=failed phase=credential-rw cleanup-operation=leave-reader cleanup-failure=leave-reader cleanup-http-status=403 cleanup-matrix-error=M_FORBIDDEN error-class=unavailable',
+    'room-appservice-test-failure case=room-appservice-private-client-live-policy body-result=failed phase=credential-rw cleanup-operation=leave-reader cleanup-failure=leave-reader cleanup-http-status=403 cleanup-matrix-error=M_FORBIDDEN cleanup-retry=none cleanup-retry-delay-ms=unavailable error-class=unavailable',
   );
   assert.equal(diagnostic.includes(privateDetail), false);
 
@@ -265,7 +265,7 @@ test('projects private-client policy failures to fixed phase and error class', (
   );
   assert.equal(
     runtimeDiagnostic,
-    'room-appservice-test-failure case=room-appservice-private-client-live-policy body-result=unavailable phase=unavailable cleanup-operation=none cleanup-failure=none cleanup-http-status=unavailable cleanup-matrix-error=unavailable error-class=runtime',
+    'room-appservice-test-failure case=room-appservice-private-client-live-policy body-result=unavailable phase=unavailable cleanup-operation=none cleanup-failure=none cleanup-http-status=unavailable cleanup-matrix-error=unavailable cleanup-retry=none cleanup-retry-delay-ms=unavailable error-class=runtime',
   );
   assert.equal(runtimeDiagnostic.includes(privateDetail), false);
 
@@ -281,9 +281,33 @@ test('projects private-client policy failures to fixed phase and error class', (
   );
   assert.equal(
     lookupFailureDiagnostic,
-    'room-appservice-test-failure case=room-appservice-private-client-live-policy body-result=completed phase=rejoin cleanup-operation=lookup-members cleanup-failure=lookup-members cleanup-http-status=unavailable cleanup-matrix-error=unavailable error-class=unavailable',
+    'room-appservice-test-failure case=room-appservice-private-client-live-policy body-result=completed phase=rejoin cleanup-operation=lookup-members cleanup-failure=lookup-members cleanup-http-status=unavailable cleanup-matrix-error=unavailable cleanup-retry=none cleanup-retry-delay-ms=unavailable error-class=unavailable',
   );
   assert.equal(lookupFailureDiagnostic.includes(privateDetail), false);
+
+  const pendingRetryDiagnostic = formatRoomAppServiceFailureDiagnostic(
+    reportWithFailure,
+    [
+      'room-appservice-setup-complete',
+      'room-appservice-case-body-private-client-live-policy-completed',
+      'room-appservice-case-stage-private-client-live-policy-rejoin',
+      'room-appservice-rate-limit-retry-POST-/_matrix/client/v3/rooms/:roomId/leave-30000ms',
+      'room-appservice-case-cleanup-private-client-live-policy-operation-leave-reader',
+      'room-appservice-http-status-429',
+      'room-appservice-matrix-error-M_LIMIT_EXCEEDED',
+      'room-appservice-rate-limit-retry-POST-/_matrix/client/v3/rooms/:roomId/leave-5000ms',
+      'room-appservice-case-start-exact-binding',
+      'room-appservice-rate-limit-retry-POST-/_matrix/client/v3/rooms/:roomId/leave-999ms',
+      'room-appservice-case-stage-exact-binding-private-detail',
+    ].join('\n'),
+  );
+  assert.equal(
+    pendingRetryDiagnostic,
+    'room-appservice-test-failure case=room-appservice-private-client-live-policy body-result=completed phase=rejoin cleanup-operation=leave-reader cleanup-failure=none cleanup-http-status=unavailable cleanup-matrix-error=unavailable cleanup-retry=rate-limited cleanup-retry-delay-ms=5000 error-class=unavailable',
+  );
+  assert.equal(pendingRetryDiagnostic.includes(privateDetail), false);
+  assert.equal(pendingRetryDiagnostic.includes('999'), false);
+  assert.equal(pendingRetryDiagnostic.includes('30000'), false);
 });
 
 test('keeps unknown room failures unmapped and excludes raw test titles', () => {

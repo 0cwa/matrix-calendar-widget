@@ -324,16 +324,66 @@ export function getPrivatePolicyCleanupFailure(stageContent) {
   return getPrivatePolicyCleanupMarker(stageContent, 'failure');
 }
 
+export function getPrivatePolicyCleanupRetryDelayMs(stageContent) {
+  const lines = getPrivatePolicyCleanupOperationWindow(stageContent);
+  let retryDelayMs;
+  for (const line of lines) {
+    const match = line.match(
+      /^room-appservice-rate-limit-retry-(?:GET|POST|PUT|PATCH|DELETE)-\/_matrix\/client\/v3\/rooms\/:roomId\/(?:leave|state\/m\.room\.power_levels\/)-(\d{1,5})ms$/,
+    );
+    if (!match) continue;
+    const candidate = Number(match[1]);
+    if (
+      Number.isSafeInteger(candidate) &&
+      candidate >= 0 &&
+      candidate <= 30_000
+    ) {
+      retryDelayMs = candidate;
+    }
+  }
+  return retryDelayMs;
+}
+
+function getPrivatePolicyCleanupOperationWindow(stageContent) {
+  if (typeof stageContent !== 'string') return [];
+  const lines = stageContent.split(/\r?\n/).map((line) => line.trim());
+  const operationPrefix =
+    'room-appservice-case-cleanup-private-client-live-policy-operation-';
+  let operationIndex = -1;
+  for (let index = 0; index < lines.length; index += 1) {
+    const operation = lines[index].replace(operationPrefix, '');
+    if (
+      lines[index].startsWith(operationPrefix) &&
+      PRIVATE_POLICY_CLEANUP_OPERATIONS.has(operation)
+    ) {
+      operationIndex = index;
+    }
+  }
+  if (operationIndex < 0) return [];
+
+  let endIndex = lines.length;
+  for (let index = operationIndex + 1; index < lines.length; index += 1) {
+    const operation = lines[index].replace(operationPrefix, '');
+    if (
+      (lines[index].startsWith(operationPrefix) &&
+        PRIVATE_POLICY_CLEANUP_OPERATIONS.has(operation)) ||
+      /^room-appservice-case-start-[a-z0-9-]+$/.test(lines[index])
+    ) {
+      endIndex = index;
+      break;
+    }
+  }
+  return lines.slice(operationIndex + 1, endIndex);
+}
+
 function getPrivatePolicyCleanupFailureWindow(stageContent) {
   if (typeof stageContent !== 'string') return [];
   const lines = stageContent.split(/\r?\n/).map((line) => line.trim());
   const failure = getPrivatePolicyCleanupFailure(stageContent);
   if (!failure) return [];
 
-  const failureMarker =
-    `room-appservice-case-cleanup-private-client-live-policy-failure-${failure}`;
-  const operationMarker =
-    `room-appservice-case-cleanup-private-client-live-policy-operation-${failure}`;
+  const failureMarker = `room-appservice-case-cleanup-private-client-live-policy-failure-${failure}`;
+  const operationMarker = `room-appservice-case-cleanup-private-client-live-policy-operation-${failure}`;
   const failureIndex = lines.lastIndexOf(failureMarker);
   if (failureIndex < 0) return [];
 

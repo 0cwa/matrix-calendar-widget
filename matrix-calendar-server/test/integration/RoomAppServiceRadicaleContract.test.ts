@@ -1847,6 +1847,8 @@ describeContract(contractDescription, () => {
     markRoomAppServiceTeardownStage('complete');
   });
 
+  // matrixJson can wait twice for server-directed 30s retries in this fixture.
+  // Allow that bounded delay plus time for the remaining local room operations.
   it('rechecks private-client room policy against live Synapse state', async () => {
     markRoomAppServiceCaseStarted('private-client-live-policy');
     markRoomAppServiceCaseStage('private-client-live-policy', 'identities');
@@ -2212,7 +2214,7 @@ describeContract(contractDescription, () => {
         }
       }
     }
-  });
+  }, 90_000);
 
   it('lists only the exact room binding through the selected principal', async () => {
     markRoomAppServiceCaseStarted('exact-binding');
