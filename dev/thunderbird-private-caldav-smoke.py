@@ -37,8 +37,8 @@ if JEST_REPORT_SPEC is None or JEST_REPORT_SPEC.loader is None:
 JEST_REPORT = importlib.util.module_from_spec(JEST_REPORT_SPEC)
 JEST_REPORT_SPEC.loader.exec_module(JEST_REPORT)
 
-SUMMARY_SCHEMA = "thunderbird-private-caldav-summary@3"
-RESULT_SCHEMA = "thunderbird-private-caldav-qualification@1"
+SUMMARY_SCHEMA = "thunderbird-private-caldav-summary@4"
+RESULT_SCHEMA = "thunderbird-private-caldav-qualification@2"
 WORKER_DIAGNOSTIC_SCHEMA = "thunderbird-private-caldav-worker-diagnostic@1"
 CALDAV_CONTRACT_DIAGNOSTIC_SCHEMA = "private-caldav-contract-diagnostic@1"
 EXPECTED_NODE_PREFIX = (22, 12, 0)
@@ -61,11 +61,41 @@ RESULT_FIELDS = {
     "unknownPropertyPreserved",
     "canonicalCreateRoundtrip",
     "canonicalDeleteRoundtrip",
+    "probeEventLoadedBeforeTombstone",
+    "canonicalProbeBaselineCaptured",
     "freshRevokeDenied",
+    "nativeRevocationPutDenied",
     "callbackAdvancedAfterRevoke",
     "revokedState",
     "authDeniedAfterRevoke",
 }
+RESULT_GATE_FIELDS = RESULT_FIELDS - {"freshRevokeDenied"}
+RESULT_ENUM_FIELDS = {
+    "postRevokeClientOutcome",
+    "nativeRevocationResponseClass",
+}
+RESULT_OUTPUT_FIELDS = RESULT_FIELDS | RESULT_ENUM_FIELDS
+POST_REVOKE_CLIENT_OUTCOMES = {
+    "not_reached",
+    "rejected",
+    "fulfilled",
+    "indeterminate",
+    "error",
+}
+NATIVE_REVOCATION_RESPONSE_CLASSES = {
+    "not_seen",
+    "unauthorized",
+    "forbidden",
+    "accepted",
+    "other",
+    "mixed",
+}
+
+
+def _client_outcome_consistent(value: dict[str, Any]) -> bool:
+    return type(value.get("freshRevokeDenied")) is bool and value.get(
+        "freshRevokeDenied"
+    ) is (value.get("postRevokeClientOutcome") == "rejected")
 CALDAV_CONTRACT_PHASES = {
     "setup",
     "caldav_imports",
@@ -193,6 +223,8 @@ FIXTURE_FAILURE_CLASSES = {
     "calendar_unavailable",
     "refresh_failed",
     "event_not_loaded",
+    "probe_event_not_loaded",
+    "probe_event_load_failed",
     "unknown_property_not_loaded",
     "event_edit_failed",
     "event_create_failed",
@@ -225,6 +257,8 @@ FIXTURE_FAILURE_CLASSES = {
     "invalid_workspace",
     "invalid_binary",
     "invalid_app_id",
+    "invalid_probe_uid",
+    "invalid_probe_marker",
     "invalid_origin",
     "version_mismatch",
     "main_window_missing",
@@ -250,6 +284,8 @@ NATIVE_FAILURE_PAIRS = {
     ("worker_setup", "invalid_workspace"),
     ("worker_setup", "invalid_binary"),
     ("worker_setup", "invalid_app_id"),
+    ("worker_setup", "invalid_probe_uid"),
+    ("worker_setup", "invalid_probe_marker"),
     ("worker_setup", "invalid_origin"),
     ("application_startup", "version_mismatch"),
     ("application_startup", "main_window_missing"),
@@ -267,6 +303,8 @@ NATIVE_FAILURE_PAIRS = {
     ("provider_refresh", "calendar_unavailable"),
     ("provider_refresh", "refresh_failed"),
     ("provider_edit", "event_not_loaded"),
+    ("provider_edit", "probe_event_not_loaded"),
+    ("provider_edit", "probe_event_load_failed"),
     ("provider_edit", "unknown_property_not_loaded"),
     ("provider_edit", "event_edit_failed"),
     ("provider_create", "event_not_loaded"),
@@ -464,7 +502,12 @@ def _initial_summary(source_sha: str) -> dict[str, Any]:
         "unknownPropertyPreserved": False,
         "canonicalCreateRoundtrip": False,
         "canonicalDeleteRoundtrip": False,
+        "probeEventLoadedBeforeTombstone": False,
+        "canonicalProbeBaselineCaptured": False,
         "freshRevokeDenied": False,
+        "nativeRevocationPutDenied": False,
+        "postRevokeClientOutcome": "not_reached",
+        "nativeRevocationResponseClass": "not_seen",
         "callbackAdvancedAfterRevoke": False,
         "revokedState": False,
         "authDeniedAfterRevoke": False,
@@ -514,6 +557,12 @@ def _write_summary(payload: dict[str, Any]) -> None:
             safe["app_version"] is not None
             and safe["app_version"] != "158.0.1"
         )
+        or not isinstance(safe["postRevokeClientOutcome"], str)
+        or safe["postRevokeClientOutcome"] not in POST_REVOKE_CLIENT_OUTCOMES
+        or not _client_outcome_consistent(safe)
+        or not isinstance(safe["nativeRevocationResponseClass"], str)
+        or safe["nativeRevocationResponseClass"]
+        not in NATIVE_REVOCATION_RESPONSE_CLASSES
         or (
             safe["fixture_failure_stage"] is not None
             and (
@@ -995,11 +1044,19 @@ def _read_native_result(path: Path) -> dict[str, Any]:
         raise ValueError("native client result is invalid") from None
     if (
         not isinstance(value, dict)
-        or set(value) != {"schema", "status", "appVersion", *RESULT_FIELDS}
+        or set(value) != {"schema", "status", "appVersion", *RESULT_OUTPUT_FIELDS}
         or value.get("schema") != RESULT_SCHEMA
         or value.get("status") != "passed"
         or value.get("appVersion") != "158.0.1"
-        or any(type(value.get(key)) is not bool or value[key] is not True for key in RESULT_FIELDS)
+        or any(type(value.get(key)) is not bool for key in RESULT_FIELDS)
+        or any(value.get(key) is not True for key in RESULT_GATE_FIELDS)
+        or not isinstance(value.get("postRevokeClientOutcome"), str)
+        or value.get("postRevokeClientOutcome")
+        not in POST_REVOKE_CLIENT_OUTCOMES - {"not_reached", "error"}
+        or not _client_outcome_consistent(value)
+        or not isinstance(value.get("nativeRevocationResponseClass"), str)
+        or value.get("nativeRevocationResponseClass")
+        not in {"unauthorized", "forbidden"}
     ):
         raise ValueError("native client result is invalid")
     return value
@@ -1464,13 +1521,7 @@ def _container_worker() -> int:
         value = _read_native_result(result_path)
     except Exception:
         return fail(failure_stage, failure_class)
-    safe = {
-        "schema": RESULT_SCHEMA,
-        "status": "passed",
-        "appVersion": value["appVersion"],
-        **{key: True for key in sorted(RESULT_FIELDS)},
-    }
-    print(json.dumps(safe, sort_keys=True, separators=(",", ":")))
+    print(json.dumps(value, sort_keys=True, separators=(",", ":")))
     return 0
 
 
@@ -1541,11 +1592,20 @@ def _run() -> None:
         value = json.loads(lines[0])
         if (
             not isinstance(value, dict)
-            or set(value) != {"schema", "status", "appVersion", *RESULT_FIELDS}
+            or set(value)
+            != {"schema", "status", "appVersion", *RESULT_OUTPUT_FIELDS}
             or value.get("schema") != RESULT_SCHEMA
             or value.get("status") != "passed"
             or value.get("appVersion") != "158.0.1"
-            or any(value.get(key) is not True for key in RESULT_FIELDS)
+            or any(type(value.get(key)) is not bool for key in RESULT_FIELDS)
+            or any(value.get(key) is not True for key in RESULT_GATE_FIELDS)
+            or not isinstance(value.get("postRevokeClientOutcome"), str)
+            or value.get("postRevokeClientOutcome")
+            not in POST_REVOKE_CLIENT_OUTCOMES - {"not_reached", "error"}
+            or not _client_outcome_consistent(value)
+            or not isinstance(value.get("nativeRevocationResponseClass"), str)
+            or value.get("nativeRevocationResponseClass")
+            not in {"unauthorized", "forbidden"}
         ):
             summary.update(
                 {
@@ -1583,6 +1643,7 @@ def _run() -> None:
             "native_provider_passed": True,
             "app_version": result["appVersion"],
             **{key: result[key] for key in RESULT_FIELDS},
+            **{key: result[key] for key in RESULT_ENUM_FIELDS},
         }
     )
     _write_summary(summary)
@@ -1624,7 +1685,14 @@ def _finalize() -> None:
             and summary.get("caldav_wheel_bytes", 0) > 0
             and summary.get("private_dependencies_installed") is True
             and summary.get("app_version") == "158.0.1"
-            and all(summary.get(key) is True for key in RESULT_FIELDS)
+            and all(summary.get(key) is True for key in RESULT_GATE_FIELDS)
+            and isinstance(summary.get("postRevokeClientOutcome"), str)
+            and summary.get("postRevokeClientOutcome")
+            in POST_REVOKE_CLIENT_OUTCOMES - {"not_reached", "error"}
+            and _client_outcome_consistent(summary)
+            and isinstance(summary.get("nativeRevocationResponseClass"), str)
+            and summary.get("nativeRevocationResponseClass")
+            in {"unauthorized", "forbidden"}
         )
         if failed is not None:
             run_failure = (
