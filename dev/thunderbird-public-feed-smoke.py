@@ -26,7 +26,8 @@ if SMOKE_SPEC is None or SMOKE_SPEC.loader is None:
 SMOKE = importlib.util.module_from_spec(SMOKE_SPEC)
 SMOKE_SPEC.loader.exec_module(SMOKE)
 
-SUMMARY_SCHEMA = "thunderbird-public-ics-summary@1"
+# Summary @2 adds one closed, privacy-safe subreason for startup artifact preflight.
+SUMMARY_SCHEMA = "thunderbird-public-ics-summary@2"
 RESULT_SCHEMA = "thunderbird-public-ics-qualification@1"
 EXPECTED_APP_VERSION = "158.0.1"
 EXPECTED_NODE_PREFIX = (22, 12, 0)
@@ -119,6 +120,15 @@ FAILURE_CLASSES = {
     "version_mismatch",
     "workspace_preflight_failed",
 }
+STARTUP_ARTIFACT_FAILURES = {
+    # Includes producer summary schema/source/owner/mode and content validation.
+    "summary_contract_invalid",
+    "binary_artifact_invalid",
+    "venv_layout_invalid",
+    "marionette_module_invalid",
+    "container_interpreter_probe_failed",
+    "unknown",
+}
 NATIVE_FAILURE_STAGES = {
     "input_preflight",
     "profile_setup",
@@ -173,6 +183,7 @@ def _initial_summary(source_sha: str) -> dict[str, Any]:
         "phase": "preflight",
         "failure_stage": None,
         "failure_class": None,
+        "startupArtifactsFailure": None,
         "dockerBackendVerified": False,
         "dockerIsolationVerified": False,
         "workspaceJestReady": False,
@@ -231,6 +242,7 @@ def _success_gates(value: dict[str, Any]) -> bool:
     )
     return (
         value.get("status") in {"running", "passed"}
+        and value.get("startupArtifactsFailure") is None
         and all(value.get(key) is True for key in SUMMARY_BOOLEAN_FIELDS)
         and value.get("appVersion") == EXPECTED_APP_VERSION
         and _supported_node_version(value.get("nodeVersion"))
@@ -256,6 +268,8 @@ def _write_summary(payload: dict[str, Any]) -> None:
         or safe["phase"] not in {"preflight", "prepare", "fixture_run", "complete"}
         or safe["failure_stage"] not in (None, *FAILURE_STAGES)
         or safe["failure_class"] not in (None, *FAILURE_CLASSES)
+        or safe["startupArtifactsFailure"] not in (None, *STARTUP_ARTIFACT_FAILURES)
+        or (safe["startupArtifactsFailure"] is not None and safe["status"] != "failed")
         or any(type(safe[key]) is not bool for key in SUMMARY_BOOLEAN_FIELDS)
         or any(
             type(safe[key]) is not int or not 0 <= safe[key] <= 100
@@ -272,6 +286,11 @@ def _write_summary(payload: dict[str, Any]) -> None:
         or (
             safe["status"] == "failed"
             and (safe["failure_stage"] is None or safe["failure_class"] is None)
+        )
+        or (
+            safe["status"] == "failed"
+            and safe["failure_stage"] == "startup_artifacts_preflight"
+            and safe["startupArtifactsFailure"] is None
         )
         or (
             safe["status"] == "passed"
@@ -334,7 +353,12 @@ def _load_summary() -> dict[str, Any]:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError, json.JSONDecodeError):
         raise ValueError("public feed summary is invalid") from None
-    if not isinstance(value, dict) or set(value) != set(_initial_summary("0" * 40)):
+    if (
+        not isinstance(value, dict)
+        or set(value) != set(_initial_summary("0" * 40))
+        or value.get("startupArtifactsFailure")
+        not in (None, *STARTUP_ARTIFACT_FAILURES)
+    ):
         raise ValueError("public feed summary is invalid")
     return value
 
@@ -348,6 +372,17 @@ def _source_sha() -> str:
 
 def _task_root() -> Path:
     return SMOKE._root_path()
+
+
+class StartupArtifactsPreflightFailure(Exception):
+    """Closed reason for a public startup artifact validation boundary."""
+
+    def __init__(self, reason: str) -> None:
+        self.reason = (
+            reason
+            if isinstance(reason, str) and reason in STARTUP_ARTIFACT_FAILURES
+            else "unknown"
+        )
 
 
 def _workspace() -> Path:
@@ -416,8 +451,8 @@ def _owned_venv_python_link(root: Path) -> bool:
 
 
 def _require_startup_artifacts(root: Path, source_sha: str) -> None:
-    summary_path = SMOKE._summary_path()
     try:
+        summary_path = SMOKE._summary_path()
         metadata = summary_path.lstat()
         if (
             summary_path.is_symlink()
@@ -427,8 +462,8 @@ def _require_startup_artifacts(root: Path, source_sha: str) -> None:
         ):
             raise ValueError
         startup_summary = json.loads(summary_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError, json.JSONDecodeError):
-        raise ValueError("startup artifact summary is invalid") from None
+    except (SMOKE.SmokeFailure, OSError, ValueError, json.JSONDecodeError):
+        raise StartupArtifactsPreflightFailure("summary_contract_invalid") from None
 
     binary = root / "app" / "thunderbird" / "thunderbird"
     marionette = (
@@ -440,13 +475,14 @@ def _require_startup_artifacts(root: Path, source_sha: str) -> None:
         / "marionette_driver"
         / "marionette.py"
     )
-    if (
-        not _startup_artifacts_verified(startup_summary, source_sha)
-        or not _owned_regular_file(binary)
-        or not _owned_venv_python_link(root)
-        or not _owned_regular_file(marionette)
-    ):
-        raise ValueError("startup artifacts are unavailable")
+    if not _startup_artifacts_verified(startup_summary, source_sha):
+        raise StartupArtifactsPreflightFailure("summary_contract_invalid")
+    if not _owned_regular_file(binary):
+        raise StartupArtifactsPreflightFailure("binary_artifact_invalid")
+    if not _owned_venv_python_link(root):
+        raise StartupArtifactsPreflightFailure("venv_layout_invalid")
+    if not _owned_regular_file(marionette):
+        raise StartupArtifactsPreflightFailure("marionette_module_invalid")
 
     try:
         SMOKE._capture_container(
@@ -463,8 +499,10 @@ def _require_startup_artifacts(root: Path, source_sha: str) -> None:
             failure_phase="preflight",
             failure_class="invalid_input",
         )
-    except SMOKE.SmokeFailure:
-        raise ValueError("startup artifacts are unavailable") from None
+    except Exception:
+        raise StartupArtifactsPreflightFailure(
+            "container_interpreter_probe_failed"
+        ) from None
 
 
 def _node_runtime(root: Path) -> tuple[str, Path]:
@@ -564,7 +602,19 @@ def _prepare() -> bool:
         stage = "node_runtime"
         node_version, _ = _node_runtime(root)
         summary["nodeVersion"] = node_version
+    except StartupArtifactsPreflightFailure as error:
+        summary.update(
+            {
+                "startupArtifactsFailure": error.reason,
+                "status": "failed",
+                "phase": "prepare",
+                "failure_stage": stage,
+                "failure_class": "startup_artifacts_preflight_failed",
+            }
+        )
     except SMOKE.SmokeFailure as error:
+        if stage == "startup_artifacts_preflight":
+            summary["startupArtifactsFailure"] = "unknown"
         failure_class = {
             "container_backend_unavailable": "container_backend_unavailable",
             "container_isolation_unavailable": "container_isolation_unavailable",
@@ -578,6 +628,8 @@ def _prepare() -> bool:
             }
         )
     except Exception:
+        if stage == "startup_artifacts_preflight":
+            summary["startupArtifactsFailure"] = "unknown"
         failure_class = {
             "workspace_preflight": "workspace_preflight_failed",
             "startup_artifacts_preflight": "startup_artifacts_preflight_failed",
@@ -902,6 +954,11 @@ def _finalize() -> bool:
                     "failure_class": failure_data[1],
                 }
             )
+            if (
+                failed_step == "startup_prepare"
+                and summary["startupArtifactsFailure"] is None
+            ):
+                summary["startupArtifactsFailure"] = "unknown"
         elif _success_gates({**summary, "status": "passed"}):
             summary.update(
                 {

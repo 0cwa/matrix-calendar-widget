@@ -82,6 +82,268 @@ class PublicFeedSmokeTests(unittest.TestCase):
         )
         marker.chmod(0o600)
 
+    def _make_startup_artifact_fixture(
+        self, base: Path
+    ) -> tuple[Path, Path, dict[str, str]]:
+        runner_temp = base / "runner-temp"
+        runner_temp.mkdir()
+        task_root = base / "task-root"
+        binary = task_root / "app" / "thunderbird" / "thunderbird"
+        binary.parent.mkdir(parents=True)
+        binary.write_bytes(b"fixture Thunderbird binary")
+        binary.chmod(0o700)
+        python_link = task_root / "venv" / "bin" / "python"
+        python_link.parent.mkdir(parents=True)
+        python_link.symlink_to("/usr/local/bin/python3.13")
+        marionette = (
+            task_root
+            / "venv"
+            / "lib"
+            / "python3.13"
+            / "site-packages"
+            / "marionette_driver"
+            / "marionette.py"
+        )
+        marionette.parent.mkdir(parents=True)
+        marionette.write_text("# fixture module\n", encoding="utf-8")
+
+        startup_summary = PUBLIC.SMOKE._initial_summary(SOURCE_SHA)
+        startup_summary.update(
+            {
+                "phase": "dependency_install",
+                "archive_sha256_verified": True,
+                "archive_sha512_verified": True,
+                "python_artifacts_verified": True,
+                "docker_backend_verified": True,
+                "docker_isolation_verified": True,
+            }
+        )
+        startup_summary_path = runner_temp / "thunderbird-calendar-smoke-summary.json"
+        startup_summary_path.write_text(json.dumps(startup_summary), encoding="utf-8")
+        startup_summary_path.chmod(0o600)
+        environment = {"RUNNER_TEMP": str(runner_temp)}
+        return task_root, startup_summary_path, environment
+
+    def test_startup_artifact_preflight_reports_each_closed_boundary(self) -> None:
+        cases = (
+            "summary_malformed",
+            "summary_mode",
+            "summary_owner",
+            "summary_schema",
+            "summary_source",
+            "binary_artifact",
+            "venv_layout",
+            "marionette_module",
+            "container_interpreter_probe",
+        )
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as temporary:
+                task_root, summary_path, environment = (
+                    self._make_startup_artifact_fixture(Path(temporary))
+                )
+                binary = task_root / "app" / "thunderbird" / "thunderbird"
+                python_link = task_root / "venv" / "bin" / "python"
+                marionette = (
+                    task_root
+                    / "venv"
+                    / "lib"
+                    / "python3.13"
+                    / "site-packages"
+                    / "marionette_driver"
+                    / "marionette.py"
+                )
+                original_summary = summary_path.read_bytes()
+                summary = json.loads(original_summary)
+                expected_reason = {
+                    "summary_malformed": "summary_contract_invalid",
+                    "summary_mode": "summary_contract_invalid",
+                    "summary_owner": "summary_contract_invalid",
+                    "summary_schema": "summary_contract_invalid",
+                    "summary_source": "summary_contract_invalid",
+                    "binary_artifact": "binary_artifact_invalid",
+                    "venv_layout": "venv_layout_invalid",
+                    "marionette_module": "marionette_module_invalid",
+                    "container_interpreter_probe": "container_interpreter_probe_failed",
+                }[case]
+
+                if case == "summary_malformed":
+                    summary_path.write_text("{invalid", encoding="utf-8")
+                    summary_path.chmod(0o600)
+                elif case == "summary_mode":
+                    summary_path.chmod(0o644)
+                elif case == "summary_schema":
+                    summary["schema"] = "thunderbird-calendar-startup-smoke@0"
+                    summary_path.write_text(json.dumps(summary), encoding="utf-8")
+                    summary_path.chmod(0o600)
+                elif case == "summary_source":
+                    summary["source_sha"] = "b" * 40
+                    summary_path.write_text(json.dumps(summary), encoding="utf-8")
+                    summary_path.chmod(0o600)
+                elif case == "binary_artifact":
+                    binary.unlink()
+                elif case == "venv_layout":
+                    python_link.unlink()
+                elif case == "marionette_module":
+                    marionette.unlink()
+
+                with (
+                    patch.dict(os.environ, environment),
+                    patch.object(
+                        PUBLIC.SMOKE,
+                        "_capture_container",
+                        side_effect=(
+                            PUBLIC.SMOKE.SmokeFailure("preflight", "invalid_input")
+                            if case == "container_interpreter_probe"
+                            else None
+                        ),
+                    ),
+                ):
+                    if case == "summary_owner":
+                        with self.assertRaises(
+                            PUBLIC.StartupArtifactsPreflightFailure
+                        ) as failure:
+                            with patch.object(
+                                PUBLIC.os,
+                                "getuid",
+                                return_value=os.getuid() + 1,
+                            ):
+                                PUBLIC._require_startup_artifacts(task_root, SOURCE_SHA)
+                    else:
+                        with self.assertRaises(
+                            PUBLIC.StartupArtifactsPreflightFailure
+                        ) as failure:
+                            PUBLIC._require_startup_artifacts(task_root, SOURCE_SHA)
+                    self.assertEqual(failure.exception.reason, expected_reason)
+
+                summary_path.write_bytes(original_summary)
+                summary_path.chmod(0o600)
+
+    def test_startup_preflight_failure_is_closed_in_prepare_summary(
+        self,
+    ) -> None:
+        cases = (
+            (
+                "known boundary",
+                PUBLIC.StartupArtifactsPreflightFailure("venv_layout_invalid"),
+                "venv_layout_invalid",
+            ),
+            (
+                "unknown exception",
+                RuntimeError("private exception detail"),
+                "unknown",
+            ),
+        )
+        for label, failure, expected_reason in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as temporary:
+                base = Path(temporary)
+                runner_temp = base / "runner-temp"
+                runner_temp.mkdir()
+                task_root = base / "task-root"
+                environment = {
+                    "RUNNER_TEMP": str(runner_temp),
+                    "GITHUB_SHA": SOURCE_SHA,
+                    "GITHUB_RUN_ID": "17",
+                    "GITHUB_RUN_ATTEMPT": "1",
+                }
+                with (
+                    patch.dict(os.environ, environment),
+                    patch.object(PUBLIC, "_task_root", return_value=task_root),
+                    patch.object(
+                        PUBLIC.SMOKE,
+                        "_require_preflight",
+                        return_value={
+                            "docker_backend_verified": True,
+                            "docker_isolation_verified": True,
+                        },
+                    ),
+                    patch.object(PUBLIC.SMOKE, "_verify_owner"),
+                    patch.object(PUBLIC, "_workspace", return_value=base),
+                    patch.object(
+                        PUBLIC,
+                        "_require_startup_artifacts",
+                        side_effect=failure,
+                    ),
+                ):
+                    self.assertFalse(PUBLIC._prepare())
+                    summary = PUBLIC._load_summary()
+
+                self.assertEqual(
+                    summary["failure_stage"], "startup_artifacts_preflight"
+                )
+                self.assertEqual(
+                    summary["failure_class"], "startup_artifacts_preflight_failed"
+                )
+                self.assertEqual(summary["startupArtifactsFailure"], expected_reason)
+                self.assertTrue(summary["dockerBackendVerified"])
+                self.assertTrue(summary["dockerIsolationVerified"])
+                self.assertTrue(summary["workspaceJestReady"])
+                self.assertTrue(
+                    all(
+                        not summary[field]
+                        for field in {
+                            "startupArtifactsVerified",
+                            "thunderbirdArchiveVerified",
+                            "marionetteArtifactsVerified",
+                            "nativeProviderPassed",
+                            *PUBLIC.PREDICATE_FIELDS,
+                        }
+                    )
+                )
+                self.assertNotIn("private exception detail", json.dumps(summary))
+
+    def test_startup_artifact_subreason_is_a_closed_summary_field(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            runner_temp = Path(temporary)
+            environment = {"RUNNER_TEMP": str(runner_temp)}
+            with patch.dict(os.environ, environment):
+                summary = PUBLIC._initial_summary(SOURCE_SHA)
+                summary["startupArtifactsFailure"] = "private exception detail"
+                PUBLIC._write_summary(summary)
+                saved = PUBLIC._load_summary()
+                serialized = PUBLIC._summary_path().read_text(encoding="utf-8")
+
+                self.assertEqual(saved["failure_stage"], "complete")
+                self.assertEqual(saved["failure_class"], "internal_error")
+                self.assertIsNone(saved["startupArtifactsFailure"])
+                self.assertNotIn("private exception detail", serialized)
+
+                saved["startupArtifactsFailure"] = "unbounded exception detail"
+                path = PUBLIC._summary_path()
+                path.write_text(json.dumps(saved), encoding="utf-8")
+                path.chmod(0o600)
+                with self.assertRaises(ValueError):
+                    PUBLIC._load_summary()
+
+    def test_finalizer_uses_unknown_for_unreported_startup_prepare_failure(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            runner_temp = base / "runner-temp"
+            runner_temp.mkdir()
+            task_parent = base / "task-roots"
+            task_parent.mkdir()
+            environment = {
+                "RUNNER_TEMP": str(runner_temp),
+                "GITHUB_SHA": SOURCE_SHA,
+                "GITHUB_RUN_ID": "17",
+                "GITHUB_RUN_ATTEMPT": "1",
+                **self._outcome_environment(),
+                "TB_PUBLIC_STARTUP_PREPARE_OUTCOME": "failure",
+            }
+            with (
+                patch.dict(os.environ, environment),
+                patch.object(PUBLIC.SMOKE, "ROOT_PARENT", task_parent),
+            ):
+                PUBLIC._write_summary(PUBLIC._initial_summary(SOURCE_SHA))
+                self.assertFalse(PUBLIC._finalize())
+                summary = PUBLIC._load_summary()
+            self.assertEqual(summary["failure_stage"], "startup_artifacts_preflight")
+            self.assertEqual(
+                summary["failure_class"], "startup_artifacts_preflight_failed"
+            )
+            self.assertEqual(summary["startupArtifactsFailure"], "unknown")
+
     def test_every_public_native_predicate_and_count_is_a_success_gate(self) -> None:
         result = self._native_result()
         self.assertTrue(PUBLIC._valid_native_result(result))
@@ -326,7 +588,9 @@ class PublicFeedSmokeTests(unittest.TestCase):
                 ):
                     self.assertTrue(PUBLIC._prepare())
                 summary = PUBLIC._load_summary()
+                self.assertEqual(summary["schema"], "thunderbird-public-ics-summary@2")
                 self.assertTrue(summary["startupArtifactsVerified"])
+                self.assertIsNone(summary["startupArtifactsFailure"])
                 self.assertTrue(summary["thunderbirdArchiveVerified"])
                 self.assertTrue(summary["marionetteArtifactsVerified"])
                 self.assertEqual(summary["nodeVersion"], NODE_VERSION)
