@@ -73,6 +73,19 @@ function privateOwnedFile(path, expectedMode) {
   return info;
 }
 
+function restrictPrivateOwnedFile(path) {
+  const info = lstatSync(path);
+  if (
+    !info.isFile() ||
+    info.isSymbolicLink() ||
+    (typeof process.getuid === 'function' && info.uid !== process.getuid())
+  ) {
+    throw invalidPreparation();
+  }
+  chmodSync(path, 0o600);
+  return privateOwnedFile(path, 0o600);
+}
+
 function hasControlCharacters(value) {
   for (const character of value) {
     const codePoint = character.codePointAt(0) ?? 0;
@@ -140,7 +153,7 @@ export function preparePrivateUiAcceptance({
     root,
   );
   const envPath = validateRunnerTempPath(githubEnvFile, root);
-  privateOwnedFile(envPath, 0o600);
+  restrictPrivateOwnedFile(envPath);
 
   mkdirSync(workspace, { mode: 0o700 });
   try {

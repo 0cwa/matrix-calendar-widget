@@ -162,13 +162,26 @@ test('private app UI acceptance is manual, opt-in, and separately configured', (
     workflow,
     /private_ui:\n\s+description:.*\n\s+type: boolean\n\s+required: true\n\s+default: false/u,
   );
+  const appserviceStart = workflow.indexOf('  element-web-acceptance:\n');
+  const normalBotStart = workflow.indexOf('  normal-bot-account-acceptance:\n');
+  assert.ok(appserviceStart >= 0 && normalBotStart > appserviceStart);
+  const appserviceJob = workflow.slice(appserviceStart, normalBotStart);
+  const normalBotJob = workflow.slice(normalBotStart);
   assert.match(
-    workflow,
-    /private-ui: \$\{\{ inputs\.private_ui && 'true' \|\| 'false' \}\}/u,
+    appserviceJob,
+    /if: \$\{\{ github\.event_name != 'workflow_dispatch' \|\| !inputs\.private_ui \}\}/u,
   );
   assert.match(
-    workflow,
-    /principal-mode: bot-account\n\s+private-ui: 'false'/u,
+    appserviceJob,
+    /principal-mode: appservice\n\s+private-ui: 'false'/u,
+  );
+  assert.doesNotMatch(
+    appserviceJob,
+    /private-ui:\s*\$\{\{[^}]*inputs\.private_ui/u,
+  );
+  assert.match(
+    normalBotJob,
+    /principal-mode: bot-account\n\s+private-ui: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.private_ui && 'true' \|\| 'false' \}\}/u,
   );
   assert.match(
     runner,
@@ -181,6 +194,37 @@ test('private app UI acceptance is manual, opt-in, and separately configured', (
   assert.match(
     runner,
     /Run the opt-in private app UI and CalDAV lifecycle\n\s+if: \$\{\{ inputs\.private-ui == 'true' \}\}/u,
+  );
+  const setupStart = runner.indexOf(
+    '    - name: Mask synthetic service credentials and prepare private files',
+  );
+  const prepareStart = runner.indexOf(
+    '    - name: Prepare opt-in private UI TLS profile',
+  );
+  const installStart = runner.indexOf('    - name: Install dependencies');
+  assert.ok(setupStart >= 0 && prepareStart > setupStart);
+  assert.ok(installStart > prepareStart);
+  const setupStep = runner.slice(setupStart, prepareStart);
+  const environmentModeCheck = setupStep.indexOf('chmod 0600 -- "$GITHUB_ENV"');
+  const firstEnvironmentWrite = setupStep.indexOf('>> "$GITHUB_ENV"');
+  assert.ok(environmentModeCheck >= 0);
+  assert.ok(
+    firstEnvironmentWrite > environmentModeCheck,
+    'private runner environment permissions must be tightened before appending values',
+  );
+  assert.match(
+    setupStep,
+    /if \[\[ "\$PRIVATE_UI" == true \]\]; then[\s\S]*?! -f "\$GITHUB_ENV" \|\| -L "\$GITHUB_ENV" \|\| ! -O "\$GITHUB_ENV"/u,
+  );
+  const prepareStep = runner.slice(prepareStart, installStart);
+  assert.match(
+    prepareStep,
+    /if \[\[ ! -f "\$GITHUB_ENV" \|\| -L "\$GITHUB_ENV" \|\| ! -O "\$GITHUB_ENV" \]\]/u,
+  );
+  assert.ok(
+    prepareStep.indexOf('chmod 0600 -- "$GITHUB_ENV"') <
+      prepareStep.indexOf('node dev/element-acceptance-private-ui-prepare.mjs'),
+    'the fresh step environment file must be secured before preparation',
   );
   assert.match(
     runner,

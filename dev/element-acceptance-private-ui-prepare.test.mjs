@@ -15,17 +15,22 @@
  */
 
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import {
   chmodSync,
+  copyFileSync,
+  existsSync,
   lstatSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import {
   preparePrivateUiAcceptance,
   readPrivateUiComposeEnvironment,
@@ -112,4 +117,47 @@ test('Compose private settings require a private runner-owned environment file',
       }),
     TypeError,
   );
+});
+
+test('private TLS preparation cold-starts with a producer-mode runner file', () => {
+  const sourceDev = dirname(fileURLToPath(import.meta.url));
+  const coldRoot = makeTemporaryDirectory();
+  const coldDev = join(coldRoot, 'dev');
+  const runnerTemp = join(coldRoot, 'runner-temp');
+  const githubEnvFile = join(runnerTemp, 'set_env');
+
+  mkdirSync(coldDev, { mode: 0o700 });
+  mkdirSync(runnerTemp, { mode: 0o700 });
+  for (const name of [
+    'element-acceptance-private-ui-prepare.mjs',
+    'element-acceptance-private-tls.mjs',
+  ]) {
+    copyFileSync(join(sourceDev, name), join(coldDev, name));
+  }
+  writeFileSync(githubEnvFile, '', { mode: 0o644 });
+  chmodSync(githubEnvFile, 0o644);
+
+  const result = spawnSync(
+    process.execPath,
+    [join(coldDev, 'element-acceptance-private-ui-prepare.mjs')],
+    {
+      cwd: coldRoot,
+      env: {
+        ELEMENT_ACCEPTANCE_PRIVATE_UI: 'true',
+        GITHUB_ENV: githubEnvFile,
+        PATH: process.env.PATH,
+        RUNNER_TEMP: runnerTemp,
+      },
+      encoding: 'utf8',
+    },
+  );
+
+  assert.equal(result.status, 0, 'cold source-only preparation must succeed');
+  assert.equal(lstatSync(githubEnvFile).mode & 0o777, 0o600);
+  const githubEnvironment = readFileSync(githubEnvFile, 'utf8');
+  assert.equal(
+    githubEnvironment.includes('MATRIX_CALENDAR_PRIVATE_CLIENT_EPOCH_KEY'),
+    false,
+  );
+  assert.equal(existsSync(join(coldRoot, 'node_modules')), false);
 });

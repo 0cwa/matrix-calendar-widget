@@ -31,6 +31,7 @@ concurrency:
 jobs:
   element-web-acceptance:
     name: Element Web acceptance
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.private_ui }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
@@ -50,7 +51,7 @@ jobs:
         uses: ./.github/actions/element-acceptance
         with:
           principal-mode: appservice
-          private-ui: ${{ inputs.private_ui && 'true' || 'false' }}
+          private-ui: 'false'
 
   normal-bot-account-acceptance:
     name: Normal bot account acceptance
@@ -73,4 +74,4 @@ jobs:
         uses: ./.github/actions/element-acceptance
         with:
           principal-mode: bot-account
-          private-ui: 'false'
+          private-ui: ${{ github.event_name == 'workflow_dispatch' && inputs.private_ui && 'true' || 'false' }}

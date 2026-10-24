@@ -17,6 +17,13 @@ runs:
         PRIVATE_UI: ${{ inputs.private-ui }}
       shell: bash
       run: |
+        if [[ "$PRIVATE_UI" == true ]]; then
+          if [[ ! -f "$GITHUB_ENV" || -L "$GITHUB_ENV" || ! -O "$GITHUB_ENV" ]]; then
+            echo 'The private acceptance environment file is not a runner-owned regular file.' >&2
+            exit 1
+          fi
+          chmod 0600 -- "$GITHUB_ENV"
+        fi
         case "$PRINCIPAL_MODE" in
           appservice)
             if [[ -z "${MATRIX_APPLICATION_SERVICE_TOKEN:-}" || ${#MATRIX_APPLICATION_SERVICE_TOKEN} -gt 4096 || "${MATRIX_CALENDAR_DEV_APPSERVICE_REGISTRATION:-enabled}" != enabled ]]; then
@@ -85,7 +92,13 @@ runs:
     - name: Prepare opt-in private UI TLS profile
       if: ${{ inputs.private-ui == 'true' }}
       shell: bash
-      run: node dev/element-acceptance-private-ui-prepare.mjs
+      run: |
+        if [[ ! -f "$GITHUB_ENV" || -L "$GITHUB_ENV" || ! -O "$GITHUB_ENV" ]]; then
+          echo 'The private acceptance environment file is not a runner-owned regular file.' >&2
+          exit 1
+        fi
+        chmod 0600 -- "$GITHUB_ENV"
+        node dev/element-acceptance-private-ui-prepare.mjs
 
     - name: Install dependencies
       shell: bash
