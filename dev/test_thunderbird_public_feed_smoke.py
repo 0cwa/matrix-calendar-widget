@@ -8,7 +8,9 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -376,7 +378,34 @@ class PublicFeedSmokeTests(unittest.TestCase):
         old_node["nodeVersion"] = "22.11.9"
         self.assertFalse(PUBLIC._success_gates(old_node))
 
-    def test_timeout_budget_orders_fixture_jest_container_and_workflow(self) -> None:
+    def test_timeout_budget_orders_worker_fixture_jest_container_and_workflow(
+        self,
+    ) -> None:
+        worker_source_path = (
+            Path(__file__).parents[1]
+            / "radicale-auth"
+            / "tests"
+            / "public_calendar_feed_thunderbird_contract.py"
+        )
+        worker_spec = importlib.util.spec_from_file_location(
+            "public_calendar_feed_thunderbird_contract_budget", worker_source_path
+        )
+        self.assertIsNotNone(worker_spec)
+        self.assertIsNotNone(worker_spec.loader)
+        worker_environment = {
+            "MCW_PUBLIC_ICS_API_ORIGIN": "https://localhost:8443",
+            "MCW_PUBLIC_ICS_URL": "https://localhost:8443/v1/public-calendar-feeds/synthetic.envelope",
+            "MCW_PUBLIC_ICS_CONTROL_PORT": "12345",
+            "MCW_PUBLIC_ICS_CONTROL_KEY": "a" * 43,
+            "MCW_PUBLIC_ICS_CA_FILE": "/tmp/synthetic-ca.pem",
+            "MCW_PUBLIC_ICS_NATIVE_THUNDERBIRD_BIN": "/tmp/thunderbird",
+            "MCW_PUBLIC_ICS_NATIVE_WORKSPACE": "/task/workspace",
+        }
+        native_worker = importlib.util.module_from_spec(worker_spec)
+        with patch.dict(os.environ, worker_environment):
+            worker_spec.loader.exec_module(native_worker)
+        self.assertEqual(native_worker.WORKER_PHASE_BUDGET_SECONDS, 615)
+
         fixture = (
             Path(__file__).parents[1]
             / "matrix-calendar-server"
@@ -399,8 +428,33 @@ class PublicFeedSmokeTests(unittest.TestCase):
             )
             if (match := re.search(rf"{name}\s*=\s*([0-9_]+)", fixture_source))
         }
+        self.assertEqual(
+            set(fixture_values),
+            {
+                "PUBLIC_NATIVE_WORKER_TIMEOUT_MS",
+                "PUBLIC_NATIVE_CHILD_TERMINATION_GRACE_MS",
+                "PUBLIC_NATIVE_FIXTURE_SETUP_TEARDOWN_MARGIN_MS",
+            },
+        )
+        self.assertGreaterEqual(
+            fixture_values["PUBLIC_NATIVE_WORKER_TIMEOUT_MS"],
+            native_worker.WORKER_PHASE_BUDGET_SECONDS * 1000,
+        )
+        self.assertEqual(
+            fixture_values["PUBLIC_NATIVE_WORKER_TIMEOUT_MS"],
+            native_worker.WORKER_PHASE_BUDGET_SECONDS * 1000 + 45_000,
+        )
+        self.assertEqual(
+            fixture_values["PUBLIC_NATIVE_CHILD_TERMINATION_GRACE_MS"], 3_000
+        )
+        self.assertEqual(
+            fixture_values["PUBLIC_NATIVE_FIXTURE_SETUP_TEARDOWN_MARGIN_MS"],
+            180_000,
+        )
         fixture_ms = sum(fixture_values.values())
         self.assertEqual(fixture_ms, 843_000)
+        self.assertIn("nativeThunderbirdProfile\n          ? 240_000", fixture_source)
+        self.assertIn("waitForChild(nativeProcess, 180_000)", fixture_source)
         self.assertEqual(
             PUBLIC.JEST_TIMEOUT_SECONDS * 1000,
             fixture_ms + PUBLIC.JEST_PROCESS_MARGIN_SECONDS * 1000,
@@ -421,6 +475,39 @@ class PublicFeedSmokeTests(unittest.TestCase):
             int(workflow_timeout.group(1)) * 60,
             PUBLIC.NATIVE_TIMEOUT_SECONDS,
         )
+
+    def test_public_native_worker_tests_run_in_radicale_auth_only_tree(self) -> None:
+        source_root = Path(__file__).parents[1] / "radicale-auth"
+        with tempfile.TemporaryDirectory(prefix="mcw-public-auth-only-") as temporary:
+            isolated_root = Path(temporary) / "radicale-auth"
+            shutil.copytree(
+                source_root,
+                isolated_root,
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+            )
+            self.assertFalse((Path(temporary) / "matrix-calendar-server").exists())
+            self.assertFalse((Path(temporary) / "dev").exists())
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-B",
+                    str(
+                        isolated_root
+                        / "tests"
+                        / "test_public_calendar_feed_thunderbird_contract.py"
+                    ),
+                ],
+                cwd=isolated_root,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+                timeout=30,
+            )
+            self.assertEqual(result.returncode, 0)
+            self.assertRegex(result.stderr, r"Ran [1-9][0-9]* tests?\b")
 
     def test_native_failure_result_has_its_own_closed_stage_and_class_allowlists(
         self,

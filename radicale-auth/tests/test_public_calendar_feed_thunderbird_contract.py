@@ -20,7 +20,6 @@ import importlib.util
 import json
 import os
 from pathlib import Path
-import re
 import shutil
 import subprocess
 import tempfile
@@ -220,9 +219,7 @@ globalThis.window = {};
         self.assertEqual(completed.returncode, 0)
         self.assertEqual(json.loads(completed.stdout), {"passed": True})
 
-    def test_native_timeout_budget_matches_the_worker_and_fixture_deadlines(
-        self,
-    ) -> None:
+    def test_native_timeout_budget_matches_worker_rpc_and_cleanup_bounds(self) -> None:
         self.assertEqual(self.worker.WORKER_PHASE_BUDGET_SECONDS, 615)
         self.assertEqual(self.worker.MARIONETTE_HELLO_TIMEOUT_SECONDS, 60)
         self.assertEqual(self.worker.CALENDAR_TAB_PHASE_BUDGET_SECONDS, 25)
@@ -231,46 +228,6 @@ globalThis.window = {};
             self.worker.EVENT_OBSERVATION_MAX_SECONDS,
             self.worker.MARIONETTE_SCRIPT_TIMEOUT_SECONDS,
         )
-
-        fixture = (
-            Path(__file__).parents[2]
-            / "matrix-calendar-server"
-            / "test"
-            / "integration"
-            / "PrivateCalendarClientRadicaleContract.test.ts"
-        )
-        fixture_source = fixture.read_text(encoding="utf-8")
-        worker_timeout = re.search(
-            r"PUBLIC_NATIVE_WORKER_TIMEOUT_MS\s*=\s*([0-9_]+)",
-            fixture_source,
-        )
-        termination_grace = re.search(
-            r"PUBLIC_NATIVE_CHILD_TERMINATION_GRACE_MS\s*=\s*([0-9_]+)",
-            fixture_source,
-        )
-        fixture_margin = re.search(
-            r"PUBLIC_NATIVE_FIXTURE_SETUP_TEARDOWN_MARGIN_MS\s*=\s*([0-9_]+)",
-            fixture_source,
-        )
-        fixture_timeout = re.search(
-            r"PUBLIC_NATIVE_FIXTURE_TIMEOUT_MS\s*=\s*\n\s*PUBLIC_NATIVE_WORKER_TIMEOUT_MS\s*\+\s*\n\s*PUBLIC_NATIVE_CHILD_TERMINATION_GRACE_MS\s*\+\s*\n\s*PUBLIC_NATIVE_FIXTURE_SETUP_TEARDOWN_MARGIN_MS",
-            fixture_source,
-        )
-        self.assertIsNotNone(worker_timeout)
-        self.assertIsNotNone(termination_grace)
-        self.assertIsNotNone(fixture_margin)
-        self.assertIsNotNone(fixture_timeout)
-        worker_timeout_ms = int(worker_timeout.group(1).replace("_", ""))
-        self.assertGreaterEqual(
-            worker_timeout_ms, self.worker.WORKER_PHASE_BUDGET_SECONDS * 1000
-        )
-        self.assertEqual(
-            worker_timeout_ms,
-            self.worker.WORKER_PHASE_BUDGET_SECONDS * 1000 + 45_000,
-        )
-        self.assertEqual(int(termination_grace.group(1).replace("_", "")), 3_000)
-        self.assertEqual(int(fixture_margin.group(1).replace("_", "")), 180_000)
-
         worker_source = (
             Path(__file__)
             .with_name("public_calendar_feed_thunderbird_contract.py")
@@ -283,8 +240,6 @@ globalThis.window = {};
             "marionette.timeout.script = MARIONETTE_SCRIPT_TIMEOUT_SECONDS",
             worker_source,
         )
-        self.assertIn("nativeThunderbirdProfile\n          ? 240_000", fixture_source)
-        self.assertIn("waitForChild(nativeProcess, 180_000)", fixture_source)
 
 
 if __name__ == "__main__":
