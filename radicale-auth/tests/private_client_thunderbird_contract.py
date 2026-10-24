@@ -107,8 +107,9 @@ return Boolean(tabmail && Array.isArray(tabmail.tabInfo) &&
 """
 
 DISCOVER_CALENDAR = r"""
-const done = arguments[arguments.length - 1];
-const [username, password, location, expectedOrigin, expectedPath] = arguments.slice(0, -1);
+const scriptArguments = Array.from(arguments);
+const done = scriptArguments.pop();
+const [username, password, location, expectedOrigin, expectedPath] = scriptArguments;
 (async () => {
   try {
     if (typeof cal === "undefined" || !cal.provider || !cal.provider.caldav ||
