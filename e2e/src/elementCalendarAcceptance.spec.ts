@@ -155,14 +155,6 @@ type ReminderConfigurationStep =
 
 type ReminderConfigurationObservation = {
   reminderStep: ReminderConfigurationStep;
-  alarmUiStep: ReminderAlarmUiStep;
-  alarmUiPatchStatus: number;
-  alarmUiRelativeAlarmReadback: boolean;
-  alarmUiAlarmToggleReadback: boolean;
-  alarmUiRelativeTriggerReadback: boolean;
-  alarmUiOffsetReadback: boolean;
-  alarmUiEditorClosed: boolean;
-  alarmUiDetailsClosed: boolean;
   reminderSettingsButtonCount: number;
   reminderSettingsButtonVisible: boolean;
   reminderOptionsGetCount: number;
@@ -182,6 +174,17 @@ type ReminderConfigurationObservation = {
   narrowSidePanelSafe: boolean;
   reminderPutCount: number;
   reminderPutStatus: number;
+};
+
+type ReminderAlarmUiObservation = {
+  alarmUiStep: ReminderAlarmUiStep;
+  alarmUiPatchStatus: number;
+  alarmUiRelativeAlarmReadback: boolean;
+  alarmUiAlarmToggleReadback: boolean;
+  alarmUiRelativeTriggerReadback: boolean;
+  alarmUiOffsetReadback: boolean;
+  alarmUiEditorClosed: boolean;
+  alarmUiDetailsClosed: boolean;
 };
 
 type ReminderAlarmUiStep =
@@ -5347,17 +5350,7 @@ async function createAndConfigureReminder(
   record(activePhase, 'passed', status, 1);
 
   activePhase = 'reminder-alarm-ui-readback';
-  const alarmObservation: Pick<
-    ReminderConfigurationObservation,
-    | 'alarmUiStep'
-    | 'alarmUiPatchStatus'
-    | 'alarmUiRelativeAlarmReadback'
-    | 'alarmUiAlarmToggleReadback'
-    | 'alarmUiRelativeTriggerReadback'
-    | 'alarmUiOffsetReadback'
-    | 'alarmUiEditorClosed'
-    | 'alarmUiDetailsClosed'
-  > = {
+  const alarmObservation: ReminderAlarmUiObservation = {
     alarmUiStep: 'event-row-visible',
     alarmUiPatchStatus: 0,
     alarmUiRelativeAlarmReadback: false,
@@ -5441,7 +5434,7 @@ async function readBackRelativeAlarm(
   frame: FrameLocator,
   title: string,
   observation: Pick<
-    ReminderConfigurationObservation,
+    ReminderAlarmUiObservation,
     | 'alarmUiStep'
     | 'alarmUiRelativeAlarmReadback'
     | 'alarmUiAlarmToggleReadback'
@@ -5517,7 +5510,7 @@ async function addCalDavAlarmFromReminderSettings(
   page: Page,
   title: string,
   observation: Pick<
-    ReminderConfigurationObservation,
+    ReminderAlarmUiObservation,
     | 'alarmUiStep'
     | 'alarmUiPatchStatus'
     | 'alarmUiEditorClosed'
@@ -5584,7 +5577,6 @@ async function addCalDavAlarmFromReminderSettings(
     await parentDetails
       .getByRole('button', { name: 'Close', exact: true })
       .click();
-    observation.alarmUiDetailsClosed = true;
     observation.alarmUiStep = 'details-hidden';
     await expect(parentDetails).toBeHidden({ timeout: 20_000 });
     observation.alarmUiDetailsClosed = true;
@@ -5608,14 +5600,6 @@ async function setRoomReminder(
   const details = frame.getByRole('dialog').last();
   const observation: ReminderConfigurationObservation = {
     reminderStep: 'event-details',
-    alarmUiStep: 'event-row-visible',
-    alarmUiPatchStatus: 0,
-    alarmUiRelativeAlarmReadback: false,
-    alarmUiAlarmToggleReadback: false,
-    alarmUiRelativeTriggerReadback: false,
-    alarmUiOffsetReadback: false,
-    alarmUiEditorClosed: false,
-    alarmUiDetailsClosed: false,
     reminderSettingsButtonCount: 0,
     reminderSettingsButtonVisible: false,
     reminderOptionsGetCount: 0,
@@ -9311,6 +9295,7 @@ function record(
     allDayScheduleReadback?: boolean;
     canManageReminders?: boolean;
   } & Partial<ReminderConfigurationObservation> &
+    Partial<ReminderAlarmUiObservation> &
     Partial<PublicFeedBrowserObservation> &
     Partial<Omit<G6StageRecord, 'phase' | 'status' | 'httpStatus' | 'count'>>,
 ) {
