@@ -242,16 +242,65 @@ let nativeDiscoveryStage = "provider_invocation";
 
 REFRESH_CALENDAR = r"""
 const done = arguments[arguments.length - 1];
-try {
-  const calendar = window.__mcwPrivateCalDavCalendar;
-  if (!calendar || typeof calendar.refresh !== "function") {
-    done({ ok: false, failure: "calendar_unavailable" });
-  } else {
-    calendar.refresh();
-    done({ ok: true });
+let calendar = null;
+let observer = null;
+let timeout = null;
+let settled = false;
+const finish = result => {
+  if (settled) {
+    return;
   }
+  settled = true;
+  if (timeout !== null) {
+    clearTimeout(timeout);
+  }
+  if (calendar && observer) {
+    try {
+      calendar.removeObserver(observer);
+    } catch (_error) {
+      result = { ok: false, failure: "refresh_failed" };
+    }
+  }
+  done(result);
+};
+try {
+  calendar = window.__mcwPrivateCalDavCalendar;
+  if (!calendar || typeof calendar.refresh !== "function" ||
+      typeof calendar.addObserver !== "function" ||
+      typeof calendar.removeObserver !== "function") {
+    done({ ok: false, failure: "calendar_unavailable" });
+    return;
+  }
+  let refreshStarted = false;
+  observer = {
+    QueryInterface: ChromeUtils.generateQI(["calIObserver"]),
+    onStartBatch() {},
+    onEndBatch() {},
+    onLoad() {
+      if (refreshStarted) {
+        finish({ ok: true });
+      }
+    },
+    onAddItem() {},
+    onModifyItem() {},
+    onDeleteItem() {},
+    onError() {
+      if (refreshStarted) {
+        finish({ ok: false, failure: "refresh_failed" });
+      }
+    },
+    onPropertyChanged() {},
+    onPropertyDeleting() {},
+  };
+  calendar.addObserver(observer);
+  timeout = setTimeout(
+    () => finish({ ok: false, failure: "refresh_failed" }),
+    20_000
+  );
+  refreshStarted = true;
+  calendar.refresh();
 } catch (_error) {
-  done({ ok: false, failure: "refresh_failed" });
+  finish({ ok: false, failure: "refresh_failed" });
 }
 """
 
