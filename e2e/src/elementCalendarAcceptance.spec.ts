@@ -8586,21 +8586,79 @@ function privateDavLifecycleSucceeded(
   readCreatedResource: PrivateDavRequestResult,
   updatedResource: PrivateDavRequestResult,
   readUpdatedResource: PrivateDavRequestResult,
+  deletedResource: PrivateDavRequestResult,
 ): boolean {
   return (
     principalDiscovery.status === 207 &&
     collectionDiscovery.status === 207 &&
-    createdResource.status >= 200 &&
-    createdResource.status < 300 &&
+    privateDavWriteSucceeded(createdResource) &&
     readCreatedResource.status === 200 &&
     readCreatedResource.expectedTextPresent === true &&
-    typeof readCreatedResource.etag === 'string' &&
-    readCreatedResource.etag.length > 0 &&
-    updatedResource.status >= 200 &&
-    updatedResource.status < 300 &&
+    isStrongPrivateDavEtag(readCreatedResource.etag) &&
+    privateDavWriteSucceeded(updatedResource) &&
     readUpdatedResource.status === 200 &&
-    readUpdatedResource.expectedTextPresent === true
+    readUpdatedResource.expectedTextPresent === true &&
+    isStrongPrivateDavEtag(readUpdatedResource.etag) &&
+    privateDavWriteSucceeded(deletedResource)
   );
+}
+
+function privateDavWriteSucceeded(result: PrivateDavRequestResult): boolean {
+  return result.status >= 200 && result.status < 300;
+}
+
+function isStrongPrivateDavEtag(etag: string | undefined): etag is string {
+  return typeof etag === 'string' && /^"[\x21\x23-\x7e]{1,200}"$/u.test(etag);
+}
+
+function privateDavEtagOrEmpty(etag: string | undefined): string {
+  return isStrongPrivateDavEtag(etag) ? etag : '';
+}
+
+function privateDavReadSucceeded(result: PrivateDavRequestResult): boolean {
+  return result.status === 200 && result.expectedTextPresent === true;
+}
+
+function privateDavReadEtagOrEmpty(result: PrivateDavRequestResult): string {
+  return privateDavReadSucceeded(result)
+    ? privateDavEtagOrEmpty(result.etag)
+    : '';
+}
+
+async function bestEffortDeleteOwnedPrivateDavResource(
+  requestBase: {
+    username: string;
+    password: string;
+    caCertificate: Buffer;
+  },
+  url: URL,
+  expectedUid: string,
+): Promise<void> {
+  try {
+    const existingResource = await requestPrivateDav({
+      ...requestBase,
+      url,
+      method: 'GET',
+      expectedText: `UID:${expectedUid}`,
+    });
+    if (existingResource.status === 404) return;
+    if (
+      existingResource.status !== 200 ||
+      existingResource.expectedTextPresent !== true ||
+      !isStrongPrivateDavEtag(existingResource.etag)
+    ) {
+      return;
+    }
+
+    await requestPrivateDav({
+      ...requestBase,
+      url,
+      method: 'DELETE',
+      headers: { 'if-match': existingResource.etag },
+    });
+  } catch {
+    // Best-effort cleanup must not replace the primary acceptance result.
+  }
 }
 
 function revokedPrivateDavCredentialDenied(
@@ -10586,8 +10644,12 @@ if (process.env.ELEMENT_ACCEPTANCE_PRIVATE_UI === 'true') {
 
         const principalUrl = new URL('../', credentialUrl);
         const collectionUrl = new URL(credentialUrl.href);
-        const resourceUrl = new URL('private-ui-acceptance.ics', collectionUrl);
-        const eventUid = `private-ui-${randomUUID()}@acceptance.invalid`;
+        const eventResourceId = randomUUID();
+        const resourceUrl = new URL(
+          `private-ui-${eventResourceId}.ics`,
+          collectionUrl,
+        );
+        const eventUid = `private-ui-${eventResourceId}@acceptance.invalid`;
         const timeValue = (value: Date) =>
           value
             .toISOString()
@@ -10621,62 +10683,85 @@ if (process.env.ELEMENT_ACCEPTANCE_PRIVATE_UI === 'true') {
           password,
           caCertificate,
         };
-        const principalDiscovery = await requestPrivateDav({
-          ...requestBase,
-          url: principalUrl,
-          method: 'PROPFIND',
-          headers: { depth: '0', 'content-type': 'application/xml' },
-          body: discoveryBody,
-        });
-        const collectionDiscovery = await requestPrivateDav({
-          ...requestBase,
-          url: collectionUrl,
-          method: 'PROPFIND',
-          headers: { depth: '1', 'content-type': 'application/xml' },
-          body: discoveryBody,
-        });
-        const createdResource = await requestPrivateDav({
-          ...requestBase,
-          url: resourceUrl,
-          method: 'PUT',
-          headers: {
-            'content-type': 'text/calendar; charset=utf-8',
-            'if-none-match': '*',
-          },
-          body: makeIcs(originalSummary),
-        });
-        const readCreatedResource = await requestPrivateDav({
-          ...requestBase,
-          url: resourceUrl,
-          method: 'GET',
-          expectedText: `SUMMARY:${originalSummary}`,
-        });
-        const updatedResource = await requestPrivateDav({
-          ...requestBase,
-          url: resourceUrl,
-          method: 'PUT',
-          headers: {
-            'content-type': 'text/calendar; charset=utf-8',
-            'if-match': readCreatedResource.etag ?? '',
-          },
-          body: makeIcs(updatedSummary),
-        });
-        const readUpdatedResource = await requestPrivateDav({
-          ...requestBase,
-          url: resourceUrl,
-          method: 'GET',
-          expectedText: `SUMMARY:${updatedSummary}`,
-        });
-        expect(
-          privateDavLifecycleSucceeded(
-            principalDiscovery,
-            collectionDiscovery,
-            createdResource,
-            readCreatedResource,
-            updatedResource,
-            readUpdatedResource,
-          ),
-        ).toBe(true);
+        try {
+          const principalDiscovery = await requestPrivateDav({
+            ...requestBase,
+            url: principalUrl,
+            method: 'PROPFIND',
+            headers: { depth: '0', 'content-type': 'application/xml' },
+            body: discoveryBody,
+          });
+          const collectionDiscovery = await requestPrivateDav({
+            ...requestBase,
+            url: collectionUrl,
+            method: 'PROPFIND',
+            headers: { depth: '1', 'content-type': 'application/xml' },
+            body: discoveryBody,
+          });
+          const createdResource = await requestPrivateDav({
+            ...requestBase,
+            url: resourceUrl,
+            method: 'PUT',
+            headers: {
+              'content-type': 'text/calendar; charset=utf-8',
+              'if-none-match': '*',
+            },
+            body: makeIcs(originalSummary),
+          });
+          expect(privateDavWriteSucceeded(createdResource)).toBe(true);
+          const readCreatedResource = await requestPrivateDav({
+            ...requestBase,
+            url: resourceUrl,
+            method: 'GET',
+            expectedText: `SUMMARY:${originalSummary}`,
+          });
+          expect(privateDavReadSucceeded(readCreatedResource)).toBe(true);
+          expect(isStrongPrivateDavEtag(readCreatedResource.etag)).toBe(true);
+          const updatedResource = await requestPrivateDav({
+            ...requestBase,
+            url: resourceUrl,
+            method: 'PUT',
+            headers: {
+              'content-type': 'text/calendar; charset=utf-8',
+              'if-match': privateDavReadEtagOrEmpty(readCreatedResource),
+            },
+            body: makeIcs(updatedSummary),
+          });
+          const readUpdatedResource = await requestPrivateDav({
+            ...requestBase,
+            url: resourceUrl,
+            method: 'GET',
+            expectedText: `SUMMARY:${updatedSummary}`,
+          });
+          const deletedResource = await requestPrivateDav({
+            ...requestBase,
+            url: resourceUrl,
+            method: 'DELETE',
+            headers: {
+              'if-match': privateDavReadEtagOrEmpty(readUpdatedResource),
+            },
+          });
+          expect(privateDavWriteSucceeded(deletedResource)).toBe(true);
+          expect(
+            privateDavLifecycleSucceeded(
+              principalDiscovery,
+              collectionDiscovery,
+              createdResource,
+              readCreatedResource,
+              updatedResource,
+              readUpdatedResource,
+              deletedResource,
+            ),
+          ).toBe(true);
+        } finally {
+          // This only deletes this random resource after verifying its UID and
+          // current strong ETag. Cleanup failure never masks the test failure.
+          await bestEffortDeleteOwnedPrivateDavResource(
+            requestBase,
+            resourceUrl,
+            eventUid,
+          );
+        }
 
         const memberBContext = await makeContext();
         const memberBPage = await authenticateInElement(
