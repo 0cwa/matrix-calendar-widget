@@ -456,7 +456,10 @@ export function CalendarPrivateClientDialog({
                         'Setting up',
                       );
                     case 'revoked':
-                      return t('calendarPrivateClient.status.revoked', 'Revoked');
+                      return t(
+                        'calendarPrivateClient.status.revoked',
+                        'Revoked',
+                      );
                     case 'attention':
                       return t(
                         'calendarPrivateClient.status.attention',
@@ -668,8 +671,7 @@ function formatPrivateClientDate(value: string): string {
 function privateClientStatus(
   client: PrivateCalendarClientMetadata,
 ): 'active' | 'pending' | 'revoked' | 'attention' {
-  if (client.state === 'revoked')
-    return 'revoked';
+  if (client.state === 'revoked') return 'revoked';
   if (client.state === 'pending') {
     return 'pending';
   }
