@@ -446,6 +446,24 @@ export function CalendarPrivateClientDialog({
               {clients.map((client) => {
                 const confirming = confirmationAppId === client.appId;
                 const status = privateClientStatus(client);
+                const statusLabel = (() => {
+                  switch (status) {
+                    case 'active':
+                      return t('calendarPrivateClient.status.active', 'Active');
+                    case 'pending':
+                      return t(
+                        'calendarPrivateClient.status.pending',
+                        'Setting up',
+                      );
+                    case 'revoked':
+                      return t('calendarPrivateClient.status.revoked', 'Revoked');
+                    case 'attention':
+                      return t(
+                        'calendarPrivateClient.status.attention',
+                        'Needs attention',
+                      );
+                  }
+                })();
                 return (
                   <Paper key={client.appId} variant="outlined" sx={{ p: 1.5 }}>
                     <Stack spacing={1}>
@@ -463,10 +481,7 @@ export function CalendarPrivateClientDialog({
                       </Typography>
                       <Typography color="text.secondary" variant="body2">
                         {t('calendarPrivateClient.statusLabel', {
-                          status: t(
-                            `calendarPrivateClient.status.${status.key}`,
-                            status.fallback,
-                          ),
+                          status: statusLabel,
                           defaultValue: 'Status: {{status}}',
                         })}
                       </Typography>
@@ -650,17 +665,16 @@ function formatPrivateClientDate(value: string): string {
   }).format(new Date(value));
 }
 
-function privateClientStatus(client: PrivateCalendarClientMetadata): {
-  key: 'active' | 'pending' | 'revoked' | 'attention';
-  fallback: string;
-} {
+function privateClientStatus(
+  client: PrivateCalendarClientMetadata,
+): 'active' | 'pending' | 'revoked' | 'attention' {
   if (client.state === 'revoked')
-    return { key: 'revoked', fallback: 'Revoked' };
+    return 'revoked';
   if (client.state === 'pending') {
-    return { key: 'pending', fallback: 'Setting up' };
+    return 'pending';
   }
   if (client.mapState !== 'present') {
-    return { key: 'attention', fallback: 'Needs attention' };
+    return 'attention';
   }
-  return { key: 'active', fallback: 'Active' };
+  return 'active';
 }
