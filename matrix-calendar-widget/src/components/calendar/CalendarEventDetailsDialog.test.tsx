@@ -23,6 +23,7 @@ import {
 } from '@matrix-calendar-widget/calendar';
 import type { WidgetApi } from '@matrix-widget-toolkit/api';
 import { WidgetApiMockProvider } from '@matrix-widget-toolkit/react';
+import { createTheme, ThemeProvider } from '@mui/material';
 import {
   fireEvent,
   render,
@@ -144,6 +145,32 @@ function createWrapper(repository: InMemoryCalendarRepository) {
   };
 }
 
+function createWidgetModalPortalThemeWrapper(
+  repository: InMemoryCalendarRepository,
+) {
+  const RepositoryWrapper = createWrapper(repository);
+  const widgetPortalContainer = () => document.documentElement;
+  const theme = createTheme({
+    components: {
+      MuiDialog: { defaultProps: { container: widgetPortalContainer } },
+      MuiMenu: { defaultProps: { container: widgetPortalContainer } },
+      MuiPopover: {
+        defaultProps: {
+          container: widgetPortalContainer,
+          slotProps: { root: { container: widgetPortalContainer } },
+        },
+      },
+    },
+  });
+  return function ProductionThemeWrapper({ children }: PropsWithChildren<{}>) {
+    return (
+      <ThemeProvider theme={theme}>
+        <RepositoryWrapper>{children}</RepositoryWrapper>
+      </ThemeProvider>
+    );
+  };
+}
+
 function createRoomCalendarRepository(
   roomCapabilities?: CalendarRoomCapabilities,
 ) {
@@ -190,6 +217,65 @@ function createRoomCalendarRepository(
 }
 
 describe('<CalendarEventDetailsDialog />', () => {
+  it('keeps the room reminder autocomplete popup accessible with the widget modal portal', async () => {
+    const { repository, roomEvent } = createRoomCalendarRepository({
+      calendarId: 'room-calendar',
+      roomId: '!authorized-room:example.test',
+      canReadEvents: true,
+      canWriteEvents: true,
+      canManageReminders: true,
+    });
+    const targetUserId = '@alice:example.test';
+    const timedOption: CalendarRoomReminderAlarmOption = {
+      eventUid: roomEvent.uid,
+      recurrenceId: null,
+      alarmUid: 'production-theme-probe',
+      timingType: 'timed',
+      supported: true,
+      requiresAllDaySchedule: false,
+      relatedTo: 'start',
+      trigger: {
+        weeks: 0,
+        days: 0,
+        hours: 0,
+        minutes: 15,
+        seconds: 0,
+        isNegative: true,
+      },
+    };
+    repository.listRoomReminderAlarmOptions.mockResolvedValue([timedOption]);
+    Object.assign(repository, {
+      listRoomReminderRecipients: vi.fn().mockResolvedValue([
+        { userId: targetUserId, displayName: 'Alice' },
+        { userId: '@bob:example.test', displayName: 'Bob' },
+      ]),
+    });
+
+    render(<CalendarEventDetailsDialog event={roomEvent} onClose={vi.fn()} />, {
+      wrapper: createWidgetModalPortalThemeWrapper(repository),
+    });
+    const documentRoot = within(document.documentElement);
+    await userEvent.click(
+      await documentRoot.findByRole('button', { name: 'Reminder settings' }),
+    );
+    await documentRoot.findByText('Alarm 1: −15m relative to event start');
+    await userEvent.click(
+      documentRoot.getByRole('combobox', { name: 'Matrix destination' }),
+    );
+    await userEvent.click(
+      await documentRoot.findByRole('option', { name: 'Selected people' }),
+    );
+    const recipients = await documentRoot.findByRole('combobox', {
+      name: 'Selected people',
+    });
+    await userEvent.click(recipients);
+    await userEvent.type(recipients, targetUserId);
+
+    const listbox = await documentRoot.findByRole('listbox');
+    expect(within(listbox).getAllByRole('option')).toHaveLength(1);
+    expect(listbox).toBeVisible();
+  });
+
   it('renders only revalidated external links as explicit safe anchors', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [calendar],

@@ -25,6 +25,7 @@ import {
   InMemoryCalendarRepository,
 } from '@matrix-calendar-widget/calendar';
 import type { StateEvent, WidgetApi } from '@matrix-widget-toolkit/api';
+import { MuiThemeProvider } from '@matrix-widget-toolkit/mui';
 import { WidgetApiMockProvider } from '@matrix-widget-toolkit/react';
 import {
   Box,
@@ -674,20 +675,25 @@ async function start() {
     );
     performance.mark('synthetic-large-calendar-mount-start');
   }
+  const fixture = (
+    <I18nextProvider i18n={i18next}>
+      <LocalizationProvider>
+        <CalendarRepositoryProvider repository={repository}>
+          <CalendarFixture largeCalendarRepository={largeCalendarRepository} />
+        </CalendarRepositoryProvider>
+      </LocalizationProvider>
+    </I18nextProvider>
+  );
   createRoot(document.getElementById('root')!).render(
     <WidgetApiMockProvider value={syntheticRoomWidgetApi}>
-      <I18nextProvider i18n={i18next}>
+      {roomMode === 'room-manager' ? (
+        <MuiThemeProvider>{fixture}</MuiThemeProvider>
+      ) : (
         <ThemeProvider theme={theme}>
           <CssBaseline />
-          <LocalizationProvider>
-            <CalendarRepositoryProvider repository={repository}>
-              <CalendarFixture
-                largeCalendarRepository={largeCalendarRepository}
-              />
-            </CalendarRepositoryProvider>
-          </LocalizationProvider>
+          {fixture}
         </ThemeProvider>
-      </I18nextProvider>
+      )}
     </WidgetApiMockProvider>,
   );
 }

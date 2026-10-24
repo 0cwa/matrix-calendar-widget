@@ -77,6 +77,7 @@ type CalendarRoomReminderControlProps = {
   eventUid: string;
   roomId?: string;
   calendarTimezone?: string;
+  popperContainer?: () => HTMLElement | null;
   eventTiming: CalendarEventTiming;
   isRecurringSeries: boolean;
   openRequest?: number;
@@ -96,6 +97,7 @@ export function CalendarRoomReminderControl({
   eventUid,
   roomId,
   calendarTimezone,
+  popperContainer,
   eventTiming,
   isRecurringSeries,
   openRequest = 0,
@@ -607,6 +609,7 @@ export function CalendarRoomReminderControl({
                   }
                   limitTags={4}
                   multiple
+                  slotProps={{ popper: { container: popperContainer } }}
                   onClose={() =>
                     setMemberSearchQueries((current) => ({
                       ...current,
