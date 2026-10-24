@@ -127,11 +127,12 @@ export class GatewayCalendarRepository
           target: 'personal',
         }),
       ),
-      this.getRoomCalendarCapabilities(),
+      this.loadRawRoomCalendarCapabilities(),
     ]);
     const calendars: Calendar[] = [];
     let partialAvailability = false;
     let canManageCalendarCollections = false;
+    let roomCapabilities: CalendarRoomCapabilities | undefined;
 
     if (personalResult.status === 'fulfilled') {
       canManageCalendarCollections = true;
@@ -165,6 +166,7 @@ export class GatewayCalendarRepository
               'Room calendar target did not match the validated context',
             );
           }
+          roomCapabilities = capabilities;
           calendars.push(
             ...roomCalendars.map((calendar) =>
               this.rememberCalendar('room', {
@@ -176,6 +178,8 @@ export class GatewayCalendarRepository
         } catch {
           partialAvailability = true;
         }
+      } else {
+        roomCapabilities = capabilities;
       }
     }
 
@@ -190,14 +194,22 @@ export class GatewayCalendarRepository
       calendars,
       partialAvailability,
       canManageCalendarCollections,
-      roomCapabilities:
-        capabilitiesResult.status === 'fulfilled'
-          ? capabilitiesResult.value
-          : undefined,
+      roomCapabilities: roomCapabilities
+        ? this.toPublicRoomCapabilities(roomCapabilities)
+        : undefined,
     };
   }
 
   async getRoomCalendarCapabilities(): Promise<
+    CalendarRoomCapabilities | undefined
+  > {
+    const capabilities = await this.loadRawRoomCalendarCapabilities();
+    return capabilities
+      ? this.toPublicRoomCapabilities(capabilities)
+      : undefined;
+  }
+
+  private async loadRawRoomCalendarCapabilities(): Promise<
     CalendarRoomCapabilities | undefined
   > {
     if (this.options.getRoomCalendarCapabilities) {
@@ -226,6 +238,18 @@ export class GatewayCalendarRepository
       );
     }
     return { ...capabilities, roomId: context.roomId };
+  }
+
+  private toPublicRoomCapabilities(
+    capabilities: CalendarRoomCapabilities,
+  ): CalendarRoomCapabilities {
+    return {
+      ...capabilities,
+      // Calendar/event IDs exposed to the widget are target-scoped.
+      // Keep room capabilities in that same namespace so callers can compare
+      // them with projected event and calendar IDs.
+      calendarId: this.publicCalendarId('room', capabilities.calendarId),
+    };
   }
 
   async getPublicCalendarFeedPublication(

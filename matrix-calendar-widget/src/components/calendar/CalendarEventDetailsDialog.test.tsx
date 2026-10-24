@@ -147,9 +147,10 @@ function createWrapper(repository: InMemoryCalendarRepository) {
 function createRoomCalendarRepository(
   roomCapabilities?: CalendarRoomCapabilities,
 ) {
+  const publicRoomCalendarId = 'matrix-calendar-target://room/room-calendar';
   const roomCalendar: Calendar = {
     ...calendar,
-    id: 'room-calendar',
+    id: publicRoomCalendarId,
     name: 'Room calendar',
     operatorManaged: true,
   };
@@ -169,7 +170,10 @@ function createRoomCalendarRepository(
         calendars: [roomCalendar],
         partialAvailability: false,
         canManageCalendarCollections: false,
-        roomCapabilities,
+        roomCapabilities: roomCapabilities && {
+          ...roomCapabilities,
+          calendarId: publicRoomCalendarId,
+        },
       }),
       listEventsWithAvailability: vi.fn().mockResolvedValue({
         events: [roomEvent],
