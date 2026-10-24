@@ -5379,6 +5379,7 @@ async function createAndConfigureReminder(
         relativeAlarmReadback: false,
       },
     );
+    activeReminderFailureRecorded = true;
     throw new Error('The relative alarm did not reload from the event');
   }
   alarmObservation.alarmUiStep = 'complete';

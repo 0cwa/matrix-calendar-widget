@@ -379,7 +379,7 @@ describe('<CalendarEventDetailsDialog />', () => {
     expect(screen.getByLabelText('Matrix destination')).toBeInTheDocument();
     expect(
       screen.getByText(
-        /Supported timed Matrix reminders follow the saved alert; all-day events need a separate local time and time zone/,
+        /Supported timed Matrix reminders follow the saved CalDAV alert; all-day events need a separate local time and time zone/,
       ),
     ).toBeInTheDocument();
     expect(repository.listRoomReminderAlarmOptions).toHaveBeenCalledTimes(2);

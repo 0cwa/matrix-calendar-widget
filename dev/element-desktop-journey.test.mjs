@@ -3631,6 +3631,16 @@ test('records only bounded child and evidence classification enums', () => {
       'evidence_phase_record_diagnostic_rejected',
       'evidence_final_summary_cross_check_rejected',
     ]) {
+      const evidenceOrderDiagnostic =
+        evidenceFailureCode === 'evidence_phase_record_order_rejected'
+          ? {
+              reason: 'duplicate_phase',
+              recordIndex: 2,
+              recordCount: 2,
+              observedPhase: 'desktop-login',
+              expectedPhase: 'desktop-member-identity',
+            }
+          : undefined;
       writeDesktopJourneyParentDiagnostic({
         filePath: diagnosticFile,
         runnerTemp,
@@ -3638,6 +3648,9 @@ test('records only bounded child and evidence classification enums', () => {
         childExitStatus: 23,
         evidenceState: 'invalid',
         evidenceFailureCode,
+        ...(evidenceOrderDiagnostic === undefined
+          ? {}
+          : { evidenceOrderDiagnostic }),
       });
       assert.deepEqual(
         readDesktopJourneyParentDiagnostic({
@@ -3649,6 +3662,9 @@ test('records only bounded child and evidence classification enums', () => {
           childExitStatus: 23,
           evidenceState: 'invalid',
           evidenceFailureCode,
+          ...(evidenceOrderDiagnostic === undefined
+            ? {}
+            : { evidenceOrderDiagnostic }),
         },
       );
       unlinkSync(diagnosticFile);
@@ -3671,6 +3687,32 @@ test('records only bounded child and evidence classification enums', () => {
         childExitStatus: 0,
         evidenceState: 'valid',
         evidenceFailureCode: 'json_parse_failed',
+      },
+      {
+        childOutcome: 'exited',
+        childExitStatus: 1,
+        evidenceState: 'invalid',
+        evidenceFailureCode: 'evidence_phase_record_order_rejected',
+        evidenceOrderDiagnostic: {
+          reason: 'duplicate_phase',
+          recordIndex: 2,
+          recordCount: 2,
+          observedPhase: 'private-phase',
+          expectedPhase: 'desktop-member-identity',
+        },
+      },
+      {
+        childOutcome: 'exited',
+        childExitStatus: 1,
+        evidenceState: 'invalid',
+        evidenceFailureCode: 'evidence_phase_record_order_rejected',
+        evidenceOrderDiagnostic: {
+          reason: 'private-evidence-sentinel',
+          recordIndex: 2,
+          recordCount: 2,
+          observedPhase: 'desktop-login',
+          expectedPhase: 'desktop-member-identity',
+        },
       },
     ]) {
       assert.throws(
@@ -3752,6 +3794,15 @@ test('classifies fixed evidence validation stages without exposing input', () =>
           '{"phase":"desktop-login","status":"passed"}\n' +
           '{"phase":"desktop-login","status":"passed"}',
         expected: 'evidence_phase_record_order_rejected',
+        details: {
+          evidenceOrderDiagnostic: {
+            reason: 'duplicate_phase',
+            recordIndex: 2,
+            recordCount: 2,
+            observedPhase: 'desktop-login',
+            expectedPhase: 'desktop-member-identity',
+          },
+        },
       },
       {
         input: JSON.stringify({
@@ -3770,7 +3821,7 @@ test('classifies fixed evidence validation stages without exposing input', () =>
       },
     ];
 
-    for (const { input, expected } of cases) {
+    for (const { input, expected, details = {} } of cases) {
       writeFileSync(filePath, `${input}\n`, { mode: 0o600 });
       assert.deepEqual(
         classifyDesktopJourneyEvidence({
@@ -3778,7 +3829,11 @@ test('classifies fixed evidence validation stages without exposing input', () =>
           runnerTemp,
           expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
         }),
-        { evidenceState: 'invalid', evidenceFailureCode: expected },
+        {
+          evidenceState: 'invalid',
+          evidenceFailureCode: expected,
+          ...details,
+        },
       );
     }
 
@@ -3850,7 +3905,7 @@ test('emits a sanitized unavailable summary when evidence validation fails', () 
     assert.doesNotMatch(result.stderr, new RegExp(privateSentinel, 'u'));
 
     const summary = JSON.parse(result.stdout);
-    assert.equal(summary.schemaVersion, 22);
+    assert.equal(summary.schemaVersion, 23);
     assert.equal(summary.sourceSha, DESKTOP_REFRESH_SOURCE_SHA);
     assert.equal(summary.status, 'unavailable');
     assert.equal(summary.desktopChildCompletion.outcome, 'unknown');
@@ -3865,12 +3920,90 @@ test('emits a sanitized unavailable summary when evidence validation fails', () 
   });
 });
 
-test('declares the schema-22 CLI parent diagnostic shape', () => {
+test('retains only bounded Desktop phase-order details for the safe summary', () => {
+  withTempDirectory((runnerTemp) => {
+    const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
+    writeFileSync(
+      filePath,
+      '{"phase":"desktop-login","status":"passed"}\n' +
+        '{"phase":"desktop-login","status":"passed"}\n',
+      { mode: 0o600 },
+    );
+    const classification = classifyDesktopJourneyEvidence({
+      filePath,
+      runnerTemp,
+      expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+    });
+    assert.deepEqual(classification, {
+      evidenceState: 'invalid',
+      evidenceFailureCode: 'evidence_phase_record_order_rejected',
+      evidenceOrderDiagnostic: {
+        reason: 'duplicate_phase',
+        recordIndex: 2,
+        recordCount: 2,
+        observedPhase: 'desktop-login',
+        expectedPhase: 'desktop-member-identity',
+      },
+    });
+    writeDesktopJourneyParentDiagnostic({
+      filePath: join(
+        runnerTemp,
+        'element-desktop-journey-parent-diagnostic.json',
+      ),
+      runnerTemp,
+      childOutcome: 'exited',
+      childExitStatus: 23,
+      ...classification,
+    });
+
+    const parentDiagnostic = readDesktopJourneyParentDiagnostic({
+      filePath: join(
+        runnerTemp,
+        'element-desktop-journey-parent-diagnostic.json',
+      ),
+      runnerTemp,
+    });
+    assert.deepEqual(parentDiagnostic, {
+      childOutcome: 'exited',
+      childExitStatus: 23,
+      evidenceState: 'invalid',
+      evidenceFailureCode: 'evidence_phase_record_order_rejected',
+      evidenceOrderDiagnostic: {
+        reason: 'duplicate_phase',
+        recordIndex: 2,
+        recordCount: 2,
+        observedPhase: 'desktop-login',
+        expectedPhase: 'desktop-member-identity',
+      },
+    });
+    assert.doesNotMatch(
+      readFileSync(
+        join(runnerTemp, 'element-desktop-journey-parent-diagnostic.json'),
+        'utf8',
+      ),
+      /private-evidence-sentinel|private-phase/u,
+    );
+    let summaryError;
+    assert.throws(
+      () =>
+        summarizeDesktopJourneyEvidence(readFileSync(filePath, 'utf8'), {
+          expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+        }),
+      (error) => {
+        summaryError = error;
+        return true;
+      },
+    );
+    assert.equal(summaryError.code, 'evidence_phase_record_order_rejected');
+  });
+});
+
+test('declares the schema-23 CLI parent diagnostic shape', () => {
   const declarations = readFileSync(
     new URL('./element-desktop-journey.d.mts', import.meta.url),
     'utf8',
   );
-  assert.match(declarations, /schemaVersion: 22;/u);
+  assert.match(declarations, /schemaVersion: 23;/u);
   assert.match(declarations, /DesktopJourneyEvidenceFailureCode/u);
   assert.match(
     declarations,
@@ -3878,11 +4011,15 @@ test('declares the schema-22 CLI parent diagnostic shape', () => {
   );
   assert.match(
     declarations,
-    /evidenceFailureCode: DesktopJourneyEvidenceFailureCode/u,
+    /evidenceFailureCode: 'evidence_phase_record_order_rejected'/u,
   );
   assert.match(
     declarations,
     /desktopChildDiagnostic: DesktopChildDiagnostic;/u,
+  );
+  assert.match(
+    declarations,
+    /DesktopEvidenceOrderDiagnostic[\s\S]*?evidenceOrderDiagnostic: DesktopEvidenceOrderDiagnostic/u,
   );
   assert.match(declarations, /childExitStatus: number;/u);
   assert.match(declarations, /childExitStatus: null;/u);
