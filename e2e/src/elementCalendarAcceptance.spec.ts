@@ -67,6 +67,7 @@ import {
   buildOrdinaryPerformanceSeedEnvironment,
   raceCalendarReadyOrIdentityPrompt,
 } from '../../dev/element-acceptance-performance.mjs';
+import { createPrivateUiCheckpointJournal } from '../../dev/element-acceptance-private-ui-checkpoints.mjs';
 import { classifyG6KeyboardFocusTarget } from '../../dev/element-g6-keyboard-focus.mjs';
 import {
   beginG6ResourceCreate,
@@ -10559,23 +10560,59 @@ function recordRuntimeVersions(chromiumVersion: string) {
   );
 }
 
+function requirePrivateUiCheckpointJournal<T>(journal: T | undefined): T {
+  if (journal === undefined) {
+    throw new Error('Private acceptance checkpoints are unavailable');
+  }
+  return journal;
+}
+
 if (process.env.ELEMENT_ACCEPTANCE_PRIVATE_UI === 'true') {
   test.describe('private calendar app acceptance', () => {
     test.use({ trace: 'off', video: 'off', screenshot: 'off' });
+
+    let privateUiJournal:
+      | ReturnType<typeof createPrivateUiCheckpointJournal>
+      | undefined;
+
+    test.beforeEach(() => {
+      const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
+      const sourceSha = process.env.ELEMENT_ACCEPTANCE_SOURCE_SHA;
+      if (process.env.ROOM_CALENDAR_PRINCIPAL_MODE !== 'bot-account') {
+        throw new Error('Private acceptance requires the normal bot profile');
+      }
+      if (!stageFile || !sourceSha) {
+        throw new Error('Private acceptance checkpoints are unavailable');
+      }
+      privateUiJournal = createPrivateUiCheckpointJournal({
+        stageFile,
+        sourceSha,
+        profile: 'normal-bot',
+      });
+    });
+
+    test.afterEach(async ({}, testInfo) => {
+      privateUiJournal?.finish(testInfo.status);
+      privateUiJournal = undefined;
+    });
 
     test('Element Web manages private app access and revokes CalDAV authorization', async ({
       browser,
     }) => {
       test.setTimeout(360_000);
-      fixture = readFixture();
-
-      const privateGatewayOriginMatches =
-        new URL(fixture.gatewayUrl).origin ===
-        PRIVATE_ACCEPTANCE_GATEWAY_ORIGIN;
-      expect(privateGatewayOriginMatches).toBe(true);
-
-      expect(privateTlsDirectoryMatchesRunnerTemp()).toBe(true);
-      const caCertificate = readPrivateAcceptanceCaCertificate();
+      const checkpoint = requirePrivateUiCheckpointJournal(privateUiJournal);
+      const caCertificate = await checkpoint.run(
+        'private-ui-fixture-ready',
+        () => {
+          fixture = readFixture();
+          const privateGatewayOriginMatches =
+            new URL(fixture.gatewayUrl).origin ===
+            PRIVATE_ACCEPTANCE_GATEWAY_ORIGIN;
+          expect(privateGatewayOriginMatches).toBe(true);
+          expect(privateTlsDirectoryMatchesRunnerTemp()).toBe(true);
+          return readPrivateAcceptanceCaCertificate();
+        },
+      );
 
       const allowedOrigins = new Set([
         new URL(fixture.elementUrl).origin,
@@ -10613,46 +10650,65 @@ if (process.env.ELEMENT_ACCEPTANCE_PRIVATE_UI === 'true') {
       };
 
       try {
-        const contextA = await makeContext();
-        const pageA = await authenticateInElement(
-          contextA,
-          fixture.users.memberA,
+        const { contextA, pageA } = await checkpoint.run(
+          'private-ui-member-a-auth',
+          async () => {
+            const contextA = await makeContext();
+            const pageA = await authenticateInElement(
+              contextA,
+              fixture.users.memberA,
+            );
+            return { contextA, pageA };
+          },
         );
-        const teamRoomA = await openFixtureRoom(
-          pageA,
-          fixture.roomName,
-          fixture.teamRoomId,
+        const teamRoomA = await checkpoint.run('private-ui-member-a-room', () =>
+          openFixtureRoom(pageA, fixture.roomName, fixture.teamRoomId),
         );
-        const frameA = await openCalendarWidget(teamRoomA, pageA, {
-          expectWidgetWarning: false,
-        });
+        const frameA = await checkpoint.run(
+          'private-ui-member-a-widget-ready',
+          () =>
+            openCalendarWidget(teamRoomA, pageA, {
+              expectWidgetWarning: false,
+            }),
+        );
         const privateClientButtonA = frameA.getByRole('button', {
           name: 'Calendar app access',
           exact: true,
         });
-        await expect(privateClientButtonA).toBeVisible();
         const initialListResponse = waitForPrivateClientResponse(pageA, 'GET');
-        await privateClientButtonA.click();
-        const dialogA = frameA.getByRole('dialog').last();
-        await expect(dialogA).toBeVisible();
-        expect((await initialListResponse).status()).toBe(200);
+        const dialogA = await checkpoint.run(
+          'private-ui-dialog-open',
+          async () => {
+            await expect(privateClientButtonA).toBeVisible();
+            await privateClientButtonA.click();
+            const dialog = frameA.getByRole('dialog').last();
+            await expect(dialog).toBeVisible();
+            return dialog;
+          },
+        );
+        await checkpoint.run('private-ui-initial-list', async () => {
+          const response = await initialListResponse;
+          expect(response.status()).toBe(200);
+        });
 
         const calendarPicker = dialogA.getByRole('combobox', {
           name: 'Calendar',
         });
-        await calendarPicker.click();
-        const targetCalendarOption = frameA.getByRole('option', {
-          name: 'Synthetic team calendar',
-          exact: true,
+        await checkpoint.run('private-ui-calendar-select', async () => {
+          await calendarPicker.click();
+          const targetCalendarOption = frameA.getByRole('option', {
+            name: 'Synthetic team calendar',
+            exact: true,
+          });
+          await expect(targetCalendarOption).toHaveCount(1);
+          expect(
+            await selectPrivateAcceptanceCalendar(
+              pageA,
+              calendarPicker,
+              targetCalendarOption,
+            ),
+          ).toBe(true);
         });
-        await expect(targetCalendarOption).toHaveCount(1);
-        expect(
-          await selectPrivateAcceptanceCalendar(
-            pageA,
-            calendarPicker,
-            targetCalendarOption,
-          ),
-        ).toBe(true);
 
         let publicFeedMutationCount = 0;
         pageA.on('request', (request) => {
@@ -10670,54 +10726,86 @@ if (process.env.ELEMENT_ACCEPTANCE_PRIVATE_UI === 'true') {
           }
         });
 
-        const createResponse = waitForPrivateClientResponse(pageA, 'POST');
-        await dialogA
-          .getByRole('button', { name: 'Create app access', exact: true })
-          .click();
-        const createdStatus = (await createResponse).status();
-        expect(createdStatus === 201).toBe(true);
+        const { credentialUrlText, credentialUrl, username, password } =
+          await checkpoint.run(
+            'private-ui-credential-issue-reveal',
+            async () => {
+              const createResponse = waitForPrivateClientResponse(
+                pageA,
+                'POST',
+              );
+              await dialogA
+                .getByRole('button', {
+                  name: 'Create app access',
+                  exact: true,
+                })
+                .click();
+              expect((await createResponse).status()).toBe(201);
 
-        const credentialUrlText = await dialogA
-          .getByRole('textbox', { name: 'CalDAV URL', exact: true })
-          .inputValue();
-        const credentialUrl = parsePrivateCredentialUrl(credentialUrlText);
-        const username = await dialogA
-          .getByRole('textbox', { name: 'Username', exact: true })
-          .inputValue();
-        const password = await dialogA
-          .getByRole('textbox', { name: 'App password', exact: true })
-          .inputValue();
-        expect(
-          privateCredentialsMatchGateway(username, password, credentialUrl),
-        ).toBe(true);
-        expect(publicFeedMutationCount).toBe(0);
+              const credentialUrlText = await dialogA
+                .getByRole('textbox', { name: 'CalDAV URL', exact: true })
+                .inputValue();
+              const credentialUrl =
+                parsePrivateCredentialUrl(credentialUrlText);
+              const username = await dialogA
+                .getByRole('textbox', { name: 'Username', exact: true })
+                .inputValue();
+              const password = await dialogA
+                .getByRole('textbox', { name: 'App password', exact: true })
+                .inputValue();
+              expect(
+                privateCredentialsMatchGateway(
+                  username,
+                  password,
+                  credentialUrl,
+                ),
+              ).toBe(true);
+              return { credentialUrlText, credentialUrl, username, password };
+            },
+          );
+        await checkpoint.run('private-ui-no-publication', () => {
+          expect(publicFeedMutationCount).toBe(0);
+        });
 
-        await expect(
-          dialogA.getByText('Status: Active', { exact: true }),
-        ).toBeVisible();
-        await dialogA
-          .getByRole('button', { name: 'Hide setup details', exact: true })
-          .click();
-        expect(await privateSetupDetailsAbsent(dialogA)).toBe(true);
+        await checkpoint.run('private-ui-credential-hide', async () => {
+          await expect(
+            dialogA.getByText('Status: Active', { exact: true }),
+          ).toBeVisible();
+          await dialogA
+            .getByRole('button', { name: 'Hide setup details', exact: true })
+            .click();
+          expect(await privateSetupDetailsAbsent(dialogA)).toBe(true);
+        });
 
-        const browserStorage = JSON.stringify(await contextA.storageState());
-        const appCredentialWasPersisted =
-          browserStorage.includes(username) ||
-          browserStorage.includes(password) ||
-          browserStorage.includes(credentialUrlText);
-        expect(appCredentialWasPersisted).toBe(false);
+        await checkpoint.run('private-ui-storage-check', async () => {
+          const browserStorage = JSON.stringify(await contextA.storageState());
+          const appCredentialWasPersisted =
+            browserStorage.includes(username) ||
+            browserStorage.includes(password) ||
+            browserStorage.includes(credentialUrlText);
+          expect(appCredentialWasPersisted).toBe(false);
+        });
 
-        await dialogA
-          .getByRole('button', { name: 'Close', exact: true })
-          .click();
-        const listedAfterReopen = waitForPrivateClientResponse(pageA, 'GET');
-        await privateClientButtonA.click();
-        const reopenedDialogA = frameA.getByRole('dialog').last();
-        expect((await listedAfterReopen).status()).toBe(200);
-        expect(await privateSetupDetailsAbsent(reopenedDialogA)).toBe(true);
-        await expect(
-          reopenedDialogA.getByText('Status: Active', { exact: true }),
-        ).toBeVisible();
+        const reopenedDialogA = await checkpoint.run(
+          'private-ui-list-reopen',
+          async () => {
+            await dialogA
+              .getByRole('button', { name: 'Close', exact: true })
+              .click();
+            const listedAfterReopen = waitForPrivateClientResponse(
+              pageA,
+              'GET',
+            );
+            await privateClientButtonA.click();
+            const dialog = frameA.getByRole('dialog').last();
+            expect((await listedAfterReopen).status()).toBe(200);
+            expect(await privateSetupDetailsAbsent(dialog)).toBe(true);
+            await expect(
+              dialog.getByText('Status: Active', { exact: true }),
+            ).toBeVisible();
+            return dialog;
+          },
+        );
 
         const principalUrl = new URL('../', credentialUrl);
         const collectionUrl = new URL(credentialUrl.href);
@@ -10761,64 +10849,111 @@ if (process.env.ELEMENT_ACCEPTANCE_PRIVATE_UI === 'true') {
           caCertificate,
         };
         try {
-          const principalDiscovery = await requestPrivateDav({
-            ...requestBase,
-            url: principalUrl,
-            method: 'PROPFIND',
-            headers: { depth: '0', 'content-type': 'application/xml' },
-            body: discoveryBody,
-          });
-          const collectionDiscovery = await requestPrivateDav({
-            ...requestBase,
-            url: collectionUrl,
-            method: 'PROPFIND',
-            headers: { depth: '1', 'content-type': 'application/xml' },
-            body: discoveryBody,
-          });
-          const createdResource = await requestPrivateDav({
-            ...requestBase,
-            url: resourceUrl,
-            method: 'PUT',
-            headers: {
-              'content-type': 'text/calendar; charset=utf-8',
-              'if-none-match': '*',
+          const principalDiscovery = await checkpoint.run(
+            'private-ui-dav-principal-discovery',
+            async () => {
+              const result = await requestPrivateDav({
+                ...requestBase,
+                url: principalUrl,
+                method: 'PROPFIND',
+                headers: { depth: '0', 'content-type': 'application/xml' },
+                body: discoveryBody,
+              });
+              expect(result.status).toBe(207);
+              return result;
             },
-            body: makeIcs(originalSummary),
-          });
-          expect(privateDavWriteSucceeded(createdResource)).toBe(true);
-          const readCreatedResource = await requestPrivateDav({
-            ...requestBase,
-            url: resourceUrl,
-            method: 'GET',
-            expectedText: `SUMMARY:${originalSummary}`,
-          });
-          expect(privateDavReadSucceeded(readCreatedResource)).toBe(true);
-          expect(isStrongPrivateDavEtag(readCreatedResource.etag)).toBe(true);
-          const updatedResource = await requestPrivateDav({
-            ...requestBase,
-            url: resourceUrl,
-            method: 'PUT',
-            headers: {
-              'content-type': 'text/calendar; charset=utf-8',
-              'if-match': privateDavReadEtagOrEmpty(readCreatedResource),
+          );
+          const collectionDiscovery = await checkpoint.run(
+            'private-ui-dav-collection-discovery',
+            async () => {
+              const result = await requestPrivateDav({
+                ...requestBase,
+                url: collectionUrl,
+                method: 'PROPFIND',
+                headers: { depth: '1', 'content-type': 'application/xml' },
+                body: discoveryBody,
+              });
+              expect(result.status).toBe(207);
+              return result;
             },
-            body: makeIcs(updatedSummary),
-          });
-          const readUpdatedResource = await requestPrivateDav({
-            ...requestBase,
-            url: resourceUrl,
-            method: 'GET',
-            expectedText: `SUMMARY:${updatedSummary}`,
-          });
-          const deletedResource = await requestPrivateDav({
-            ...requestBase,
-            url: resourceUrl,
-            method: 'DELETE',
-            headers: {
-              'if-match': privateDavReadEtagOrEmpty(readUpdatedResource),
+          );
+          const createdResource = await checkpoint.run(
+            'private-ui-dav-create',
+            async () => {
+              const result = await requestPrivateDav({
+                ...requestBase,
+                url: resourceUrl,
+                method: 'PUT',
+                headers: {
+                  'content-type': 'text/calendar; charset=utf-8',
+                  'if-none-match': '*',
+                },
+                body: makeIcs(originalSummary),
+              });
+              expect(privateDavWriteSucceeded(result)).toBe(true);
+              return result;
             },
-          });
-          expect(privateDavWriteSucceeded(deletedResource)).toBe(true);
+          );
+          const readCreatedResource = await checkpoint.run(
+            'private-ui-dav-read-created',
+            async () => {
+              const result = await requestPrivateDav({
+                ...requestBase,
+                url: resourceUrl,
+                method: 'GET',
+                expectedText: `SUMMARY:${originalSummary}`,
+              });
+              expect(privateDavReadSucceeded(result)).toBe(true);
+              expect(isStrongPrivateDavEtag(result.etag)).toBe(true);
+              return result;
+            },
+          );
+          const updatedResource = await checkpoint.run(
+            'private-ui-dav-update',
+            async () => {
+              const result = await requestPrivateDav({
+                ...requestBase,
+                url: resourceUrl,
+                method: 'PUT',
+                headers: {
+                  'content-type': 'text/calendar; charset=utf-8',
+                  'if-match': privateDavReadEtagOrEmpty(readCreatedResource),
+                },
+                body: makeIcs(updatedSummary),
+              });
+              expect(privateDavWriteSucceeded(result)).toBe(true);
+              return result;
+            },
+          );
+          const readUpdatedResource = await checkpoint.run(
+            'private-ui-dav-read-updated',
+            async () => {
+              const result = await requestPrivateDav({
+                ...requestBase,
+                url: resourceUrl,
+                method: 'GET',
+                expectedText: `SUMMARY:${updatedSummary}`,
+              });
+              expect(privateDavReadSucceeded(result)).toBe(true);
+              expect(isStrongPrivateDavEtag(result.etag)).toBe(true);
+              return result;
+            },
+          );
+          const deletedResource = await checkpoint.run(
+            'private-ui-dav-delete',
+            async () => {
+              const result = await requestPrivateDav({
+                ...requestBase,
+                url: resourceUrl,
+                method: 'DELETE',
+                headers: {
+                  'if-match': privateDavReadEtagOrEmpty(readUpdatedResource),
+                },
+              });
+              expect(privateDavWriteSucceeded(result)).toBe(true);
+              return result;
+            },
+          );
           expect(
             privateDavLifecycleSucceeded(
               principalDiscovery,
@@ -10833,93 +10968,123 @@ if (process.env.ELEMENT_ACCEPTANCE_PRIVATE_UI === 'true') {
         } finally {
           // This only deletes this random resource after verifying its UID and
           // current strong ETag. Cleanup failure never masks the test failure.
-          await bestEffortDeleteOwnedPrivateDavResource(
-            requestBase,
-            resourceUrl,
-            eventUid,
+          await checkpoint.run('private-ui-dav-cleanup', () =>
+            bestEffortDeleteOwnedPrivateDavResource(
+              requestBase,
+              resourceUrl,
+              eventUid,
+            ),
           );
         }
 
-        const memberBContext = await makeContext();
-        const memberBPage = await authenticateInElement(
-          memberBContext,
-          fixture.users.memberB,
+        const memberBPage = await checkpoint.run(
+          'private-ui-member-b-auth',
+          async () => {
+            const memberBContext = await makeContext();
+            return authenticateInElement(memberBContext, fixture.users.memberB);
+          },
         );
-        const memberBRoom = await openFixtureRoom(
-          memberBPage,
-          fixture.roomName,
-          fixture.teamRoomId,
+        const memberBRoom = await checkpoint.run(
+          'private-ui-member-b-room',
+          () =>
+            openFixtureRoom(memberBPage, fixture.roomName, fixture.teamRoomId),
         );
-        const memberBFrame = await openCalendarWidget(
-          memberBRoom,
-          memberBPage,
-          { expectWidgetWarning: true },
+        const memberBFrame = await checkpoint.run(
+          'private-ui-member-b-widget-ready',
+          () =>
+            openCalendarWidget(memberBRoom, memberBPage, {
+              expectWidgetWarning: true,
+            }),
         );
-        const memberBDialogList = waitForPrivateClientResponse(
-          memberBPage,
-          'GET',
-        );
-        await memberBFrame
-          .getByRole('button', {
-            name: 'Calendar app access',
-            exact: true,
-          })
-          .click();
-        const memberBDialog = memberBFrame.getByRole('dialog').last();
-        expect((await memberBDialogList).status()).toBe(403);
-        await expect(
-          memberBDialog.getByRole('button', {
-            name: 'Create app access',
-            exact: true,
-          }),
-        ).toHaveCount(0);
-
-        const outsiderContext = await makeContext();
-        const outsiderPage = await authenticateInElement(
-          outsiderContext,
-          fixture.users.outsider,
-        );
-        const outsiderRoom = await openFixtureRoom(
-          outsiderPage,
-          fixture.outsiderRoomName,
-          fixture.outsiderRoomId,
-        );
-        await openCalendarWidget(outsiderRoom, outsiderPage, {
-          expectWidgetWarning: false,
-          waitForCalendar: false,
-        });
-        const outsiderPrivateClientStatus =
-          await requestPrivateClientListStatus(
-            outsiderPage,
-            fixture.gatewayUrl,
-            fixture.teamRoomId,
-            fixture.calendarId,
+        await checkpoint.run('private-ui-member-b-deny', async () => {
+          const memberBDialogList = waitForPrivateClientResponse(
+            memberBPage,
+            'GET',
           );
-        expect(outsiderPrivateClientStatus).toBe(403);
-
-        const revokeResponse = waitForPrivateClientResponse(pageA, 'DELETE');
-        await reopenedDialogA
-          .getByRole('button', { name: 'Revoke', exact: true })
-          .click();
-        await reopenedDialogA
-          .getByRole('button', { name: 'Revoke access', exact: true })
-          .click();
-        expect((await revokeResponse).status()).toBe(200);
-        await expect(
-          reopenedDialogA.getByText('Status: Revoked', { exact: true }),
-        ).toBeVisible();
-
-        const davAfterRevoke = await requestPrivateDav({
-          ...requestBase,
-          url: resourceUrl,
-          method: 'GET',
+          await memberBFrame
+            .getByRole('button', {
+              name: 'Calendar app access',
+              exact: true,
+            })
+            .click();
+          const memberBDialog = memberBFrame.getByRole('dialog').last();
+          expect((await memberBDialogList).status()).toBe(403);
+          await expect(
+            memberBDialog.getByRole('button', {
+              name: 'Create app access',
+              exact: true,
+            }),
+          ).toHaveCount(0);
         });
-        expect(revokedPrivateDavCredentialDenied(davAfterRevoke)).toBe(true);
-        expect(blockedExternalRequests).toBe(0);
-      } finally {
-        await Promise.all(
-          contexts.map((context) => context.close().catch(() => undefined)),
+
+        const outsiderPage = await checkpoint.run(
+          'private-ui-outsider-auth',
+          async () => {
+            const outsiderContext = await makeContext();
+            return authenticateInElement(
+              outsiderContext,
+              fixture.users.outsider,
+            );
+          },
         );
+        const outsiderRoom = await checkpoint.run(
+          'private-ui-outsider-room',
+          () =>
+            openFixtureRoom(
+              outsiderPage,
+              fixture.outsiderRoomName,
+              fixture.outsiderRoomId,
+            ),
+        );
+        await checkpoint.run('private-ui-outsider-widget-ready', () =>
+          openCalendarWidget(outsiderRoom, outsiderPage, {
+            expectWidgetWarning: false,
+            waitForCalendar: false,
+          }),
+        );
+        await checkpoint.run('private-ui-outsider-deny', async () => {
+          const outsiderPrivateClientStatus =
+            await requestPrivateClientListStatus(
+              outsiderPage,
+              fixture.gatewayUrl,
+              fixture.teamRoomId,
+              fixture.calendarId,
+            );
+          expect(outsiderPrivateClientStatus).toBe(403);
+        });
+
+        await checkpoint.run('private-ui-revoke', async () => {
+          const revokeResponse = waitForPrivateClientResponse(pageA, 'DELETE');
+          await reopenedDialogA
+            .getByRole('button', { name: 'Revoke', exact: true })
+            .click();
+          await reopenedDialogA
+            .getByRole('button', { name: 'Revoke access', exact: true })
+            .click();
+          expect((await revokeResponse).status()).toBe(200);
+          await expect(
+            reopenedDialogA.getByText('Status: Revoked', { exact: true }),
+          ).toBeVisible();
+        });
+
+        await checkpoint.run('private-ui-dav-deny-after-revoke', async () => {
+          const davAfterRevoke = await requestPrivateDav({
+            ...requestBase,
+            url: resourceUrl,
+            method: 'GET',
+          });
+          expect(revokedPrivateDavCredentialDenied(davAfterRevoke)).toBe(true);
+        });
+        await checkpoint.run('private-ui-egress-check', async () => {
+          expect(blockedExternalRequests).toBe(0);
+          expect(publicFeedMutationCount).toBe(0);
+        });
+      } finally {
+        await checkpoint.run('private-ui-context-cleanup', async () => {
+          await Promise.all(
+            contexts.map((context) => context.close().catch(() => undefined)),
+          );
+        });
       }
     });
   });

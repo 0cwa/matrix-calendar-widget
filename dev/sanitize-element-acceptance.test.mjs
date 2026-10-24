@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import {
   classifyRadicaleStartupLogs,
@@ -8,6 +11,7 @@ import { roomContextObservationForPhase } from './element-room-context-observati
 import {
   formatSanitizerFailureSummary,
   sanitizeElementAcceptance,
+  summarizeElementAcceptanceFile,
 } from './sanitize-element-acceptance.mjs';
 
 const sourceSha = 'a'.repeat(40);
@@ -929,6 +933,149 @@ test('reports only an allowlisted rejection category and phase when a summary is
   }
   assert.equal(malformedRecord.category, 'invalid-stage-json');
   assert.equal(malformedRecord.phase, 'unknown');
+});
+
+test('sanitizes source-bound private UI checkpoints and preserves timeout status', () => {
+  const records = [
+    {
+      phase: 'private-ui-dav-read-created',
+      status: 'started',
+      sourceSha,
+      profile: 'normal-bot',
+    },
+    {
+      phase: 'private-ui-dav-read-created',
+      status: 'passed',
+      sourceSha,
+      profile: 'normal-bot',
+    },
+    {
+      phase: 'private-ui-dav-delete',
+      status: 'started',
+      sourceSha,
+      profile: 'normal-bot',
+    },
+    {
+      phase: 'private-ui-test-result',
+      status: 'failed',
+      sourceSha,
+      profile: 'normal-bot',
+      testStatus: 'timedOut',
+      lastEnteredPhase: 'private-ui-dav-delete',
+      lastCompletedPhase: 'private-ui-dav-read-created',
+      failurePhase: 'private-ui-dav-delete',
+    },
+  ];
+  const summary = sanitizeElementAcceptance(
+    records.map((record) => JSON.stringify(record)).join('\n'),
+    sourceSha,
+    { privateUiEnabled: true, profile: 'normal-bot' },
+  );
+
+  assert.match(
+    summary,
+    /phase=private-ui-dav-delete status=started profile=normal-bot/u,
+  );
+  assert.match(
+    summary,
+    /phase=private-ui-test-result status=failed profile=normal-bot test_status=timedOut last_entered=private-ui-dav-delete last_completed=private-ui-dav-read-created failure_phase=private-ui-dav-delete/u,
+  );
+  assert.doesNotMatch(summary, /password|credential|https?:\/\//u);
+
+  const failedRecords = [
+    {
+      phase: 'private-ui-dav-create',
+      status: 'started',
+      sourceSha,
+      profile: 'normal-bot',
+    },
+    {
+      phase: 'private-ui-dav-create',
+      status: 'failed',
+      sourceSha,
+      profile: 'normal-bot',
+    },
+    {
+      phase: 'private-ui-test-result',
+      status: 'failed',
+      sourceSha,
+      profile: 'normal-bot',
+      testStatus: 'failed',
+      lastEnteredPhase: 'private-ui-dav-create',
+      lastCompletedPhase: null,
+      failurePhase: 'private-ui-dav-create',
+    },
+  ];
+  const failedSummary = sanitizeElementAcceptance(
+    failedRecords.map((record) => JSON.stringify(record)).join('\n'),
+    sourceSha,
+    { privateUiEnabled: true, profile: 'normal-bot' },
+  );
+  assert.match(
+    failedSummary,
+    /phase=private-ui-test-result status=failed profile=normal-bot test_status=failed last_entered=private-ui-dav-create last_completed=none failure_phase=private-ui-dav-create/u,
+  );
+});
+
+test('rejects private checkpoints unless their source, profile, schema, and mode match', () => {
+  const base = {
+    phase: 'private-ui-dav-create',
+    status: 'started',
+    sourceSha,
+    profile: 'normal-bot',
+  };
+  const invalidRecords = [
+    { ...base, sourceSha: 'c'.repeat(40) },
+    { ...base, profile: 'appservice' },
+    { ...base, unknownPrivateField: 'private-sentinel-value' },
+    { ...base, phase: 'private-ui-unknown-phase' },
+  ];
+
+  for (const record of invalidRecords) {
+    let failure;
+    try {
+      sanitizeElementAcceptance(JSON.stringify(record), sourceSha, {
+        privateUiEnabled: true,
+        profile: 'normal-bot',
+      });
+    } catch (error) {
+      failure = error;
+    }
+    assert.equal(failure?.category, 'invalid-stage-record');
+    const safeFailure = formatSanitizerFailureSummary(failure, sourceSha);
+    assert.doesNotMatch(safeFailure, /private-sentinel-value|appservice/u);
+  }
+
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(JSON.stringify(base), sourceSha, {
+        privateUiEnabled: false,
+        profile: 'normal-bot',
+      }),
+    /invalid element acceptance summary/u,
+  );
+});
+
+test('reports a missing stage file without echoing its path or private values', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'private-ui-summary-'));
+  const missingStageFile = join(directory, 'private-sentinel-stage.jsonl');
+  try {
+    const result = summarizeElementAcceptanceFile(missingStageFile, sourceSha, {
+      privateUiEnabled: true,
+      profile: 'normal-bot',
+    });
+    assert.equal(result.available, false);
+    assert.equal(
+      result.summary,
+      `element-acceptance source_sha=${sourceSha}\nphase=summary status=unavailable category=summary-unavailable rejected_phase=unknown\n`,
+    );
+    assert.doesNotMatch(
+      result.summary,
+      /private-sentinel-stage|password|credential|https?:\/\//u,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('emits bounded restore target failure details without raw command output', () => {
