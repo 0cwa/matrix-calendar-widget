@@ -2619,13 +2619,16 @@ function validReminderRecipientRosterObservation(record) {
     recipientRosterHttpStatus,
     recipientRosterOutcome,
     recipientRosterShapeValid,
+    recipientRosterTargetPresent,
   } = record;
   if (
     !Number.isInteger(recipientRosterCount) ||
     recipientRosterCount < 0 ||
     recipientRosterCount > MAX_REMINDER_RECIPIENT_ROSTER_COUNT ||
     !REMINDER_RECIPIENT_ROSTER_OUTCOMES.has(recipientRosterOutcome) ||
-    typeof recipientRosterShapeValid !== 'boolean'
+    typeof recipientRosterShapeValid !== 'boolean' ||
+    typeof recipientRosterTargetPresent !== 'boolean' ||
+    (recipientRosterOutcome !== 'nonempty' && recipientRosterTargetPresent)
   ) {
     return false;
   }
