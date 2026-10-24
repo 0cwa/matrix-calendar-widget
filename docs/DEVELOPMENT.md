@@ -108,7 +108,12 @@ yarn workspace e2e playwright install --with-deps chromium --only-shell
 yarn workspace e2e playwright test --config playwright.calendar.config.ts
 ```
 
-The browser installation may need system-package privileges on Linux. The [browser validation guide](./browser-calendar-validation.md) includes fixture type checks and explains the evidence limits.
+The browser installation may need system-package privileges on Linux. The [browser validation guide](./browser-calendar-validation.md) explains the evidence limits. When editing browser or screenshot-gallery fixtures, run their dedicated TypeScript projects; the workspace type-check does not include these fixture files:
+
+```bash
+yarn exec -- tsc -p matrix-calendar-widget/browser-tests/tsconfig.json --noEmit
+yarn exec -- tsc -p e2e/gallery-tests/tsconfig.json --noEmit
+```
 
 ## Run the repository gate
 
