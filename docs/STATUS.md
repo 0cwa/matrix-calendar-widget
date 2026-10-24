@@ -2,7 +2,7 @@
 
 [Documentation](./README.md) · [Roadmap](./ROADMAP.md) · [Implementation plan](./PLAN.md) · [Release evidence](./RELEASE.md)
 
-_Updated 21 October 2026 against `main` at [`817854b`](https://github.com/0cwa/matrix-calendar-widget/commit/817854b9d9662f400069501b2c527abdc306035b), after public-feed PR #385 merged. Open PRs are identified separately below._
+_Updated 24 October 2026 against `main` at [`817854b`](https://github.com/0cwa/matrix-calendar-widget/commit/817854b9d9662f400069501b2c527abdc306035b), after public-feed PR #385 merged. Open PRs are identified separately below._
 
 **Pre-alpha.** The calendar implementation is available for development. The controlled pilot targets Element Web/Desktop, one gateway replica, an independent project-owned Radicale store, and separate app-owned PostgreSQL state. A previously frozen source has application and image evidence; target configuration, live pilot use, backup/recovery, and wider rollout remain distinct gates in the [release ledger](./RELEASE.md).
 

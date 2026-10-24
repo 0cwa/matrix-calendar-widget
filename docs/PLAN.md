@@ -2,7 +2,7 @@
 
 [Documentation](./README.md) · [Current status](./STATUS.md) · [Roadmap](./ROADMAP.md) · [Release evidence](./RELEASE.md)
 
-_Reviewed 21 October 2026 against `main` at `817854b`._
+_Reviewed 24 October 2026 against `main` at `817854b`._
 
 This is the milestone and follow-up index. The [roadmap](./ROADMAP.md) owns priority and dependency order; the [release ledger](./RELEASE.md) owns source-specific qualification. Detailed checkboxes, test counts, and earlier attempts are preserved in the [implementation history](./archive/implementation-history.md). A completed source milestone does not certify a target deployment.
 
