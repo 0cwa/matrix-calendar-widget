@@ -130,6 +130,16 @@ function reminderConfigurationObservation(overrides = {}) {
     reminderTargetMatches: true,
     allDayScheduleMatches: true,
     narrowSidePanelSafe: true,
+    narrowViewportWithinRange: 'not-observed',
+    narrowDialogWithinViewport: 'not-observed',
+    narrowDialogContentsFit: 'not-observed',
+    narrowDocumentContentsFit: 'not-observed',
+    narrowViewportWidth: 'not-observed',
+    narrowDialogWidth: 'not-observed',
+    narrowDialogClientWidth: 'not-observed',
+    narrowDialogScrollWidth: 'not-observed',
+    narrowDocumentClientWidth: 'not-observed',
+    narrowDocumentScrollWidth: 'not-observed',
     reminderPutCount: 1,
     reminderPutStatus: 200,
     ...overrides,
@@ -1755,6 +1765,103 @@ test('projects selected-recipient success and failed selection steps', () => {
     prefillRosterSummary,
     /phase=reminder-room-configuration-enabled status=failed .*recipient_selection_step=member-prefill-roster-ready .*member_input_probe_installed=true .*put_count=0 .*member_listbox_count=0/u,
   );
+});
+
+test('sanitizes bounded post-PUT layout measurements and legacy observations', () => {
+  const postPutLayoutFailure = reminderConfigurationObservation({
+    status: 'failed',
+    reminderEnabled: false,
+    reminderStep: 'post-put-layout',
+    recipientKind: 'selected',
+    narrowSidePanelSafe: false,
+    narrowViewportWithinRange: false,
+    narrowDialogWithinViewport: true,
+    narrowDialogContentsFit: true,
+    narrowDocumentContentsFit: false,
+    narrowViewportWidth: 448,
+    narrowDialogWidth: 447.5,
+    narrowDialogClientWidth: 448,
+    narrowDialogScrollWidth: 448,
+    narrowDocumentClientWidth: 448,
+    narrowDocumentScrollWidth: 451,
+  });
+  delete postPutLayoutFailure.count;
+
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(postPutLayoutFailure),
+    sourceSha,
+  );
+  assert.match(summary, /reminder_step=post-put-layout/u);
+  assert.match(
+    summary,
+    /narrow_side_panel_safe=false .*narrow_viewport_within_range=false narrow_dialog_within_viewport=true narrow_dialog_contents_fit=true narrow_document_contents_fit=false narrow_viewport_width=448 narrow_dialog_width=447\.5 narrow_dialog_client_width=448 narrow_dialog_scroll_width=448 narrow_document_client_width=448 narrow_document_scroll_width=451/u,
+  );
+  assert.doesNotMatch(
+    summary,
+    /sensitive-title|private-dom-text|@member|Member B|<[^>]*>/u,
+  );
+
+  const legacyFailure = { ...postPutLayoutFailure };
+  delete legacyFailure.narrowViewportWithinRange;
+  delete legacyFailure.narrowDialogWithinViewport;
+  delete legacyFailure.narrowDialogContentsFit;
+  delete legacyFailure.narrowDocumentContentsFit;
+  delete legacyFailure.narrowViewportWidth;
+  delete legacyFailure.narrowDialogWidth;
+  delete legacyFailure.narrowDialogClientWidth;
+  delete legacyFailure.narrowDialogScrollWidth;
+  delete legacyFailure.narrowDocumentClientWidth;
+  delete legacyFailure.narrowDocumentScrollWidth;
+  assert.match(
+    sanitizeElementAcceptance(JSON.stringify(legacyFailure), sourceSha),
+    /narrow_viewport_within_range=not-observed narrow_dialog_within_viewport=not-observed narrow_dialog_contents_fit=not-observed narrow_document_contents_fit=not-observed narrow_viewport_width=not-observed narrow_dialog_width=not-observed narrow_dialog_client_width=not-observed narrow_dialog_scroll_width=not-observed narrow_document_client_width=not-observed narrow_document_scroll_width=not-observed/u,
+  );
+
+  for (const invalidLayoutMeasurement of [
+    { narrowDialogWidth: -1 },
+    { narrowDocumentScrollWidth: 100_001 },
+    { narrowViewportWithinRange: 'sensitive-title' },
+    { narrowDialogClientWidth: 'private-dom-text' },
+  ]) {
+    let failure;
+    assert.throws(
+      () =>
+        sanitizeElementAcceptance(
+          JSON.stringify({
+            ...postPutLayoutFailure,
+            ...invalidLayoutMeasurement,
+          }),
+          sourceSha,
+        ),
+      (error) => {
+        failure = error;
+        return error.message === 'invalid element acceptance summary';
+      },
+    );
+    assert.doesNotMatch(
+      formatSanitizerFailureSummary(failure, sourceSha),
+      /sensitive-title|private-dom-text/u,
+    );
+  }
+
+  for (const inconsistentPostPutStep of [
+    { recipientKind: 'room' },
+    { reminderPutCount: 0 },
+    { reminderPutStatus: 503 },
+    { narrowSidePanelSafe: true },
+  ]) {
+    assert.throws(
+      () =>
+        sanitizeElementAcceptance(
+          JSON.stringify({
+            ...postPutLayoutFailure,
+            ...inconsistentPostPutStep,
+          }),
+          sourceSha,
+        ),
+      /invalid element acceptance summary/u,
+    );
+  }
 });
 
 test('requires selected-user Matrix mentions to exclude a room broadcast', () => {
