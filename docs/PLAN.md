@@ -42,6 +42,8 @@ Use the [recurrence and event decision index](./adrs/README.md#calendar-semantic
 
 **In progress:** selected-member and all-day Matrix reminder delivery in [PR #384](https://github.com/0cwa/matrix-calendar-widget/pull/384), under [#382](https://github.com/0cwa/matrix-calendar-widget/issues/382). The event-editor source now saves the canonical event before reopening Matrix settings against refreshed alarm options. Full acceptance and deployment qualification remain pending; do not count the open PR as completed baseline support. See [bot/setup guidance](./bot-calendar.md), [configuration](./configuration.md), and the [Matrix decision index](./adrs/README.md#matrix-identity-rooms-and-reminders).
 
+**Browser contract:** [#399](https://github.com/0cwa/matrix-calendar-widget/issues/399) adds a focused check that a room manager can search full Matrix IDs, keep the filtered option stable through a member-state update, and save the exact selected recipient through the real reminder control.
+
 ## M7 — Non-widget fallback
 
 **Implemented:** bounded `!calendar` commands and separately gated post-success room notices. [PR #383](https://github.com/0cwa/matrix-calendar-widget/pull/383) adds title-first replies, localized timing, and optional listing IDs. Source contracts cover real Matrix command delivery on synthetic services. Human acceptance in the configured pilot room remains separate. See [command syntax](./bot-calendar.md).
