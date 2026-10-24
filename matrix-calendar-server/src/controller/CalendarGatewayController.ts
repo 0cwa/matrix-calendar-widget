@@ -60,12 +60,10 @@ import {
   CalDavEventClient,
   CalDavEventResource,
   CalDavEventTransportError,
-  DEFAULT_CALDAV_EVENT_RESPONSE_MAX_BYTES,
   ICalendarEventCodec,
   ICalendarEventCodecError,
   MatrixOpenIdCalDavCredentialError,
   MatrixOpenIdCalDavCredentialProviderFactory,
-  MAX_FOLLOWING_RESOURCE_BYTES,
 } from '../caldav';
 import { isSafeSingleVeventSeries } from '../caldav/ICalendarDeletionSafety';
 import { MatrixOpenIdCredentialParam } from '../decorator/MatrixOpenIdCredentialParam';
@@ -83,6 +81,7 @@ import { MatrixRoomMembershipGuard } from '../guard/MatrixRoomMembershipGuard';
 import { IMatrixOpenIdCredential } from '../model/IMatrixOpenIdCredential';
 import { IUserContext } from '../model/IUserContext';
 import { calendarResourceIdFromHref } from '../service/CalendarCommandParser';
+import { updateCalendarEventConditionally } from '../service/CalendarEventUpdateOperation';
 import type { RoomCalendarBindingRegistry } from '../service/IRoomCalendarBindingRegistry';
 import { MatrixCalendarAuthorizationFactory } from '../service/MatrixCalendarAuthorization';
 import { RoomCalendarBindingError } from '../service/RoomCalendarBindingResolver';
@@ -918,48 +917,15 @@ export class CalendarGatewayController {
     return this.runCalDav(async () => {
       const client = this.eventClient(userContext, openIdCredential);
       const codec = new ICalendarEventCodec();
-      const current = await client.getEvent(normalizedEventId);
-      const encoded = codec
-        .parse(scope.calendarId, normalizedEventId, current.icalendar)
-        .applyPatch(patch ?? {});
-
-      if (
-        patch?.recurrence &&
-        'following' in patch.recurrence &&
-        Buffer.byteLength(encoded.icalendar, 'utf8') >
-          Math.min(
-            MAX_FOLLOWING_RESOURCE_BYTES,
-            this.appConfig.caldav_max_event_response_bytes ??
-              DEFAULT_CALDAV_EVENT_RESPONSE_MAX_BYTES,
-          )
-      ) {
-        throw new PayloadTooLargeException({
-          code: 'event-too-large',
-          message:
-            'This and following edit would exceed the supported calendar resource size.',
-        });
-      }
-
-      if (
-        encoded.icalendar === current.icalendar &&
-        etag === current.etag &&
-        (Object.prototype.hasOwnProperty.call(patch, 'conference') ||
-          Object.prototype.hasOwnProperty.call(patch, 'alarm') ||
-          Object.prototype.hasOwnProperty.call(patch, 'attachment') ||
-          (patch?.recurrence &&
-            ('occurrence' in patch.recurrence ||
-              'following' in patch.recurrence)))
-      ) {
-        return this.eventDto(codec, scope.calendarId, current);
-      }
-
-      await client.updateEvent(normalizedEventId, etag, encoded.icalendar);
-
-      return this.eventDto(
-        codec,
-        scope.calendarId,
-        await client.getEvent(normalizedEventId),
-      );
+      const result = await updateCalendarEventConditionally({
+        client,
+        calendarId: scope.calendarId,
+        resourceUrl: normalizedEventId,
+        expectedEtag: etag,
+        patch: patch ?? {},
+        maxResponseBytes: this.appConfig.caldav_max_event_response_bytes,
+      });
+      return this.eventDto(codec, scope.calendarId, result.resource);
     });
   }
 

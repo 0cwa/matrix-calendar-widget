@@ -30,12 +30,7 @@ import {
 } from '@matrix-calendar-widget/calendar';
 import { Injectable } from '@nestjs/common';
 import { UserID } from 'matrix-bot-sdk';
-import {
-  CalDavEventClient,
-  CalDavEventResource,
-  DEFAULT_CALDAV_EVENT_RESPONSE_MAX_BYTES,
-  MAX_FOLLOWING_RESOURCE_BYTES,
-} from '../caldav';
+import { CalDavEventClient, CalDavEventResource } from '../caldav';
 import { isSafeSingleVeventSeries } from '../caldav/ICalendarDeletionSafety';
 import {
   ICalendarEventCodec,
@@ -43,6 +38,10 @@ import {
 } from '../caldav/ICalendarEventCodec';
 import { MatrixOpenIdCalDavCredentialProvider } from '../caldav/MatrixOpenIdCalDavCredentialProvider';
 import { IMatrixOpenIdCredential } from '../model/IMatrixOpenIdCredential';
+import {
+  updateCalendarEventConditionally,
+  type CalendarEventUpdateOperationResult,
+} from './CalendarEventUpdateOperation';
 import type { RoomCalendarBindingRegistry } from './IRoomCalendarBindingRegistry';
 import {
   isSafeRoomCalendarServiceUserLocalpart,
@@ -238,13 +237,16 @@ export class RoomCalendarEventOperations {
     const eventUrl = collectionChildUrl(scope.collectionUrl, eventId);
     const etag = requireExpectedEtag(expectedEtag);
     const client = this.client(scope.servicePrincipal);
-    const codec = new ICalendarEventCodec();
-    const current = await client.getEvent(eventUrl);
-    let encoded;
+    let update: CalendarEventUpdateOperationResult;
     try {
-      encoded = codec
-        .parse(scope.calendarId, eventUrl, current.icalendar)
-        .applyPatch(patch ?? {});
+      update = await updateCalendarEventConditionally({
+        client,
+        calendarId: scope.calendarId,
+        resourceUrl: eventUrl,
+        expectedEtag: etag,
+        patch: patch ?? {},
+        maxResponseBytes: this.options.maxResponseBytes,
+      });
     } catch (error) {
       if (
         error instanceof ICalendarEventCodecError &&
@@ -254,37 +256,10 @@ export class RoomCalendarEventOperations {
       }
       throw error;
     }
-
-    if (
-      patch?.recurrence &&
-      'following' in patch.recurrence &&
-      Buffer.byteLength(encoded.icalendar, 'utf8') >
-        Math.min(
-          MAX_FOLLOWING_RESOURCE_BYTES,
-          this.options.maxResponseBytes ??
-            DEFAULT_CALDAV_EVENT_RESPONSE_MAX_BYTES,
-        )
-    ) {
-      throw new RoomCalendarEventOperationError('event-too-large');
-    }
-
-    if (
-      encoded.icalendar === current.icalendar &&
-      etag === current.etag &&
-      (Object.prototype.hasOwnProperty.call(patch, 'conference') ||
-        Object.prototype.hasOwnProperty.call(patch, 'alarm') ||
-        Object.prototype.hasOwnProperty.call(patch, 'attachment') ||
-        (patch?.recurrence &&
-          ('occurrence' in patch.recurrence ||
-            'following' in patch.recurrence)))
-    ) {
-      return { ...resolveResource(scope.calendarId, current), noOp: true };
-    }
-
-    // Keep the caller's validator. A stale edit must fail with 412 rather
-    // than silently applying the patch to the newly read resource version.
-    await client.updateEvent(eventUrl, etag, encoded.icalendar);
-    return resolveResource(scope.calendarId, await client.getEvent(eventUrl));
+    return {
+      ...resolveResource(scope.calendarId, update.resource),
+      ...(update.noOp ? { noOp: true as const } : {}),
+    };
   }
 
   async deleteEvent(
