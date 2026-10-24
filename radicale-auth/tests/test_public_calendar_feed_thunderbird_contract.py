@@ -21,6 +21,8 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -133,6 +135,90 @@ class PublicCalendarFeedThunderbirdWorkerTests(unittest.TestCase):
         ):
             with self.assertRaises(self.worker.ContractFailure):
                 self.worker._state()
+
+    def test_public_provider_script_uses_marionette_function_arguments(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("Node.js is unavailable")
+
+        harness = r"""
+const fs = require("node:fs");
+const { script } = JSON.parse(fs.readFileSync(0, "utf8"));
+const url = "https://localhost:8443/v1/public-calendar-feeds/synthetic.envelope";
+const origin = "https://localhost:8443";
+const calendar = {
+  id: "public-feed-fixture",
+  type: "ics",
+  readOnly: false,
+  name: "",
+};
+let createdType = null;
+let createdUri = null;
+let registered = null;
+globalThis.cal = {
+  manager: {
+    createCalendar(type, uri) {
+      createdType = type;
+      createdUri = uri;
+      return calendar;
+    },
+    registerCalendar(value) {
+      registered = value;
+    },
+    getCalendarById(id) {
+      return registered && registered.id === id ? registered : null;
+    },
+  },
+};
+globalThis.Services = {
+  logins: { getAllLogins: () => [] },
+  io: { newURI: value => ({ spec: value }) },
+};
+globalThis.window = {};
+
+(async () => {
+  const result = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("callback missing")), 1000);
+    const done = value => {
+      clearTimeout(timer);
+      resolve(value);
+    };
+    try {
+      // Marionette invokes the async script as a function with script args
+      // followed by its completion callback; only Thunderbird APIs are mocked.
+      new Function(script).call(null, url, origin, done);
+    } catch (_error) {
+      clearTimeout(timer);
+      reject(new Error("provider script threw before completion"));
+    }
+  });
+  const passed = result && result.ok === true &&
+    result.providerTypeICS === true &&
+    result.readOnlyCalendar === true &&
+    result.storedCredentialsAbsent === true &&
+    createdType === "ics" && createdUri && createdUri.spec === url &&
+    calendar.readOnly === true && registered === calendar &&
+    window.__mcwPublicIcsCalendar === calendar;
+  process.stdout.write(JSON.stringify({ passed: passed === true }));
+  if (passed !== true) process.exitCode = 1;
+})().catch(() => {
+  process.stdout.write(JSON.stringify({ passed: false }));
+  process.exitCode = 1;
+});
+"""
+        completed = subprocess.run(
+            [node, "-e", harness],
+            input=json.dumps({"script": self.worker.CREATE_PUBLIC_ICS}),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout=5,
+        )
+        self.assertEqual(completed.returncode, 0)
+        self.assertEqual(json.loads(completed.stdout), {"passed": True})
 
     def test_native_timeout_budget_matches_the_worker_and_fixture_deadlines(
         self,
