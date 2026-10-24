@@ -44,6 +44,8 @@ Use the [recurrence and event decision index](./adrs/README.md#calendar-semantic
 
 **Browser contract:** [#399](https://github.com/0cwa/matrix-calendar-widget/issues/399) adds a focused check that a room manager can search full Matrix IDs, keep the filtered option stable through a member-state update, and save the exact selected recipient through the real reminder control.
 
+**Roster completeness:** [#401](https://github.com/0cwa/matrix-calendar-widget/issues/401) adds a manager-authorized gateway roster read so selected recipients remain available when an Element host has an empty or partial member cache. The roster response improves picker options; current membership is still enforced when saving and delivering reminders. See [ADR047](./adrs/adr047-authoritative-reminder-recipient-roster.md).
+
 ## M7 — Non-widget fallback
 
 **Implemented:** bounded `!calendar` commands and separately gated post-success room notices. [PR #383](https://github.com/0cwa/matrix-calendar-widget/pull/383) adds title-first replies, localized timing, and optional listing IDs. Source contracts cover real Matrix command delivery on synthetic services. Human acceptance in the configured pilot room remains separate. See [command syntax](./bot-calendar.md).

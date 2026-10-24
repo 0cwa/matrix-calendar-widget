@@ -65,6 +65,7 @@ export {
   type CalendarRoomReminderAllDaySchedule,
   type CalendarRoomReminderConfiguration,
   type CalendarRoomReminderIdentity,
+  type CalendarRoomReminderRecipient,
   type CalendarRoomReminderRepository,
   type CalendarRoomReminderTarget,
 } from './CalendarRoomReminderRepository';

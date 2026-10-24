@@ -24,7 +24,7 @@ The [user guide](./user-guide.md) explains the supported workflows. The [data mo
 
 ## In development and deferred
 
-- [PR #384](https://github.com/0cwa/matrix-calendar-widget/pull/384) is open at this snapshot: selected joined-member reminder targets, explicit all-day delivery schedules, and combined alarm/reminder controls. These are not shipped features of the baseline above.
+- [PR #384](https://github.com/0cwa/matrix-calendar-widget/pull/384) is open at this snapshot: selected joined-member reminder targets, explicit all-day delivery schedules, and combined alarm/reminder controls. These are not shipped features of the baseline above. [Issue #401](https://github.com/0cwa/matrix-calendar-widget/issues/401) tracks completing the selected-member picker from the gateway's current joined-member roster when an Element cache is empty or partial; save and delivery still recheck current membership.
 - [Issue #382](https://github.com/0cwa/matrix-calendar-widget/issues/382) tracks remaining subscription/reminder/bot work. Public feeds and readable bot replies have merged; private external CalDAV read/write credentials remain open.
 - [Issue #386](https://github.com/0cwa/matrix-calendar-widget/issues/386) tracks appservice-mode packaged Desktop room navigation on the public-feed source. The normal-bot acceptance job passed on that source; the appservice failure is not silently reclassified as a pass.
 - [Issue #5](https://github.com/0cwa/matrix-calendar-widget/issues/5) retains collection timezone work; [#6](https://github.com/0cwa/matrix-calendar-widget/issues/6) retains broader recurrence and cross-client interoperability.

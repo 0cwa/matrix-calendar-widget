@@ -56,6 +56,7 @@ describe('RoomReminderConfigurationService', () => {
   let getConfiguration: jest.Mock;
   let deleteConfiguration: jest.Mock;
   let getJoinedRoomMembers: jest.Mock;
+  let getJoinedRoomRecipients: jest.Mock;
   let getPowerLevels: jest.Mock;
   let getRoomVersion: jest.Mock;
   let isRoomEncrypted: jest.Mock;
@@ -101,6 +102,9 @@ describe('RoomReminderConfigurationService', () => {
     } as unknown as RoomReminderStore;
 
     getJoinedRoomMembers = jest.fn().mockResolvedValue([actor]);
+    getJoinedRoomRecipients = jest
+      .fn()
+      .mockResolvedValue([{ userId: actor, displayName: 'Alice' }]);
     getPowerLevels = jest.fn().mockResolvedValue({
       users: { [actor]: 100 },
       events: { 'io.github.0cwa.matrix-calendar.manage': 50 },
@@ -109,6 +113,7 @@ describe('RoomReminderConfigurationService', () => {
     isRoomEncrypted = jest.fn().mockResolvedValue(false);
     const matrixState = {
       getJoinedRoomMembers,
+      getJoinedRoomRecipients,
       getPowerLevels,
       getRoomVersion,
       isRoomEncrypted,
@@ -171,6 +176,135 @@ describe('RoomReminderConfigurationService', () => {
     ]);
     expect(JSON.stringify(result)).not.toContain('private');
     expect(result.nextCursor).toBeDefined();
+  });
+
+  it('returns only the bound room recipient DTO after manager authorization', async () => {
+    getJoinedRoomRecipients.mockResolvedValue([
+      {
+        userId: actor,
+        displayName: '  Alice\nExample  ',
+        avatarUrl: 'mxc://private-avatar',
+        extra: 'private profile field',
+      },
+      {
+        userId: '@bob:example.test',
+        displayName: null,
+        avatarUrl: 'mxc://private-avatar',
+      },
+    ]);
+    const resolveBinding = jest.spyOn(bindingRegistry, 'resolve');
+
+    const result = await service.listRecipients(actor, roomId);
+
+    expect(result).toEqual({
+      recipients: [
+        { userId: actor, displayName: 'Alice Example' },
+        { userId: '@bob:example.test', displayName: null },
+      ],
+    });
+    expect(JSON.stringify(result)).not.toContain('avatar');
+    expect(JSON.stringify(result)).not.toContain('private profile');
+    expect(getJoinedRoomMembers).toHaveBeenCalledWith(roomId);
+    expect(resolveBinding).toHaveBeenCalledWith(roomId, undefined, undefined);
+    expect(getJoinedRoomRecipients).toHaveBeenCalledWith(roomId);
+    expect(forAuthorizedTarget).not.toHaveBeenCalled();
+    expect(getEventResource).not.toHaveBeenCalled();
+    expect(getJoinedRoomMembers.mock.invocationCallOrder[0]).toBeLessThan(
+      getJoinedRoomRecipients.mock.invocationCallOrder[0],
+    );
+    expect(getPowerLevels.mock.invocationCallOrder[0]).toBeLessThan(
+      getJoinedRoomRecipients.mock.invocationCallOrder[0],
+    );
+    expect(getRoomVersion.mock.invocationCallOrder[0]).toBeLessThan(
+      getJoinedRoomRecipients.mock.invocationCallOrder[0],
+    );
+    expect(resolveBinding.mock.invocationCallOrder[0]).toBeLessThan(
+      getJoinedRoomRecipients.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('denies an encrypted room before the dedicated recipient roster fetch', async () => {
+    isRoomEncrypted.mockResolvedValue(true);
+
+    await expect(service.listRecipients(actor, roomId)).rejects.toMatchObject({
+      status: 403,
+    });
+
+    expect(getJoinedRoomMembers).not.toHaveBeenCalled();
+    expect(getJoinedRoomRecipients).not.toHaveBeenCalled();
+  });
+
+  it('fails closed on an unknown encryption state before the roster fetch', async () => {
+    isRoomEncrypted.mockRejectedValue(
+      new Error('private encryption state response'),
+    );
+
+    await expect(service.listRecipients(actor, roomId)).rejects.toMatchObject({
+      status: 403,
+    });
+
+    expect(getJoinedRoomMembers).not.toHaveBeenCalled();
+    expect(getJoinedRoomRecipients).not.toHaveBeenCalled();
+  });
+
+  it('denies a non-manager before the dedicated recipient roster fetch', async () => {
+    getPowerLevels.mockResolvedValue({
+      users: { [actor]: 0 },
+      events: { 'io.github.0cwa.matrix-calendar.manage': 50 },
+    });
+
+    const resolveBinding = jest.spyOn(bindingRegistry, 'resolve');
+
+    await expect(service.listRecipients(actor, roomId)).rejects.toMatchObject({
+      status: 403,
+    });
+
+    expect(getJoinedRoomMembers).toHaveBeenCalledWith(roomId);
+    expect(getJoinedRoomRecipients).not.toHaveBeenCalled();
+    expect(resolveBinding).not.toHaveBeenCalled();
+  });
+
+  it('denies a non-member before the dedicated recipient roster fetch', async () => {
+    getJoinedRoomMembers.mockResolvedValue([]);
+
+    await expect(service.listRecipients(actor, roomId)).rejects.toMatchObject({
+      status: 403,
+    });
+
+    expect(getJoinedRoomMembers).toHaveBeenCalledWith(roomId);
+    expect(getPowerLevels).not.toHaveBeenCalled();
+    expect(getJoinedRoomRecipients).not.toHaveBeenCalled();
+  });
+
+  it('denies an unbound room before the dedicated recipient roster fetch', async () => {
+    const resolveBinding = jest
+      .spyOn(bindingRegistry, 'resolve')
+      .mockRejectedValue(new Error('private binding failure'));
+
+    await expect(service.listRecipients(actor, roomId)).rejects.toMatchObject({
+      status: 403,
+    });
+
+    expect(resolveBinding).toHaveBeenCalledWith(roomId, undefined, undefined);
+    expect(getJoinedRoomRecipients).not.toHaveBeenCalled();
+  });
+
+  it('returns a fixed unavailable error when the recipient transport fails', async () => {
+    getJoinedRoomRecipients.mockRejectedValue(
+      new Error('private Matrix homeserver response'),
+    );
+
+    await expect(service.listRecipients(actor, roomId)).rejects.toMatchObject({
+      status: 503,
+      response: {
+        code: 'room-reminder-configuration-unavailable',
+        message: 'Room reminder configuration is unavailable',
+      },
+    });
+
+    expect(getJoinedRoomRecipients).toHaveBeenCalledWith(roomId);
+    expect(forAuthorizedTarget).not.toHaveBeenCalled();
+    expect(getEventResource).not.toHaveBeenCalled();
   });
 
   it('does not read the store when a cursor belongs to another room', async () => {
@@ -286,9 +420,15 @@ describe('RoomReminderConfigurationService', () => {
           'https://dav.example.test/calendar/planning.ics',
         ),
       ).rejects.toMatchObject({ status: 403 });
+      await expect(service.listRecipients(actor, roomId)).rejects.toMatchObject(
+        {
+          status: 403,
+        },
+      );
 
-      expect(isRoomEncrypted).toHaveBeenCalledTimes(4);
+      expect(isRoomEncrypted).toHaveBeenCalledTimes(5);
       expect(getJoinedRoomMembers).not.toHaveBeenCalled();
+      expect(getJoinedRoomRecipients).not.toHaveBeenCalled();
       expect(forAuthorizedTarget).not.toHaveBeenCalled();
       expect(getEventResource).not.toHaveBeenCalled();
       expect(listConfigurationPage).not.toHaveBeenCalled();

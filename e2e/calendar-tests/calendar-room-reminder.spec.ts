@@ -89,6 +89,11 @@ test('room manager can search and save an exact Matrix reminder recipient while 
   await recipients.press('Enter');
   await expect(listbox).toBeHidden();
   await expect(dialog.locator('.MuiAutocomplete-tag')).toHaveText(['Alicia']);
+  await recipients.click();
+  await expect(
+    page.getByRole('option', { name: 'Robert', exact: true }),
+  ).toBeVisible();
+  await recipients.press('Escape');
   await dialog
     .getByRole('button', { name: 'Save Matrix destination', exact: true })
     .click();

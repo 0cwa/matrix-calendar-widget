@@ -102,6 +102,44 @@ describe('MatrixAppServiceReminderTransport', () => {
     expect(init?.redirect).toBe('manual');
   });
 
+  it('returns normalized joined-member labels without other profile fields', async () => {
+    const fetchMock = createFetchMock().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          joined: {
+            '@alice:example.test': {
+              display_name: '  Alice\nExample  ',
+              avatar_url: 'mxc://private-avatar',
+            },
+            '@bob:example.test': { display_name: '  ' },
+            '@carol:example.test': null,
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+
+    await expect(
+      createTransport(fetchMock).getJoinedRoomRecipients(roomId),
+    ).resolves.toEqual([
+      { userId: '@alice:example.test', displayName: 'Alice Example' },
+      { userId: '@bob:example.test', displayName: null },
+      { userId: '@carol:example.test', displayName: null },
+    ]);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(new URL(String(url)).pathname).toBe(
+      '/_matrix/client/v3/rooms/!team%3Aexample.test/joined_members',
+    );
+    expect(new URL(String(url)).searchParams.get('user_id')).toBe(senderUserId);
+    expect(new Headers(init?.headers).get('Authorization')).toBe(
+      `Bearer ${token}`,
+    );
+    expect(JSON.stringify(fetchMock.mock.calls)).not.toContain(
+      'private-avatar',
+    );
+  });
+
   it('retains the appservice-only constructor while reading the runtime-selected identity', async () => {
     const fetchMock = createFetchMock().mockResolvedValue(
       new Response(JSON.stringify({ joined: { [senderUserId]: {} } }), {
