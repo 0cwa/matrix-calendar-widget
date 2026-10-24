@@ -527,8 +527,24 @@ def _async_script(
         result = marionette.execute_async_script(script, script_args=args)
     except Exception as error:
         raise _marionette_failure(stage, error) from None
-    if not isinstance(result, dict) or type(result.get("ok")) is not bool:
-        raise ContractFailure(stage, "invalid_provider_result")
+    if not isinstance(result, dict):
+        error_class = "invalid_provider_result"
+        if stage == "post_revoke_provider_request":
+            error_class = (
+                "invalid_provider_result_none"
+                if result is None
+                else "invalid_provider_result_non_object"
+            )
+        raise ContractFailure(stage, error_class)
+    if "ok" not in result or type(result.get("ok")) is not bool:
+        error_class = "invalid_provider_result"
+        if stage == "post_revoke_provider_request":
+            error_class = (
+                "invalid_provider_result_missing_ok"
+                if "ok" not in result
+                else "invalid_provider_result_non_boolean_ok"
+            )
+        raise ContractFailure(stage, error_class)
     return result
 
 

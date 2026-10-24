@@ -210,6 +210,10 @@ FIXTURE_FAILURE_CLASSES = {
     "session_error",
     "other",
     "invalid_provider_result",
+    "invalid_provider_result_none",
+    "invalid_provider_result_non_object",
+    "invalid_provider_result_missing_ok",
+    "invalid_provider_result_non_boolean_ok",
     "calendar_mode_unavailable",
     "calendar_tab_not_open",
     "input_missing",
@@ -333,6 +337,14 @@ NATIVE_FAILURE_PAIRS = {
         "provider_create",
         "provider_delete",
         "post_revoke_provider_request",
+    }
+} | {
+    ("post_revoke_provider_request", error_class)
+    for error_class in {
+        "invalid_provider_result_none",
+        "invalid_provider_result_non_object",
+        "invalid_provider_result_missing_ok",
+        "invalid_provider_result_non_boolean_ok",
     }
 } | {
     ("calendar_tab_observation", "calendar_mode_unavailable"),
