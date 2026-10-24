@@ -183,7 +183,7 @@ except Exception as error:
 
 _set_contract_phase("callback_imports")
 try:
-    from matrix_calendar_radicale_auth.private_client_callback import (
+    from matrix_calendar_private_client_callback import (
         AUTH_PATH,
         REQUEST_SIGNATURE_HEADER,
         RESPONSE_SIGNATURE_HEADER,

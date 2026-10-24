@@ -21,6 +21,13 @@ CONTRACT_SCRIPT = (
     / "tests"
     / "private_client_caldav_contract.py"
 )
+RADICALE_DOCKERFILE = Path(__file__).parents[1] / "radicale-auth" / "Dockerfile"
+CALLBACK_MODULE_SOURCE = (
+    Path(__file__).parents[1]
+    / "radicale-auth"
+    / "src"
+    / "matrix_calendar_private_client_callback.py"
+)
 PRIVATE_CALDAV_REQUIREMENTS = Path(__file__).with_name(
     "thunderbird-private-caldav-requirements.txt"
 )
@@ -32,6 +39,18 @@ SPEC.loader.exec_module(SMOKE)
 
 
 class PrivateCalDavSmokeTests(unittest.TestCase):
+    def test_radicale_image_copies_dependency_light_callback_module(self) -> None:
+        dockerfile = RADICALE_DOCKERFILE.read_text(encoding="utf-8")
+        self.assertTrue(CALLBACK_MODULE_SOURCE.is_file())
+        self.assertIn(
+            "src/matrix_calendar_private_client_callback.py",
+            dockerfile,
+        )
+        self.assertIn(
+            "/opt/radicale-auth/src/matrix_calendar_private_client_callback.py",
+            dockerfile,
+        )
+
     def _make_yarn_hoisted_workspace(self, workspace: Path) -> Path:
         workspace.mkdir()
         (workspace / "package.json").write_text(
@@ -148,7 +167,7 @@ class PrivateCalDavSmokeTests(unittest.TestCase):
             ("caldav_imports", "import caldav"),
             (
                 "callback_imports",
-                "from matrix_calendar_radicale_auth.private_client_callback import",
+                "from matrix_calendar_private_client_callback import",
             ),
             (
                 "env_port_validation",
