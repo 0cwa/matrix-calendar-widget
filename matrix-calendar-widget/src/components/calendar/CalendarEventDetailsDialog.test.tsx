@@ -23,7 +23,6 @@ import {
 } from '@matrix-calendar-widget/calendar';
 import type { WidgetApi } from '@matrix-widget-toolkit/api';
 import { WidgetApiMockProvider } from '@matrix-widget-toolkit/react';
-import { createTheme, ThemeProvider } from '@mui/material';
 import {
   fireEvent,
   render,
@@ -42,6 +41,7 @@ import {
   type CalendarRoomCapabilities,
   type CalendarRoomReminderAlarmOption,
 } from '../../calendar';
+import { CalendarMuiThemeProvider } from '../common/CalendarMuiThemeProvider';
 import {
   CalendarEventDetailsDialog,
   formatCalendarEventTime,
@@ -149,24 +149,11 @@ function createWidgetModalPortalThemeWrapper(
   repository: InMemoryCalendarRepository,
 ) {
   const RepositoryWrapper = createWrapper(repository);
-  const widgetPortalContainer = () => document.documentElement;
-  const theme = createTheme({
-    components: {
-      MuiDialog: { defaultProps: { container: widgetPortalContainer } },
-      MuiMenu: { defaultProps: { container: widgetPortalContainer } },
-      MuiPopover: {
-        defaultProps: {
-          container: widgetPortalContainer,
-          slotProps: { root: { container: widgetPortalContainer } },
-        },
-      },
-    },
-  });
   return function ProductionThemeWrapper({ children }: PropsWithChildren<{}>) {
     return (
-      <ThemeProvider theme={theme}>
+      <CalendarMuiThemeProvider>
         <RepositoryWrapper>{children}</RepositoryWrapper>
-      </ThemeProvider>
+      </CalendarMuiThemeProvider>
     );
   };
 }
@@ -255,6 +242,8 @@ describe('<CalendarEventDetailsDialog />', () => {
       wrapper: createWidgetModalPortalThemeWrapper(repository),
     });
     const documentRoot = within(document.documentElement);
+    await documentRoot.findByRole('dialog', { name: roomEvent.title });
+    expect(document.body).not.toHaveAttribute('aria-hidden', 'true');
     await userEvent.click(
       await documentRoot.findByRole('button', { name: 'Reminder settings' }),
     );
