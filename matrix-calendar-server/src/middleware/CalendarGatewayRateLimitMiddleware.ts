@@ -15,6 +15,7 @@
  */
 
 import { NextFunction, Request, Response } from 'express';
+import { isPrivateCalendarClientDavPath } from '../service/private-client/PrivateCalendarClientPath';
 
 export const CALENDAR_GATEWAY_MAX_RATE_LIMIT_KEYS = 10_000;
 const CLEANUP_INTERVAL_MAX_MS = 10_000;
@@ -116,8 +117,10 @@ export class BoundedFixedWindowSourceRateLimiter {
 }
 
 export function isCalendarGatewayPath(path: string): boolean {
-  return /^\/v1\/(?:calendar(?:\/|$)|calendar-feeds(?:\/|$)|public-calendar-feeds(?:\/|$))/i.test(
-    path,
+  return (
+    /^\/v1\/(?:calendar(?:\/|$)|calendar-feeds(?:\/|$)|public-calendar-feeds(?:\/|$)|private-calendar-client-callback(?:\/|$))/i.test(
+      path,
+    ) || isPrivateCalendarClientDavPath(path)
   );
 }
 

@@ -15,9 +15,45 @@
  */
 
 import {
+  RadicalePublicFeedClient,
   RadicalePublicFeedError,
   readBoundedResponseBytes,
 } from './RadicalePublicFeedClient';
+
+describe('RadicalePublicFeedClient.listTokenShares', () => {
+  const credentials = {
+    getRequestHeaders: jest
+      .fn()
+      .mockResolvedValue({ Authorization: 'Basic synthetic' }),
+  };
+
+  it('returns a frozen empty list for Radicale’s exact empty not-found response', async () => {
+    const client = createClient({
+      ApiVersion: 1,
+      Lines: 0,
+      Status: 'not-found',
+      Content: [],
+    });
+
+    const shares = await client.listTokenShares('/alice/team/', credentials);
+
+    expect(shares).toEqual([]);
+    expect(Object.isFrozen(shares)).toBe(true);
+  });
+
+  it.each([
+    { Status: 'not-found' },
+    { Status: 'not-found', Content: [{}] },
+    { Status: 'not-found', Content: null },
+    { Status: 'success', Content: [{}] },
+  ])('rejects other list response shapes: %j', async (payload) => {
+    const client = createClient(payload);
+
+    await expect(
+      client.listTokenShares('/alice/team/', credentials),
+    ).rejects.toMatchObject({ code: 'invalid-response' });
+  });
+});
 
 describe('readBoundedResponseBytes', () => {
   it('preserves buffered bodies and accepts a body exactly at its limit', async () => {
@@ -68,4 +104,14 @@ function responseWithBody(
     body,
     headers: new Headers(headers),
   } as unknown as Response;
+}
+
+function createClient(payload: unknown): RadicalePublicFeedClient {
+  return new RadicalePublicFeedClient(
+    'https://radicale.example.test',
+    async () =>
+      new Response(JSON.stringify(payload), {
+        headers: { 'Content-Type': 'application/json' },
+      }),
+  );
 }

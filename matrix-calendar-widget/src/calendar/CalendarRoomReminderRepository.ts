@@ -25,8 +25,16 @@ export type CalendarRoomReminderAlarmOption = {
   eventUid: string;
   recurrenceId: string | null;
   alarmUid: string;
-  relatedTo: 'start' | 'end';
-  trigger: CalendarEventDuration;
+  timingType: 'timed' | 'all-day' | 'unsupported';
+  supported: boolean;
+  requiresAllDaySchedule: boolean;
+  unavailableReason?:
+    | 'unsupported-timezone'
+    | 'unsupported-event-timing'
+    | 'absolute-trigger'
+    | 'unsupported-trigger';
+  relatedTo?: 'start' | 'end';
+  trigger?: CalendarEventDuration;
   repeat?: {
     count: number;
     interval: CalendarEventDuration;
@@ -39,20 +47,49 @@ export type CalendarRoomReminderIdentity = {
   alarmUid: string;
 };
 
+export type CalendarRoomReminderRecipient = Readonly<{
+  userId: string;
+  displayName: string | null;
+}>;
+
+export type CalendarRoomReminderTarget =
+  | Readonly<{ kind: 'room' }>
+  | Readonly<{ kind: 'users'; userIds: readonly string[] }>;
+
+export type CalendarRoomReminderAllDaySchedule = Readonly<{
+  daysBefore: number;
+  localTime: string;
+  timezone: string;
+}>;
+
+export type CalendarRoomReminderConfiguration = CalendarRoomReminderIdentity &
+  Readonly<{
+    target: CalendarRoomReminderTarget;
+    allDaySchedule: CalendarRoomReminderAllDaySchedule | null;
+    revision: number;
+  }>;
+
 export interface CalendarRoomReminderRepository {
+  /** Complete current joined-member options for the bound room, when supported. */
+  listRoomReminderRecipients?(): Promise<CalendarRoomReminderRecipient[]>;
+
   listRoomReminderAlarmOptions(
     calendarId: CalendarId,
     eventId: CalendarEventId,
   ): Promise<CalendarRoomReminderAlarmOption[]>;
 
-  listRoomReminderConfigurations(): Promise<CalendarRoomReminderIdentity[]>;
+  listRoomReminderConfigurations(): Promise<
+    CalendarRoomReminderConfiguration[]
+  >;
 
   enableRoomReminder(
     calendarId: CalendarId,
     eventId: CalendarEventId,
     alarmUid: string,
     recurrenceId: string | null,
-  ): Promise<CalendarRoomReminderIdentity>;
+    target: CalendarRoomReminderTarget,
+    allDaySchedule: CalendarRoomReminderAllDaySchedule | null,
+  ): Promise<CalendarRoomReminderConfiguration>;
 
   disableRoomReminder(identity: CalendarRoomReminderIdentity): Promise<void>;
 }

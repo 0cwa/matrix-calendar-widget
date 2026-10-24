@@ -414,7 +414,7 @@ test('keeps the Desktop child timeout and nonzero failure gate unchanged', () =>
       },
     );
     assert.equal(captured.program, 'yarn');
-    assert.equal(captured.options.timeout, 165_000);
+    assert.equal(captured.options.timeout, 225_000);
     assert.equal(captured.options.stdio, 'ignore');
     assert.equal(captured.options.encoding, 'utf8');
     assert.equal(

@@ -2,7 +2,7 @@
 
 [Documentation](./README.md) · [Roadmap](./ROADMAP.md) · [Implementation plan](./PLAN.md) · [Release evidence](./RELEASE.md)
 
-_Updated 21 October 2026 against `main` at [`817854b`](https://github.com/0cwa/matrix-calendar-widget/commit/817854b9d9662f400069501b2c527abdc306035b), after public-feed PR #385 merged. Open PRs are identified separately below._
+_Updated 24 October 2026 against `main` at [`817854b`](https://github.com/0cwa/matrix-calendar-widget/commit/817854b9d9662f400069501b2c527abdc306035b), after public-feed PR #385 merged. Open PRs are identified separately below._
 
 **Pre-alpha.** The calendar implementation is available for development. The controlled pilot targets Element Web/Desktop, one gateway replica, an independent project-owned Radicale store, and separate app-owned PostgreSQL state. A previously frozen source has application and image evidence; target configuration, live pilot use, backup/recovery, and wider rollout remain distinct gates in the [release ledger](./RELEASE.md).
 
@@ -24,8 +24,9 @@ The [user guide](./user-guide.md) explains the supported workflows. The [data mo
 
 ## In development and deferred
 
-- [PR #384](https://github.com/0cwa/matrix-calendar-widget/pull/384) is open at this snapshot: selected joined-member reminder targets, explicit all-day delivery schedules, and combined alarm/reminder controls. These are not shipped features of the baseline above.
+- [PR #384](https://github.com/0cwa/matrix-calendar-widget/pull/384) is open at this snapshot: selected joined-member reminder targets, explicit all-day delivery schedules, and combined alarm/reminder controls. These are not shipped features of the baseline above. [Issue #401](https://github.com/0cwa/matrix-calendar-widget/issues/401) tracks completing the selected-member picker from the gateway's current joined-member roster when an Element cache is empty or partial; save and delivery still recheck current membership.
 - [Issue #382](https://github.com/0cwa/matrix-calendar-widget/issues/382) tracks remaining subscription/reminder/bot work. Public feeds and readable bot replies have merged; private external CalDAV read/write credentials remain open.
+- Private external CalDAV editing is in development on a dedicated source branch, not current `main`. The reviewed backend, isolated PostgreSQL and private Radicale contracts, integrated type/build/widget checks, and the combined map-plus-token public-feed Radicale contract pass locally at source `867ef236`. Same-database migration coexistence with reminder v4 and room bindings, actual desktop-app acceptance, and real Matrix-policy integration remain open. See the [branch validation record](./private-calendar-app-access-validation.md). Keep the capability default-off; this work does not authorize deployment.
 - [Issue #386](https://github.com/0cwa/matrix-calendar-widget/issues/386) tracks appservice-mode packaged Desktop room navigation on the public-feed source. The normal-bot acceptance job passed on that source; the appservice failure is not silently reclassified as a pass.
 - [Issue #5](https://github.com/0cwa/matrix-calendar-widget/issues/5) retains collection timezone work; [#6](https://github.com/0cwa/matrix-calendar-widget/issues/6) retains broader recurrence and cross-client interoperability.
 - Mobile/other-client certification, full-width/pinned layouts, broader capacity claims, and formal screen-reader certification remain outside the bounded pilot. Calendar/Radicale testing for the developing Android widget host belongs in [#372](https://github.com/0cwa/matrix-calendar-widget/issues/372).

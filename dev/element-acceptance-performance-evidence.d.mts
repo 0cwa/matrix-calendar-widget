@@ -69,6 +69,31 @@ export type PerformancePageErrorObservation =
         | 'case-cleanup';
     };
 
+export type SafePerformancePageErrorDetails = {
+  safeErrorName:
+    | 'Error'
+    | 'TypeError'
+    | 'ReferenceError'
+    | 'SyntaxError'
+    | 'RangeError'
+    | 'URIError'
+    | 'EvalError'
+    | 'AggregateError'
+    | 'DOMException'
+    | 'Other'
+    | 'unavailable';
+  safeErrorMessageClass:
+    | 'cannot-read-nullish-property'
+    | 'cannot-write-nullish-property'
+    | 'cannot-destructure-nullish-value'
+    | 'not-a-function'
+    | 'network-failure'
+    | 'react-minified-error'
+    | 'out-of-memory'
+    | 'other'
+    | 'unavailable';
+};
+
 export type PerformanceEndpoint =
   | 'context'
   | 'calendars'
@@ -141,6 +166,10 @@ export function classifyPerformancePageError(
   error: unknown,
   fixtureUrls: { elementUrl: string; widgetUrl: string },
 ): PerformancePageErrorClassification;
+
+export function safePerformancePageErrorDetails(
+  error: unknown,
+): SafePerformancePageErrorDetails;
 
 export function capturePerformancePageError(
   report: {

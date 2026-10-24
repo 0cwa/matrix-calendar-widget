@@ -888,8 +888,10 @@ async function provision() {
   addMask(bot.accessToken);
   const reminderBootstrapPassword = randomBytes(32).toString('base64url');
   const reminderAppPassword = randomBytes(32).toString('base64url');
+  const publicFeedSigningKey = randomBytes(32).toString('base64url');
   addMask(reminderBootstrapPassword);
   addMask(reminderAppPassword);
+  addMask(publicFeedSigningKey);
   const reminderDatabaseUrl =
     `postgresql://matrix_calendar_app:${reminderAppPassword}` +
     '@postgres:5432/matrix_calendar_test';
@@ -903,6 +905,8 @@ async function provision() {
     ELEMENT_ACCEPTANCE_REMINDER_DATABASE_URL: reminderDatabaseUrl,
     ELEMENT_ACCEPTANCE_REMINDER_RESTORE_DATABASE_URL:
       reminderRestoreDatabaseUrl,
+    MATRIX_CALENDAR_PUBLIC_FEED_ORIGIN: GATEWAY_URL,
+    MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY: publicFeedSigningKey,
     ELEMENT_ACCEPTANCE_RESTORE_VOLUME_NAME: `${requiredEnvironment('COMPOSE_PROJECT_NAME')}_radicale-restore`,
     ELEMENT_ACCEPTANCE_ROOM_BINDING: JSON.stringify([
       { roomId: rooms.teamRoomId, calendarId: CALENDAR_ID },

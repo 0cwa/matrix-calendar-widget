@@ -31,7 +31,7 @@ const recurrenceId = JSON.stringify([
 ]);
 
 describe('room reminder configuration request contract', () => {
-  it('accepts only the fields needed to configure a safe source selection', () => {
+  it('defaults legacy requests to room targeting and accepts explicit recipient and all-day metadata', () => {
     expect(
       parseReminderConfigurationUpsertInput({
         eventId: 'https://dav.example.test/calendar/planning.ics',
@@ -42,6 +42,38 @@ describe('room reminder configuration request contract', () => {
       eventId: 'https://dav.example.test/calendar/planning.ics',
       recurrenceId,
       alarmUid: 'reminder@example.test',
+      target: { kind: 'room' },
+      allDaySchedule: null,
+    });
+
+    expect(
+      parseReminderConfigurationUpsertInput({
+        eventId: 'https://dav.example.test/calendar/planning.ics',
+        recurrenceId: null,
+        alarmUid: 'reminder@example.test',
+        target: {
+          kind: 'users',
+          userIds: ['@bob:example.test', '@alice:example.test'],
+        },
+        allDaySchedule: {
+          daysBefore: 1,
+          localTime: '09:00',
+          timezone: 'Europe/Stockholm',
+        },
+      }),
+    ).toEqual({
+      eventId: 'https://dav.example.test/calendar/planning.ics',
+      recurrenceId: null,
+      alarmUid: 'reminder@example.test',
+      target: {
+        kind: 'users',
+        userIds: ['@alice:example.test', '@bob:example.test'],
+      },
+      allDaySchedule: {
+        daysBefore: 1,
+        localTime: '09:00',
+        timezone: 'Europe/Stockholm',
+      },
     });
 
     expect(
@@ -90,6 +122,51 @@ describe('room reminder configuration request contract', () => {
     },
   ])('rejects extra upsert field %#', (input) => {
     expect(() => parseReminderConfigurationUpsertInput(input)).toThrow();
+  });
+
+  it.each([
+    { kind: 'users', userIds: [] },
+    { kind: 'users', userIds: ['@alice:example.test', '@alice:example.test'] },
+    {
+      kind: 'users',
+      userIds: Array.from(
+        { length: 51 },
+        (_, index) => `@user${index}:example.test`,
+      ),
+    },
+    { kind: 'users', userIds: ['not-a-matrix-id'] },
+    { kind: 'room', userIds: ['@alice:example.test'] },
+    { kind: 'users', userIds: ['@alice:example.test'], extra: true },
+  ])('rejects malformed or oversized recipient target %#', (target) => {
+    expect(() =>
+      parseReminderConfigurationUpsertInput({
+        eventId: 'https://dav.example.test/calendar/planning.ics',
+        recurrenceId: null,
+        alarmUid: 'reminder@example.test',
+        target,
+      }),
+    ).toThrow();
+  });
+
+  it.each([
+    { daysBefore: -1, localTime: '09:00', timezone: 'Europe/Stockholm' },
+    { daysBefore: 1, localTime: '24:00', timezone: 'Europe/Stockholm' },
+    { daysBefore: 1, localTime: '09:00', timezone: 'UTC+11' },
+    {
+      daysBefore: 1,
+      localTime: '09:00',
+      timezone: 'Europe/Stockholm',
+      extra: true,
+    },
+  ])('rejects malformed all-day schedules %#', (allDaySchedule) => {
+    expect(() =>
+      parseReminderConfigurationUpsertInput({
+        eventId: 'https://dav.example.test/calendar/planning.ics',
+        recurrenceId: null,
+        alarmUid: 'reminder@example.test',
+        allDaySchedule,
+      }),
+    ).toThrow();
   });
 
   it.each([

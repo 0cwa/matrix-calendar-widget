@@ -24,6 +24,7 @@ const javascriptConfig = requireFromWorkspace('@eslint/js').configs.recommended;
 const toolingGlobals = Object.fromEntries(
   [
     'Buffer',
+    'AbortSignal',
     'Intl',
     'TextDecoder',
     'URL',

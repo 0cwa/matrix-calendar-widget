@@ -69,6 +69,7 @@ function projectionDiagnosticCounts(overrides = {}) {
 }
 
 function reminderConfigurationObservation(overrides = {}) {
+  const selectedRecipient = overrides.recipientKind === 'selected';
   return {
     phase: 'reminder-room-configuration-enabled',
     status: 'passed',
@@ -76,20 +77,95 @@ function reminderConfigurationObservation(overrides = {}) {
     count: 1,
     reminderEnabled: true,
     reminderStep: 'complete',
-    notifyButtonCount: 1,
-    notifyButtonVisible: true,
+    reminderSettingsButtonCount: 1,
+    reminderSettingsButtonVisible: true,
     reminderOptionsGetCount: 1,
     reminderOptionsGetStatus: 200,
     reminderConfigGetCount: 1,
     reminderConfigGetStatus: 200,
-    reminderEligibleOptionCount: 1,
-    reminderOptionCheckedBefore: false,
-    reminderOptionCheckAttempted: true,
+    recipientRosterGetCount: 1,
+    recipientRosterHttpStatus: 200,
+    recipientRosterCount: 1,
+    recipientRosterShapeValid: true,
+    recipientRosterOutcome: 'nonempty',
+    reminderDestinationControlCount: 1,
+    recipientKind: 'room',
+    recipientSelectionAttempted: true,
+    recipientSelectionStep: 'complete',
+    recipientOptionCount: 1,
+    memberInputProbeInstalled: selectedRecipient,
+    memberQueryMatchesTargetAfterFill: selectedRecipient,
+    memberQueryMatchesTargetAtOptionCount: selectedRecipient,
+    memberInputFocusedBeforeFill: selectedRecipient,
+    memberDocumentFocusedBeforeFill: selectedRecipient,
+    memberInputFocusedAfterFill: selectedRecipient,
+    memberDocumentFocusedAfterFill: selectedRecipient,
+    memberInputEventMatchedTarget: selectedRecipient,
+    memberInputBlurEventCount: 0,
+    memberInputSameNodeAfterFill: selectedRecipient,
+    memberListboxCount: selectedRecipient ? 1 : 0,
+    memberInputControlsUniqueListbox: selectedRecipient,
+    memberOptionCount: selectedRecipient ? 1 : 0,
+    memberOptionsContainingTargetIdCount: selectedRecipient ? 1 : 0,
+    selectedMemberTagCount: selectedRecipient ? 1 : 0,
+    selectedMemberKeyboardFlow: false,
+    reminderTargetMatches: true,
+    allDayScheduleMatches: true,
+    narrowSidePanelSafe: true,
     reminderPutCount: 1,
     reminderPutStatus: 200,
-    reminderOptionCheckedAfter: true,
     ...overrides,
   };
+}
+
+function reminderAlarmUiObservation(overrides = {}) {
+  return {
+    phase: 'reminder-alarm-ui-readback',
+    status: 'passed',
+    httpStatus: 200,
+    count: 1,
+    relativeAlarmReadback: true,
+    alarmUiStep: 'complete',
+    alarmUiPatchStatus: 200,
+    alarmUiRelativeAlarmReadback: true,
+    alarmUiAlarmToggleReadback: true,
+    alarmUiRelativeTriggerReadback: true,
+    alarmUiOffsetReadback: true,
+    alarmUiEditorClosed: true,
+    alarmUiDetailsClosed: true,
+    ...overrides,
+  };
+}
+
+function producerReminderAlarmUiObservation(overrides = {}) {
+  return {
+    alarmUiStep: 'event-row-visible',
+    alarmUiPatchStatus: 0,
+    alarmUiRelativeAlarmReadback: false,
+    alarmUiAlarmToggleReadback: false,
+    alarmUiRelativeTriggerReadback: false,
+    alarmUiOffsetReadback: false,
+    alarmUiEditorClosed: false,
+    alarmUiDetailsClosed: false,
+    ...overrides,
+  };
+}
+
+function serializeProducerReminderAlarmUiRecord(
+  status,
+  observation,
+  relativeAlarmReadback,
+) {
+  const httpStatus = observation.alarmUiPatchStatus || undefined;
+  const count = 1;
+  return JSON.stringify({
+    phase: 'reminder-alarm-ui-readback',
+    status,
+    ...(httpStatus === undefined ? {} : { httpStatus }),
+    ...(count === undefined ? {} : { count }),
+    ...observation,
+    relativeAlarmReadback,
+  });
 }
 
 function missingReminderOptionObservation() {
@@ -98,19 +174,44 @@ function missingReminderOptionObservation() {
     status: 'failed',
     httpStatus: 200,
     reminderEnabled: false,
-    reminderStep: 'eligible-option',
-    notifyButtonCount: 1,
-    notifyButtonVisible: true,
+    reminderStep: 'destination-control',
+    reminderSettingsButtonCount: 1,
+    reminderSettingsButtonVisible: true,
     reminderOptionsGetCount: 1,
     reminderOptionsGetStatus: 200,
     reminderConfigGetCount: 1,
     reminderConfigGetStatus: 200,
-    reminderEligibleOptionCount: 0,
-    reminderOptionCheckedBefore: false,
-    reminderOptionCheckAttempted: false,
+    recipientRosterGetCount: 0,
+    recipientRosterHttpStatus: 0,
+    recipientRosterCount: 0,
+    recipientRosterShapeValid: false,
+    recipientRosterOutcome: 'unobserved',
+    reminderDestinationControlCount: 0,
+    recipientKind: 'unknown',
+    recipientSelectionAttempted: false,
+    recipientSelectionStep: 'destination-clicked',
+    recipientOptionCount: 0,
+    memberInputProbeInstalled: false,
+    memberQueryMatchesTargetAfterFill: false,
+    memberQueryMatchesTargetAtOptionCount: false,
+    memberInputFocusedBeforeFill: false,
+    memberDocumentFocusedBeforeFill: false,
+    memberInputFocusedAfterFill: false,
+    memberDocumentFocusedAfterFill: false,
+    memberInputEventMatchedTarget: false,
+    memberInputBlurEventCount: 0,
+    memberInputSameNodeAfterFill: false,
+    memberListboxCount: 0,
+    memberInputControlsUniqueListbox: false,
+    memberOptionCount: 0,
+    memberOptionsContainingTargetIdCount: 0,
+    selectedMemberTagCount: 0,
+    selectedMemberKeyboardFlow: false,
+    reminderTargetMatches: false,
+    allDayScheduleMatches: false,
+    narrowSidePanelSafe: false,
     reminderPutCount: 0,
     reminderPutStatus: 0,
-    reminderOptionCheckedAfter: false,
   };
 }
 
@@ -335,6 +436,7 @@ test('summarizes reminder restore gates without exposing backup fingerprints or 
         status: 'passed',
         count: 1,
         attemptCount: 2,
+        configurationCount: 1,
         deliveryStateSent: true,
         deliveryClaimClear: true,
       }),
@@ -371,12 +473,12 @@ test('summarizes reminder restore gates without exposing backup fingerprints or 
       JSON.stringify({
         phase: 'restore-delivery-row',
         status: 'passed',
-        count: 1,
-        attemptCount: 2,
+        count: 3,
+        attemptCount: 3,
         deliveryStateSent: true,
         deliveryClaimClear: true,
         deliveryKeyUnchanged: true,
-        attemptCountUnchanged: true,
+        deliveryMetadataUnchanged: true,
       }),
     ].join('\n'),
     sourceSha,
@@ -390,9 +492,312 @@ test('summarizes reminder restore gates without exposing backup fingerprints or 
   );
   assert.match(
     summary,
-    /delivery_key_unchanged=true attempt_count_unchanged=true/u,
+    /delivery_key_unchanged=true delivery_metadata_unchanged=true/u,
+  );
+  assert.match(
+    summary,
+    /phase=reminder-delivery-snapshot status=passed count=1 configuration_count=1 delivery_state_sent=true delivery_claim_clear=true/u,
   );
   assert.doesNotMatch(summary, /b{64}|attempt_count=2/u);
+});
+
+test('accepts and projects the complete reminder producer stream for room and selected targets', () => {
+  const stage = (phase, status, details = {}) =>
+    JSON.stringify({ phase, status, ...details });
+  const records = [
+    JSON.stringify(reminderConfigurationObservation({ recipientKind: 'room' })),
+    stage('reminder-configuration-stored', 'started'),
+    stage('reminder-configuration-stored', 'passed', {
+      count: 1,
+      snapshotCompared: false,
+    }),
+    stage('reminder-delivery-snapshot', 'started'),
+    stage('reminder-delivery-snapshot', 'passed', {
+      count: 1,
+      attemptCount: 1,
+      deliveryStateSent: true,
+      deliveryClaimClear: true,
+      configurationCount: 1,
+    }),
+    stage('reminder-initial-delivery', 'passed', {
+      httpStatus: 200,
+      count: 1,
+      canaryDelivered: true,
+      roomMentioned: true,
+      selectedMemberMentioned: false,
+      targetMentioned: true,
+      expectedRoomRecipient: true,
+      expectedSelectedRecipient: false,
+      deliveredAfterDue: true,
+      allMarkersOnce: true,
+    }),
+    JSON.stringify(
+      reminderConfigurationObservation({
+        recipientKind: 'selected',
+        selectedMemberKeyboardFlow: true,
+      }),
+    ),
+    stage('reminder-configuration-stored', 'started'),
+    stage('reminder-configuration-stored', 'passed', {
+      count: 2,
+      snapshotCompared: true,
+    }),
+    stage('reminder-restart-delivery-row', 'started'),
+    stage('reminder-restart-delivery-row', 'passed', {
+      count: 2,
+      attemptCount: 2,
+      deliveryStateSent: true,
+      deliveryClaimClear: true,
+      deliveryKeyUnchanged: true,
+      deliveryMetadataUnchanged: true,
+    }),
+    stage('reminder-restart-scheduler-scan', 'passed', {
+      httpStatus: 200,
+      count: 2,
+      canaryDelivered: true,
+      roomMentioned: false,
+      selectedMemberMentioned: true,
+      targetMentioned: true,
+      expectedRoomRecipient: false,
+      expectedSelectedRecipient: true,
+      deliveredAfterDue: true,
+      allMarkersOnce: true,
+    }),
+    JSON.stringify(reminderConfigurationObservation({ recipientKind: 'room' })),
+    stage('reminder-configuration-stored', 'started'),
+    stage('reminder-configuration-stored', 'passed', {
+      count: 3,
+      snapshotCompared: true,
+    }),
+    stage('restore-delivery-row', 'started'),
+    stage('restore-delivery-row', 'passed', {
+      count: 3,
+      attemptCount: 3,
+      deliveryStateSent: true,
+      deliveryClaimClear: true,
+      deliveryKeyUnchanged: true,
+      deliveryMetadataUnchanged: true,
+    }),
+    stage('reminder-restore-scheduler-scan', 'passed', {
+      httpStatus: 200,
+      count: 3,
+      canaryDelivered: true,
+      roomMentioned: true,
+      selectedMemberMentioned: false,
+      targetMentioned: true,
+      expectedRoomRecipient: true,
+      expectedSelectedRecipient: false,
+      deliveredAfterDue: true,
+      allMarkersOnce: true,
+    }),
+  ];
+
+  const summary = sanitizeElementAcceptance(records.join('\n'), sourceSha);
+  assert.match(
+    summary,
+    /phase=reminder-delivery-snapshot status=passed count=1 configuration_count=1 delivery_state_sent=true delivery_claim_clear=true/u,
+  );
+  assert.match(
+    summary,
+    /phase=reminder-configuration-stored status=passed count=3 snapshot_compared=true/u,
+  );
+  assert.match(
+    summary,
+    /phase=reminder-restart-delivery-row status=passed count=2 delivery_state_sent=true delivery_claim_clear=true delivery_key_unchanged=true delivery_metadata_unchanged=true/u,
+  );
+  assert.match(
+    summary,
+    /phase=restore-delivery-row status=passed count=3 delivery_state_sent=true delivery_claim_clear=true delivery_key_unchanged=true delivery_metadata_unchanged=true/u,
+  );
+  assert.match(
+    summary,
+    /phase=reminder-restart-scheduler-scan status=passed http_status=200 count=2 canary_delivered=true room_mentioned=false selected_member_mentioned=true target_mentioned=true expected_room_recipient=false expected_selected_recipient=true delivered_after_due=true all_markers_once=true/u,
+  );
+  assert.match(
+    summary,
+    /phase=reminder-restore-scheduler-scan status=passed http_status=200 count=3 canary_delivered=true room_mentioned=true selected_member_mentioned=false target_mentioned=true expected_room_recipient=true expected_selected_recipient=false delivered_after_due=true all_markers_once=true/u,
+  );
+  assert.doesNotMatch(summary, /attempt_count=|delivery_key=/u);
+
+  const selectedTargetSummary = sanitizeElementAcceptance(
+    JSON.stringify(
+      reminderConfigurationObservation({
+        recipientKind: 'selected',
+        selectedMemberKeyboardFlow: true,
+      }),
+    ),
+    sourceSha,
+  );
+  assert.match(
+    selectedTargetSummary,
+    /recipient_kind=selected recipient_selection_attempted=true recipient_selection_step=complete recipient_option_count=1 member_input_probe_installed=true member_option_count=1 selected_member_tag_count=1 selected_member_keyboard_flow=true reminder_target_matches=true all_day_schedule_matches=true narrow_side_panel_safe=true/u,
+  );
+});
+
+test('closes reminder producer records while preserving bounded failure rows', () => {
+  for (const record of [
+    {
+      phase: 'reminder-delivery-snapshot',
+      status: 'passed',
+      count: 1,
+      attemptCount: 1,
+      deliveryStateSent: true,
+      deliveryClaimClear: true,
+    },
+    {
+      phase: 'reminder-delivery-snapshot',
+      status: 'passed',
+      count: 1,
+      attemptCount: 1,
+      deliveryStateSent: true,
+      deliveryClaimClear: true,
+      configurationCount: 0,
+    },
+    {
+      phase: 'reminder-delivery-snapshot',
+      status: 'passed',
+      count: 1,
+      attemptCount: 1,
+      deliveryStateSent: true,
+      deliveryClaimClear: true,
+      configurationCount: 1,
+      schemaVersionMatches: true,
+    },
+    {
+      phase: 'reminder-restart-delivery-row',
+      status: 'passed',
+      count: 2,
+      attemptCount: 2,
+      deliveryStateSent: true,
+      deliveryClaimClear: true,
+      deliveryKeyUnchanged: true,
+    },
+    {
+      phase: 'reminder-restart-delivery-row',
+      status: 'passed',
+      count: 2,
+      attemptCount: 2,
+      deliveryStateSent: true,
+      deliveryClaimClear: true,
+      deliveryKeyUnchanged: true,
+      deliveryMetadataUnchanged: false,
+    },
+    {
+      phase: 'restore-delivery-row',
+      status: 'passed',
+      count: 3,
+      attemptCount: 3,
+      deliveryStateSent: true,
+      deliveryClaimClear: true,
+      deliveryKeyUnchanged: true,
+      deliveryMetadataUnchanged: true,
+      attemptCountUnchanged: true,
+    },
+    {
+      phase: 'restore-delivery-row',
+      status: 'passed',
+      count: 2,
+      attemptCount: 3,
+      deliveryStateSent: true,
+      deliveryClaimClear: true,
+      deliveryKeyUnchanged: true,
+      deliveryMetadataUnchanged: true,
+    },
+    {
+      phase: 'reminder-restart-delivery-row',
+      status: 'passed',
+      count: 2,
+      attemptCount: 2,
+      deliveryStateSent: true,
+      deliveryClaimClear: true,
+      deliveryKeyUnchanged: true,
+      deliveryMetadataUnchanged: true,
+      privateField: 'must-not-pass',
+    },
+  ]) {
+    assert.throws(
+      () => sanitizeElementAcceptance(JSON.stringify(record), sourceSha),
+      /invalid element acceptance summary/u,
+    );
+  }
+
+  const failedSnapshot = sanitizeElementAcceptance(
+    [
+      JSON.stringify({
+        phase: 'reminder-delivery-snapshot',
+        status: 'started',
+      }),
+      JSON.stringify({
+        phase: 'reminder-delivery-snapshot',
+        status: 'failed',
+        schemaVersionMatches: false,
+      }),
+    ].join('\n'),
+    sourceSha,
+  );
+  assert.match(
+    failedSnapshot,
+    /phase=reminder-delivery-snapshot status=failed schema_version_matches=false/u,
+  );
+
+  const failedBackendSnapshot = sanitizeElementAcceptance(
+    [
+      JSON.stringify({
+        phase: 'reminder-delivery-snapshot',
+        status: 'started',
+      }),
+      JSON.stringify({
+        phase: 'reminder-delivery-snapshot',
+        status: 'failed',
+        processExitCode: 1,
+      }),
+    ].join('\n'),
+    sourceSha,
+  );
+  assert.match(
+    failedBackendSnapshot,
+    /phase=reminder-delivery-snapshot status=failed process_exit_code=1/u,
+  );
+
+  const failedRestart = sanitizeElementAcceptance(
+    [
+      JSON.stringify({
+        phase: 'reminder-restart-delivery-row',
+        status: 'started',
+      }),
+      JSON.stringify({
+        phase: 'reminder-restart-delivery-row',
+        status: 'failed',
+        count: 4,
+      }),
+    ].join('\n'),
+    sourceSha,
+  );
+  assert.match(
+    failedRestart,
+    /phase=reminder-restart-delivery-row status=failed count=4/u,
+  );
+
+  const failedRestoreComparison = sanitizeElementAcceptance(
+    [
+      JSON.stringify({ phase: 'restore-delivery-row', status: 'started' }),
+      JSON.stringify({
+        phase: 'restore-delivery-row',
+        status: 'failed',
+        count: 3,
+        attemptCount: 3,
+        deliveryStateSent: true,
+        deliveryClaimClear: true,
+        deliveryKeyUnchanged: true,
+        deliveryMetadataUnchanged: false,
+      }),
+    ].join('\n'),
+    sourceSha,
+  );
+  assert.match(
+    failedRestoreComparison,
+    /phase=restore-delivery-row status=failed count=3 delivery_state_sent=true delivery_claim_clear=true delivery_key_unchanged=true delivery_metadata_unchanged=false/u,
+  );
 });
 
 test('reports skipped Element only on a three-container restore quiescence', () => {
@@ -569,8 +974,13 @@ test('requires UI, Matrix delivery, and timeline evidence for reminder recovery'
       JSON.stringify(reminderConfigurationObservation()),
       JSON.stringify({
         phase: 'reminder-configuration-stored',
+        status: 'started',
+      }),
+      JSON.stringify({
+        phase: 'reminder-configuration-stored',
         status: 'passed',
         count: 1,
+        snapshotCompared: false,
       }),
       JSON.stringify({
         phase: 'reminder-event-created',
@@ -583,18 +993,15 @@ test('requires UI, Matrix delivery, and timeline evidence for reminder recovery'
         httpStatus: 201,
         count: 1,
       }),
-      JSON.stringify({
-        phase: 'reminder-alarm-ui-readback',
-        status: 'passed',
-        count: 1,
-        relativeAlarmReadback: true,
-      }),
+      JSON.stringify(reminderAlarmUiObservation()),
       JSON.stringify({
         phase: 'reminder-ui-readback',
         status: 'passed',
         count: 1,
         relativeAlarmReadback: true,
         reminderEnabled: true,
+        targetSettingsReadback: true,
+        allDayScheduleReadback: true,
       }),
       JSON.stringify({
         phase: 'reminder-initial-delivery',
@@ -603,6 +1010,10 @@ test('requires UI, Matrix delivery, and timeline evidence for reminder recovery'
         count: 1,
         canaryDelivered: true,
         roomMentioned: true,
+        selectedMemberMentioned: false,
+        targetMentioned: true,
+        expectedRoomRecipient: true,
+        expectedSelectedRecipient: false,
         deliveredAfterDue: true,
         allMarkersOnce: true,
       }),
@@ -620,6 +1031,10 @@ test('requires UI, Matrix delivery, and timeline evidence for reminder recovery'
         count: 2,
         canaryDelivered: true,
         roomMentioned: true,
+        selectedMemberMentioned: false,
+        targetMentioned: true,
+        expectedRoomRecipient: true,
+        expectedSelectedRecipient: false,
         deliveredAfterDue: true,
         allMarkersOnce: true,
       }),
@@ -644,6 +1059,10 @@ test('requires UI, Matrix delivery, and timeline evidence for reminder recovery'
         count: 3,
         canaryDelivered: true,
         roomMentioned: true,
+        selectedMemberMentioned: false,
+        targetMentioned: true,
+        expectedRoomRecipient: true,
+        expectedSelectedRecipient: false,
         deliveredAfterDue: true,
         allMarkersOnce: true,
       }),
@@ -673,11 +1092,19 @@ test('requires UI, Matrix delivery, and timeline evidence for reminder recovery'
   );
   assert.match(
     summary,
-    /phase=reminder-room-configuration-enabled status=passed reminder_step=complete notify_button_count=1 notify_button_visible=true options_get_count=1 options_http_status=200 configuration_get_count=1 configuration_http_status=200 eligible_option_count=1 option_checked_before=false option_check_attempted=true put_count=1 put_http_status=200 option_checked_after=true/u,
+    /phase=reminder-room-configuration-enabled status=passed reminder_step=complete reminder_settings_button_count=1 reminder_settings_button_visible=true options_get_count=1 options_http_status=200 configuration_get_count=1 configuration_http_status=200 recipient_roster_get_count=1 recipient_roster_http_status=200 recipient_roster_count=1 recipient_roster_shape_valid=true recipient_roster_outcome=nonempty destination_control_count=1 recipient_kind=room recipient_selection_attempted=true recipient_selection_step=complete recipient_option_count=1 member_input_probe_installed=false member_option_count=0 selected_member_tag_count=0 selected_member_keyboard_flow=false reminder_target_matches=true all_day_schedule_matches=true narrow_side_panel_safe=true put_count=1 put_http_status=200/u,
   );
   assert.match(
     summary,
-    /phase=reminder-initial-delivery status=passed http_status=200 count=1 canary_delivered=true room_mentioned=true delivered_after_due=true all_markers_once=true/u,
+    /phase=reminder-alarm-ui-readback status=passed count=1 http_status=200 alarm_ui_step=complete alarm_ui_patch_status=200 relative_alarm_readback=true alarm_ui_relative_alarm_readback=true alarm_ui_alarm_toggle_readback=true alarm_ui_relative_trigger_readback=true alarm_ui_offset_readback=true alarm_ui_editor_closed=true alarm_ui_details_closed=true/u,
+  );
+  assert.match(
+    summary,
+    /phase=reminder-configuration-stored status=passed count=1 snapshot_compared=false/u,
+  );
+  assert.match(
+    summary,
+    /phase=reminder-initial-delivery status=passed http_status=200 count=1 canary_delivered=true room_mentioned=true selected_member_mentioned=false target_mentioned=true expected_room_recipient=true expected_selected_recipient=false delivered_after_due=true all_markers_once=true/u,
   );
   assert.match(
     summary,
@@ -750,6 +1177,36 @@ test('requires UI, Matrix delivery, and timeline evidence for reminder recovery'
     },
     reminderConfigurationObservation({ reminderOptionsGetStatus: 999 }),
     reminderConfigurationObservation({ reminderPutCount: 3 }),
+    reminderConfigurationObservation({
+      memberQueryMatchesTargetAfterFill: 'true',
+    }),
+    reminderConfigurationObservation({ memberListboxCount: 3 }),
+    reminderConfigurationObservation({
+      memberOptionsContainingTargetIdCount: 3,
+    }),
+    reminderConfigurationObservation({ unexpectedMemberText: 'private value' }),
+    reminderConfigurationObservation({
+      recipientKind: 'selected',
+      selectedMemberKeyboardFlow: false,
+    }),
+    reminderConfigurationObservation({
+      recipientKind: 'selected',
+      narrowSidePanelSafe: false,
+    }),
+    {
+      phase: 'reminder-initial-delivery',
+      status: 'passed',
+      httpStatus: 200,
+      count: 1,
+      canaryDelivered: true,
+      roomMentioned: true,
+      selectedMemberMentioned: false,
+      targetMentioned: true,
+      expectedRoomRecipient: false,
+      expectedSelectedRecipient: true,
+      deliveredAfterDue: true,
+      allMarkersOnce: true,
+    },
     reminderConfigurationObservation({ accessToken: 'private-test-token' }),
   ]) {
     assert.throws(
@@ -759,6 +1216,835 @@ test('requires UI, Matrix delivery, and timeline evidence for reminder recovery'
   }
 });
 
+test('sanitizes selected-member reminder configuration with keyboard and narrow-panel evidence', () => {
+  const summary = sanitizeElementAcceptance(
+    [
+      JSON.stringify(
+        reminderConfigurationObservation({
+          recipientKind: 'selected',
+          selectedMemberKeyboardFlow: true,
+        }),
+      ),
+      JSON.stringify({
+        phase: 'reminder-configuration-stored',
+        status: 'started',
+      }),
+      JSON.stringify({
+        phase: 'reminder-configuration-stored',
+        status: 'passed',
+        count: 1,
+        snapshotCompared: true,
+      }),
+    ].join('\n'),
+    sourceSha,
+  );
+
+  assert.match(
+    summary,
+    /recipient_kind=selected recipient_selection_attempted=true recipient_selection_step=complete recipient_option_count=1 member_input_probe_installed=true member_option_count=1 selected_member_tag_count=1 selected_member_keyboard_flow=true reminder_target_matches=true all_day_schedule_matches=true narrow_side_panel_safe=true/u,
+  );
+  assert.doesNotMatch(summary, /user_id|matrix_id|https?:/iu);
+  assert.match(
+    summary,
+    /phase=reminder-configuration-stored status=passed count=1 snapshot_compared=true/u,
+  );
+});
+
+test('validates reminder configuration snapshot rows without accepting target identifiers', () => {
+  for (const record of [
+    {
+      phase: 'reminder-configuration-stored',
+      status: 'passed',
+      count: 0,
+      snapshotCompared: true,
+    },
+    {
+      phase: 'reminder-configuration-stored',
+      status: 'passed',
+      count: 1,
+    },
+    {
+      phase: 'reminder-configuration-stored',
+      status: 'passed',
+      count: 1,
+      snapshotCompared: true,
+      metadataUnchanged: false,
+    },
+    {
+      phase: 'reminder-configuration-stored',
+      status: 'failed',
+      count: 1,
+      snapshotCompared: false,
+      metadataUnchanged: false,
+    },
+    {
+      phase: 'reminder-configuration-stored',
+      status: 'failed',
+      schemaVersionMatches: true,
+    },
+    {
+      phase: 'reminder-configuration-stored',
+      status: 'passed',
+      count: 1,
+      snapshotCompared: true,
+      privateTargetUserId: '@private-sentinel:example.test',
+    },
+  ]) {
+    assert.throws(
+      () => sanitizeElementAcceptance(JSON.stringify(record), sourceSha),
+      /invalid element acceptance summary/u,
+    );
+  }
+
+  const failedComparison = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'reminder-configuration-stored',
+      status: 'failed',
+      count: 1,
+      snapshotCompared: true,
+      metadataUnchanged: false,
+    }),
+    sourceSha,
+  );
+  assert.match(
+    failedComparison,
+    /phase=reminder-configuration-stored status=failed count=1 snapshot_compared=true metadata_unchanged=false/u,
+  );
+  const schemaMismatch = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'reminder-configuration-stored',
+      status: 'failed',
+      schemaVersionMatches: false,
+    }),
+    sourceSha,
+  );
+  assert.match(
+    schemaMismatch,
+    /phase=reminder-configuration-stored status=failed schema_version_matches=false/u,
+  );
+
+  let failure;
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify({
+          phase: 'reminder-configuration-stored',
+          status: 'passed',
+          count: 1,
+          snapshotCompared: true,
+          privateTargetUserId: '@private-sentinel:example.test',
+        }),
+        sourceSha,
+      ),
+    (error) => {
+      failure = error;
+      return true;
+    },
+  );
+  const safeFailure = formatSanitizerFailureSummary(failure, sourceSha);
+  assert.match(
+    safeFailure,
+    /status=unavailable category=invalid-stage-record rejected_phase=reminder-configuration-stored/u,
+  );
+  assert.doesNotMatch(safeFailure, /private-sentinel|@private/u);
+});
+
+test('projects failed reminder alarm editor steps and rejects private fields', () => {
+  const alarmFailure = reminderAlarmUiObservation({
+    status: 'failed',
+    relativeAlarmReadback: false,
+    alarmUiStep: 'readback-alarm-toggle',
+    alarmUiRelativeAlarmReadback: false,
+    alarmUiAlarmToggleReadback: false,
+    alarmUiRelativeTriggerReadback: false,
+    alarmUiOffsetReadback: false,
+    alarmUiEditorClosed: false,
+    alarmUiDetailsClosed: false,
+  });
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(alarmFailure),
+    sourceSha,
+  );
+  assert.match(
+    summary,
+    /phase=reminder-alarm-ui-readback status=failed count=1 http_status=200 alarm_ui_step=readback-alarm-toggle alarm_ui_patch_status=200 relative_alarm_readback=false alarm_ui_relative_alarm_readback=false alarm_ui_alarm_toggle_readback=false alarm_ui_relative_trigger_readback=false alarm_ui_offset_readback=false alarm_ui_editor_closed=false alarm_ui_details_closed=false/u,
+  );
+
+  let failure;
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify({ ...alarmFailure, rawError: 'private sentinel' }),
+        sourceSha,
+      ),
+    (error) => {
+      failure = error;
+      return true;
+    },
+  );
+  assert.equal(failure.category, 'invalid-stage-record');
+  const safeFailure = formatSanitizerFailureSummary(failure, sourceSha);
+  assert.match(
+    safeFailure,
+    /diagnostic_reason=record_shape record_index=1 record_index_capped=false record_count=1 record_count_capped=false missing_fields=none invalid_fields=none unknown_key_count=1 unknown_key_count_capped=false/u,
+  );
+  assert.doesNotMatch(safeFailure, /private sentinel|rawError/u);
+
+  const manyUnknownFields = Object.fromEntries(
+    Array.from({ length: 105 }, (_, index) => [
+      `private-key-${index}`,
+      'private value sentinel',
+    ]),
+  );
+  let cappedFailure;
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify({ ...alarmFailure, ...manyUnknownFields }),
+        sourceSha,
+      ),
+    (error) => {
+      cappedFailure = error;
+      return true;
+    },
+  );
+  const cappedSummary = formatSanitizerFailureSummary(cappedFailure, sourceSha);
+  assert.match(
+    cappedSummary,
+    /unknown_key_count=99 unknown_key_count_capped=true/u,
+  );
+  assert.doesNotMatch(cappedSummary, /private-key|private value sentinel/u);
+});
+
+test('diagnoses serialized reminder alarm rows without exposing private keys', () => {
+  const defaultPatchObservation = producerReminderAlarmUiObservation({
+    alarmUiStep: 'event-open',
+  });
+  const defaultPatchLine = serializeProducerReminderAlarmUiRecord(
+    'failed',
+    defaultPatchObservation,
+    false,
+  );
+  const defaultPatchRecord = JSON.parse(defaultPatchLine);
+  assert.equal(Object.hasOwn(defaultPatchRecord, 'httpStatus'), false);
+  assert.match(
+    sanitizeElementAcceptance(defaultPatchLine, sourceSha),
+    /phase=reminder-alarm-ui-readback status=failed count=1 alarm_ui_step=event-open alarm_ui_patch_status=0/u,
+  );
+
+  const detailedFailureObservation = producerReminderAlarmUiObservation({
+    alarmUiStep: 'readback-alarm-toggle',
+    alarmUiPatchStatus: 200,
+    alarmUiRelativeAlarmReadback: false,
+    alarmUiAlarmToggleReadback: false,
+    alarmUiRelativeTriggerReadback: false,
+    alarmUiOffsetReadback: false,
+    alarmUiEditorClosed: false,
+    alarmUiDetailsClosed: false,
+  });
+  const detailedFailureLine = serializeProducerReminderAlarmUiRecord(
+    'failed',
+    detailedFailureObservation,
+    false,
+  );
+  assert.match(
+    sanitizeElementAcceptance(detailedFailureLine, sourceSha),
+    /phase=reminder-alarm-ui-readback status=failed count=1 http_status=200 alarm_ui_step=readback-alarm-toggle/u,
+  );
+
+  const duplicateOuterFailureLine = JSON.stringify({
+    phase: 'reminder-alarm-ui-readback',
+    status: 'failed',
+    httpStatus: 200,
+  });
+  let duplicateFailure;
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        [detailedFailureLine, duplicateOuterFailureLine].join('\n'),
+        sourceSha,
+      ),
+    (error) => {
+      duplicateFailure = error;
+      return true;
+    },
+  );
+  assert.match(
+    formatSanitizerFailureSummary(duplicateFailure, sourceSha),
+    /status=unavailable category=invalid-stage-record rejected_phase=reminder-alarm-ui-readback diagnostic_reason=record_shape record_index=2 record_index_capped=false record_count=2 record_count_capped=false missing_fields=count,relativeAlarmReadback,alarmUiStep,alarmUiPatchStatus/u,
+  );
+
+  const undefinedFieldObservation = {
+    ...defaultPatchObservation,
+    alarmUiOffsetReadback: undefined,
+  };
+  const undefinedFieldLine = serializeProducerReminderAlarmUiRecord(
+    'failed',
+    undefinedFieldObservation,
+    false,
+  );
+  let undefinedFieldFailure;
+  assert.throws(
+    () => sanitizeElementAcceptance(undefinedFieldLine, sourceSha),
+    (error) => {
+      undefinedFieldFailure = error;
+      return true;
+    },
+  );
+  const undefinedFieldSummary = formatSanitizerFailureSummary(
+    undefinedFieldFailure,
+    sourceSha,
+  );
+  assert.match(
+    undefinedFieldSummary,
+    /diagnostic_reason=record_shape .*missing_fields=alarmUiOffsetReadback/u,
+  );
+  assert.doesNotMatch(undefinedFieldSummary, /undefined/u);
+
+  const nonFiniteObservation = {
+    ...defaultPatchObservation,
+    alarmUiPatchStatus: Number.NaN,
+  };
+  const nonFiniteLine = serializeProducerReminderAlarmUiRecord(
+    'failed',
+    nonFiniteObservation,
+    false,
+  );
+  assert.equal(JSON.parse(nonFiniteLine).alarmUiPatchStatus, null);
+  let nonFiniteFailure;
+  assert.throws(
+    () => sanitizeElementAcceptance(nonFiniteLine, sourceSha),
+    (error) => {
+      nonFiniteFailure = error;
+      return true;
+    },
+  );
+  assert.match(
+    formatSanitizerFailureSummary(nonFiniteFailure, sourceSha),
+    /diagnostic_reason=invalid_field_types .*invalid_fields=alarmUiPatchStatus:type/u,
+  );
+});
+
+test('projects selected-recipient success and failed selection steps', () => {
+  const selectedSuccess = reminderConfigurationObservation({
+    recipientKind: 'selected',
+    memberOptionCount: 1,
+    memberOptionsContainingTargetIdCount: 1,
+    memberListboxCount: 1,
+    memberInputControlsUniqueListbox: true,
+    memberInputFocusedBeforeFill: true,
+    memberDocumentFocusedBeforeFill: true,
+    memberInputFocusedAfterFill: false,
+    memberDocumentFocusedAfterFill: true,
+    memberInputEventMatchedTarget: true,
+    memberInputBlurEventCount: 1,
+    memberInputSameNodeAfterFill: false,
+    selectedMemberTagCount: 1,
+    selectedMemberKeyboardFlow: true,
+    narrowSidePanelSafe: true,
+  });
+  const successSummary = sanitizeElementAcceptance(
+    JSON.stringify(selectedSuccess),
+    sourceSha,
+  );
+  assert.match(
+    successSummary,
+    /phase=reminder-room-configuration-enabled status=passed reminder_step=complete reminder_settings_button_count=1 reminder_settings_button_visible=true options_get_count=1 options_http_status=200 configuration_get_count=1 configuration_http_status=200 recipient_roster_get_count=1 recipient_roster_http_status=200 recipient_roster_count=1 recipient_roster_shape_valid=true recipient_roster_outcome=nonempty destination_control_count=1 recipient_kind=selected recipient_selection_attempted=true recipient_selection_step=complete recipient_option_count=1 member_input_probe_installed=true member_option_count=1 selected_member_tag_count=1 selected_member_keyboard_flow=true reminder_target_matches=true all_day_schedule_matches=true narrow_side_panel_safe=true put_count=1 put_http_status=200 member_query_matches_target_after_fill=true member_query_matches_target_at_option_count=true member_input_focused_before_fill=true member_document_focused_before_fill=true member_input_focused_after_fill=false member_document_focused_after_fill=true member_input_event_matched_target=true member_input_blur_event_count=1 member_input_same_node_after_fill=false member_listbox_count=1 member_input_controls_unique_listbox=true member_options_containing_target_id_count=1/u,
+  );
+  for (const inconsistentObservation of [
+    { recipientSelectionStep: 'unrecognized-step' },
+    { memberInputProbeInstalled: 'true' },
+    { recipientOptionCount: 2 },
+    { memberOptionCount: 0 },
+    { recipientRosterOutcome: 'empty' },
+    { recipientRosterCount: 0 },
+    { recipientRosterShapeValid: false },
+    { memberInputControlsUniqueListbox: false },
+    { memberInputControlsUniqueListbox: 'true' },
+    { memberInputFocusedAfterFill: 'true' },
+    { memberInputBlurEventCount: 3 },
+    { selectedMemberTagCount: 2 },
+    { allDayScheduleMatches: false },
+  ]) {
+    assert.throws(
+      () =>
+        sanitizeElementAcceptance(
+          JSON.stringify({ ...selectedSuccess, ...inconsistentObservation }),
+          sourceSha,
+        ),
+      /invalid element acceptance summary/u,
+    );
+  }
+
+  const selectedFailure = reminderConfigurationObservation({
+    status: 'failed',
+    httpStatus: 200,
+    reminderEnabled: false,
+    reminderStep: 'recipient-selection',
+    recipientKind: 'selected',
+    recipientSelectionAttempted: true,
+    recipientSelectionStep: 'member-option-ready',
+    memberQueryMatchesTargetAfterFill: true,
+    memberQueryMatchesTargetAtOptionCount: true,
+    memberListboxCount: 1,
+    memberInputControlsUniqueListbox: true,
+    recipientOptionCount: 1,
+    memberOptionCount: 0,
+    memberOptionsContainingTargetIdCount: 0,
+    selectedMemberTagCount: 0,
+    selectedMemberKeyboardFlow: false,
+    reminderTargetMatches: false,
+    allDayScheduleMatches: false,
+    narrowSidePanelSafe: true,
+    reminderPutCount: 0,
+    reminderPutStatus: 0,
+  });
+  delete selectedFailure.count;
+  const failureSummary = sanitizeElementAcceptance(
+    JSON.stringify(selectedFailure),
+    sourceSha,
+  );
+  assert.match(
+    failureSummary,
+    /phase=reminder-room-configuration-enabled status=failed reminder_step=recipient-selection reminder_settings_button_count=1 reminder_settings_button_visible=true options_get_count=1 options_http_status=200 configuration_get_count=1 configuration_http_status=200 recipient_roster_get_count=1 recipient_roster_http_status=200 recipient_roster_count=1 recipient_roster_shape_valid=true recipient_roster_outcome=nonempty destination_control_count=1 recipient_kind=selected recipient_selection_attempted=true recipient_selection_step=member-option-ready recipient_option_count=1 member_input_probe_installed=true member_option_count=0 selected_member_tag_count=0 selected_member_keyboard_flow=false reminder_target_matches=false all_day_schedule_matches=false narrow_side_panel_safe=true put_count=0 put_http_status=0 member_query_matches_target_after_fill=true member_query_matches_target_at_option_count=true .*member_listbox_count=1 member_input_controls_unique_listbox=true member_options_containing_target_id_count=0/u,
+  );
+
+  const multipleMemberOptionsFailure = {
+    ...selectedFailure,
+    recipientSelectionStep: 'member-option-count-checked',
+    memberOptionCount: 2,
+  };
+  const multipleOptionsSummary = sanitizeElementAcceptance(
+    JSON.stringify(multipleMemberOptionsFailure),
+    sourceSha,
+  );
+  assert.match(
+    multipleOptionsSummary,
+    /phase=reminder-room-configuration-enabled status=failed .*recipient_selection_step=member-option-count-checked .*member_option_count=2 .*put_count=0/u,
+  );
+
+  const memberListboxAssociationFailure = {
+    ...selectedFailure,
+    recipientSelectionStep: 'member-listbox-ready',
+    memberListboxCount: 2,
+    memberInputControlsUniqueListbox: false,
+    memberOptionCount: 0,
+  };
+  const associationFailureSummary = sanitizeElementAcceptance(
+    JSON.stringify(memberListboxAssociationFailure),
+    sourceSha,
+  );
+  assert.match(
+    associationFailureSummary,
+    /phase=reminder-room-configuration-enabled status=failed .*recipient_selection_step=member-listbox-ready .*member_option_count=0 .*put_count=0 .*member_listbox_count=2 member_input_controls_unique_listbox=false/u,
+  );
+
+  const prefillRosterFailure = {
+    ...selectedFailure,
+    recipientSelectionStep: 'member-prefill-roster-ready',
+    memberInputProbeInstalled: true,
+    memberQueryMatchesTargetAfterFill: false,
+    memberQueryMatchesTargetAtOptionCount: false,
+    memberInputEventMatchedTarget: false,
+    memberInputSameNodeAfterFill: false,
+    memberInputFocusedBeforeFill: true,
+    memberListboxCount: 0,
+    memberOptionCount: 0,
+  };
+  const prefillRosterSummary = sanitizeElementAcceptance(
+    JSON.stringify(prefillRosterFailure),
+    sourceSha,
+  );
+  assert.match(
+    prefillRosterSummary,
+    /phase=reminder-room-configuration-enabled status=failed .*recipient_selection_step=member-prefill-roster-ready .*member_input_probe_installed=true .*put_count=0 .*member_listbox_count=0/u,
+  );
+});
+
+test('requires selected-user Matrix mentions to exclude a room broadcast', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'reminder-initial-delivery',
+      status: 'passed',
+      httpStatus: 200,
+      count: 1,
+      canaryDelivered: true,
+      roomMentioned: false,
+      selectedMemberMentioned: true,
+      targetMentioned: true,
+      expectedRoomRecipient: false,
+      expectedSelectedRecipient: true,
+      deliveredAfterDue: true,
+      allMarkersOnce: true,
+    }),
+    sourceSha,
+  );
+
+  assert.match(
+    summary,
+    /selected_member_mentioned=true target_mentioned=true expected_room_recipient=false expected_selected_recipient=true/u,
+  );
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify({
+          phase: 'reminder-initial-delivery',
+          status: 'passed',
+          httpStatus: 200,
+          count: 1,
+          canaryDelivered: true,
+          roomMentioned: true,
+          selectedMemberMentioned: false,
+          targetMentioned: true,
+          expectedRoomRecipient: false,
+          expectedSelectedRecipient: true,
+          deliveredAfterDue: true,
+          allMarkersOnce: true,
+        }),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+});
+
+test('sanitizes bounded joined-recipient response outcomes', () => {
+  const failedSelection = reminderConfigurationObservation({
+    status: 'failed',
+    reminderEnabled: false,
+    reminderStep: 'recipient-selection',
+    recipientKind: 'selected',
+    recipientSelectionAttempted: true,
+    recipientSelectionStep: 'member-prefill-roster-ready',
+    memberListboxCount: 0,
+    memberOptionCount: 0,
+    selectedMemberTagCount: 0,
+    reminderTargetMatches: false,
+    allDayScheduleMatches: false,
+    reminderPutCount: 0,
+    reminderPutStatus: 0,
+  });
+  delete failedSelection.count;
+
+  const observations = [
+    {
+      label: 'unobserved',
+      fields: {
+        recipientRosterGetCount: 0,
+        recipientRosterHttpStatus: 0,
+        recipientRosterCount: 0,
+        recipientRosterShapeValid: false,
+        recipientRosterOutcome: 'unobserved',
+      },
+    },
+    {
+      label: 'http_error',
+      fields: {
+        recipientRosterGetCount: 1,
+        recipientRosterHttpStatus: 503,
+        recipientRosterCount: 0,
+        recipientRosterShapeValid: false,
+        recipientRosterOutcome: 'http_error',
+      },
+    },
+    {
+      label: 'empty',
+      fields: {
+        recipientRosterGetCount: 1,
+        recipientRosterHttpStatus: 200,
+        recipientRosterCount: 0,
+        recipientRosterShapeValid: true,
+        recipientRosterOutcome: 'empty',
+      },
+    },
+    {
+      label: 'invalid_shape',
+      fields: {
+        recipientRosterGetCount: 1,
+        recipientRosterHttpStatus: 200,
+        recipientRosterCount: 1,
+        recipientRosterShapeValid: false,
+        recipientRosterOutcome: 'invalid_shape',
+      },
+    },
+    {
+      label: 'nonempty',
+      fields: {
+        recipientRosterGetCount: 1,
+        recipientRosterHttpStatus: 200,
+        recipientRosterCount: 1,
+        recipientRosterShapeValid: true,
+        recipientRosterOutcome: 'nonempty',
+      },
+    },
+  ];
+
+  for (const { label, fields } of observations) {
+    const summary = sanitizeElementAcceptance(
+      JSON.stringify({ ...failedSelection, ...fields }),
+      sourceSha,
+    );
+    assert.match(
+      summary,
+      new RegExp(`recipient_roster_outcome=${label}\\b`, 'u'),
+    );
+    assert.doesNotMatch(summary, /@|displayName|userId/u);
+  }
+
+  const roomModeWithoutRoster = sanitizeElementAcceptance(
+    JSON.stringify(
+      reminderConfigurationObservation({
+        recipientKind: 'room',
+        recipientRosterGetCount: 0,
+        recipientRosterHttpStatus: 0,
+        recipientRosterCount: 0,
+        recipientRosterShapeValid: false,
+        recipientRosterOutcome: 'unobserved',
+      }),
+    ),
+    sourceSha,
+  );
+  assert.match(roomModeWithoutRoster, /recipient_roster_outcome=unobserved/u);
+});
+
+test('sanitizes the manager-consented anonymous public feed lifecycle', () => {
+  const successfulObservation = {
+    phase: 'public-feed-browser-lifecycle',
+    status: 'passed',
+    httpStatus: 404,
+    publicFeedLifecycleStep: 'complete',
+    publicFeedSettingsEnabled: true,
+    publicFeedSettingsUnpublished: true,
+    publicFeedTargetCalendarMatches: true,
+    publicFeedManagementTargetMatches: true,
+    publicFeedConsentCheckboxCount: 1,
+    publicFeedConsentCheckboxVisible: true,
+    publicFeedConsentCheckboxChecked: true,
+    publicFeedPublishButtonCount: 1,
+    publicFeedPublishDisabledBeforeConsent: true,
+    publicFeedPublishDisabledAfterConsent: false,
+    publicFeedManagementGetStatus: 200,
+    publicFeedPublishStatus: 200,
+    publicFeedGetStatus: 200,
+    publicFeedHeadStatus: 200,
+    publicFeedUnpublishStatus: 200,
+    publicFeedRevokedGetStatus: 404,
+    publicFeedRevokedHeadStatus: 404,
+    publicConsentGateObserved: true,
+    publicManagerPublishSucceeded: true,
+    publicUrlOriginAndRouteMatch: true,
+    anonymousGetContainsCanonicalEvent: true,
+    anonymousHeadMatchesGet: true,
+    unpublishSucceeded: true,
+    anonymousGetDeniedAfterUnpublish: true,
+    anonymousHeadDeniedAfterUnpublish: true,
+  };
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(successfulObservation),
+    sourceSha,
+  );
+
+  assert.match(
+    summary,
+    /public_feed_lifecycle_step=complete public_feed_settings_enabled=true public_feed_settings_unpublished=true public_feed_target_calendar_matches=true public_feed_management_target_matches=true public_feed_consent_checkbox_count=1 public_feed_consent_checkbox_visible=true public_feed_consent_checkbox_checked=true public_feed_publish_button_count=1 public_feed_publish_disabled_before_consent=true public_feed_publish_disabled_after_consent=false/u,
+  );
+  assert.match(
+    summary,
+    /public_feed_management_get_status=200 public_feed_publish_status=200 public_feed_get_status=200 public_feed_head_status=200 public_feed_unpublish_status=200 public_feed_revoked_get_status=404 public_feed_revoked_head_status=404/u,
+  );
+  assert.match(
+    summary,
+    /public_consent_gate_observed=true public_manager_publish_succeeded=true public_url_origin_and_route_match=true anonymous_get_contains_canonical_event=true anonymous_head_matches_get=true unpublish_succeeded=true anonymous_get_denied_after_unpublish=true anonymous_head_denied_after_unpublish=true/u,
+  );
+  assert.doesNotMatch(summary, /https?:\/\/|feed-url|signature|token-path/iu);
+
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify({
+          ...successfulObservation,
+          publicFeedManagementTargetMatches: false,
+        }),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify({
+          phase: 'public-feed-browser-lifecycle',
+          status: 'passed',
+          publicFeedManagementGetStatus: 200,
+          publicFeedPublishStatus: 200,
+          publicFeedGetStatus: 302,
+          publicFeedHeadStatus: 200,
+          publicFeedUnpublishStatus: 200,
+          publicFeedRevokedGetStatus: 404,
+          publicFeedRevokedHeadStatus: 404,
+          publicConsentGateObserved: true,
+          publicManagerPublishSucceeded: true,
+          publicUrlOriginAndRouteMatch: true,
+          anonymousGetContainsCanonicalEvent: true,
+          anonymousHeadMatchesGet: true,
+          unpublishSucceeded: true,
+          anonymousGetDeniedAfterUnpublish: true,
+          anonymousHeadDeniedAfterUnpublish: true,
+        }),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+});
+
+test('sanitizes the closed public-feed consent failure boundary', () => {
+  const observation = {
+    phase: 'public-feed-browser-lifecycle',
+    status: 'failed',
+    publicFeedLifecycleStep: 'awaiting-consent-control',
+    publicFeedSettingsEnabled: true,
+    publicFeedSettingsUnpublished: true,
+    publicFeedTargetCalendarMatches: true,
+    publicFeedManagementTargetMatches: false,
+    publicFeedConsentCheckboxCount: 0,
+    publicFeedConsentCheckboxVisible: false,
+    publicFeedPublishButtonCount: 1,
+    publicFeedPublishDisabledBeforeConsent: true,
+    publicConsentGateObserved: false,
+    publicManagerPublishSucceeded: false,
+    publicUrlOriginAndRouteMatch: false,
+    anonymousGetContainsCanonicalEvent: false,
+    anonymousHeadMatchesGet: false,
+    unpublishSucceeded: false,
+    anonymousGetDeniedAfterUnpublish: false,
+    anonymousHeadDeniedAfterUnpublish: false,
+  };
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(observation),
+    sourceSha,
+  );
+
+  assert.match(
+    summary,
+    /public_feed_lifecycle_step=awaiting-consent-control public_feed_settings_enabled=true public_feed_settings_unpublished=true public_feed_target_calendar_matches=true public_feed_management_target_matches=false public_feed_consent_checkbox_count=0 public_feed_consent_checkbox_visible=false public_feed_publish_button_count=1 public_feed_publish_disabled_before_consent=true/u,
+  );
+  assert.doesNotMatch(
+    summary,
+    /https?:\/\/|checkbox-name|calendar-title|private/iu,
+  );
+
+  for (const invalid of [
+    { ...observation, publicFeedLifecycleStep: 'future-stage-private-data' },
+    { ...observation, publicFeedConsentCheckboxCount: 11 },
+    { ...observation, publicFeedConsentCheckboxVisible: 'private text' },
+    { ...observation, publicFeedManagementTargetMatches: 'private text' },
+    { ...observation, calendarId: 'synthetic-calendar-id' },
+    { ...observation, roomId: '!synthetic:example.test' },
+    { ...observation, phase: 'runtime-ready' },
+  ]) {
+    assert.throws(
+      () => sanitizeElementAcceptance(JSON.stringify(invalid), sourceSha),
+      /invalid element acceptance summary/u,
+    );
+  }
+});
+
+test('reports only closed backend codes for public-feed management 503 responses', () => {
+  const failedLifecycle = {
+    phase: 'public-feed-browser-lifecycle',
+    status: 'failed',
+    publicFeedManagementGetStatus: 503,
+    publicFeedManagementErrorCode: 'room-calendar-authorization-unavailable',
+    publicConsentGateObserved: false,
+    publicManagerPublishSucceeded: false,
+    publicUrlOriginAndRouteMatch: false,
+    anonymousGetContainsCanonicalEvent: false,
+    anonymousHeadMatchesGet: false,
+    unpublishSucceeded: false,
+    anonymousGetDeniedAfterUnpublish: false,
+    anonymousHeadDeniedAfterUnpublish: false,
+  };
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(failedLifecycle),
+    sourceSha,
+  );
+
+  assert.match(
+    summary,
+    /public_feed_management_error_code=room-calendar-authorization-unavailable/u,
+  );
+  assert.match(
+    sanitizeElementAcceptance(
+      JSON.stringify({
+        ...failedLifecycle,
+        publicFeedManagementErrorCode: 'unclassified',
+      }),
+      sourceSha,
+    ),
+    /public_feed_management_error_code=unclassified/u,
+  );
+
+  for (const errorCode of [
+    'Authorization: Bearer private-value',
+    'calendar title or hostname',
+  ]) {
+    assert.throws(
+      () =>
+        sanitizeElementAcceptance(
+          JSON.stringify({
+            phase: 'public-feed-browser-lifecycle',
+            status: 'failed',
+            publicFeedManagementGetStatus: 503,
+            publicFeedManagementErrorCode: errorCode,
+            publicConsentGateObserved: false,
+            publicManagerPublishSucceeded: false,
+            publicUrlOriginAndRouteMatch: false,
+            anonymousGetContainsCanonicalEvent: false,
+            anonymousHeadMatchesGet: false,
+            unpublishSucceeded: false,
+            anonymousGetDeniedAfterUnpublish: false,
+            anonymousHeadDeniedAfterUnpublish: false,
+          }),
+          sourceSha,
+        ),
+      /invalid element acceptance summary/u,
+    );
+  }
+
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify({
+          phase: 'public-feed-browser-lifecycle',
+          status: 'failed',
+          publicFeedManagementGetStatus: 503,
+          publicConsentGateObserved: false,
+          publicManagerPublishSucceeded: false,
+          publicUrlOriginAndRouteMatch: false,
+          anonymousGetContainsCanonicalEvent: false,
+          anonymousHeadMatchesGet: false,
+          unpublishSucceeded: false,
+          anonymousGetDeniedAfterUnpublish: false,
+          anonymousHeadDeniedAfterUnpublish: false,
+        }),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify({
+          ...failedLifecycle,
+          publicFeedManagementGetStatus: 500,
+        }),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+});
+
 test('sanitizes the fixed reminder option failure boundary', () => {
   const summary = sanitizeElementAcceptance(
     JSON.stringify(missingReminderOptionObservation()),
@@ -766,7 +2052,7 @@ test('sanitizes the fixed reminder option failure boundary', () => {
   );
   assert.match(
     summary,
-    /phase=reminder-room-configuration-enabled status=failed reminder_step=eligible-option notify_button_count=1 notify_button_visible=true options_get_count=1 options_http_status=200 configuration_get_count=1 configuration_http_status=200 eligible_option_count=0 option_checked_before=false option_check_attempted=false put_count=0 put_http_status=0 option_checked_after=false/u,
+    /phase=reminder-room-configuration-enabled status=failed reminder_step=destination-control reminder_settings_button_count=1 reminder_settings_button_visible=true options_get_count=1 options_http_status=200 configuration_get_count=1 configuration_http_status=200 recipient_roster_get_count=0 recipient_roster_http_status=0 recipient_roster_count=0 recipient_roster_shape_valid=false recipient_roster_outcome=unobserved destination_control_count=0 recipient_kind=unknown recipient_selection_attempted=false recipient_selection_step=destination-clicked recipient_option_count=0 member_input_probe_installed=false member_option_count=0 selected_member_tag_count=0 selected_member_keyboard_flow=false reminder_target_matches=false all_day_schedule_matches=false narrow_side_panel_safe=false put_count=0 put_http_status=0/u,
   );
   assert.doesNotMatch(summary, /https?:|access_token|event_id|error_text/iu);
 });
@@ -824,7 +2110,7 @@ test('rejects incomplete or inconsistent restore evidence', () => {
       deliveryStateSent: true,
       deliveryClaimClear: true,
       deliveryKeyUnchanged: false,
-      attemptCountUnchanged: true,
+      deliveryMetadataUnchanged: true,
     },
     {
       phase: 'restore-radicale-backup',

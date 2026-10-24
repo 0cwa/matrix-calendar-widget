@@ -14,6 +14,9 @@
  * limitations under the License.
  */
 
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import postgres from 'postgres';
 import configuration, {
   parseRoomCalendarSetupAllowedActorServerNames,
@@ -276,6 +279,101 @@ describe('reminder database configuration', () => {
         MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY_FILE: '/tmp/key',
       }).error,
     ).toBeDefined();
+  });
+
+  it('requires distinct decoded private-client keys and keeps key values out of errors', () => {
+    const base = {
+      ACCESS_TOKEN: 'synthetic-token',
+      HOMESERVER_URL: 'https://matrix.example.test',
+      MEETINGWIDGET_URL: 'https://widget.example.test',
+      BREAKOUT_SESSION_WIDGET_URL: 'https://breakout.example.test',
+      MEETINGWIDGET_COCKPIT_URL: 'https://details.example.test',
+      RADICALE_URL: 'https://calendar.example.test',
+      MATRIX_CALENDAR_PRIVATE_CLIENTS_ENABLED: true,
+      MATRIX_CALENDAR_PRIVATE_CLIENT_ORIGIN: 'https://api.example.test',
+      MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_URL:
+        'postgresql://private:secret@localhost:5432/calendar',
+    };
+    const epochKey = Buffer.alloc(32, 0x31).toString('base64url');
+    const callbackKey = Buffer.alloc(32, 0x32).toString('base64url');
+    const otherKey = Buffer.alloc(32, 0x33).toString('base64url');
+
+    const equalPrivateKeys = ValidationSchema.validate({
+      ...base,
+      MATRIX_CALENDAR_PRIVATE_CLIENT_EPOCH_KEY: epochKey,
+      MATRIX_CALENDAR_PRIVATE_CLIENT_CALLBACK_KEY: epochKey,
+    });
+    expect(equalPrivateKeys.error).toBeDefined();
+    expect(equalPrivateKeys.error?.message).not.toContain(epochKey);
+
+    const equalPublicEpochKey = ValidationSchema.validate({
+      ...base,
+      MATRIX_CALENDAR_PRIVATE_CLIENT_EPOCH_KEY: epochKey,
+      MATRIX_CALENDAR_PRIVATE_CLIENT_CALLBACK_KEY: callbackKey,
+      MATRIX_CALENDAR_PUBLIC_FEED_ORIGIN: 'https://calendar.example.test',
+      MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY: epochKey,
+    });
+    expect(equalPublicEpochKey.error).toBeDefined();
+    expect(equalPublicEpochKey.error?.message).not.toContain(epochKey);
+
+    const equalPublicCallbackKey = ValidationSchema.validate({
+      ...base,
+      MATRIX_CALENDAR_PRIVATE_CLIENT_EPOCH_KEY: epochKey,
+      MATRIX_CALENDAR_PRIVATE_CLIENT_CALLBACK_KEY: callbackKey,
+      MATRIX_CALENDAR_PUBLIC_FEED_ORIGIN: 'https://calendar.example.test',
+      MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY: callbackKey,
+    });
+    expect(equalPublicCallbackKey.error).toBeDefined();
+    expect(equalPublicCallbackKey.error?.message).not.toContain(callbackKey);
+
+    const distinctKeysWithoutPublicFeed = ValidationSchema.validate({
+      ...base,
+      MATRIX_CALENDAR_PRIVATE_CLIENT_EPOCH_KEY: epochKey,
+      MATRIX_CALENDAR_PRIVATE_CLIENT_CALLBACK_KEY: callbackKey,
+    });
+    expect(distinctKeysWithoutPublicFeed.error).toBeUndefined();
+
+    const allDistinct = ValidationSchema.validate({
+      ...base,
+      MATRIX_CALENDAR_PRIVATE_CLIENT_EPOCH_KEY: epochKey,
+      MATRIX_CALENDAR_PRIVATE_CLIENT_CALLBACK_KEY: callbackKey,
+      MATRIX_CALENDAR_PUBLIC_FEED_ORIGIN: 'https://calendar.example.test',
+      MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY: otherKey,
+    });
+    expect(allDistinct.error).toBeUndefined();
+  });
+
+  it('compares a file-loaded public feed key with decoded private-client keys', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'mcw-private-key-test-'));
+    try {
+      const publicKey = Buffer.alloc(32, 0x41).toString('base64url');
+      const callbackKey = Buffer.alloc(32, 0x41).toString('base64url');
+      const epochKey = Buffer.alloc(32, 0x42).toString('base64url');
+      const keyPath = join(directory, 'public-feed-key');
+      writeFileSync(keyPath, `${publicKey}\n`, { mode: 0o600 });
+      const result = ValidationSchema.validate({
+        ACCESS_TOKEN: 'synthetic-token',
+        HOMESERVER_URL: 'https://matrix.example.test',
+        MEETINGWIDGET_URL: 'https://widget.example.test',
+        BREAKOUT_SESSION_WIDGET_URL: 'https://breakout.example.test',
+        MEETINGWIDGET_COCKPIT_URL: 'https://details.example.test',
+        RADICALE_URL: 'https://calendar.example.test',
+        MATRIX_CALENDAR_PRIVATE_CLIENTS_ENABLED: true,
+        MATRIX_CALENDAR_PRIVATE_CLIENT_ORIGIN: 'https://api.example.test',
+        MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_URL:
+          'postgresql://private:secret@localhost:5432/calendar',
+        MATRIX_CALENDAR_PRIVATE_CLIENT_EPOCH_KEY: epochKey,
+        MATRIX_CALENDAR_PRIVATE_CLIENT_CALLBACK_KEY: callbackKey,
+        MATRIX_CALENDAR_PUBLIC_FEED_ORIGIN: 'https://calendar.example.test',
+        MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY_FILE: keyPath,
+      });
+
+      expect(result.error).toBeDefined();
+      expect(result.error?.message).not.toContain(publicKey);
+      expect(result.error?.message).not.toContain(callbackKey);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it('accepts only the explicit TLS modes', () => {

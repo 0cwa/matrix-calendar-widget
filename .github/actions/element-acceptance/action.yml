@@ -228,7 +228,7 @@ runs:
       id: reminder_initial
       shell: bash
       run: |
-        if ! ELEMENT_ACCEPTANCE_REMINDER_FLOW=initial yarn workspace e2e playwright test --config playwright.element-acceptance.config.ts --grep "Element Web delivers a relative room reminder" > "$RUNNER_TEMP/element-acceptance-playwright.log" 2>&1; then
+        if ! ELEMENT_ACCEPTANCE_REMINDER_FLOW=initial yarn workspace e2e playwright test --config playwright.element-acceptance.config.ts --grep "Element Web delivers room-timed and selected-member all-day reminders across restart and restore" > "$RUNNER_TEMP/element-acceptance-playwright.log" 2>&1; then
           echo 'Initial reminder delivery failed; see sanitized phase summary.' >&2
           exit 1
         fi
@@ -240,7 +240,7 @@ runs:
       shell: bash
       run: |
         node dev/element-acceptance-reminder-restore.mjs restart
-        if ! ELEMENT_ACCEPTANCE_REMINDER_FLOW=restart yarn workspace e2e playwright test --config playwright.element-acceptance.config.ts --grep "Element Web delivers a relative room reminder" > "$RUNNER_TEMP/element-acceptance-playwright.log" 2>&1; then
+        if ! ELEMENT_ACCEPTANCE_REMINDER_FLOW=restart yarn workspace e2e playwright test --config playwright.element-acceptance.config.ts --grep "Element Web delivers room-timed and selected-member all-day reminders across restart and restore" > "$RUNNER_TEMP/element-acceptance-playwright.log" 2>&1; then
           echo 'Post-restart reminder delivery failed; see sanitized phase summary.' >&2
           exit 1
         fi
@@ -253,7 +253,7 @@ runs:
       shell: bash
       run: |
         node dev/element-acceptance-reminder-restore.mjs restore
-        if ! ELEMENT_ACCEPTANCE_REMINDER_FLOW=restore yarn workspace e2e playwright test --config playwright.element-acceptance.config.ts --grep "Element Web delivers a relative room reminder" > "$RUNNER_TEMP/element-acceptance-playwright.log" 2>&1; then
+        if ! ELEMENT_ACCEPTANCE_REMINDER_FLOW=restore yarn workspace e2e playwright test --config playwright.element-acceptance.config.ts --grep "Element Web delivers room-timed and selected-member all-day reminders across restart and restore" > "$RUNNER_TEMP/element-acceptance-playwright.log" 2>&1; then
           echo 'Post-restore reminder delivery failed; see sanitized phase summary.' >&2
           exit 1
         fi
