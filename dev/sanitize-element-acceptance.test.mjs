@@ -1829,6 +1829,7 @@ test('sanitizes bounded joined-recipient response outcomes', () => {
         recipientRosterHttpStatus: 0,
         recipientRosterCount: 0,
         recipientRosterShapeValid: false,
+        recipientRosterTargetPresent: false,
         recipientRosterOutcome: 'unobserved',
       },
     },
@@ -1839,6 +1840,7 @@ test('sanitizes bounded joined-recipient response outcomes', () => {
         recipientRosterHttpStatus: 503,
         recipientRosterCount: 0,
         recipientRosterShapeValid: false,
+        recipientRosterTargetPresent: false,
         recipientRosterOutcome: 'http_error',
       },
     },
@@ -1849,6 +1851,7 @@ test('sanitizes bounded joined-recipient response outcomes', () => {
         recipientRosterHttpStatus: 200,
         recipientRosterCount: 0,
         recipientRosterShapeValid: true,
+        recipientRosterTargetPresent: false,
         recipientRosterOutcome: 'empty',
       },
     },
@@ -1859,6 +1862,7 @@ test('sanitizes bounded joined-recipient response outcomes', () => {
         recipientRosterHttpStatus: 200,
         recipientRosterCount: 1,
         recipientRosterShapeValid: false,
+        recipientRosterTargetPresent: false,
         recipientRosterOutcome: 'invalid_shape',
       },
     },
@@ -1869,6 +1873,7 @@ test('sanitizes bounded joined-recipient response outcomes', () => {
         recipientRosterHttpStatus: 200,
         recipientRosterCount: 1,
         recipientRosterShapeValid: true,
+        recipientRosterTargetPresent: true,
         recipientRosterOutcome: 'nonempty',
       },
     },
@@ -1885,6 +1890,32 @@ test('sanitizes bounded joined-recipient response outcomes', () => {
     );
     assert.doesNotMatch(summary, /@|displayName|userId/u);
   }
+
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify({
+          ...failedSelection,
+          recipientRosterCount: 0,
+          recipientRosterShapeValid: true,
+          recipientRosterOutcome: 'empty',
+          recipientRosterTargetPresent: true,
+        }),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+  const nonemptyRosterWithoutExpectedTarget = sanitizeElementAcceptance(
+    JSON.stringify({
+      ...failedSelection,
+      recipientRosterTargetPresent: false,
+    }),
+    sourceSha,
+  );
+  assert.match(
+    nonemptyRosterWithoutExpectedTarget,
+    /recipient_roster_outcome=nonempty .*recipient_roster_target_present=false/u,
+  );
 
   const roomModeWithoutRoster = sanitizeElementAcceptance(
     JSON.stringify(
