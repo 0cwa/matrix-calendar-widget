@@ -5,6 +5,7 @@ import {
   createRadicaleFilesystemEvidence,
 } from './element-acceptance-reminder-restore.mjs';
 import { roomContextObservationForPhase } from './element-room-context-observation.mjs';
+import { createReminderDeliverySnapshot } from './reminder-delivery-snapshot.mjs';
 import {
   formatSanitizerFailureSummary,
   sanitizeElementAcceptance,
@@ -546,13 +547,17 @@ test('accepts and projects the complete reminder producer stream for room and se
       snapshotCompared: false,
     }),
     stage('reminder-delivery-snapshot', 'started'),
-    stage('reminder-delivery-snapshot', 'passed', {
-      count: 1,
-      attemptCount: 1,
-      deliveryStateSent: true,
-      deliveryClaimClear: true,
-      configurationCount: 1,
-    }),
+    stage(
+      'reminder-delivery-snapshot',
+      'passed',
+      createReminderDeliverySnapshot({
+        count: 1,
+        attemptCount: 1,
+        deliveryStateSent: true,
+        deliveryClaimClear: true,
+        configurationCount: 1,
+      }),
+    ),
     stage('reminder-initial-delivery', 'passed', {
       httpStatus: 200,
       count: 1,
@@ -585,13 +590,17 @@ test('accepts and projects the complete reminder producer stream for room and se
       deliveryKeyUnchanged: true,
       deliveryMetadataUnchanged: true,
     }),
-    stage('reminder-delivery-snapshot', 'passed', {
-      count: 2,
-      attemptCount: 2,
-      deliveryStateSent: true,
-      deliveryClaimClear: true,
-      configurationCount: 2,
-    }),
+    stage(
+      'reminder-delivery-snapshot',
+      'passed',
+      createReminderDeliverySnapshot({
+        count: 2,
+        attemptCount: 2,
+        deliveryStateSent: true,
+        deliveryClaimClear: true,
+        configurationCount: 2,
+      }),
+    ),
     stage('reminder-restart-scheduler-scan', 'passed', {
       httpStatus: 200,
       count: 2,
@@ -677,6 +686,15 @@ test('accepts and projects the complete reminder producer stream for room and se
 
 test('closes reminder producer records while preserving bounded failure rows', () => {
   for (const record of [
+    {
+      phase: 'reminder-delivery-snapshot',
+      status: 'passed',
+      count: 0,
+      attemptCount: 0,
+      deliveryStateSent: true,
+      deliveryClaimClear: true,
+      configurationCount: 0,
+    },
     {
       phase: 'reminder-delivery-snapshot',
       status: 'passed',
@@ -908,6 +926,38 @@ test('reports skipped Element only on a three-container restore quiescence', () 
     assert.throws(
       () => sanitizeElementAcceptance(JSON.stringify(record), sourceSha),
       /invalid element acceptance summary/u,
+    );
+  }
+});
+
+test('reminder delivery snapshot factory enforces the serialized contract', () => {
+  for (const invalid of [
+    { count: 0, attemptCount: 0, configurationCount: 0 },
+    { count: 3, attemptCount: 3, configurationCount: 3 },
+    { count: 2, attemptCount: 1, configurationCount: 2 },
+    { count: 2, attemptCount: 2, configurationCount: 1 },
+    {
+      count: 1,
+      attemptCount: 1,
+      configurationCount: 1,
+      deliveryStateSent: false,
+    },
+    {
+      count: 1,
+      attemptCount: 1,
+      configurationCount: 1,
+      deliveryClaimClear: false,
+    },
+    { count: 1, attemptCount: 1, configurationCount: 1, extra: true },
+  ]) {
+    assert.throws(
+      () =>
+        createReminderDeliverySnapshot({
+          deliveryStateSent: true,
+          deliveryClaimClear: true,
+          ...invalid,
+        }),
+      /Invalid reminder delivery snapshot/u,
     );
   }
 });
