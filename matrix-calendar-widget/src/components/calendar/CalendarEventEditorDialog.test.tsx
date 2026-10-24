@@ -203,7 +203,7 @@ describe('<CalendarEventEditorDialog />', () => {
     await waitFor(() => expect(opener).toHaveFocus());
   });
 
-  it('clears configure intent when requestSubmit does not dispatch submit', async () => {
+  it('keeps configure intent out of an ordinary save when native validation blocks it', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [calendar],
       events: [event],
@@ -222,29 +222,30 @@ describe('<CalendarEventEditorDialog />', () => {
       { wrapper: createWrapper(repository) },
     );
 
-    const requestSubmit = vi
-      .spyOn(HTMLFormElement.prototype, 'requestSubmit')
-      .mockImplementation(() => undefined);
-    try {
-      await userEvent.click(
-        await screen.findByRole('button', {
-          name: 'Save and configure Matrix reminders',
-        }),
-      );
-    } finally {
-      requestSubmit.mockRestore();
-    }
+    const title = (await screen.findByRole('textbox', {
+      name: /Title/i,
+    })) as HTMLInputElement;
+    title.setCustomValidity('The title is temporarily invalid.');
+    const reportValidity = vi.spyOn(
+      HTMLFormElement.prototype,
+      'reportValidity',
+    );
+    await userEvent.click(
+      screen.getByRole('button', {
+        name: 'Save and configure Matrix reminders',
+      }),
+    );
 
+    expect(reportValidity).toHaveBeenCalledOnce();
     expect(onClose).not.toHaveBeenCalled();
     expect(onSaveAndConfigureRoomReminders).not.toHaveBeenCalled();
 
-    await userEvent.type(
-      screen.getByRole('textbox', { name: /Title/i }),
-      '{Enter}',
-    );
+    title.setCustomValidity('');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
     expect(onSaveAndConfigureRoomReminders).not.toHaveBeenCalled();
+    reportValidity.mockRestore();
   });
 
   it('creates one attachment link and exposes accessible edit controls', async () => {

@@ -83,6 +83,10 @@ export type CalendarEventEditorProps = {
   uidFactory?: () => string;
 };
 
+export type CalendarEventEditorSubmissionIntent =
+  | { readonly kind: 'save' }
+  | { readonly kind: 'save-and-configure-room-reminders' };
+
 export function useCalendarEventEditor({
   calendars,
   event,
@@ -720,15 +724,10 @@ export function useCalendarEventEditor({
                         )
                       : undefined;
 
-  const handleSubmit = async (submitEvent: FormEvent) => {
-    submitEvent.preventDefault();
-
-    const form = submitEvent.currentTarget as HTMLFormElement;
-    const configureRoomRemindersAfterSave = Boolean(
-      onSaveAndConfigureRoomReminders &&
-      form.dataset.saveIntent === 'configure-room-reminders',
-    );
-    delete form.dataset.saveIntent;
+  const submit = async (intent: CalendarEventEditorSubmissionIntent) => {
+    const configureRoomRemindersAfterSave =
+      intent.kind === 'save-and-configure-room-reminders' &&
+      Boolean(onSaveAndConfigureRoomReminders);
 
     if (validationError || readOnly || chooseScope || missingOccurrence) {
       return;
@@ -859,6 +858,11 @@ export function useCalendarEventEditor({
       setSaving(false);
       setSavingRoomReminderSetup(false);
     }
+  };
+
+  const handleSubmit = (submitEvent: FormEvent) => {
+    submitEvent.preventDefault();
+    void submit({ kind: 'save' });
   };
 
   const handleReloadLatest = async () => {
@@ -1037,6 +1041,7 @@ export function useCalendarEventEditor({
     canChooseWeekdays,
     validationError,
     handleSubmit,
+    submit,
     handleReloadLatest,
     chooseOccurrenceScope,
     handleOccurrenceTextModeChange,
