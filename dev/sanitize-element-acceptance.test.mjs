@@ -585,6 +585,13 @@ test('accepts and projects the complete reminder producer stream for room and se
       deliveryKeyUnchanged: true,
       deliveryMetadataUnchanged: true,
     }),
+    stage('reminder-delivery-snapshot', 'passed', {
+      count: 2,
+      attemptCount: 2,
+      deliveryStateSent: true,
+      deliveryClaimClear: true,
+      configurationCount: 2,
+    }),
     stage('reminder-restart-scheduler-scan', 'passed', {
       httpStatus: 200,
       count: 2,
@@ -629,15 +636,15 @@ test('accepts and projects the complete reminder producer stream for room and se
   const summary = sanitizeElementAcceptance(records.join('\n'), sourceSha);
   assert.match(
     summary,
-    /phase=reminder-delivery-snapshot status=passed count=1 configuration_count=1 delivery_state_sent=true delivery_claim_clear=true/u,
-  );
-  assert.match(
-    summary,
     /phase=reminder-configuration-stored status=passed count=3 snapshot_compared=true/u,
   );
   assert.match(
     summary,
     /phase=reminder-restart-delivery-row status=passed count=2 delivery_state_sent=true delivery_claim_clear=true delivery_key_unchanged=true delivery_metadata_unchanged=true/u,
+  );
+  assert.match(
+    summary,
+    /phase=reminder-delivery-snapshot status=passed count=2 configuration_count=2 delivery_state_sent=true delivery_claim_clear=true/u,
   );
   assert.match(
     summary,
@@ -686,6 +693,24 @@ test('closes reminder producer records while preserving bounded failure rows', (
       deliveryStateSent: true,
       deliveryClaimClear: true,
       configurationCount: 0,
+    },
+    {
+      phase: 'reminder-delivery-snapshot',
+      status: 'passed',
+      count: 3,
+      attemptCount: 3,
+      deliveryStateSent: true,
+      deliveryClaimClear: true,
+      configurationCount: 3,
+    },
+    {
+      phase: 'reminder-delivery-snapshot',
+      status: 'passed',
+      count: 2,
+      attemptCount: 1,
+      deliveryStateSent: true,
+      deliveryClaimClear: true,
+      configurationCount: 2,
     },
     {
       phase: 'reminder-delivery-snapshot',

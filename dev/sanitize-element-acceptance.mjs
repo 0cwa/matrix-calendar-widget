@@ -782,10 +782,10 @@ const REMINDER_DELIVERY_PHASES = new Set([
   'restore-delivery-row',
 ]);
 const REMINDER_DELIVERY_SUCCESS_COUNTS = new Map([
-  ['reminder-delivery-snapshot', 1],
   ['reminder-restart-delivery-row', 2],
   ['restore-delivery-row', 3],
 ]);
+const REMINDER_DELIVERY_SNAPSHOT_MAX_COUNT = 2;
 const REMINDER_TARGET_DELIVERY_PHASES = new Set([
   'reminder-initial-delivery',
   'reminder-restart-scheduler-scan',
@@ -3688,7 +3688,15 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           typeof record.checksum !== 'string' ||
           !/^[a-f0-9]{64}$/u.test(record.checksum))) ||
       (record.status === 'passed' &&
+        record.phase === 'reminder-delivery-snapshot' &&
+        (!Number.isSafeInteger(record.count) ||
+          record.count < 1 ||
+          record.count > REMINDER_DELIVERY_SNAPSHOT_MAX_COUNT ||
+          !Number.isSafeInteger(record.attemptCount) ||
+          record.attemptCount < record.count)) ||
+      (record.status === 'passed' &&
         REMINDER_DELIVERY_PHASES.has(record.phase) &&
+        record.phase !== 'reminder-delivery-snapshot' &&
         (!Number.isSafeInteger(record.attemptCount) ||
           record.attemptCount <
             REMINDER_DELIVERY_SUCCESS_COUNTS.get(record.phase) ||
