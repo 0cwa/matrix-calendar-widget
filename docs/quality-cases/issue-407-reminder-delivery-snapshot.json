@@ -2,7 +2,7 @@
   "contract_version": "1.0.0",
   "case_id": "issue-407-reminder-delivery-snapshot",
   "objective": "Share the reminder delivery snapshot contract between restore production and acceptance sanitization.",
-  "status": "complete",
+  "status": "validating",
   "trigger": {
     "observation": "The restore producer assembled snapshot fields independently from the sanitizer's range and relationship checks, so valid restart snapshots with count 2 could be rejected by stale count-1 assumptions.",
     "evidence_refs": [
@@ -105,8 +105,8 @@
       "id": "focused-sanitizer",
       "criterion": "The focused sanitizer suite passes.",
       "status": "passed",
-      "command": "node22 --test dev/sanitize-element-acceptance.test.mjs",
-      "evidence_refs": ["test-run: 1 suite passed"]
+      "command": "node22 dev/sanitize-element-acceptance.test.mjs",
+      "evidence_refs": ["direct-test-run: 77 callbacks passed"]
     },
     {
       "id": "diff-format",
@@ -125,7 +125,7 @@
     }
   ],
   "blockers": [],
-  "next_action": "Review and land this bounded shared contract with issue 407.",
+  "next_action": "Integrate the independently reviewed bounded shared contract with issue 407.",
   "extensions": {
     "development-quality.architecture-friction": {
       "classification": "duplication-friction and auditability-friction",
