@@ -62,6 +62,58 @@ const simpleCalendar = fs.readFileSync(
   path.resolve(__dirname, '../../../fixtures/ical/simple-timed.ics'),
   'utf8',
 );
+const richEventUpdateCases: [
+  string,
+  string,
+  CalendarEventPatch,
+  string[],
+  string[],
+][] = [
+  [
+    'ordinary event fields',
+    'interoperable-properties.ics',
+    { title: 'Updated rich event' },
+    ['SUMMARY:Updated rich event'],
+    [
+      'UID:interoperable-properties@example.test',
+      'RRULE:FREQ=DAILY;COUNT=3',
+      'CONFERENCE;',
+      'meet.example.test/room/42',
+      'ATTACH;',
+      'files.example.test/agenda.pdf',
+      'X-ALARM-METADATA',
+      'ACTION:EMAIL',
+      'ACTION:AUDIO',
+    ],
+  ],
+  [
+    'a selected occurrence',
+    'recurrence-utc.ics',
+    {
+      recurrence: {
+        occurrence: {
+          action: 'set-fields',
+          recurrenceId: {
+            type: 'date-time',
+            value: {
+              local: '2026-10-12T14:00:00',
+              timezone: 'UTC',
+            },
+          },
+          viewerTimezone: 'UTC',
+          title: { action: 'set', value: 'Updated selected occurrence' },
+        },
+      },
+    },
+    ['RECURRENCE-ID:20261012T140000Z', 'SUMMARY:Updated selected occurrence'],
+    [
+      'UID:utc-recurrence@example.test',
+      'RRULE:FREQ=WEEKLY;COUNT=2',
+      'RECURRENCE-ID:20261101T140000Z',
+      'DTSTART:20261101T160000Z',
+    ],
+  ],
+];
 
 function absoluteAlarmAttachmentSource(): {
   alarm: {
@@ -614,6 +666,69 @@ describe('RoomCalendarEventOperations', () => {
     expect(putInit?.body).toContain('UID:mixed-journal@example.test');
     expect(basicUsername(putInit)).toBe('_matrix_calendar_service');
   });
+
+  it.each(richEventUpdateCases)(
+    'applies %s patches through the conditional event update path',
+    async (
+      _description,
+      fixture,
+      patch,
+      expectedLines,
+      preservedProperties,
+    ) => {
+      const eventUrl = `${collectionUrl}${fixture}`;
+      const sourceCalendar = fs.readFileSync(
+        path.resolve(__dirname, '../../../fixtures/ical', fixture),
+        'utf8',
+      );
+      const updatedCalendar = new ICalendarEventCodec()
+        .parse(calendarId, eventUrl, sourceCalendar)
+        .applyPatch(patch).icalendar;
+      fetchMock
+        .mockResolvedValueOnce(
+          new Response(sourceCalendar, {
+            status: 200,
+            headers: { ETag: '"rich-v1"' },
+          }),
+        )
+        .mockResolvedValueOnce(
+          new Response('', {
+            status: 204,
+            headers: { ETag: '"rich-v2"' },
+          }),
+        )
+        .mockResolvedValueOnce(
+          new Response(updatedCalendar, {
+            status: 200,
+            headers: { ETag: '"rich-v2"' },
+          }),
+        );
+
+      await expect(
+        operations.updateEvent(access(), eventUrl, '"rich-v1"', patch),
+      ).resolves.toMatchObject({
+        event: {
+          uid:
+            fixture === 'interoperable-properties.ics'
+              ? 'interoperable-properties@example.test'
+              : 'utc-recurrence@example.test',
+        },
+        etag: '"rich-v2"',
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      const [, putInit] = fetchMock.mock.calls[1];
+      const writtenIcs = (putInit?.body as string).replace(/\r?\n[ \t]/g, '');
+      expect(putInit?.method).toBe('PUT');
+      expect(new Headers(putInit?.headers).get('If-Match')).toBe('"rich-v1"');
+      for (const line of expectedLines) {
+        expect(writtenIcs).toContain(line);
+      }
+      for (const preservedProperty of preservedProperties) {
+        expect(writtenIcs).toContain(preservedProperty);
+      }
+    },
+  );
 
   it('rejects malformed conference patches before CalDAV reads', async () => {
     await expect(
