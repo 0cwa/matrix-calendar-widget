@@ -181,69 +181,68 @@ class PublicCalendarFeedThunderbirdWorkerTests(unittest.TestCase):
                     "initial_http_start",
                 )
 
-    def test_public_provider_script_uses_marionette_function_arguments(self) -> None:
+    def test_public_provider_and_credentials_gate_await_login_api(self) -> None:
         node = shutil.which("node")
         if node is None:
             self.skipTest("Node.js is unavailable")
 
         harness = r"""
 const fs = require("node:fs");
-const { script } = JSON.parse(fs.readFileSync(0, "utf8"));
+const { script, credentialsScript } = JSON.parse(fs.readFileSync(0, "utf8"));
 const url = "https://localhost:8443/v1/public-calendar-feeds/synthetic.envelope";
 const origin = "https://localhost:8443";
-const calendar = {
-  id: "public-feed-fixture",
-  type: "ics",
-  readOnly: false,
-  name: "",
-};
-let createdType = null;
-let createdUri = null;
+const calendar = { id: "public-feed-fixture", type: "ics", readOnly: false, name: "" };
+let loginResult = Promise.resolve([]);
+let createCalls = 0;
 let registered = null;
-globalThis.cal = {
-  manager: {
-    createCalendar(type, uri) {
-      createdType = type;
-      createdUri = uri;
-      return calendar;
-    },
-    registerCalendar(value) {
-      registered = value;
-    },
-    getCalendarById(id) {
-      return registered && registered.id === id ? registered : null;
-    },
+globalThis.cal = { manager: {
+  createCalendar(type, uri) {
+    createCalls += 1;
+    if (type !== "ics" || uri.spec !== url) throw new Error("unexpected provider");
+    return calendar;
   },
-};
+  registerCalendar(value) { registered = value; },
+  getCalendarById(id) { return registered && registered.id === id ? registered : null; },
+}};
 globalThis.Services = {
-  logins: { getAllLogins: () => [] },
+  logins: { getAllLogins: () => loginResult },
   io: { newURI: value => ({ spec: value }) },
 };
 globalThis.window = {};
+function invokeAsync(source, args = []) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("callback missing")), 1000);
+    const done = value => { clearTimeout(timer); resolve(value); };
+    try { new Function(source).apply(null, [...args, done]); }
+    catch (_error) { clearTimeout(timer); reject(new Error("provider script threw")); }
+  });
+}
 
 (async () => {
-  const result = await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("callback missing")), 1000);
-    const done = value => {
-      clearTimeout(timer);
-      resolve(value);
-    };
-    try {
-      // Marionette invokes the async script as a function with script args
-      // followed by its completion callback; only Thunderbird APIs are mocked.
-      new Function(script).call(null, url, origin, done);
-    } catch (_error) {
-      clearTimeout(timer);
-      reject(new Error("provider script threw before completion"));
-    }
-  });
-  const passed = result && result.ok === true &&
-    result.providerTypeICS === true &&
-    result.readOnlyCalendar === true &&
-    result.storedCredentialsAbsent === true &&
-    createdType === "ics" && createdUri && createdUri.spec === url &&
-    calendar.readOnly === true && registered === calendar &&
-    window.__mcwPublicIcsCalendar === calendar;
+  const created = await invokeAsync(script, [url, origin]);
+  const emptyCheck = await invokeAsync(credentialsScript);
+  loginResult = Promise.resolve([{}]);
+  const presentResult = await invokeAsync(script, [url, origin]);
+  const presentCheck = await invokeAsync(credentialsScript);
+  loginResult = Promise.resolve({});
+  const invalidResult = await invokeAsync(script, [url, origin]);
+  const invalidCheck = await invokeAsync(credentialsScript);
+  loginResult = Promise.reject(new Error("synthetic"));
+  const rejectedResult = await invokeAsync(script, [url, origin]);
+  const rejectedCheck = await invokeAsync(credentialsScript);
+  const passed = created && created.ok === true &&
+    created.providerTypeICS === true &&
+    created.readOnlyCalendar === true &&
+    created.storedCredentialsAbsent === true &&
+    createCalls === 1 && calendar.readOnly === true && registered === calendar &&
+    window.__mcwPublicIcsCalendar === calendar &&
+    emptyCheck && emptyCheck.ok === true && emptyCheck.absent === true &&
+    presentResult && presentResult.failure === "stored_credentials_present" &&
+    presentCheck && presentCheck.ok === true && presentCheck.absent === false &&
+    invalidResult && invalidResult.failure === "provider_unavailable" &&
+    invalidCheck && invalidCheck.ok === false &&
+    rejectedResult && rejectedResult.failure === "provider_unavailable" &&
+    rejectedCheck && rejectedCheck.ok === false && createCalls === 1;
   process.stdout.write(JSON.stringify({ passed: passed === true }));
   if (passed !== true) process.exitCode = 1;
 })().catch(() => {
@@ -253,7 +252,12 @@ globalThis.window = {};
 """
         completed = subprocess.run(
             [node, "-e", harness],
-            input=json.dumps({"script": self.worker.CREATE_PUBLIC_ICS}),
+            input=json.dumps(
+                {
+                    "script": self.worker.CREATE_PUBLIC_ICS,
+                    "credentialsScript": self.worker.STORED_CREDENTIALS_ABSENT,
+                }
+            ),
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             text=True,

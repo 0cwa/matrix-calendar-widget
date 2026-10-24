@@ -176,8 +176,21 @@ return Boolean(tabmail && Array.isArray(tabmail.tabInfo) &&
 """
 
 STORED_CREDENTIALS_ABSENT = """
-return typeof Services !== "undefined" && Services.logins &&
-  Services.logins.getAllLogins().length === 0;
+const done = arguments[arguments.length - 1];
+(async () => {
+  try {
+    if (typeof Services === "undefined" || !Services.logins ||
+        typeof Services.logins.getAllLogins !== "function") {
+      return { ok: false };
+    }
+    const logins = await Services.logins.getAllLogins();
+    return Array.isArray(logins)
+      ? { ok: true, absent: logins.length === 0 }
+      : { ok: false };
+  } catch (_error) {
+    return { ok: false };
+  }
+})().then(done, () => done({ ok: false }));
 """
 
 # Verified against Mozilla's THUNDERBIRD_158_0_1_RELEASE source: the manager
@@ -195,7 +208,19 @@ const [url, expectedOrigin] = callbackArguments;
       return { ok: false, failure: "provider_unavailable" };
     }
     if (typeof Services === "undefined" || !Services.logins ||
-        Services.logins.getAllLogins().length !== 0) {
+        typeof Services.logins.getAllLogins !== "function") {
+      return { ok: false, failure: "provider_unavailable" };
+    }
+    let logins;
+    try {
+      logins = await Services.logins.getAllLogins();
+    } catch (_error) {
+      return { ok: false, failure: "provider_unavailable" };
+    }
+    if (!Array.isArray(logins)) {
+      return { ok: false, failure: "provider_unavailable" };
+    }
+    if (logins.length !== 0) {
       return { ok: false, failure: "stored_credentials_present" };
     }
     const parsed = new URL(url);
@@ -589,12 +614,17 @@ def run() -> dict[str, object]:
             before_explicit_refresh, "status200Count", "explicit_refresh"
         )
         try:
-            credentials_absent_after_refresh = marionette.execute_script(
+            credentials_absent_after_refresh = marionette.execute_async_script(
                 STORED_CREDENTIALS_ABSENT
             )
         except Exception:
             raise ContractFailure("explicit_refresh", "provider_unavailable") from None
-        if credentials_absent_after_refresh is not True:
+        if (
+            not isinstance(credentials_absent_after_refresh, dict)
+            or credentials_absent_after_refresh.get("ok") is not True
+        ):
+            raise ContractFailure("explicit_refresh", "provider_unavailable")
+        if credentials_absent_after_refresh.get("absent") is not True:
             raise ContractFailure("explicit_refresh", "stored_credentials_present")
 
         status, _ = _control_request("POST", "/public-feed-unpublish", b"{}")
@@ -618,7 +648,7 @@ def run() -> dict[str, object]:
             "readOnlyCalendar": opened.get("readOnlyCalendar") is True,
             "storedCredentialsAbsent": (
                 opened.get("storedCredentialsAbsent") is True
-                and credentials_absent_after_refresh is True
+                and credentials_absent_after_refresh.get("absent") is True
             ),
             "initialFeedObserved": initial["status200Count"]
             > before_initial_refresh["status200Count"],
