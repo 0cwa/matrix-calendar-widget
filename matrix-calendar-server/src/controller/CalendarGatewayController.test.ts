@@ -99,6 +99,74 @@ describe('CalendarGatewayController', () => {
     assertDisabled,
     forAuthorizedTarget,
   } as unknown as RoomCalendarCalDavAccess;
+  const richEventUpdateCases: [
+    string,
+    string,
+    CalendarEventPatch,
+    string[],
+    string[],
+  ][] = [
+    [
+      'ordinary event fields',
+      'interoperable-properties.ics',
+      { title: 'Updated rich event' },
+      ['SUMMARY:Updated rich event'],
+      [
+        'UID:interoperable-properties@example.test',
+        'RRULE:FREQ=DAILY;COUNT=3',
+        'CONFERENCE;',
+        'meet.example.test/room/42',
+        'ATTACH;',
+        'files.example.test/agenda.pdf',
+        'X-ALARM-METADATA',
+        'ACTION:EMAIL',
+        'ACTION:AUDIO',
+      ],
+    ],
+    [
+      'a selected occurrence',
+      'recurrence-utc.ics',
+      {
+        recurrence: {
+          occurrence: {
+            action: 'set-fields',
+            recurrenceId: {
+              type: 'date-time',
+              value: {
+                local: '2026-10-12T14:00:00',
+                timezone: 'UTC',
+              },
+            },
+            viewerTimezone: 'UTC',
+            title: { action: 'set', value: 'Updated selected occurrence' },
+          },
+        },
+      },
+      ['RECURRENCE-ID:20261012T140000Z', 'SUMMARY:Updated selected occurrence'],
+      [
+        'UID:utc-recurrence@example.test',
+        'RRULE:FREQ=WEEKLY;COUNT=2',
+        'RECURRENCE-ID:20261101T140000Z',
+        'DTSTART:20261101T160000Z',
+      ],
+    ],
+  ];
+  const alarmSeriesOccurrencePatch: CalendarEventPatch = {
+    recurrence: {
+      occurrence: {
+        action: 'set-fields',
+        recurrenceId: {
+          type: 'date-time',
+          value: {
+            local: '2026-09-24T09:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        },
+        viewerTimezone: 'Europe/Stockholm',
+        title: { action: 'set', value: 'Unsupported alarm-series edit' },
+      },
+    },
+  };
 
   beforeEach(() => {
     fetch.resetMocks();
@@ -2444,8 +2512,15 @@ END:VCALENDAR`,
     isAllowed.mockResolvedValue(true);
     const calendarId = 'https://radicale.example.test/alice/team/';
     const eventId = 'https://radicale.example.test/alice/team/event.ics';
+    const sourceCalendar = readFixture('mixed-components.ics').replace(
+      'SUMMARY:Visible calendar event',
+      'SUMMARY:Before update\nX-CUSTOM-EVENT:preserve-me',
+    );
+    const updatedCalendar = new ICalendarEventCodec()
+      .parse(calendarId, eventId, sourceCalendar)
+      .applyPatch({ title: 'After update' }).icalendar;
     fetch
-      .mockResponseOnce(simpleEventIcs('Before update', 'X-CUSTOM:preserve'), {
+      .mockResponseOnce(sourceCalendar, {
         status: 200,
         headers: { ETag: '"old-etag"' },
       })
@@ -2453,7 +2528,7 @@ END:VCALENDAR`,
         status: 200,
         headers: { ETag: '"new-etag"' },
       })
-      .mockResponseOnce(simpleEventIcs('After update', 'X-CUSTOM:preserve'), {
+      .mockResponseOnce(updatedCalendar, {
         status: 200,
         headers: { ETag: '"new-etag"' },
       });
@@ -2481,7 +2556,175 @@ END:VCALENDAR`,
     expect(putInit?.method).toBe('PUT');
     expect(putHeaders.get('If-Match')).toBe('"old-etag"');
     expect(putInit?.body).toContain('SUMMARY:After update');
-    expect(putInit?.body).toContain('X-CUSTOM:preserve');
+    expect(putInit?.body).toContain('X-CUSTOM-EVENT:preserve-me');
+    expect(putInit?.body).toContain('BEGIN:VTODO');
+    expect(putInit?.body).toContain('UID:mixed-task@example.test');
+    expect(putInit?.body).toContain('BEGIN:VJOURNAL');
+    expect(putInit?.body).toContain('UID:mixed-journal@example.test');
+  });
+
+  it.each(richEventUpdateCases)(
+    'applies %s patches through the conditional event update path',
+    async (
+      _description,
+      fixture,
+      patch,
+      expectedLines,
+      preservedProperties,
+    ) => {
+      isAllowed.mockResolvedValue(true);
+      const calendarId = 'https://radicale.example.test/alice/team/';
+      const eventId = `${calendarId}${fixture}`;
+      const sourceCalendar = readFixture(fixture);
+      const updatedCalendar = new ICalendarEventCodec()
+        .parse(calendarId, eventId, sourceCalendar)
+        .applyPatch(patch).icalendar;
+      fetch
+        .mockResponseOnce(sourceCalendar, {
+          status: 200,
+          headers: { ETag: '"rich-v1"' },
+        })
+        .mockResponseOnce('', {
+          status: 204,
+          headers: { ETag: '"rich-v2"' },
+        })
+        .mockResponseOnce(updatedCalendar, {
+          status: 200,
+          headers: { ETag: '"rich-v2"' },
+        });
+
+      const result = await createController().updateEvent(
+        userContext,
+        openIdCredential,
+        patch,
+        '"rich-v1"',
+        roomId,
+        calendarId,
+        eventId,
+      );
+
+      expect(result).toMatchObject({
+        event: {
+          uid:
+            fixture === 'interoperable-properties.ics'
+              ? 'interoperable-properties@example.test'
+              : 'utc-recurrence@example.test',
+        },
+        etag: '"rich-v2"',
+      });
+      expect(fetch).toHaveBeenCalledTimes(3);
+      const [, putInit] = fetch.mock.calls[1];
+      const writtenIcs = (putInit?.body as string).replace(/\r?\n[ \t]/g, '');
+      expect(putInit?.method).toBe('PUT');
+      expect(new Headers(putInit?.headers).get('If-Match')).toBe('"rich-v1"');
+      for (const line of expectedLines) {
+        expect(writtenIcs).toContain(line);
+      }
+      for (const preservedProperty of preservedProperties) {
+        expect(writtenIcs).toContain(preservedProperty);
+      }
+    },
+  );
+
+  it('keeps selected-occurrence edits rejected for an alarm-bearing series', async () => {
+    isAllowed.mockResolvedValue(true);
+    const calendarId = 'https://radicale.example.test/alice/team/';
+    const eventId = `${calendarId}interoperable-properties.ics`;
+    fetch.mockResponseOnce(readFixture('interoperable-properties.ics'), {
+      status: 200,
+      headers: { ETag: '"rich-v1"' },
+    });
+
+    await expect(
+      createController().updateEvent(
+        userContext,
+        openIdCredential,
+        alarmSeriesOccurrencePatch,
+        '"rich-v1"',
+        roomId,
+        calendarId,
+        eventId,
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'unsupported-patch' },
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][1]?.method).toBe('GET');
+    expect(isAllowed.mock.invocationCallOrder[0]).toBeLessThan(
+      fetch.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('maps rejected room alarm-series occurrence edits without writing or auditing', async () => {
+    isAllowed.mockResolvedValue(true);
+    const roomConfig = {
+      ...appConfig,
+      radicale_url: 'https://radicale.example.test/',
+      room_calendar_access_enabled: true,
+      room_calendar_event_writes_enabled: true,
+    } as IAppConfiguration;
+    const collectionUrl =
+      'https://radicale.example.test/_matrix_calendar_service/team-calendar/';
+    const eventId = `${collectionUrl}interoperable-properties.ics`;
+    const principal: RoomCalendarCalDavPrincipal = {
+      identity: applicationServiceIdentity,
+      userId: '@_matrix_calendar_service:example.test',
+      calendarUrl: collectionUrl,
+      credential: {
+        accessToken: 'service-openid-proof',
+        matrixServerName: 'example.test',
+      },
+    };
+    forAuthorizedTarget.mockResolvedValue(principal);
+    const roomFetch = fetch as unknown as typeof globalThis.fetch;
+    const operations = new RoomCalendarEventOperations(roomFetch, {
+      eventWritesEnabled: true,
+      radicaleBaseUrl: roomConfig.radicale_url,
+      bindingRegistry: bindingRegistryFor(roomConfig),
+      principalIdentityProvider: {
+        resolve: async () => applicationServiceIdentity,
+      },
+    });
+    const record = jest.fn();
+    const auditService = {
+      record,
+    } as unknown as RoomCalendarEventAuditService;
+    fetch.mockResponseOnce(readFixture('interoperable-properties.ics'), {
+      status: 200,
+      headers: { ETag: '"rich-v1"' },
+    });
+
+    await expect(
+      createController(
+        roomConfig,
+        roomCalendarCalDavAccess,
+        new MatrixOpenIdCalDavCredentialProviderFactory(),
+        operations,
+        auditService,
+      ).updateEvent(
+        userContext,
+        openIdCredential,
+        alarmSeriesOccurrencePatch,
+        '"rich-v1"',
+        roomId,
+        'team-calendar',
+        eventId,
+        'room',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'unsupported-patch' },
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][1]?.method).toBe('GET');
+    expect(record).not.toHaveBeenCalled();
+    expect(isAllowed.mock.invocationCallOrder[0]).toBeLessThan(
+      forAuthorizedTarget.mock.invocationCallOrder[0],
+    );
+    expect(forAuthorizedTarget.mock.invocationCallOrder[0]).toBeLessThan(
+      fetch.mock.invocationCallOrder[0],
+    );
   });
 
   it('skips a same-value conference write only with the current ETag', async () => {
