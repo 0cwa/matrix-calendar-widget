@@ -21,6 +21,9 @@ CONTRACT_SCRIPT = (
     / "tests"
     / "private_client_caldav_contract.py"
 )
+PRIVATE_CALDAV_REQUIREMENTS = Path(__file__).with_name(
+    "thunderbird-private-caldav-requirements.txt"
+)
 SPEC = importlib.util.spec_from_file_location("private_caldav_smoke", SCRIPT)
 if SPEC is None or SPEC.loader is None:
     raise RuntimeError("private CalDAV smoke helper is unavailable")
@@ -141,10 +144,150 @@ class PrivateCalDavSmokeTests(unittest.TestCase):
         self.assertIn('CURRENT_CONTRACT_PHASE = "setup"', source)
         self.assertIn("os.O_EXCL | getattr(os, \"O_NOFOLLOW\", 0)", source)
         self.assertIn("            0o600,", source)
+        setup_boundaries = (
+            ("caldav_imports", "import caldav"),
+            (
+                "callback_imports",
+                "from matrix_calendar_radicale_auth.private_client_callback import",
+            ),
+            (
+                "env_port_validation",
+                'RADICALE_PORT = int(os.environ["MCW_PRIVATE_CALDAV_RADICALE_PORT"])',
+            ),
+            ("callback_key_decode", "CALLBACK_KEY = base64.urlsafe_b64decode("),
+            ("url_parse", "API = urllib.parse.urlsplit(API_ORIGIN)"),
+            (
+                "ca_context",
+                "TLS_CONTEXT = ssl.create_default_context(",
+            ),
+        )
+        for phase, operation in setup_boundaries:
+            with self.subTest(phase=phase):
+                self.assertLess(
+                    source.index(f'_set_contract_phase("{phase}")'),
+                    source.index(operation),
+                )
+
+    def test_python_setup_error_classes_are_fixed_and_unknown_modules_are_hidden(
+        self,
+    ) -> None:
+        import ssl
+
+        source_tree = ast.parse(CONTRACT_SCRIPT.read_text(encoding="utf-8"))
+        allowlist = next(
+            node
+            for node in source_tree.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name)
+                and target.id == "KNOWN_SETUP_IMPORT_MODULES"
+                for target in node.targets
+            )
+        )
+        classifier = next(
+            node
+            for node in source_tree.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "_classify_setup_exception"
+        )
+        isolated = ast.Module(body=[allowlist, classifier], type_ignores=[])
+        namespace: dict[str, object] = {"ssl": ssl}
+        exec(
+            compile(
+                ast.fix_missing_locations(isolated), str(CONTRACT_SCRIPT), "exec"
+            ),
+            namespace,
+        )
+        classify = namespace["_classify_setup_exception"]
+
+        cases = (
+            (
+                "caldav_imports",
+                ModuleNotFoundError("private message", name="caldav.lib.error"),
+                "module_missing",
+            ),
+            ("callback_imports", ImportError("private message"), "import_error"),
+            (
+                "env_port_validation",
+                KeyError("private environment name"),
+                "missing_environment",
+            ),
+            ("env_port_validation", ValueError("private port value"), "invalid_value"),
+            ("callback_key_decode", ValueError("private key value"), "invalid_value"),
+            ("url_parse", ValueError("private URL value"), "invalid_value"),
+            (
+                "ca_context",
+                ssl.SSLError("private certificate message"),
+                "tls_setup",
+            ),
+            ("ca_context", RuntimeError("private exception text"), "other"),
+            (
+                "caldav_imports",
+                ModuleNotFoundError(
+                    "secret module name", name="unlisted_secret_module"
+                ),
+                "other",
+            ),
+        )
+        for phase, error, expected in cases:
+            with self.subTest(phase=phase, expected=expected):
+                observed = classify(phase, error)
+                self.assertEqual(observed, expected)
+                self.assertIn(observed, SMOKE.CALDAV_CONTRACT_ERROR_CLASSES)
+                self.assertNotIn(str(error), observed)
+
+        locked_distribution_modules = {
+            "caldav": "caldav",
+            "charset-normalizer": "charset_normalizer",
+            "click": "click",
+            "dnspython": "dns",
+            "h11": "h11",
+            "icalendar": "icalendar",
+            "icalendar-searcher": "icalendar_searcher",
+            "jh2": "jh2",
+            "lxml": "lxml",
+            "niquests": "niquests",
+            "python-dateutil": "dateutil",
+            "pyyaml": "yaml",
+            "qh3": "qh3",
+            "recurring-ical-events": "recurring_ical_events",
+            "six": "six",
+            "tzdata": "tzdata",
+            "urllib3-future": "urllib3_future",
+            "wassima": "wassima",
+            "x-wr-timezone": "x_wr_timezone",
+        }
+        locked_distributions = {
+            line.split("==", 1)[0].lower()
+            for line in PRIVATE_CALDAV_REQUIREMENTS.read_text(
+                encoding="utf-8"
+            ).splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        }
+        self.assertEqual(set(locked_distribution_modules), locked_distributions)
+        self.assertTrue(
+            set(locked_distribution_modules.values()).issubset(
+                namespace["KNOWN_SETUP_IMPORT_MODULES"]
+            )
+        )
 
     def test_python_contract_diagnostic_accepts_fixed_phases_and_classes(self) -> None:
         source_sha = "a" * 40
         cases = (
+            ("caldav_imports", "module_missing", "python_contract_caldav_imports"),
+            ("callback_imports", "import_error", "python_contract_callback_imports"),
+            (
+                "env_port_validation",
+                "missing_environment",
+                "python_contract_env_port_validation",
+            ),
+            (
+                "callback_key_decode",
+                "invalid_value",
+                "python_contract_callback_key_decode",
+            ),
+            ("url_parse", "invalid_value", "python_contract_url_parse"),
+            ("ca_context", "tls_setup", "python_contract_ca_context"),
             ("callback_security", "operation_failed", "python_contract_callback_security"),
             ("event_read", "assertion_failed", "python_contract_event_read"),
             ("setup", "setup_failed", "python_contract_setup"),

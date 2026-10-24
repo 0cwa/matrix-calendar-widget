@@ -62,6 +62,12 @@ RESULT_FIELDS = {
 }
 CALDAV_CONTRACT_PHASES = {
     "setup",
+    "caldav_imports",
+    "callback_imports",
+    "env_port_validation",
+    "callback_key_decode",
+    "url_parse",
+    "ca_context",
     "client_version",
     "callback_security",
     "principal_discovery",
@@ -84,6 +90,12 @@ CALDAV_CONTRACT_PHASES = {
 }
 CALDAV_CONTRACT_ERROR_CLASSES = {
     "setup_failed",
+    "module_missing",
+    "import_error",
+    "invalid_value",
+    "missing_environment",
+    "tls_setup",
+    "other",
     "assertion_failed",
     "operation_failed",
 }
@@ -92,6 +104,12 @@ CALDAV_CONTRACT_SUMMARY_STAGES = {
 }
 CALDAV_CONTRACT_SUMMARY_CLASSES = {
     "setup_failed": "python_contract_setup_failed",
+    "module_missing": "python_contract_module_missing",
+    "import_error": "python_contract_import_error",
+    "invalid_value": "python_contract_invalid_value",
+    "missing_environment": "python_contract_missing_environment",
+    "tls_setup": "python_contract_tls_setup",
+    "other": "python_contract_other",
     "assertion_failed": "python_contract_assertion_failed",
     "operation_failed": "python_contract_operation_failed",
 }

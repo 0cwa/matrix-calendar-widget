@@ -32,6 +32,12 @@ CONTRACT_DIAGNOSTIC_PATH = (
 )
 CONTRACT_PHASES = {
     "setup",
+    "caldav_imports",
+    "callback_imports",
+    "env_port_validation",
+    "callback_key_decode",
+    "url_parse",
+    "ca_context",
     "client_version",
     "callback_security",
     "principal_discovery",
@@ -52,8 +58,48 @@ CONTRACT_PHASES = {
     "personal_revocation",
     "complete",
 }
-CONTRACT_ERROR_CLASSES = {"setup_failed", "assertion_failed", "operation_failed"}
+CONTRACT_ERROR_CLASSES = {
+    "setup_failed",
+    "module_missing",
+    "import_error",
+    "invalid_value",
+    "missing_environment",
+    "tls_setup",
+    "other",
+    "assertion_failed",
+    "operation_failed",
+}
 CURRENT_CONTRACT_PHASE = "setup"
+
+KNOWN_SETUP_IMPORT_MODULES = {
+    "base64",
+    "caldav",
+    "charset_normalizer",
+    "click",
+    "dateutil",
+    "dns",
+    "h11",
+    "http",
+    "icalendar",
+    "icalendar_searcher",
+    "json",
+    "jh2",
+    "lxml",
+    "matrix_calendar_radicale_auth",
+    "niquests",
+    "os",
+    "qh3",
+    "recurring_ical_events",
+    "six",
+    "ssl",
+    "time",
+    "tzdata",
+    "urllib",
+    "urllib3_future",
+    "wassima",
+    "x_wr_timezone",
+    "yaml",
+}
 
 
 def _write_contract_diagnostic(phase: str, error_class: str) -> None:
@@ -98,10 +144,45 @@ def _set_contract_phase(phase: str) -> None:
     CURRENT_CONTRACT_PHASE = phase
 
 
+def _classify_setup_exception(phase: str, error: Exception) -> str:
+    if isinstance(error, ModuleNotFoundError):
+        module = error.name
+        if (
+            isinstance(module, str)
+            and module.split(".", 1)[0] in KNOWN_SETUP_IMPORT_MODULES
+        ):
+            return "module_missing"
+        return "other"
+    if isinstance(error, ImportError):
+        return "import_error"
+    if phase == "env_port_validation" and isinstance(error, KeyError):
+        return "missing_environment"
+    if phase == "ca_context" and isinstance(
+        error, (OSError, ssl.SSLError, ValueError)
+    ):
+        return "tls_setup"
+    if isinstance(error, (TypeError, ValueError)):
+        return "invalid_value"
+    return "other"
+
+
+def _record_setup_failure(error: Exception) -> None:
+    _write_contract_diagnostic(
+        CURRENT_CONTRACT_PHASE,
+        _classify_setup_exception(CURRENT_CONTRACT_PHASE, error),
+    )
+
+
+_set_contract_phase("caldav_imports")
 try:
     import caldav
     from caldav.lib import error as caldav_error
+except Exception as error:
+    _record_setup_failure(error)
+    raise
 
+_set_contract_phase("callback_imports")
+try:
     from matrix_calendar_radicale_auth.private_client_callback import (
         AUTH_PATH,
         REQUEST_SIGNATURE_HEADER,
@@ -111,11 +192,12 @@ try:
         _response_signature,
         PrivateClientCallbackClient,
     )
-except Exception:
-    _write_contract_diagnostic("setup", "setup_failed")
+except Exception as error:
+    _record_setup_failure(error)
     raise
 
 
+_set_contract_phase("env_port_validation")
 try:
     RADICALE_PORT = int(os.environ["MCW_PRIVATE_CALDAV_RADICALE_PORT"])
     CONTROL_PORT = int(os.environ["MCW_PRIVATE_CALDAV_CONTROL_PORT"])
@@ -126,16 +208,35 @@ try:
     ROOM_APP_ID = os.environ["MCW_PRIVATE_CALDAV_ROOM_APP_ID"]
     ROOM_SECRET = os.environ["MCW_PRIVATE_CALDAV_ROOM_SECRET"]
     CONTROL_KEY = os.environ["MCW_PRIVATE_CALDAV_CONTROL_KEY"]
-    CALLBACK_KEY = base64.urlsafe_b64decode(
-        os.environ["RADICALE_PRIVATE_CLIENT_CALLBACK_KEY"] + "="
-    )
+    CALLBACK_KEY_TEXT = os.environ["RADICALE_PRIVATE_CLIENT_CALLBACK_KEY"]
     DEFER_PERSONAL_REVOKE = (
         os.environ.get("MCW_PRIVATE_CALDAV_NATIVE_PROFILE") == "1"
     )
+except Exception as error:
+    _record_setup_failure(error)
+    raise
+
+_set_contract_phase("callback_key_decode")
+try:
+    CALLBACK_KEY = base64.urlsafe_b64decode(CALLBACK_KEY_TEXT + "=")
+except Exception as error:
+    _record_setup_failure(error)
+    raise
+
+_set_contract_phase("url_parse")
+try:
     API = urllib.parse.urlsplit(API_ORIGIN)
-    TLS_CONTEXT = ssl.create_default_context(cafile=CERTIFICATE_AUTHORITY)
-except Exception:
-    _write_contract_diagnostic("setup", "setup_failed")
+except Exception as error:
+    _record_setup_failure(error)
+    raise
+
+_set_contract_phase("ca_context")
+try:
+    TLS_CONTEXT = ssl.create_default_context(
+        cafile=CERTIFICATE_AUTHORITY
+    )
+except Exception as error:
+    _record_setup_failure(error)
     raise
 
 EVENT = """BEGIN:VCALENDAR\r
