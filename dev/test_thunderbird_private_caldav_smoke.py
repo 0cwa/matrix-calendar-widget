@@ -1205,6 +1205,71 @@ async function runCase(testCase) {
                 self.assertEqual(raised.exception.error_class, expected_class)
                 self.assertNotIn("private detail", str(raised.exception))
 
+    def test_post_revoke_invalid_provider_shapes_are_fixed_and_closed(self) -> None:
+        contract = self._load_native_thunderbird_contract()
+        cases = (
+            (None, "invalid_provider_result_none"),
+            ("SYNTHETIC_PRIVATE_DETAIL", "invalid_provider_result_non_object"),
+            ([], "invalid_provider_result_non_object"),
+            ({}, "invalid_provider_result_missing_ok"),
+            (
+                {"ok": "SYNTHETIC_PRIVATE_DETAIL"},
+                "invalid_provider_result_non_boolean_ok",
+            ),
+        )
+        for result, expected_class in cases:
+            with self.subTest(error_class=expected_class):
+
+                class ReturningMarionette:
+                    def execute_async_script(self, _script, script_args):
+                        del script_args
+                        return result
+
+                with self.assertRaises(contract.ContractFailure) as raised:
+                    contract._async_script(
+                        ReturningMarionette(),
+                        "synthetic post-revoke script",
+                        [],
+                        "post_revoke_provider_request",
+                    )
+                self.assertEqual(
+                    raised.exception.stage, "post_revoke_provider_request"
+                )
+                self.assertEqual(raised.exception.error_class, expected_class)
+                self.assertNotIn("SYNTHETIC_PRIVATE_DETAIL", str(raised.exception))
+
+        valid_result = {"ok": True, "requestRejected": True}
+
+        class ValidMarionette:
+            def execute_async_script(self, _script, script_args):
+                del script_args
+                return valid_result
+
+        self.assertIs(
+            contract._async_script(
+                ValidMarionette(),
+                "synthetic post-revoke script",
+                [],
+                "post_revoke_provider_request",
+            ),
+            valid_result,
+        )
+
+        class LegacyMarionette:
+            def execute_async_script(self, _script, script_args):
+                del script_args
+                return None
+
+        with self.assertRaises(contract.ContractFailure) as legacy:
+            contract._async_script(
+                LegacyMarionette(), "synthetic script", [], "provider_edit"
+            )
+        self.assertEqual(legacy.exception.error_class, "invalid_provider_result")
+        self.assertIn(
+            ("post_revoke_provider_request", "invalid_provider_result"),
+            SMOKE.NATIVE_FAILURE_PAIRS,
+        )
+
     def test_native_ca_and_calendar_tab_failures_use_fixed_phases(self) -> None:
         contract = self._load_native_thunderbird_contract()
         with patch.object(
@@ -1313,6 +1378,17 @@ async function runCase(testCase) {
             ("provider_refresh", "script_error"),
             ("provider_edit", "session_error"),
             ("post_revoke_provider_request", "other"),
+            ("post_revoke_provider_request", "invalid_provider_result"),
+            ("post_revoke_provider_request", "invalid_provider_result_none"),
+            ("post_revoke_provider_request", "invalid_provider_result_non_object"),
+            (
+                "post_revoke_provider_request",
+                "invalid_provider_result_missing_ok",
+            ),
+            (
+                "post_revoke_provider_request",
+                "invalid_provider_result_non_boolean_ok",
+            ),
             *sorted(contract.NATIVE_DISCOVERY_FAILURE_PAIRS),
         )
         for stage, error_class in native_failures:
