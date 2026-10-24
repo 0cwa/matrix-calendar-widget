@@ -5454,6 +5454,12 @@ async function readBackRelativeAlarm(
   },
 ): Promise<boolean> {
   try {
+    observation.alarmUiRelativeAlarmReadback = false;
+    observation.alarmUiAlarmToggleReadback = false;
+    observation.alarmUiRelativeTriggerReadback = false;
+    observation.alarmUiOffsetReadback = false;
+    observation.alarmUiEditorClosed = false;
+    observation.alarmUiDetailsClosed = false;
     const row = frame.getByRole('listitem', { name: title });
     observation.alarmUiStep = 'event-row-visible';
     await expect(row).toBeVisible();
@@ -5466,7 +5472,10 @@ async function readBackRelativeAlarm(
     ).toBeVisible();
     observation.alarmUiStep = 'readback-editor-open';
     await details.getByRole('button', { name: 'Edit', exact: true }).click();
-    const editor = frame.getByRole('dialog').last();
+    const editor = frame.getByRole('dialog', {
+      name: 'Edit event',
+      exact: true,
+    });
     observation.alarmUiStep = 'readback-editor-ready';
     await expect(editor.getByRole('textbox', { name: 'Title' })).toBeVisible();
     observation.alarmUiStep = 'readback-alarm-toggle';
@@ -5539,7 +5548,10 @@ async function addCalDavAlarmFromReminderSettings(
     await expect(editCalDavButton).toBeVisible({ timeout: 20_000 });
     await editCalDavButton.click();
 
-    const editor = frame.getByRole('dialog').last();
+    const editor = frame.getByRole('dialog', {
+      name: 'Edit event',
+      exact: true,
+    });
     observation.alarmUiStep = 'editor-ready';
     await expect(editor).toBeVisible();
     const alarmToggle = editor.getByLabel('CalDAV reminder');
