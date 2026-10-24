@@ -169,6 +169,7 @@ type ReminderConfigurationObservation = {
   memberQueryMatchesTargetAfterFill: boolean;
   memberQueryMatchesTargetAtOptionCount: boolean;
   memberListboxCount: number;
+  memberInputControlsUniqueListbox: boolean;
   memberOptionCount: number;
   memberOptionsContainingTargetIdCount: number;
   selectedMemberTagCount: number;
@@ -5631,6 +5632,7 @@ async function setRoomReminder(
     memberQueryMatchesTargetAfterFill: false,
     memberQueryMatchesTargetAtOptionCount: false,
     memberListboxCount: 0,
+    memberInputControlsUniqueListbox: false,
     memberOptionCount: 0,
     memberOptionsContainingTargetIdCount: 0,
     selectedMemberTagCount: 0,
@@ -5831,6 +5833,19 @@ async function setRoomReminder(
         .filter({ visible: true });
       observation.recipientSelectionStep = 'member-listbox-ready';
       observation.memberListboxCount = Math.min(await memberListbox.count(), 2);
+      const measureMemberInputListboxAssociation = async () => {
+        const controls = await memberInput.getAttribute('aria-controls');
+        const controlledIds = await memberListbox.evaluateAll((listboxes) =>
+          listboxes.map((listbox) => listbox.id),
+        );
+        const tokens = controls?.trim().split(/\s+/) ?? [];
+        return (
+          tokens.length === 1 &&
+          tokens[0].length > 0 &&
+          controlledIds.length === 1 &&
+          controlledIds[0] === tokens[0]
+        );
+      };
       try {
         await expect(memberListbox).toHaveCount(1, { timeout: 15_000 });
       } finally {
@@ -5838,7 +5853,10 @@ async function setRoomReminder(
           .count()
           .then((count) => Math.min(count, 2))
           .catch(() => observation.memberListboxCount);
+        observation.memberInputControlsUniqueListbox =
+          await measureMemberInputListboxAssociation().catch(() => false);
       }
+      expect(observation.memberInputControlsUniqueListbox).toBe(true);
       const memberOptions = memberListbox.getByRole('option');
       const memberOption = memberOptions.first();
       observation.recipientSelectionStep = 'member-option-ready';

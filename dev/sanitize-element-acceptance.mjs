@@ -1296,6 +1296,7 @@ const REMINDER_CONFIGURATION_FIELDS = [
   'memberQueryMatchesTargetAfterFill',
   'memberQueryMatchesTargetAtOptionCount',
   'memberListboxCount',
+  'memberInputControlsUniqueListbox',
   'memberOptionCount',
   'memberOptionsContainingTargetIdCount',
   'selectedMemberTagCount',
@@ -2556,6 +2557,7 @@ function validReminderConfigurationObservation(record) {
       'recipientSelectionAttempted',
       'memberQueryMatchesTargetAfterFill',
       'memberQueryMatchesTargetAtOptionCount',
+      'memberInputControlsUniqueListbox',
       'selectedMemberKeyboardFlow',
       'reminderTargetMatches',
       'allDayScheduleMatches',
@@ -2590,6 +2592,7 @@ function validReminderConfigurationObservation(record) {
         record.allDayScheduleMatches &&
         (record.recipientKind !== 'selected' ||
           (record.selectedMemberKeyboardFlow &&
+            record.memberInputControlsUniqueListbox &&
             record.narrowSidePanelSafe &&
             record.memberOptionCount === 1 &&
             record.selectedMemberTagCount === 1)) &&
@@ -4311,6 +4314,7 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           `member_query_matches_target_after_fill=${record.memberQueryMatchesTargetAfterFill}`,
           `member_query_matches_target_at_option_count=${record.memberQueryMatchesTargetAtOptionCount}`,
           `member_listbox_count=${record.memberListboxCount}`,
+          `member_input_controls_unique_listbox=${record.memberInputControlsUniqueListbox}`,
           `member_options_containing_target_id_count=${record.memberOptionsContainingTargetIdCount}`,
         ].join(' '),
       );
