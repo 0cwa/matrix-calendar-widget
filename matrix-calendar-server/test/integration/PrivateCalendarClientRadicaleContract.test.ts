@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { Module } from '@nestjs/common';
+import { Module, VersioningType } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type {
   Request as ExpressRequest,
@@ -49,25 +49,42 @@ import { delimiter, join, resolve as resolvePath } from 'node:path';
 import { ReadableStream } from 'node:stream/web';
 import { promisify } from 'node:util';
 import type { CalDavCredentialProvider } from '../../src/caldav/CalDavCredentialProvider';
+import { MatrixOpenIdCalDavCredentialProviderFactory } from '../../src/caldav/MatrixOpenIdCalDavCredentialProviderFactory';
+import { PublicCalendarFeedController } from '../../src/controller/PublicCalendarFeedController';
 import { createCalendarGatewayHttpApplication } from '../../src/http/CalendarGatewayHttpApplication';
 import type { IAppConfiguration } from '../../src/IAppConfiguration';
+import type { IMatrixOpenIdCredential } from '../../src/model/IMatrixOpenIdCredential';
 import type {
   PrivateCalendarClientRecord,
   PrivateCalendarClientStore,
 } from '../../src/model/IPrivateCalendarClientStore';
-import type { MatrixCalendarAuthorizationFactory } from '../../src/service/MatrixCalendarAuthorization';
+import type { IUserContext } from '../../src/model/IUserContext';
+import { ModuleProviderToken } from '../../src/ModuleProviderToken';
+import { MatrixCalendarAuthorizationFactory } from '../../src/service/MatrixCalendarAuthorization';
 import { PrivateCalendarClientCallbackGateway } from '../../src/service/private-client/PrivateCalendarClientCallbackGateway';
 import { privateCalendarClientSecretVerifier } from '../../src/service/private-client/PrivateCalendarClientCredentials';
 import { PrivateCalendarClientDavGateway } from '../../src/service/private-client/PrivateCalendarClientDavGateway';
 import { PrivateCalendarClientPolicy } from '../../src/service/private-client/PrivateCalendarClientPolicy';
 import { RadicalePrivateClientMapClient } from '../../src/service/private-client/RadicalePrivateClientMapClient';
+import { PublicCalendarFeedService } from '../../src/service/public-feed/PublicCalendarFeedService';
 import type { RoomCalendarCalDavAccess } from '../../src/service/RoomCalendarCalDavAccess';
 
 const execFileAsync = promisify(execFile);
 const contractEnabled = process.env.PRIVATE_CALDAV_CONTRACT === '1';
 const nativeThunderbirdProfile =
   process.env.MCW_PRIVATE_CALDAV_NATIVE_PROFILE === '1';
-const describeContract = contractEnabled ? describe : describe.skip;
+const publicFeedNativeProfile =
+  process.env.MCW_PUBLIC_FEED_NATIVE_PROFILE === '1';
+const nativeThunderbirdBinary =
+  process.env.MCW_PUBLIC_ICS_NATIVE_THUNDERBIRD_BIN ??
+  process.env.MCW_PRIVATE_CALDAV_NATIVE_THUNDERBIRD_BIN ??
+  '';
+const nativeThunderbirdWorkspace =
+  process.env.MCW_PUBLIC_ICS_NATIVE_WORKSPACE ??
+  process.env.MCW_PRIVATE_CALDAV_NATIVE_WORKSPACE ??
+  '';
+const describeContract =
+  contractEnabled || publicFeedNativeProfile ? describe : describe.skip;
 
 const APP_ID_PATTERN = /^mcwpc~[a-f0-9]{48}$/u;
 const TEST_MATRIX_SERVER = 'example.test';
@@ -84,6 +101,9 @@ function mkCalendar(components: readonly string[] = ['VEVENT']): Buffer {
 }
 const INITIAL_EVENT = Buffer.from(
   'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Matrix Calendar Widget//Private client contract//EN\r\nBEGIN:VEVENT\r\nUID:private-contract-event\r\nDTSTAMP:20261021T100000Z\r\nDTSTART:20261022T090000Z\r\nDTEND:20261022T100000Z\r\nSUMMARY:Canonical event before client edit\r\nX-COMPANY-OPAQUE;X-KEEP=attribute:keep-this-value\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n',
+);
+const PUBLIC_NATIVE_EVENT = Buffer.from(
+  'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Matrix Calendar Widget//Public feed native contract//EN\r\nBEGIN:VEVENT\r\nUID:public-native-feed-event\r\nDTSTAMP:20261021T100000Z\r\nDTSTART:20261023T110000Z\r\nDTEND:20261023T113000Z\r\nSUMMARY:Synthetic public feed native contract fixture\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n',
 );
 const OTHER_EVENT = Buffer.from(
   'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Matrix Calendar Widget//Private client contract//EN\r\nBEGIN:VEVENT\r\nUID:other-calendar-contract-event\r\nDTSTAMP:20261021T100000Z\r\nDTSTART:20261022T090000Z\r\nDTEND:20261022T100000Z\r\nSUMMARY:Do not disclose another calendar\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n',
@@ -111,14 +131,70 @@ class PrivateContractMatrixAuth {}
 let callbackGateway: PrivateCalendarClientCallbackGateway;
 let davGateway: PrivateCalendarClientDavGateway;
 let contractConfig: IAppConfiguration;
+let publicFeedService: PublicCalendarFeedService | undefined;
+let publicAuthorizationFactory: MatrixCalendarAuthorizationFactory;
+let publicRoomCalendarCalDavAccess: RoomCalendarCalDavAccess;
+let publicFeedRequestPath = '';
+const publicFeedMetrics = {
+  requestCount: 0,
+  exactRouteCount: 0,
+  authorizationAbsentCount: 0,
+  status200Count: 0,
+  status404Count: 0,
+};
 
 const configProvider = {
   getOrThrow: () => contractConfig,
 };
 
 @Module({
+  controllers: [PublicCalendarFeedController],
   providers: [
     { provide: ConfigService, useValue: configProvider },
+    {
+      provide: ModuleProviderToken.APP_CONFIGURATION,
+      useFactory: () => contractConfig,
+    },
+    {
+      provide: ModuleProviderToken.NATIVE_FETCH,
+      useFactory: () => contractFetch,
+    },
+    {
+      provide: ModuleProviderToken.ROOM_CALENDAR_CALDAV_ACCESS,
+      useFactory: () => publicRoomCalendarCalDavAccess,
+    },
+    {
+      provide: MatrixCalendarAuthorizationFactory,
+      useFactory: () => publicAuthorizationFactory,
+    },
+    {
+      provide: MatrixOpenIdCalDavCredentialProviderFactory,
+      useValue: new MatrixOpenIdCalDavCredentialProviderFactory(),
+    },
+    {
+      provide: PublicCalendarFeedService,
+      useFactory: (
+        appConfig: IAppConfiguration,
+        authorization: MatrixCalendarAuthorizationFactory,
+        credentials: MatrixOpenIdCalDavCredentialProviderFactory,
+        roomAccess: RoomCalendarCalDavAccess,
+        nativeFetch: typeof fetch,
+      ) =>
+        new PublicCalendarFeedService(
+          appConfig,
+          authorization,
+          credentials,
+          roomAccess,
+          nativeFetch,
+        ),
+      inject: [
+        ModuleProviderToken.APP_CONFIGURATION,
+        MatrixCalendarAuthorizationFactory,
+        MatrixOpenIdCalDavCredentialProviderFactory,
+        ModuleProviderToken.ROOM_CALENDAR_CALDAV_ACCESS,
+        ModuleProviderToken.NATIVE_FETCH,
+      ],
+    },
     {
       provide: PrivateCalendarClientCallbackGateway,
       useFactory: () => callbackGateway,
@@ -142,18 +218,24 @@ const configProvider = {
 class PrivateCalendarClientRadicaleContractModule {}
 
 describeContract(
-  'private CalDAV client contracts with Radicale (python-caldav and Thunderbird)',
+  'Radicale client contracts (private CalDAV and public ICS)',
   () => {
-    jest.setTimeout(nativeThunderbirdProfile ? 240_000 : 90_000);
+    jest.setTimeout(
+      nativeThunderbirdProfile || publicFeedNativeProfile ? 240_000 : 90_000,
+    );
 
-    it('discovers and edits only the mapped calendar through the HTTPS gateway', async () => {
+    it('runs the selected client profile against the Radicale HTTPS fixture', async () => {
       const root = resolvePath(__dirname, '../../..');
       const python =
+        process.env.MCW_PUBLIC_ICS_PYTHON ??
         process.env.MCW_PRIVATE_CALDAV_PYTHON ??
         '/tmp/mcw-public-feeds-radicale-venv/bin/python';
       const radicalePython =
-        process.env.MCW_PRIVATE_CALDAV_RADICALE_PYTHON ?? python;
+        process.env.MCW_PUBLIC_ICS_RADICALE_PYTHON ??
+        process.env.MCW_PRIVATE_CALDAV_RADICALE_PYTHON ??
+        python;
       const caldavSitePackages =
+        process.env.MCW_PUBLIC_ICS_SITE_PACKAGES ??
         process.env.MCW_PRIVATE_CALDAV_SITE_PACKAGES ??
         resolvePath(root, '../private-client-contract/site-packages');
       const pluginSource = join(root, 'radicale-auth', 'src');
@@ -169,18 +251,26 @@ describeContract(
         'tests',
         'private_client_thunderbird_contract.py',
       );
+      const publicFeedThunderbirdContract = join(
+        root,
+        'radicale-auth',
+        'tests',
+        'public_calendar_feed_thunderbird_contract.py',
+      );
       expect(existsSync(python)).toBe(true);
       expect(existsSync(radicalePython)).toBe(true);
-      expect(
-        existsSync(join(caldavSitePackages, 'caldav', '__init__.py')),
-      ).toBe(true);
+      if (!publicFeedNativeProfile) {
+        expect(
+          existsSync(join(caldavSitePackages, 'caldav', '__init__.py')),
+        ).toBe(true);
+      }
       if (nativeThunderbirdProfile) {
         expect(existsSync(thunderbirdContract)).toBe(true);
-        expect(
-          existsSync(
-            process.env.MCW_PRIVATE_CALDAV_NATIVE_THUNDERBIRD_BIN ?? '',
-          ),
-        ).toBe(true);
+        expect(existsSync(nativeThunderbirdBinary)).toBe(true);
+      }
+      if (publicFeedNativeProfile) {
+        expect(existsSync(publicFeedThunderbirdContract)).toBe(true);
+        expect(existsSync(nativeThunderbirdBinary)).toBe(true);
       }
 
       const temp = await mkdtemp(join(tmpdir(), 'mcw-private-client-runtime-'));
@@ -210,17 +300,45 @@ describeContract(
       const homeProbeStatuses: number[] = [];
       const clientSecrets = new Map<string, string>();
 
-      const personalAppId = `mcwpc~${randomBytes(24).toString('hex')}`;
-      const roomAppId = `mcwpc~${randomBytes(24).toString('hex')}`;
-      const personalSecret = randomBytes(32).toString('base64url');
-      const roomSecret = randomBytes(32).toString('base64url');
+      const privateFixtureEnabled = !publicFeedNativeProfile;
+      const personalAppId = privateFixtureEnabled
+        ? `mcwpc~${randomBytes(24).toString('hex')}`
+        : `mcwpc~${'0'.repeat(48)}`;
+      const roomAppId = privateFixtureEnabled
+        ? `mcwpc~${randomBytes(24).toString('hex')}`
+        : `mcwpc~${'1'.repeat(48)}`;
+      const personalSecret = privateFixtureEnabled
+        ? randomBytes(32).toString('base64url')
+        : '';
+      const roomSecret = privateFixtureEnabled
+        ? randomBytes(32).toString('base64url')
+        : '';
       const callbackKey = randomBytes(32);
       const epochKey = randomBytes(32);
       const controlKey = randomBytes(32).toString('base64url');
+      let publicFeedSigningKey = randomBytes(32);
+      while (timingSafeEqual(publicFeedSigningKey, epochKey)) {
+        publicFeedSigningKey = randomBytes(32);
+      }
+      const publicFeedUser: IUserContext = {
+        userId: TEST_ACTOR,
+        locale: 'en',
+        timezone: 'UTC',
+      };
+      const publicFeedCredential: IMatrixOpenIdCredential = {
+        accessToken: 'contract-owner-proof',
+        matrixServerName: TEST_MATRIX_SERVER,
+      };
+      const publicFeedTarget = {
+        target: 'personal' as const,
+        calendarId: 'personal',
+      };
       expect(APP_ID_PATTERN.test(personalAppId)).toBe(true);
       expect(APP_ID_PATTERN.test(roomAppId)).toBe(true);
-      clientSecrets.set(personalAppId, personalSecret);
-      clientSecrets.set(roomAppId, roomSecret);
+      if (privateFixtureEnabled) {
+        clientSecrets.set(personalAppId, personalSecret);
+        clientSecrets.set(roomAppId, roomSecret);
+      }
 
       try {
         const certificates = await createContractCertificates(temp);
@@ -229,8 +347,13 @@ describeContract(
         const subjects = new Map<string, string>([
           ['contract-owner-proof', '@alice:example.test'],
           ['contract-calendarbot-proof', '@calendarbot:example.test'],
-          ['reserved-openid-proof', `@${personalAppId}:example.test`],
         ]);
+        if (privateFixtureEnabled) {
+          subjects.set(
+            'reserved-openid-proof',
+            `@${personalAppId}:example.test`,
+          );
+        }
         userInfoServer = createHttpServer((request, response) => {
           const url = new URL(request.url ?? '/', 'http://localhost');
           const token = url.searchParams.get('access_token') ?? '';
@@ -254,28 +377,33 @@ describeContract(
         await listen(userInfoServer);
         const userInfoActualPort = portOf(userInfoServer);
 
-        const personalRecord = createRecord(
-          personalAppId,
-          personalSecret,
-          epochKey,
-          { target: 'personal', calendarId: 'personal' },
-          '/alice/personal/',
-        );
-        const roomRecord = createRecord(
-          roomAppId,
-          roomSecret,
-          epochKey,
-          {
-            target: 'room',
-            roomId: '!contract-room:example.test',
-            calendarId: 'room-team',
-          },
-          '/calendarbot/room-team/',
-        );
-        records = new Map([
-          [personalAppId, personalRecord],
-          [roomAppId, roomRecord],
-        ]);
+        records = new Map<string, PrivateCalendarClientRecord>();
+        if (privateFixtureEnabled) {
+          records.set(
+            personalAppId,
+            createRecord(
+              personalAppId,
+              personalSecret,
+              epochKey,
+              { target: 'personal', calendarId: 'personal' },
+              '/alice/personal/',
+            ),
+          );
+          records.set(
+            roomAppId,
+            createRecord(
+              roomAppId,
+              roomSecret,
+              epochKey,
+              {
+                target: 'room',
+                roomId: '!contract-room:example.test',
+                calendarId: 'room-team',
+              },
+              '/calendarbot/room-team/',
+            ),
+          );
+        }
         store = {
           enabled: true,
           async getByAppId(appId) {
@@ -334,11 +462,20 @@ describeContract(
         };
 
         const authorizationFactory = {
+          forRoom() {
+            return {
+              async isAllowed() {
+                return managerPower;
+              },
+            };
+          },
           async canManageCalendars() {
             managerPowerChecks += 1;
             return managerPower;
           },
         };
+        publicAuthorizationFactory =
+          authorizationFactory as unknown as MatrixCalendarAuthorizationFactory;
         const matrixClient = {
           async getJoinedRoomMembers() {
             return roomMember ? [TEST_ACTOR] : [];
@@ -351,10 +488,12 @@ describeContract(
             };
           },
         };
+        publicRoomCalendarCalDavAccess =
+          roomCalendarCalDavAccess as unknown as RoomCalendarCalDavAccess;
 
         const policy = new PrivateCalendarClientPolicy(
           {
-            private_calendar_clients_enabled: true,
+            private_calendar_clients_enabled: privateFixtureEnabled,
             private_calendar_client_epoch_key: epochKey,
             private_calendar_client_callback_key: callbackKey,
           } as IAppConfiguration,
@@ -398,11 +537,16 @@ describeContract(
 
         const apiAddress = await availablePort();
         contractConfig = {
-          private_calendar_clients_enabled: true,
+          private_calendar_clients_enabled: privateFixtureEnabled,
           private_calendar_client_origin: `https://localhost:${apiAddress}`,
           private_calendar_client_epoch_key: epochKey,
           private_calendar_client_callback_key: callbackKey,
           radicale_url: `http://127.0.0.1:${radicalePort}`,
+          public_calendar_feed_enabled: publicFeedNativeProfile,
+          public_calendar_feed_origin: publicFeedNativeProfile
+            ? `https://localhost:${apiAddress}`
+            : undefined,
+          public_calendar_feed_signing_key: publicFeedSigningKey,
           calendar_gateway_rate_limit_requests: 10_000,
           calendar_gateway_rate_limit_window_ms: 60_000,
           calendar_gateway_rate_limit_max_keys: 50,
@@ -423,7 +567,38 @@ describeContract(
         );
         nestApplication = gateway.app;
         nestApplication.useLogger(false);
+        nestApplication.use(
+          (
+            request: ExpressRequest,
+            response: ExpressResponse,
+            next: NextFunction,
+          ) => {
+            const requestPath = request.originalUrl ?? request.url ?? '';
+            if (
+              request.method === 'GET' &&
+              requestPath.startsWith('/v1/public-calendar-feeds/')
+            ) {
+              publicFeedMetrics.requestCount += 1;
+              if (requestPath === publicFeedRequestPath) {
+                publicFeedMetrics.exactRouteCount += 1;
+              }
+              if (!request.headers.authorization) {
+                publicFeedMetrics.authorizationAbsentCount += 1;
+              }
+              response.once('finish', () => {
+                if (response.statusCode === 200) {
+                  publicFeedMetrics.status200Count += 1;
+                } else if (response.statusCode === 404) {
+                  publicFeedMetrics.status404Count += 1;
+                }
+              });
+            }
+            next();
+          },
+        );
+        nestApplication.enableVersioning({ type: VersioningType.URI });
         await nestApplication.init();
+        publicFeedService = nestApplication.get(PublicCalendarFeedService);
         httpsServer = createHttpsServer(
           {
             key: await readFile(certificates.serverKey),
@@ -524,6 +699,16 @@ describeContract(
               }
               return false;
             },
+            {
+              state: () => ({ ...publicFeedMetrics }),
+              unpublish: async () => {
+                await publicFeedService!.unpublish(
+                  publicFeedUser,
+                  publicFeedCredential,
+                  publicFeedTarget,
+                );
+              },
+            },
           );
         });
         await listen(controlServer);
@@ -583,6 +768,164 @@ describeContract(
           openIdPassword('contract-calendarbot-proof'),
           INITIAL_EVENT,
         );
+        if (publicFeedNativeProfile) {
+          const publicEventWrite = await requestRadicale(
+            radicalePort,
+            'PUT',
+            '/alice/personal/public-native-contract.ics',
+            PUBLIC_NATIVE_EVENT,
+            openIdAuthorization('alice', 'contract-owner-proof'),
+            { 'Content-Type': 'text/calendar' },
+          );
+          expect([201, 204]).toContain(publicEventWrite.status);
+          const publication = await publicFeedService!.publish(
+            publicFeedUser,
+            publicFeedCredential,
+            publicFeedTarget,
+            true,
+          );
+          expect(publication.published).toBe(true);
+          expect(publication.url).toBeDefined();
+          const publicUrl = new URL(publication.url!);
+          expect(
+            publicUrl.origin === `https://localhost:${apiAddress}` &&
+              /^\/v1\/public-calendar-feeds\/[A-Za-z0-9_.-]+$/u.test(
+                publicUrl.pathname,
+              ) &&
+              publicUrl.username === '' &&
+              publicUrl.password === '' &&
+              publicUrl.search === '' &&
+              publicUrl.hash === '',
+          ).toBe(true);
+          publicFeedRequestPath = publicUrl.pathname;
+
+          const publicFeedThunderbirdContract = join(
+            root,
+            'radicale-auth',
+            'tests',
+            'public_calendar_feed_thunderbird_contract.py',
+          );
+          const publicNativeEnvironment = Object.fromEntries(
+            [
+              'PATH',
+              'LD_LIBRARY_PATH',
+              'XDG_CONFIG_HOME',
+              'XDG_CACHE_HOME',
+              'XDG_DATA_HOME',
+              'XDG_STATE_HOME',
+              'XDG_RUNTIME_DIR',
+              'DISPLAY',
+            ]
+              .filter((name) => typeof process.env[name] === 'string')
+              .map((name) => [name, process.env[name] as string] as const),
+          );
+          const publicProcess = spawn(python, [publicFeedThunderbirdContract], {
+            cwd: root,
+            env: {
+              ...publicNativeEnvironment,
+              MCW_PUBLIC_ICS_API_ORIGIN: `https://localhost:${apiAddress}`,
+              MCW_PUBLIC_ICS_URL: publication.url!,
+              MCW_PUBLIC_ICS_CA_FILE: certificates.caCert,
+              MCW_PUBLIC_ICS_CONTROL_PORT: String(portOf(controlServer!)),
+              MCW_PUBLIC_ICS_CONTROL_KEY: controlKey,
+              MCW_PUBLIC_ICS_NATIVE_THUNDERBIRD_BIN: nativeThunderbirdBinary,
+              MCW_PUBLIC_ICS_NATIVE_WORKSPACE: nativeThunderbirdWorkspace,
+            },
+            stdio: ['ignore', 'pipe', 'ignore'],
+          });
+          let publicStdout = '';
+          publicProcess.stdout?.on('data', (chunk: Buffer) => {
+            publicStdout += chunk.toString('utf8');
+          });
+          try {
+            const publicExit = await waitForChild(publicProcess, 180_000);
+            const resultLine = publicStdout
+              .split(/\r?\n/u)
+              .map((line) => line.trim())
+              .filter((line) => line.startsWith('{'))
+              .at(-1);
+            expect(resultLine).toBeDefined();
+            let publicResult: Record<string, unknown>;
+            try {
+              publicResult = JSON.parse(resultLine ?? '{}') as Record<
+                string,
+                unknown
+              >;
+            } catch {
+              throw new Error('Native public-feed result was invalid.');
+            }
+            if (publicExit !== 0 || publicResult.status !== 'passed') {
+              const safeFailureValue = (value: unknown) =>
+                typeof value === 'string' && /^[a-z_]{1,64}$/u.test(value)
+                  ? value
+                  : 'unknown';
+              const failureStage = safeFailureValue(publicResult.failure_stage);
+              const failureClass = safeFailureValue(publicResult.failure_class);
+              throw new Error(
+                `Native public-feed contract failed (${failureStage}/${failureClass}).`,
+              );
+            }
+            for (const predicate of [
+              'calendarTab',
+              'providerTypeICS',
+              'readOnlyCalendar',
+              'storedCredentialsAbsent',
+              'initialFeedObserved',
+              'canonicalEventObserved',
+              'explicitRefreshObserved',
+              'revokedRefreshObserved',
+              'revokedResponseNotFound',
+              'exactGatewayRoute',
+              'gatewayAuthorizationAbsent',
+            ] as const) {
+              expect(publicResult[predicate]).toBe(true);
+            }
+            const publicCountFields = [
+              'gatewayGetCount',
+              'exactRouteCount',
+              'authorizationAbsentCount',
+              'http200Count',
+              'http404Count',
+            ] as const;
+            for (const field of publicCountFields) {
+              const count = publicResult[field];
+              expect(
+                typeof count === 'number' && Number.isSafeInteger(count),
+              ).toBe(true);
+            }
+            expect(
+              publicResult.exactRouteCount === publicResult.gatewayGetCount,
+            ).toBe(true);
+            expect(
+              publicResult.authorizationAbsentCount ===
+                publicResult.gatewayGetCount,
+            ).toBe(true);
+            expect(
+              typeof publicResult.http200Count === 'number' &&
+                publicResult.http200Count >= 2,
+            ).toBe(true);
+            expect(
+              typeof publicResult.http404Count === 'number' &&
+                publicResult.http404Count >= 1,
+            ).toBe(true);
+            expect(publicFeedMetrics.requestCount).toBeGreaterThanOrEqual(3);
+            expect(publicFeedMetrics.exactRouteCount).toBe(
+              publicFeedMetrics.requestCount,
+            );
+            expect(publicFeedMetrics.authorizationAbsentCount).toBe(
+              publicFeedMetrics.requestCount,
+            );
+            expect(publicFeedMetrics.status200Count).toBeGreaterThanOrEqual(2);
+            expect(publicFeedMetrics.status404Count).toBeGreaterThanOrEqual(1);
+          } finally {
+            await publicFeedService!.unpublish(
+              publicFeedUser,
+              publicFeedCredential,
+              publicFeedTarget,
+            );
+          }
+          return;
+        }
         const mixedWrite = await requestRadicale(
           radicalePort,
           'PUT',
@@ -1605,8 +1948,34 @@ async function handleControlRequest(
     personalState: string;
   },
   verifyNativeCanonical: (operation: string) => Promise<boolean>,
+  publicFeedControl?: Readonly<{
+    state: () => Readonly<{
+      requestCount: number;
+      exactRouteCount: number;
+      authorizationAbsentCount: number;
+      status200Count: number;
+      status404Count: number;
+    }>;
+    unpublish: () => Promise<void>;
+  }>,
 ): Promise<void> {
   try {
+    if (
+      request.method === 'GET' &&
+      request.url === '/public-feed-state' &&
+      publicFeedControl &&
+      hasControlKey(request.headers[CONTROL_HEADER], controlKey)
+    ) {
+      const bytes = Buffer.from(JSON.stringify(publicFeedControl.state()));
+      response
+        .writeHead(200, {
+          'Content-Type': 'application/json',
+          'Content-Length': String(bytes.byteLength),
+          'Cache-Control': 'no-store',
+        })
+        .end(bytes);
+      return;
+    }
     if (
       request.method === 'GET' &&
       request.url === '/native-state' &&
@@ -1631,6 +2000,7 @@ async function handleControlRequest(
         '/native-verify-created',
         '/native-verify-deleted',
         '/native-verify-revoked',
+        '/public-feed-unpublish',
       ].includes(request.url ?? '') ||
       !hasControlKey(request.headers[CONTROL_HEADER], controlKey)
     ) {
@@ -1640,6 +2010,15 @@ async function handleControlRequest(
     const bytes = await readBoundedRequest(request, 1024);
     if (!bytes) {
       response.writeHead(413).end();
+      return;
+    }
+    if (request.url === '/public-feed-unpublish') {
+      if (!publicFeedControl || bytes.toString('utf8') !== '{}') {
+        response.writeHead(400).end();
+        return;
+      }
+      await publicFeedControl.unpublish();
+      response.writeHead(204).end();
       return;
     }
     if (request.url === '/revoke-personal') {
