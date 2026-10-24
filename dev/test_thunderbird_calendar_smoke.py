@@ -71,9 +71,11 @@ class SuccessfulStartup:
     port = 2828
     session = None
 
-    def __init__(self, workspace: str, **_kwargs: object):
+    def __init__(self, workspace: str, gecko_log: str, **_kwargs: object):
         self.profile_path = str(Path(workspace) / "profile")
         Path(self.profile_path).mkdir()
+        self.gecko_log = Path(gecko_log)
+        self.gecko_log.write_text("private fake runner output", encoding="utf-8")
 
     def start_session(self) -> dict[str, str]:
         self.session = object()
@@ -311,6 +313,10 @@ class ThunderbirdSmokeDiagnosticTests(unittest.TestCase):
             SuccessfulStartup, port_ready=True, expected_exit=0
         )
         self.assertEqual(result["binary_version_probe"], "passed")
+        gecko_log = self.task_root / "workspace" / "gecko.log"
+        self.assertTrue(gecko_log.is_file())
+        gecko_log.resolve().relative_to((self.task_root / "workspace").resolve())
+        self.assertEqual(gecko_log.read_text(encoding="utf-8"), "private fake runner output")
         with patch.dict(
             os.environ,
             {"RUNNER_TEMP": str(self.base), "GITHUB_OUTPUT": str(github_output)},

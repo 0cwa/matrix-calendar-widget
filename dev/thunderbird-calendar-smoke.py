@@ -1661,6 +1661,7 @@ def _smoke_worker(root: Path) -> int:
             bin=str(binary),
             app="thunderbird",
             workspace=str(root / "workspace"),
+            gecko_log=str(root / "workspace" / "gecko.log"),
             app_args=["--calendar", "--headless"],
             prefs=prefs,
             headless=False,
