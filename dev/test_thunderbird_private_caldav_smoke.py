@@ -8,12 +8,19 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import tempfile
 import unittest
 from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).with_name("thunderbird-private-caldav-smoke.py")
+CONTRACT_SCRIPT = (
+    Path(__file__).parents[1]
+    / "radicale-auth"
+    / "tests"
+    / "private_client_caldav_contract.py"
+)
 SPEC = importlib.util.spec_from_file_location("private_caldav_smoke", SCRIPT)
 if SPEC is None or SPEC.loader is None:
     raise RuntimeError("private CalDAV smoke helper is unavailable")
@@ -104,6 +111,182 @@ class PrivateCalDavSmokeTests(unittest.TestCase):
         wheelhouse = task_root / "private-caldav-wheels"
         wheelhouse.mkdir(mode=0o700)
         return SMOKE.EXPECTED_WHEEL_COUNT, 1000
+
+    def _write_caldav_contract_diagnostic(
+        self, path: Path, payload: dict[str, object]
+    ) -> None:
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        path.chmod(0o600)
+
+    def test_python_contract_phase_markers_match_the_closed_enum(self) -> None:
+        source = CONTRACT_SCRIPT.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        phase_assignment = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "CONTRACT_PHASES"
+                for target in node.targets
+            )
+        )
+        producer_phases = {
+            element.value
+            for element in phase_assignment.value.elts  # type: ignore[attr-defined]
+            if isinstance(element, ast.Constant) and isinstance(element.value, str)
+        }
+        observed = set(re.findall(r'_set_contract_phase\("([a-z_]+)"\)', source))
+        self.assertEqual(producer_phases, SMOKE.CALDAV_CONTRACT_PHASES)
+        self.assertEqual(observed, SMOKE.CALDAV_CONTRACT_PHASES - {"setup"})
+        self.assertIn('CURRENT_CONTRACT_PHASE = "setup"', source)
+        self.assertIn("os.O_EXCL | getattr(os, \"O_NOFOLLOW\", 0)", source)
+        self.assertIn("            0o600,", source)
+
+    def test_python_contract_diagnostic_accepts_fixed_phases_and_classes(self) -> None:
+        source_sha = "a" * 40
+        cases = (
+            ("callback_security", "operation_failed", "python_contract_callback_security"),
+            ("event_read", "assertion_failed", "python_contract_event_read"),
+            ("setup", "setup_failed", "python_contract_setup"),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / SMOKE.CALDAV_CONTRACT_DIAGNOSTIC_FILENAME
+            for phase, error_class, expected_stage in cases:
+                with self.subTest(phase=phase, error_class=error_class):
+                    self._write_caldav_contract_diagnostic(
+                        path,
+                        {
+                            "schema": SMOKE.CALDAV_CONTRACT_DIAGNOSTIC_SCHEMA,
+                            "status": "failed",
+                            "source_sha": source_sha,
+                            "phase": phase,
+                            "error_class": error_class,
+                        },
+                    )
+                    self.assertEqual(
+                        SMOKE._read_caldav_contract_diagnostic(path, source_sha),
+                        {
+                            "fixture_failure_stage": expected_stage,
+                            "fixture_failure_class": (
+                                SMOKE.CALDAV_CONTRACT_SUMMARY_CLASSES[error_class]
+                            ),
+                        },
+                    )
+                    path.unlink()
+
+    def test_python_contract_diagnostic_only_refines_failed_contract_setup(self) -> None:
+        diagnostic = {
+            "fixture_failure_stage": "python_contract_event_read",
+            "fixture_failure_class": "python_contract_assertion_failed",
+        }
+        self.assertEqual(
+            SMOKE._project_caldav_contract_diagnostic(
+                "fixture_setup", "caldav_contract_failed", diagnostic
+            ),
+            ("python_contract_event_read", "python_contract_assertion_failed"),
+        )
+        self.assertEqual(
+            SMOKE._project_caldav_contract_diagnostic(
+                "suite_load", "jest_suite_failed", diagnostic
+            ),
+            ("suite_load", "jest_suite_failed"),
+        )
+        self.assertEqual(
+            SMOKE._project_caldav_contract_diagnostic(
+                "fixture_setup", "caldav_contract_failed", None
+            ),
+            ("fixture_setup", "caldav_contract_failed"),
+        )
+        self.assertEqual(
+            SMOKE._project_caldav_contract_diagnostic(
+                "fixture_setup",
+                "caldav_contract_failed",
+                {
+                    "fixture_failure_stage": "private value",
+                    "fixture_failure_class": "private value",
+                },
+            ),
+            ("fixture_setup", "caldav_contract_failed"),
+        )
+
+    def test_python_contract_diagnostic_rejects_malformed_stale_and_unknown_data(self) -> None:
+        source_sha = "a" * 40
+        valid = {
+            "schema": SMOKE.CALDAV_CONTRACT_DIAGNOSTIC_SCHEMA,
+            "status": "failed",
+            "source_sha": source_sha,
+            "phase": "event_read",
+            "error_class": "assertion_failed",
+        }
+        bad_values = (
+            {**valid, "source_sha": "b" * 40},
+            {**valid, "phase": "unknown_phase"},
+            {**valid, "error_class": "private error text"},
+            {**valid, "raw_message": "must never be projected"},
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / SMOKE.CALDAV_CONTRACT_DIAGNOSTIC_FILENAME
+            for value in bad_values:
+                with self.subTest(value_keys=tuple(sorted(value))):
+                    self._write_caldav_contract_diagnostic(path, value)
+                    self.assertIsNone(
+                        SMOKE._read_caldav_contract_diagnostic(path, source_sha)
+                    )
+                    path.unlink()
+
+            path.write_text('{"phase":"event_read","phase":"event_read"}', encoding="utf-8")
+            path.chmod(0o600)
+            self.assertIsNone(
+                SMOKE._read_caldav_contract_diagnostic(path, source_sha)
+            )
+            path.unlink()
+
+            path.write_text("{", encoding="utf-8")
+            path.chmod(0o600)
+            self.assertIsNone(
+                SMOKE._read_caldav_contract_diagnostic(path, source_sha)
+            )
+            path.unlink()
+
+            self._write_caldav_contract_diagnostic(path, valid)
+            path.chmod(0o640)
+            self.assertIsNone(
+                SMOKE._read_caldav_contract_diagnostic(path, source_sha)
+            )
+            path.unlink()
+
+            path.write_bytes(b"x" * (SMOKE.MAX_CALDAV_CONTRACT_DIAGNOSTIC_BYTES + 1))
+            path.chmod(0o600)
+            self.assertIsNone(
+                SMOKE._read_caldav_contract_diagnostic(path, source_sha)
+            )
+            path.unlink()
+
+            target = Path(temporary) / "target.json"
+            self._write_caldav_contract_diagnostic(target, valid)
+            path.symlink_to(target)
+            self.assertIsNone(
+                SMOKE._read_caldav_contract_diagnostic(path, source_sha)
+            )
+            SMOKE._remove_caldav_contract_diagnostic(path)
+            self.assertTrue(path.is_symlink())
+            path.unlink()
+
+    def test_python_contract_diagnostic_cleanup_removes_only_owned_private_regular_file(self) -> None:
+        source_sha = "a" * 40
+        payload = {
+            "schema": SMOKE.CALDAV_CONTRACT_DIAGNOSTIC_SCHEMA,
+            "status": "failed",
+            "source_sha": source_sha,
+            "phase": "event_read",
+            "error_class": "assertion_failed",
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / SMOKE.CALDAV_CONTRACT_DIAGNOSTIC_FILENAME
+            self._write_caldav_contract_diagnostic(path, payload)
+            SMOKE._remove_caldav_contract_diagnostic(path)
+            self.assertFalse(path.exists())
+            SMOKE._remove_caldav_contract_diagnostic(path)
 
     def test_actual_startup_prepare_output_matches_workspace_and_artifact_gates(self) -> None:
         source_sha = "a" * 40

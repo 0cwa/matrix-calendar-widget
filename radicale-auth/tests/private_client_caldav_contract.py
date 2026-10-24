@@ -26,37 +26,117 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-import caldav
-from caldav.lib import error as caldav_error
-
-from matrix_calendar_radicale_auth.private_client_callback import (
-    AUTH_PATH,
-    REQUEST_SIGNATURE_HEADER,
-    RESPONSE_SIGNATURE_HEADER,
-    _build_opener,
-    _request_signature,
-    _response_signature,
-    PrivateClientCallbackClient,
+CONTRACT_DIAGNOSTIC_SCHEMA = "private-caldav-contract-diagnostic@1"
+CONTRACT_DIAGNOSTIC_PATH = (
+    "/task/workspace/private-caldav-contract-diagnostic.json"
 )
+CONTRACT_PHASES = {
+    "setup",
+    "client_version",
+    "callback_security",
+    "principal_discovery",
+    "calendar_discovery",
+    "event_read",
+    "etag_read",
+    "event_update",
+    "stale_etag",
+    "event_create",
+    "event_delete",
+    "mixed_collection",
+    "component_scope",
+    "credential_isolation",
+    "route_isolation",
+    "room_discovery",
+    "room_power_policy",
+    "room_membership_policy",
+    "personal_revocation",
+    "complete",
+}
+CONTRACT_ERROR_CLASSES = {"setup_failed", "assertion_failed", "operation_failed"}
+CURRENT_CONTRACT_PHASE = "setup"
 
 
-RADICALE_PORT = int(os.environ["MCW_PRIVATE_CALDAV_RADICALE_PORT"])
-CONTROL_PORT = int(os.environ["MCW_PRIVATE_CALDAV_CONTROL_PORT"])
-API_ORIGIN = os.environ["MCW_PRIVATE_CALDAV_API_ORIGIN"]
-CERTIFICATE_AUTHORITY = os.environ["MCW_PRIVATE_CALDAV_CA_FILE"]
-PERSONAL_APP_ID = os.environ["MCW_PRIVATE_CALDAV_PERSONAL_APP_ID"]
-PERSONAL_SECRET = os.environ["MCW_PRIVATE_CALDAV_PERSONAL_SECRET"]
-ROOM_APP_ID = os.environ["MCW_PRIVATE_CALDAV_ROOM_APP_ID"]
-ROOM_SECRET = os.environ["MCW_PRIVATE_CALDAV_ROOM_SECRET"]
-CONTROL_KEY = os.environ["MCW_PRIVATE_CALDAV_CONTROL_KEY"]
-CALLBACK_KEY = base64.urlsafe_b64decode(
-    os.environ["RADICALE_PRIVATE_CLIENT_CALLBACK_KEY"] + "="
-)
-DEFER_PERSONAL_REVOKE = (
-    os.environ.get("MCW_PRIVATE_CALDAV_NATIVE_PROFILE") == "1"
-)
-API = urllib.parse.urlsplit(API_ORIGIN)
-TLS_CONTEXT = ssl.create_default_context(cafile=CERTIFICATE_AUTHORITY)
+def _write_contract_diagnostic(phase: str, error_class: str) -> None:
+    diagnostic_path = os.environ.get(
+        "MCW_PRIVATE_CALDAV_CONTRACT_DIAGNOSTIC_FILE", ""
+    )
+    source_sha = os.environ.get("MCW_PRIVATE_CALDAV_SOURCE_SHA", "")
+    if (
+        diagnostic_path != CONTRACT_DIAGNOSTIC_PATH
+        or phase not in CONTRACT_PHASES
+        or error_class not in CONTRACT_ERROR_CLASSES
+        or len(source_sha) != 40
+        or any(character not in "0123456789abcdef" for character in source_sha)
+    ):
+        return
+    payload = {
+        "schema": CONTRACT_DIAGNOSTIC_SCHEMA,
+        "status": "failed",
+        "source_sha": source_sha,
+        "phase": phase,
+        "error_class": error_class,
+    }
+    try:
+        descriptor = os.open(
+            diagnostic_path,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            json.dump(payload, output, sort_keys=True, separators=(",", ":"))
+            output.write("\n")
+            output.flush()
+            os.fsync(output.fileno())
+    except OSError:
+        pass
+
+
+def _set_contract_phase(phase: str) -> None:
+    global CURRENT_CONTRACT_PHASE
+    if phase not in CONTRACT_PHASES:
+        raise ValueError("private CalDAV contract phase is invalid")
+    CURRENT_CONTRACT_PHASE = phase
+
+
+try:
+    import caldav
+    from caldav.lib import error as caldav_error
+
+    from matrix_calendar_radicale_auth.private_client_callback import (
+        AUTH_PATH,
+        REQUEST_SIGNATURE_HEADER,
+        RESPONSE_SIGNATURE_HEADER,
+        _build_opener,
+        _request_signature,
+        _response_signature,
+        PrivateClientCallbackClient,
+    )
+except Exception:
+    _write_contract_diagnostic("setup", "setup_failed")
+    raise
+
+
+try:
+    RADICALE_PORT = int(os.environ["MCW_PRIVATE_CALDAV_RADICALE_PORT"])
+    CONTROL_PORT = int(os.environ["MCW_PRIVATE_CALDAV_CONTROL_PORT"])
+    API_ORIGIN = os.environ["MCW_PRIVATE_CALDAV_API_ORIGIN"]
+    CERTIFICATE_AUTHORITY = os.environ["MCW_PRIVATE_CALDAV_CA_FILE"]
+    PERSONAL_APP_ID = os.environ["MCW_PRIVATE_CALDAV_PERSONAL_APP_ID"]
+    PERSONAL_SECRET = os.environ["MCW_PRIVATE_CALDAV_PERSONAL_SECRET"]
+    ROOM_APP_ID = os.environ["MCW_PRIVATE_CALDAV_ROOM_APP_ID"]
+    ROOM_SECRET = os.environ["MCW_PRIVATE_CALDAV_ROOM_SECRET"]
+    CONTROL_KEY = os.environ["MCW_PRIVATE_CALDAV_CONTROL_KEY"]
+    CALLBACK_KEY = base64.urlsafe_b64decode(
+        os.environ["RADICALE_PRIVATE_CLIENT_CALLBACK_KEY"] + "="
+    )
+    DEFER_PERSONAL_REVOKE = (
+        os.environ.get("MCW_PRIVATE_CALDAV_NATIVE_PROFILE") == "1"
+    )
+    API = urllib.parse.urlsplit(API_ORIGIN)
+    TLS_CONTEXT = ssl.create_default_context(cafile=CERTIFICATE_AUTHORITY)
+except Exception:
+    _write_contract_diagnostic("setup", "setup_failed")
+    raise
 
 EVENT = """BEGIN:VCALENDAR\r
 VERSION:2.0\r
@@ -214,22 +294,29 @@ def test_callback_hostname_and_replay() -> None:
         raise AssertionError("replayed callback nonce was accepted")
 
 
-def main() -> None:
+def _run_contract() -> None:
+    _set_contract_phase("client_version")
     assert caldav.__version__ == "3.5.0", ("python-caldav version", caldav.__version__)
+
+    _set_contract_phase("callback_security")
     test_callback_hostname_and_replay()
 
     personal_url = f"{API_ORIGIN}/{PERSONAL_APP_ID}/calendar/"
     client = make_client(personal_url, PERSONAL_APP_ID, PERSONAL_SECRET)
+    _set_contract_phase("principal_discovery")
     principal = client.propfind(
         personal_url, props=["{DAV:}current-user-principal"], depth=0
     )
     assert principal.status == 207 and f"/{PERSONAL_APP_ID}/" in principal.raw
+
+    _set_contract_phase("calendar_discovery")
     calendars = client.get_calendars()
     assert len(calendars) == 1, "discovery exposed a sibling calendar"
     assert str(calendars[0].url).rstrip("/").endswith(
         f"/{PERSONAL_APP_ID}/calendar"
     ), "discovery left the scoped map alias"
 
+    _set_contract_phase("event_read")
     events = calendars[0].get_events()
     assert any("private-contract-event" in event.data for event in events)
     original = calendars[0].get_event_by_uid("private-contract-event")
@@ -237,12 +324,17 @@ def main() -> None:
     stale = calendars[0].get_event_by_uid("private-contract-event")
     stale.load()
     assert "X-COMPANY-OPAQUE;X-KEEP=attribute:keep-this-value" in original.data
+
+    _set_contract_phase("etag_read")
     assert original.etag and not original.etag.startswith("W/"), "expected a strong ETag"
+
+    _set_contract_phase("event_update")
     original.icalendar_component["summary"] = "Edited by independent CalDAV client"
     original.save(precondition="etag", increase_seqno=False)
     original.load()
     assert "X-COMPANY-OPAQUE;X-KEEP=attribute:keep-this-value" in original.data
 
+    _set_contract_phase("stale_etag")
     stale.icalendar_component["summary"] = "Stale edit must fail"
     try:
         stale.save(precondition="etag", increase_seqno=False)
@@ -251,12 +343,16 @@ def main() -> None:
     else:
         raise AssertionError("stale If-Match update succeeded")
 
+    _set_contract_phase("event_create")
     created = calendars[0].add_event(
         ical=EVENT, no_overwrite=True, increase_seqno=False
     )
     created.load()
+
+    _set_contract_phase("event_delete")
     created.delete(if_match=True)
 
+    _set_contract_phase("mixed_collection")
     mixed_path = f"/{PERSONAL_APP_ID}/calendar/mixed.ics"
     status, _, mixed = request_api(
         "GET",
@@ -312,6 +408,8 @@ def main() -> None:
         and b"BEGIN:VTODO" in unchanged
         and b"SUMMARY:Mixed collection task before guarded writes" in unchanged
     ), "the denied writes changed the existing unsupported resource"
+
+    _set_contract_phase("component_scope")
     status, _, _ = request_api(
         "PUT",
         f"/{ROOM_APP_ID}/calendar/unsupported-task.ics",
@@ -322,6 +420,7 @@ def main() -> None:
     )
     assert status == 400, ("client added VTODO to a VEVENT-only calendar", status)
 
+    _set_contract_phase("credential_isolation")
     status, _, _ = request_api(
         "GET",
         f"/{ROOM_APP_ID}/calendar/event.ics",
@@ -347,6 +446,7 @@ def main() -> None:
     )
     assert status == 401, "reserved OpenID identity entered a private client home"
 
+    _set_contract_phase("route_isolation")
     # The exact root namespace is proxied. REST, owner homes, map management,
     # and native-token paths remain outside the external DAV route.
     for method, path in (
@@ -364,6 +464,7 @@ def main() -> None:
         )
         assert status in {404, 405}, ("non-DAV route crossed the gateway", status)
 
+    _set_contract_phase("room_discovery")
     room_url = f"{API_ORIGIN}/{ROOM_APP_ID}/calendar/"
     room_client = make_client(room_url, ROOM_APP_ID, ROOM_SECRET)
     room_calendars = room_client.get_calendars()
@@ -371,6 +472,7 @@ def main() -> None:
     room_event = room_calendars[0].get_event_by_uid("private-contract-event")
     room_event.load()
 
+    _set_contract_phase("room_power_policy")
     set_room_policy(manager=False)
     status, _, readable = request_api(
         "GET",
@@ -389,6 +491,7 @@ def main() -> None:
     )
     assert status == 403, ("manager-power loss did not make the calendar read-only", status)
 
+    _set_contract_phase("room_membership_policy")
     set_room_policy(manager=True, member=False)
     status, _, _ = request_api(
         "GET",
@@ -406,6 +509,7 @@ def main() -> None:
     )
     assert status == 401, "a committed leave tombstone was revived by rejoin"
 
+    _set_contract_phase("personal_revocation")
     if not DEFER_PERSONAL_REVOKE:
         status, _ = control_request("/revoke-personal", b"{}")
         assert status == 204
@@ -438,9 +542,21 @@ def main() -> None:
         "policy": "manager loss read-only; observed leave tombstoned; rejoin denied",
         "isolation": "sibling credential, reserved OpenID, and external sharing paths denied",
     }
+    _set_contract_phase("complete")
     if DEFER_PERSONAL_REVOKE:
         result["personal_revoke"] = "deferred to native Thunderbird provider"
     print(json.dumps(result, sort_keys=True))
+
+
+def main() -> None:
+    try:
+        _run_contract()
+    except AssertionError:
+        _write_contract_diagnostic(CURRENT_CONTRACT_PHASE, "assertion_failed")
+        raise
+    except Exception:
+        _write_contract_diagnostic(CURRENT_CONTRACT_PHASE, "operation_failed")
+        raise
 
 
 if __name__ == "__main__":

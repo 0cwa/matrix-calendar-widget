@@ -34,6 +34,7 @@ SMOKE_SPEC.loader.exec_module(SMOKE)
 SUMMARY_SCHEMA = "thunderbird-private-caldav-summary@3"
 RESULT_SCHEMA = "thunderbird-private-caldav-qualification@1"
 WORKER_DIAGNOSTIC_SCHEMA = "thunderbird-private-caldav-worker-diagnostic@1"
+CALDAV_CONTRACT_DIAGNOSTIC_SCHEMA = "private-caldav-contract-diagnostic@1"
 EXPECTED_NODE_PREFIX = (22, 12, 0)
 EXPECTED_WHEEL_COUNT = 19
 WHEEL_TIMEOUT_SECONDS = 300
@@ -42,7 +43,9 @@ NATIVE_TIMEOUT_SECONDS = 360
 RESULT_FILENAME = "private-caldav-result.json"
 JEST_REPORT_FILENAME = "private-caldav-jest-report.json"
 WORKER_DIAGNOSTIC_FILENAME = "private-caldav-worker-diagnostic.json"
+CALDAV_CONTRACT_DIAGNOSTIC_FILENAME = "private-caldav-contract-diagnostic.json"
 MAX_JEST_REPORT_BYTES = 1_000_000
+MAX_CALDAV_CONTRACT_DIAGNOSTIC_BYTES = 512
 RESULT_FIELDS = {
     "calendarTab",
     "providerDiscovery",
@@ -56,6 +59,41 @@ RESULT_FIELDS = {
     "callbackAdvancedAfterRevoke",
     "revokedState",
     "authDeniedAfterRevoke",
+}
+CALDAV_CONTRACT_PHASES = {
+    "setup",
+    "client_version",
+    "callback_security",
+    "principal_discovery",
+    "calendar_discovery",
+    "event_read",
+    "etag_read",
+    "event_update",
+    "stale_etag",
+    "event_create",
+    "event_delete",
+    "mixed_collection",
+    "component_scope",
+    "credential_isolation",
+    "route_isolation",
+    "room_discovery",
+    "room_power_policy",
+    "room_membership_policy",
+    "personal_revocation",
+    "complete",
+}
+CALDAV_CONTRACT_ERROR_CLASSES = {
+    "setup_failed",
+    "assertion_failed",
+    "operation_failed",
+}
+CALDAV_CONTRACT_SUMMARY_STAGES = {
+    f"python_contract_{phase}" for phase in CALDAV_CONTRACT_PHASES
+}
+CALDAV_CONTRACT_SUMMARY_CLASSES = {
+    "setup_failed": "python_contract_setup_failed",
+    "assertion_failed": "python_contract_assertion_failed",
+    "operation_failed": "python_contract_operation_failed",
 }
 FIXTURE_FAILURE_STAGES = {
     "unknown",
@@ -84,7 +122,7 @@ FIXTURE_FAILURE_STAGES = {
     "post_revoke_provider_request",
     "complete",
     "internal",
-}
+} | CALDAV_CONTRACT_SUMMARY_STAGES
 FIXTURE_FAILURE_CLASSES = {
     "unknown",
     "jest_process_error",
@@ -144,7 +182,7 @@ FIXTURE_FAILURE_CLASSES = {
     "qualification_predicate_failed",
     "cleanup_failed",
     "unexpected_error",
-}
+} | set(CALDAV_CONTRACT_SUMMARY_CLASSES.values())
 NATIVE_FAILURE_PAIRS = {
     ("worker_setup", "input_missing"),
     ("worker_setup", "invalid_workspace"),
@@ -1058,6 +1096,101 @@ def _read_worker_diagnostic(path: Path, source_sha: str) -> dict[str, str] | Non
     }
 
 
+def _read_caldav_contract_diagnostic(
+    path: Path, source_sha: str
+) -> dict[str, str] | None:
+    descriptor = -1
+    try:
+        link_metadata = path.lstat()
+        if (
+            path.is_symlink()
+            or not stat.S_ISREG(link_metadata.st_mode)
+        ):
+            return None
+        descriptor = os.open(
+            path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        )
+        with os.fdopen(descriptor, "rb") as source:
+            descriptor = -1
+            metadata = os.fstat(source.fileno())
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != os.getuid()
+                or stat.S_IMODE(metadata.st_mode) != 0o600
+                or metadata.st_size > MAX_CALDAV_CONTRACT_DIAGNOSTIC_BYTES
+            ):
+                return None
+            raw_value = source.read(MAX_CALDAV_CONTRACT_DIAGNOSTIC_BYTES + 1)
+        if len(raw_value) > MAX_CALDAV_CONTRACT_DIAGNOSTIC_BYTES:
+            return None
+        value = json.loads(
+            raw_value.decode("utf-8"), object_pairs_hook=_unique_json_object
+        )
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+    finally:
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"schema", "status", "source_sha", "phase", "error_class"}
+        or value.get("schema") != CALDAV_CONTRACT_DIAGNOSTIC_SCHEMA
+        or value.get("status") != "failed"
+        or value.get("source_sha") != source_sha
+        or not isinstance(value.get("phase"), str)
+        or value.get("phase") not in CALDAV_CONTRACT_PHASES
+        or not isinstance(value.get("error_class"), str)
+        or value.get("error_class") not in CALDAV_CONTRACT_ERROR_CLASSES
+    ):
+        return None
+    return {
+        "fixture_failure_stage": f"python_contract_{value['phase']}",
+        "fixture_failure_class": CALDAV_CONTRACT_SUMMARY_CLASSES[
+            value["error_class"]
+        ],
+    }
+
+
+def _remove_caldav_contract_diagnostic(path: Path) -> None:
+    try:
+        metadata = path.lstat()
+        if (
+            not path.is_symlink()
+            and stat.S_ISREG(metadata.st_mode)
+            and metadata.st_uid == os.getuid()
+            and stat.S_IMODE(metadata.st_mode) == 0o600
+        ):
+            path.unlink()
+    except OSError:
+        pass
+
+
+def _project_caldav_contract_diagnostic(
+    failure_stage: str,
+    failure_class: str,
+    diagnostic: dict[str, str] | None,
+) -> tuple[str, str]:
+    if (
+        (failure_stage, failure_class) == ("fixture_setup", "caldav_contract_failed")
+        and diagnostic is not None
+        and set(diagnostic)
+        == {"fixture_failure_stage", "fixture_failure_class"}
+        and isinstance(diagnostic["fixture_failure_stage"], str)
+        and diagnostic["fixture_failure_stage"] in CALDAV_CONTRACT_SUMMARY_STAGES
+        and isinstance(diagnostic["fixture_failure_class"], str)
+        and diagnostic["fixture_failure_class"]
+        in CALDAV_CONTRACT_SUMMARY_CLASSES.values()
+    ):
+        return (
+            diagnostic["fixture_failure_stage"],
+            diagnostic["fixture_failure_class"],
+        )
+    return failure_stage, failure_class
+
+
 def _close_worker_failure(
     workspace: Path,
     source_sha: str,
@@ -1065,6 +1198,7 @@ def _close_worker_failure(
     failure_class: str,
 ) -> None:
     diagnostic = workspace / WORKER_DIAGNOSTIC_FILENAME
+    caldav_diagnostic = workspace / CALDAV_CONTRACT_DIAGNOSTIC_FILENAME
     report = workspace / JEST_REPORT_FILENAME
     try:
         _write_worker_diagnostic(
@@ -1081,6 +1215,7 @@ def _close_worker_failure(
                 report.unlink()
         except OSError:
             pass
+        _remove_caldav_contract_diagnostic(caldav_diagnostic)
 
 
 def _container_worker() -> int:
@@ -1093,6 +1228,7 @@ def _container_worker() -> int:
     result_path = _workspace_result_path()
     report_path = workspace / JEST_REPORT_FILENAME
     diagnostic_path = workspace / WORKER_DIAGNOSTIC_FILENAME
+    caldav_diagnostic_path = workspace / CALDAV_CONTRACT_DIAGNOSTIC_FILENAME
     source_sha = os.environ.get("MCW_PRIVATE_CALDAV_SOURCE_SHA", "")
 
     def fail(failure_stage: str, failure_class: str) -> int:
@@ -1112,6 +1248,8 @@ def _container_worker() -> int:
         or report_path.is_symlink()
         or diagnostic_path.exists()
         or diagnostic_path.is_symlink()
+        or caldav_diagnostic_path.exists()
+        or caldav_diagnostic_path.is_symlink()
     ):
         print(json.dumps({"status": "failed", "failure_class": "input_invalid"}))
         return 1
@@ -1175,7 +1313,20 @@ def _container_worker() -> int:
             except ValueError:
                 failure_stage = "jest_runner"
                 failure_class = _jest_report_failure_class(report_path)
+            contract_diagnostic = None
+            if (failure_stage, failure_class) == (
+                "fixture_setup",
+                "caldav_contract_failed",
+            ):
+                contract_diagnostic = _read_caldav_contract_diagnostic(
+                    caldav_diagnostic_path, source_sha
+                )
+            failure_stage, failure_class = _project_caldav_contract_diagnostic(
+                failure_stage, failure_class, contract_diagnostic
+            )
             return fail(failure_stage, failure_class)
+        if caldav_diagnostic_path.exists() or caldav_diagnostic_path.is_symlink():
+            return fail("jest_runner", "worker_input_invalid")
         try:
             report_metadata = report_path.lstat()
             if (
@@ -1210,9 +1361,12 @@ def _run() -> None:
     result_path = root / "workspace" / RESULT_FILENAME
     report_path = root / "workspace" / JEST_REPORT_FILENAME
     diagnostic_path = root / "workspace" / WORKER_DIAGNOSTIC_FILENAME
+    caldav_diagnostic_path = (
+        root / "workspace" / CALDAV_CONTRACT_DIAGNOSTIC_FILENAME
+    )
     if any(
         path.exists() or path.is_symlink()
-        for path in (result_path, report_path, diagnostic_path)
+        for path in (result_path, report_path, diagnostic_path, caldav_diagnostic_path)
     ):
         raise ValueError("native result path already exists")
     mounts = [
@@ -1226,6 +1380,9 @@ def _run() -> None:
     extra_environment = {
         "PRIVATE_CALDAV_CONTRACT": "1",
         "MCW_PRIVATE_CALDAV_SOURCE_SHA": source_sha,
+        "MCW_PRIVATE_CALDAV_CONTRACT_DIAGNOSTIC_FILE": (
+            "/task/workspace/" + CALDAV_CONTRACT_DIAGNOSTIC_FILENAME
+        ),
         "MCW_PRIVATE_CALDAV_NATIVE_PROFILE": "1",
         "MCW_PRIVATE_CALDAV_PYTHON": "/task/venv/bin/python",
         "MCW_PRIVATE_CALDAV_SITE_PACKAGES": "/task/venv/lib/python3.13/site-packages",
