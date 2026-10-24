@@ -9,6 +9,8 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
+import subprocess
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -69,6 +71,91 @@ class PrivateCalDavSmokeTests(unittest.TestCase):
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
         return module
+
+    def test_discovery_script_reads_marionette_arguments_as_array_like(self) -> None:
+        node = os.environ.get("MCW_THUNDERBIRD_TEST_NODE") or shutil.which("node")
+        if not node:
+            self.skipTest("Node 22 is unavailable for the JavaScript contract check")
+        version = subprocess.run(
+            [node, "--version"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=5,
+            text=True,
+        )
+        self.assertEqual(version.returncode, 0, "Node version probe failed")
+        self.assertRegex(version.stdout.strip(), r"^v22\.[0-9]+\.[0-9]+$")
+
+        contract = self._load_native_thunderbird_contract()
+        harness = r"""
+const fs = require("node:fs");
+const input = JSON.parse(fs.readFileSync(0, "utf8"));
+const args = input.args;
+const calendar = { type: "caldav", uri: { spec: args[2] }, id: "synthetic" };
+const calendars = new Map();
+let providerArguments;
+globalThis.cal = {
+  provider: { caldav: { detectCalendars: async (...received) => {
+    providerArguments = received;
+    return [calendar];
+  } } },
+  manager: {
+    getCalendarById: (id) => calendars.get(id) || null,
+    registerCalendar: (value) => calendars.set(value.id, value),
+  },
+};
+globalThis.window = {};
+function executeAsyncScript() { eval(input.script); }
+
+(async () => {
+  const result = await new Promise((resolve) => {
+    executeAsyncScript(...args, resolve);
+  });
+  const expected = [args[0], args[1], args[2], true];
+  if (JSON.stringify(providerArguments) !== JSON.stringify(expected)) {
+    throw new Error("provider arguments changed");
+  }
+  if (
+    !result || result.ok !== true || result.providerDiscovery !== true ||
+    result.calendarUriScope !== true || result.calendarRegistered !== true ||
+    window.__mcwPrivateCalDavCalendar !== calendar
+  ) {
+    throw new Error("calendar discovery result changed");
+  }
+  process.stdout.write("pass\n");
+})().catch(() => {
+  process.stderr.write("native discovery script regression failed\n");
+  process.exitCode = 1;
+});
+"""
+        origin = "https://localhost:8443"
+        path = "/mcwpc~" + "a" * 48 + "/calendar/"
+        arguments_ = [
+            "synthetic-user",
+            "synthetic-secret",
+            origin + path,
+            origin,
+            path,
+        ]
+        completed = subprocess.run(
+            [node, "-e", harness],
+            input=json.dumps(
+                {"script": contract.DISCOVER_CALENDAR, "args": arguments_}
+            ),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=10,
+            text=True,
+        )
+        self.assertEqual(
+            completed.returncode,
+            0,
+            "actual native discovery script failed in a Marionette-style arguments context",
+        )
+        self.assertEqual(completed.stdout, "pass\n")
 
     def test_radicale_image_copies_dependency_light_callback_module(self) -> None:
         dockerfile = RADICALE_DOCKERFILE.read_text(encoding="utf-8")
