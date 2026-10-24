@@ -125,6 +125,42 @@ BOUNDED_VERSION_RE = re.compile(
 MAX_STARTUP_PROBE_SECONDS = 10
 CALENDAR_TAB_READY_TIMEOUT_SECONDS = 15
 CALENDAR_TAB_POLL_INTERVAL_SECONDS = 0.25
+CALENDAR_TAB_OBSERVATION_SCRIPT = """
+const tabmail = document.getElementById("tabmail");
+const calendarModeRegistered = Boolean(
+  tabmail && tabmail.tabModes && 'calendar' in tabmail.tabModes
+);
+const calendarTabOpenBeforeAction = Boolean(
+  tabmail &&
+    Array.isArray(tabmail.tabInfo) &&
+    tabmail.tabInfo.some(info => info.mode && info.mode.name === "calendar")
+);
+let calendarTabOpenAttempted = false;
+let calendarTabOpenError = false;
+if (tabmail && calendarModeRegistered && !calendarTabOpenBeforeAction) {
+  calendarTabOpenAttempted = true;
+  try {
+    tabmail.openTab('calendar');
+  } catch (_error) {
+    calendarTabOpenError = true;
+  }
+}
+return {
+  tabmail_present: Boolean(tabmail),
+  calendar_mode_registered: calendarModeRegistered,
+  calendar_tab_open_before_action: calendarTabOpenBeforeAction,
+  calendar_tab_open_attempted: calendarTabOpenAttempted,
+  calendar_tab_open_error: calendarTabOpenError,
+};
+"""
+CALENDAR_TAB_STATE_SCRIPT = """
+const tabmail = document.getElementById("tabmail");
+return Boolean(
+  tabmail &&
+    Array.isArray(tabmail.tabInfo) &&
+    tabmail.tabInfo.some(info => info.mode && info.mode.name === "calendar")
+);
+"""
 MAX_VERSION_OUTPUT_CHARS = 512
 MAX_STARTUP_DIAGNOSTIC_BYTES = 2048
 WORKER_STARTUP_DIAGNOSTIC = ".startup-version-probe.stderr.txt"
@@ -214,7 +250,7 @@ def _summary_path() -> Path:
 
 def _initial_summary(source_sha: str) -> dict[str, Any]:
     return {
-        "schema": "thunderbird-calendar-startup-smoke@5",
+        "schema": "thunderbird-calendar-startup-smoke@6",
         "qualification_scope": "startup_only_not_caldav",
         "source_sha": source_sha,
         "status": "running",
@@ -231,6 +267,11 @@ def _initial_summary(source_sha: str) -> dict[str, Any]:
         "marionette_handshake": False,
         "main_window": False,
         "calendar_tab": False,
+        "tabmail_present": False,
+        "calendar_mode_registered": False,
+        "calendar_tab_open_before_action": False,
+        "calendar_tab_open_attempted": False,
+        "calendar_tab_open_error": False,
         "app_version": None,
         "startup_stage": None,
         "startup_exception_class": None,
@@ -253,7 +294,7 @@ def _write_summary(payload: dict[str, Any]) -> None:
     if (
         not isinstance(safe["source_sha"], str)
         or not re.fullmatch(r"[0-9a-f]{40}", safe["source_sha"])
-        or safe["schema"] != "thunderbird-calendar-startup-smoke@5"
+        or safe["schema"] != "thunderbird-calendar-startup-smoke@6"
         or safe["qualification_scope"] != "startup_only_not_caldav"
         or not isinstance(safe["status"], str)
         or safe["status"] not in {"running", "passed", "failed"}
@@ -329,6 +370,20 @@ def _write_summary(payload: dict[str, Any]) -> None:
         )
         or type(safe["marionette_port_ready"]) is not bool
         or type(safe["marionette_session_created"]) is not bool
+        or type(safe["tabmail_present"]) is not bool
+        or type(safe["calendar_mode_registered"]) is not bool
+        or type(safe["calendar_tab_open_before_action"]) is not bool
+        or type(safe["calendar_tab_open_attempted"]) is not bool
+        or type(safe["calendar_tab_open_error"]) is not bool
+        or (
+            safe["calendar_tab_open_attempted"]
+            and (
+                not safe["tabmail_present"]
+                or not safe["calendar_mode_registered"]
+                or safe["calendar_tab_open_before_action"]
+            )
+        )
+        or (safe["calendar_tab_open_error"] and not safe["calendar_tab_open_attempted"])
         or (
             safe["marionette_session_created"]
             and (not safe["marionette_handshake"] or not safe["marionette_port_ready"])
@@ -354,6 +409,11 @@ def _write_summary(payload: dict[str, Any]) -> None:
                 "marionette_handshake",
                 "main_window",
                 "calendar_tab",
+                "tabmail_present",
+                "calendar_mode_registered",
+                "calendar_tab_open_before_action",
+                "calendar_tab_open_attempted",
+                "calendar_tab_open_error",
                 "marionette_port_ready",
                 "marionette_session_created",
             )
@@ -1079,7 +1139,7 @@ def _require_preflight(source_sha: str) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         raise SmokeFailure("preflight", "invalid_input") from None
     if (
-        value.get("schema") != "thunderbird-calendar-startup-smoke@5"
+        value.get("schema") != "thunderbird-calendar-startup-smoke@6"
         or value.get("source_sha") != source_sha
         or value.get("docker_backend_verified") is not True
         or value.get("docker_isolation_verified") is not True
@@ -1609,14 +1669,37 @@ def _observe_marionette_child(result: dict[str, Any], marionette: Any) -> None:
         result["child_exit_code"] = exit_code
 
 
+def _observe_and_open_calendar_tab(marionette: Any) -> dict[str, bool]:
+    observation = marionette.execute_script(CALENDAR_TAB_OBSERVATION_SCRIPT)
+    fields = (
+        "tabmail_present",
+        "calendar_mode_registered",
+        "calendar_tab_open_before_action",
+        "calendar_tab_open_attempted",
+        "calendar_tab_open_error",
+    )
+    if not isinstance(observation, dict) or any(
+        type(observation.get(field)) is not bool for field in fields
+    ):
+        raise RuntimeError("invalid Thunderbird tabmail observation")
+    if observation["calendar_tab_open_attempted"] and (
+        not observation["tabmail_present"]
+        or not observation["calendar_mode_registered"]
+        or observation["calendar_tab_open_before_action"]
+    ):
+        raise RuntimeError("inconsistent Thunderbird tabmail observation")
+    if observation["calendar_tab_open_error"] and not observation[
+        "calendar_tab_open_attempted"
+    ]:
+        raise RuntimeError("inconsistent Thunderbird tabmail observation")
+    return {field: observation[field] for field in fields}
+
+
 def _wait_for_calendar_tab(marionette: Any) -> bool:
     deadline = time.monotonic() + CALENDAR_TAB_READY_TIMEOUT_SECONDS
     while True:
-        modes = marionette.execute_script(
-            "const tabs = document.getElementById('tabmail'); "
-            "return tabs ? tabs.tabInfo.map(info => info.mode.name) : [];"
-        )
-        if isinstance(modes, list) and "calendar" in modes:
+        is_open = marionette.execute_script(CALENDAR_TAB_STATE_SCRIPT)
+        if is_open is True:
             return True
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -1629,6 +1712,11 @@ def _smoke_worker(root: Path) -> int:
         "marionette_handshake": False,
         "main_window": False,
         "calendar_tab": False,
+        "tabmail_present": False,
+        "calendar_mode_registered": False,
+        "calendar_tab_open_before_action": False,
+        "calendar_tab_open_attempted": False,
+        "calendar_tab_open_error": False,
         "app_version": None,
         "error_class": None,
         "startup_stage": "worker_setup",
@@ -1703,6 +1791,7 @@ def _smoke_worker(root: Path) -> int:
         marionette.set_context(marionette.CONTEXT_CHROME)
         result["main_window"] = marionette.get_window_type() == "mail:3pane"
         result["startup_stage"] = "calendar_tab_check"
+        result.update(_observe_and_open_calendar_tab(marionette))
         result["calendar_tab"] = _wait_for_calendar_tab(marionette)
         if result["app_version"] != "158.0.1" or not result["main_window"] or not result["calendar_tab"]:
             result["error_class"] = "marionette_error"
@@ -1753,6 +1842,11 @@ def _read_worker_result(root: Path) -> dict[str, Any]:
         "marionette_handshake",
         "main_window",
         "calendar_tab",
+        "tabmail_present",
+        "calendar_mode_registered",
+        "calendar_tab_open_before_action",
+        "calendar_tab_open_attempted",
+        "calendar_tab_open_error",
         "app_version",
         "error_class",
         "startup_stage",
@@ -1773,6 +1867,11 @@ def _read_worker_result(root: Path) -> dict[str, Any]:
             "marionette_handshake",
             "main_window",
             "calendar_tab",
+            "tabmail_present",
+            "calendar_mode_registered",
+            "calendar_tab_open_before_action",
+            "calendar_tab_open_attempted",
+            "calendar_tab_open_error",
             "marionette_port_ready",
             "marionette_session_created",
         )
@@ -1817,6 +1916,14 @@ def _read_worker_result(root: Path) -> dict[str, Any]:
     if value["marionette_session_created"] and (
         not value["marionette_handshake"] or not value["marionette_port_ready"]
     ):
+        raise SmokeFailure("startup", "marionette_error")
+    if value["calendar_tab_open_attempted"] and (
+        not value["tabmail_present"]
+        or not value["calendar_mode_registered"]
+        or value["calendar_tab_open_before_action"]
+    ):
+        raise SmokeFailure("startup", "marionette_error")
+    if value["calendar_tab_open_error"] and not value["calendar_tab_open_attempted"]:
         raise SmokeFailure("startup", "marionette_error")
     version = value["app_version"]
     if version is not None and (
@@ -1899,6 +2006,11 @@ def _smoke(payload: dict[str, Any], source_sha: str, root: Path) -> None:
                 "marionette_handshake",
                 "main_window",
                 "calendar_tab",
+                "tabmail_present",
+                "calendar_mode_registered",
+                "calendar_tab_open_before_action",
+                "calendar_tab_open_attempted",
+                "calendar_tab_open_error",
                 "app_version",
                 "startup_stage",
                 "startup_exception_class",

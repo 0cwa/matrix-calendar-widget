@@ -70,8 +70,11 @@ class SuccessfulStartup:
     host = "localhost"
     port = 2828
     session = None
+    last_instance: SuccessfulStartup | None = None
 
     def __init__(self, workspace: str, gecko_log: str, **_kwargs: object):
+        type(self).last_instance = self
+        self.executed_scripts: list[str] = []
         self.profile_path = str(Path(workspace) / "profile")
         Path(self.profile_path).mkdir()
         self.gecko_log = Path(gecko_log)
@@ -87,8 +90,19 @@ class SuccessfulStartup:
     def get_window_type(self) -> str:
         return "mail:3pane"
 
-    def execute_script(self, _script: str) -> list[str]:
-        return ["calendar"]
+    def execute_script(self, script: str) -> object:
+        self.executed_scripts.append(script)
+        if script == SMOKE.CALENDAR_TAB_OBSERVATION_SCRIPT:
+            return {
+                "tabmail_present": True,
+                "calendar_mode_registered": True,
+                "calendar_tab_open_before_action": False,
+                "calendar_tab_open_attempted": True,
+                "calendar_tab_open_error": False,
+            }
+        if script == SMOKE.CALENDAR_TAB_STATE_SCRIPT:
+            return True
+        raise AssertionError("unexpected Thunderbird startup script")
 
     def quit(self, *, in_app: bool) -> None:
         pass
@@ -102,11 +116,20 @@ class DelayedCalendarStartup(SuccessfulStartup):
         super().__init__(workspace, gecko_log, **kwargs)
         self.calendar_mode_checks = 0
 
-    def execute_script(self, _script: str) -> list[str]:
-        self.calendar_mode_checks += 1
-        if self.calendar_mode_checks < 3:
-            return []
-        return ["calendar"]
+    def execute_script(self, script: str) -> object:
+        if script == SMOKE.CALENDAR_TAB_STATE_SCRIPT:
+            self.executed_scripts.append(script)
+            self.calendar_mode_checks += 1
+            return self.calendar_mode_checks >= 3
+        return super().execute_script(script)
+
+
+class RegisteredModeWithoutOpenedCalendarTab(SuccessfulStartup):
+    def execute_script(self, script: str) -> object:
+        if script == SMOKE.CALENDAR_TAB_STATE_SCRIPT:
+            self.executed_scripts.append(script)
+            return False
+        return super().execute_script(script)
 
 
 class ThunderbirdSmokeDiagnosticTests(unittest.TestCase):
@@ -125,6 +148,7 @@ class ThunderbirdSmokeDiagnosticTests(unittest.TestCase):
         *,
         port_ready: bool,
         expected_exit: int = 1,
+        calendar_timeout_seconds: float | None = None,
     ) -> dict[str, object]:
         package = types.ModuleType("marionette_driver")
         package.__path__ = []
@@ -142,6 +166,13 @@ class ThunderbirdSmokeDiagnosticTests(unittest.TestCase):
         with (
             patch.object(SMOKE, "CONTAINER_TASK_ROOT", self.task_root),
             patch.object(SMOKE, "CONTAINER_RUNTIME_DIR", self.runtime_dir),
+            patch.object(
+                SMOKE,
+                "CALENDAR_TAB_READY_TIMEOUT_SECONDS",
+                SMOKE.CALENDAR_TAB_READY_TIMEOUT_SECONDS
+                if calendar_timeout_seconds is None
+                else calendar_timeout_seconds,
+            ),
             patch.dict(os.environ, environment),
             patch.dict(
                 sys.modules,
@@ -167,7 +198,7 @@ class ThunderbirdSmokeDiagnosticTests(unittest.TestCase):
             summary_path = self.base / "thunderbird-calendar-smoke-summary.json"
             summary_text = summary_path.read_text(encoding="utf-8")
             summary = json.loads(summary_text)
-            self.assertEqual(summary["schema"], "thunderbird-calendar-startup-smoke@5")
+            self.assertEqual(summary["schema"], "thunderbird-calendar-startup-smoke@6")
             self.assertEqual(summary["startup_stage"], result["startup_stage"])
             self.assertEqual(
                 summary["startup_exception_class"], result["startup_exception_class"]
@@ -326,6 +357,17 @@ class ThunderbirdSmokeDiagnosticTests(unittest.TestCase):
         )
         self.assertEqual(result["binary_version_probe"], "passed")
         self.assertTrue(result["calendar_tab"])
+        self.assertTrue(result["tabmail_present"])
+        self.assertTrue(result["calendar_mode_registered"])
+        self.assertFalse(result["calendar_tab_open_before_action"])
+        self.assertTrue(result["calendar_tab_open_attempted"])
+        self.assertFalse(result["calendar_tab_open_error"])
+        executed_scripts = DelayedCalendarStartup.last_instance.executed_scripts
+        self.assertIn("'calendar' in tabmail.tabModes", executed_scripts[0])
+        self.assertIn("tabmail.openTab('calendar')", executed_scripts[0])
+        self.assertGreaterEqual(
+            DelayedCalendarStartup.last_instance.calendar_mode_checks, 3
+        )
         gecko_log = self.task_root / "workspace" / "gecko.log"
         self.assertTrue(gecko_log.is_file())
         gecko_log.resolve().relative_to((self.task_root / "workspace").resolve())
@@ -338,6 +380,17 @@ class ThunderbirdSmokeDiagnosticTests(unittest.TestCase):
         self.assertFalse(SMOKE._worker_startup_diagnostic_path(self.task_root).exists())
         self.assertFalse(host_diagnostic.exists())
         self.assertEqual(github_output.read_text(encoding="utf-8"), "")
+
+    def test_registered_calendar_mode_does_not_pass_without_open_tabinfo(self) -> None:
+        result = self._run_worker(
+            RegisteredModeWithoutOpenedCalendarTab,
+            port_ready=True,
+            calendar_timeout_seconds=0,
+        )
+        self.assertTrue(result["calendar_mode_registered"])
+        self.assertFalse(result["calendar_tab_open_before_action"])
+        self.assertTrue(result["calendar_tab_open_attempted"])
+        self.assertFalse(result["calendar_tab"])
 
     def test_stale_symlink_is_rejected_without_removing_its_target(self) -> None:
         target = self.base / "unrelated-file.txt"
