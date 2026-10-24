@@ -47,6 +47,9 @@ describe('RoomReminderAlarmOptionsService', () => {
           eventUid: 'planning@example.test',
           recurrenceId: null,
           alarmUid: 'start-alarm@example.test',
+          timingType: 'timed',
+          supported: true,
+          requiresAllDaySchedule: false,
           relatedTo: 'start',
           trigger: {
             weeks: 0,
@@ -61,6 +64,9 @@ describe('RoomReminderAlarmOptionsService', () => {
           eventUid: 'planning@example.test',
           recurrenceId: null,
           alarmUid: 'end-alarm@example.test',
+          timingType: 'timed',
+          supported: true,
+          requiresAllDaySchedule: false,
           relatedTo: 'end',
           trigger: {
             weeks: 0,
@@ -157,7 +163,7 @@ describe('RoomReminderAlarmOptionsService', () => {
     expect(JSON.stringify(result)).not.toContain('BEGIN:VCALENDAR');
   });
 
-  it('returns no trigger option after a configured relative alarm becomes absolute', async () => {
+  it('keeps an absolute alarm visible with its unsupported reason', async () => {
     const resource: CanonicalReminderResourceData = {
       calendarId,
       icalendar: [
@@ -177,11 +183,21 @@ describe('RoomReminderAlarmOptionsService', () => {
     } as unknown as RoomReminderConfigurationService);
 
     await expect(service.list(actor, roomId, eventId)).resolves.toEqual({
-      options: [],
+      options: [
+        {
+          eventUid: 'planning@example.test',
+          recurrenceId: null,
+          alarmUid: 'planning@example.test-alarm',
+          timingType: 'timed',
+          supported: false,
+          requiresAllDaySchedule: false,
+          unavailableReason: 'absolute-trigger',
+        },
+      ],
     });
   });
 
-  it('omits alarms with unsupported anchors, absolute triggers, or malformed raw parameters', async () => {
+  it('keeps unsupported alarm candidates visible with actionable reason codes', async () => {
     const resource: CanonicalReminderResourceData = {
       calendarId,
       icalendar: [
@@ -210,8 +226,79 @@ describe('RoomReminderAlarmOptionsService', () => {
       readSourceForAlarmOptions: jest.fn().mockResolvedValue(resource),
     } as unknown as RoomReminderConfigurationService);
 
+    const result = await service.list(actor, roomId, eventId);
+    expect(
+      result.options.map(({ eventUid, supported, unavailableReason }) => ({
+        eventUid,
+        supported,
+        unavailableReason,
+      })),
+    ).toEqual([
+      {
+        eventUid: 'floating@example.test',
+        supported: false,
+        unavailableReason: 'unsupported-event-timing',
+      },
+      {
+        eventUid: 'absolute@example.test',
+        supported: false,
+        unavailableReason: 'absolute-trigger',
+      },
+      {
+        eventUid: 'malformed@example.test',
+        supported: false,
+        unavailableReason: 'unsupported-trigger',
+      },
+    ]);
+  });
+
+  it('exposes DATE alarms as supported only with an explicit Matrix schedule', async () => {
+    const resource: CanonicalReminderResourceData = {
+      calendarId,
+      icalendar: [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'BEGIN:VEVENT',
+        'UID:all-day@example.test',
+        'DTSTAMP:20260926T120000Z',
+        'DTSTART;VALUE=DATE:20261001',
+        'DTEND;VALUE=DATE:20261002',
+        'SUMMARY:Private title',
+        'BEGIN:VALARM',
+        'UID:all-day-alarm@example.test',
+        'ACTION:DISPLAY',
+        'DESCRIPTION:Private alarm description',
+        'TRIGGER:-P1D',
+        'END:VALARM',
+        'END:VEVENT',
+        'END:VCALENDAR',
+        '',
+      ].join('\r\n'),
+    };
+    const service = new RoomReminderAlarmOptionsService({
+      readSourceForAlarmOptions: jest.fn().mockResolvedValue(resource),
+    } as unknown as RoomReminderConfigurationService);
+
     await expect(service.list(actor, roomId, eventId)).resolves.toEqual({
-      options: [],
+      options: [
+        {
+          eventUid: 'all-day@example.test',
+          recurrenceId: null,
+          alarmUid: 'all-day-alarm@example.test',
+          timingType: 'all-day',
+          supported: true,
+          requiresAllDaySchedule: true,
+          relatedTo: 'start',
+          trigger: {
+            weeks: 0,
+            days: 1,
+            hours: 0,
+            minutes: 0,
+            seconds: 0,
+            isNegative: true,
+          },
+        },
+      ],
     });
   });
 

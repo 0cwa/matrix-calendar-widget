@@ -31,11 +31,18 @@ import {
 import {
   ReminderAlarmTimingOption,
   ResolvedReminderOccurrenceTiming,
+  calculateAllDayReminderDueAt,
+  isAllDayReminderScheduleWithinLimits,
   isReminderScheduleWithinLimits,
   readReminderAlarmTimingOption,
 } from './ReminderTrigger';
+import type { RoomReminderAllDaySchedule } from './RoomReminderStore';
 
 const projectedTimezoneCache = new Map<string, ICAL.Timezone>();
+
+type SelectedEventTiming =
+  | { type: 'timed'; start: ICAL.Time; end: ICAL.Time }
+  | { type: 'all-day'; startDate: string; endDate: string };
 
 export class ReminderConfigurationSourceError extends Error {
   constructor() {
@@ -55,7 +62,34 @@ export function resolveTriggerableReminderIdentity(
     'calendarId' | 'recurrenceId' | 'alarmUid'
   > & { eventUid?: string },
   resource: CanonicalReminderResourceData,
+  allDaySchedule?: RoomReminderAllDaySchedule | null,
 ): CanonicalReminderIdentity {
+  return resolveTriggerableReminderConfiguration(
+    identity,
+    resource,
+    allDaySchedule,
+  ).identity;
+}
+
+export type TriggerableReminderConfigurationResolution = {
+  identity: CanonicalReminderIdentity;
+  allDayReminderDueAt?: Date;
+  isRecurringSeries: boolean;
+};
+
+/**
+ * Resolve a supported alarm and its manager-selected DATE delivery instant.
+ * The recurrence flag describes a selected series master, not whether the
+ * recurrence rule is guaranteed to contain a future instance.
+ */
+export function resolveTriggerableReminderConfiguration(
+  identity: Pick<
+    CanonicalReminderIdentity,
+    'calendarId' | 'recurrenceId' | 'alarmUid'
+  > & { eventUid?: string },
+  resource: CanonicalReminderResourceData,
+  allDaySchedule?: RoomReminderAllDaySchedule | null,
+): TriggerableReminderConfigurationResolution {
   try {
     const selection = resolveCanonicalReminderResourceSelection(
       identity,
@@ -71,10 +105,43 @@ export function resolveTriggerableReminderIdentity(
     }
 
     const timing = resolveSelectedEventTiming(selection);
-    if (!isReminderScheduleWithinLimits(selection.alarmSource, timing)) {
-      throw new Error('Unsupported reminder trigger');
+    let allDayReminderDueAt: Date | undefined;
+    let isRecurringSeries = false;
+    if (timing.type === 'timed') {
+      if (
+        allDaySchedule != null ||
+        !isReminderScheduleWithinLimits(selection.alarmSource, timing)
+      ) {
+        throw new Error('Unsupported reminder trigger');
+      }
+    } else if (
+      !allDaySchedule ||
+      !isAllDayReminderScheduleWithinLimits(
+        selection.alarmSource,
+        allDaySchedule,
+        timing.startDate,
+      )
+    ) {
+      throw new Error('An explicit all-day reminder schedule is required');
+    } else {
+      allDayReminderDueAt = calculateAllDayReminderDueAt(
+        selection.alarmSource,
+        allDaySchedule,
+        timing.startDate,
+      );
+      if (!allDayReminderDueAt) {
+        throw new Error('Invalid all-day reminder delivery instant');
+      }
+      isRecurringSeries =
+        selection.identity.recurrenceId === null &&
+        (selection.event.getAllProperties('rrule').length > 0 ||
+          selection.event.getAllProperties('rdate').length > 0);
     }
-    return selection.identity;
+    return {
+      identity: selection.identity,
+      ...(allDayReminderDueAt ? { allDayReminderDueAt } : {}),
+      isRecurringSeries,
+    };
   } catch {
     throw new ReminderConfigurationSourceError();
   }
@@ -93,34 +160,94 @@ export function resolveTriggerableReminderAlarmOption(
       eventUid: string;
       recurrenceId: string | null;
       alarmUid: string;
+      timingType: 'timed' | 'all-day' | 'unsupported';
+      supported: boolean;
+      requiresAllDaySchedule: boolean;
+      unavailableReason?:
+        | 'unsupported-timezone'
+        | 'unsupported-event-timing'
+        | 'absolute-trigger'
+        | 'unsupported-trigger';
     })
-  | undefined {
-  try {
-    if (
-      hasUnsupportedTimezoneRules(
-        selection.calendar,
-        selection.identity.eventUid,
-      )
-    ) {
-      return undefined;
-    }
+  | {
+      eventUid: string;
+      recurrenceId: string | null;
+      alarmUid: string;
+      timingType: 'timed' | 'all-day' | 'unsupported';
+      supported: false;
+      requiresAllDaySchedule: false;
+      unavailableReason:
+        | 'unsupported-timezone'
+        | 'unsupported-event-timing'
+        | 'absolute-trigger'
+        | 'unsupported-trigger';
+    } {
+  const identity = {
+    eventUid: selection.identity.eventUid,
+    recurrenceId: selection.identity.recurrenceId,
+    alarmUid: selection.identity.alarmUid,
+  };
 
-    const timing = resolveSelectedEventTiming(selection);
-    if (!isReminderScheduleWithinLimits(selection.alarmSource, timing)) {
-      return undefined;
-    }
-
-    const alarmTiming = readReminderAlarmTimingOption(selection.alarmSource);
-    if (!alarmTiming) return undefined;
+  if (
+    hasUnsupportedTimezoneRules(selection.calendar, selection.identity.eventUid)
+  ) {
     return {
-      eventUid: selection.identity.eventUid,
-      recurrenceId: selection.identity.recurrenceId,
-      alarmUid: selection.identity.alarmUid,
-      ...alarmTiming,
+      ...identity,
+      timingType: 'unsupported',
+      supported: false,
+      requiresAllDaySchedule: false,
+      unavailableReason: 'unsupported-timezone',
     };
-  } catch {
-    return undefined;
   }
+
+  let timing: SelectedEventTiming;
+  try {
+    timing = resolveSelectedEventTiming(selection);
+  } catch {
+    return {
+      ...identity,
+      timingType: 'unsupported',
+      supported: false,
+      requiresAllDaySchedule: false,
+      unavailableReason: 'unsupported-event-timing',
+    };
+  }
+
+  const timingType = timing.type;
+  const alarmTiming = readReminderAlarmTimingOption(selection.alarmSource);
+  if (!alarmTiming) {
+    return {
+      ...identity,
+      timingType,
+      supported: false,
+      requiresAllDaySchedule: false,
+      unavailableReason: hasAbsoluteAlarmTrigger(selection.alarmSource)
+        ? 'absolute-trigger'
+        : 'unsupported-trigger',
+    };
+  }
+
+  if (
+    timing.type === 'timed' &&
+    !isReminderScheduleWithinLimits(selection.alarmSource, timing)
+  ) {
+    return {
+      ...identity,
+      ...alarmTiming,
+      timingType,
+      supported: false,
+      requiresAllDaySchedule: false,
+      unavailableReason: 'unsupported-trigger',
+    };
+  }
+
+  return {
+    ...identity,
+    ...alarmTiming,
+    timingType,
+    supported: true,
+    requiresAllDaySchedule: timing.type === 'all-day',
+  };
 }
 
 /**
@@ -131,15 +258,29 @@ export function resolveTriggerableReminderAlarmOption(
 export function resolveProjectedReminderOccurrenceTiming(
   selection: Pick<CanonicalReminderResourceSelection, 'calendar' | 'identity'>,
   timing: CalendarEventTiming,
-): ResolvedReminderOccurrenceTiming {
+): ProjectedReminderOccurrenceTiming {
   if (
-    timing.type !== 'timed' ||
     hasUnsupportedTimezoneRules(selection.calendar, selection.identity.eventUid)
   ) {
     throw new ReminderConfigurationSourceError();
   }
 
   try {
+    if (timing.type === 'all-day') {
+      if (
+        !isCalendarDate(timing.startDate) ||
+        !isCalendarDate(timing.endDate) ||
+        timing.endDate <= timing.startDate
+      ) {
+        throw new Error('Invalid all-day timing');
+      }
+      return {
+        type: 'all-day',
+        startDate: timing.startDate,
+        endDate: timing.endDate,
+      };
+    }
+
     const start = resolveProjectedDateTime(
       selection.calendar,
       selection.identity.eventUid,
@@ -156,11 +297,21 @@ export function resolveProjectedReminderOccurrenceTiming(
     ) {
       throw new Error('Incompatible event timing');
     }
-    return { start, end };
+    return { type: 'timed', start, end };
   } catch {
     throw new ReminderConfigurationSourceError();
   }
 }
+
+export type AllDayReminderOccurrenceTiming = {
+  type: 'all-day';
+  startDate: string;
+  endDate: string;
+};
+
+export type ProjectedReminderOccurrenceTiming =
+  | ({ type: 'timed' } & ResolvedReminderOccurrenceTiming)
+  | AllDayReminderOccurrenceTiming;
 
 type ParsedDateTimeSource = {
   name: 'DTSTART' | 'DTEND';
@@ -180,7 +331,32 @@ function resolveSelectedEventTiming(selection: {
   calendar: ICAL.Component;
   event: ICAL.Component;
   dateTimeLines: readonly string[];
-}): { start: ICAL.Time; end: ICAL.Time } {
+}): SelectedEventTiming {
+  const dateSources = selection.dateTimeLines.map(parseDateSource);
+  if (dateSources.every((source) => source !== undefined)) {
+    const startSources = dateSources.filter(
+      (source): source is ParsedDateSource => source?.name === 'DTSTART',
+    );
+    const endSources = dateSources.filter(
+      (source): source is ParsedDateSource => source?.name === 'DTEND',
+    );
+    const startProperties = selection.event.getAllProperties('dtstart');
+    const endProperties = selection.event.getAllProperties('dtend');
+    if (
+      startSources.length !== 1 ||
+      endSources.length !== 1 ||
+      startProperties.length !== 1 ||
+      endProperties.length !== 1 ||
+      selection.event.getAllProperties('duration').length !== 0
+    ) {
+      throw new Error('Invalid all-day event time properties');
+    }
+    const startDate = readDate(startProperties[0], startSources[0]);
+    const endDate = readDate(endProperties[0], endSources[0]);
+    if (endDate <= startDate) throw new Error('Invalid all-day event range');
+    return { type: 'all-day', startDate, endDate };
+  }
+
   const sources = selection.dateTimeLines.map(parseDateTimeSource);
   const startSources = sources.filter(({ name }) => name === 'DTSTART');
   const endSources = sources.filter(({ name }) => name === 'DTEND');
@@ -205,7 +381,74 @@ function resolveSelectedEventTiming(selection: {
   ) {
     throw new Error('Incompatible event timing');
   }
-  return { start, end };
+  return { type: 'timed', start, end };
+}
+
+type ParsedDateSource = {
+  name: 'DTSTART' | 'DTEND';
+  expected: { year: number; month: number; day: number };
+};
+
+function parseDateSource(line: string): ParsedDateSource | undefined {
+  const separator = findUnquotedColon(line);
+  if (separator < 0) return undefined;
+  const sections = splitOutsideQuotes(line.slice(0, separator), ';');
+  const rawName = sections.shift()?.toUpperCase();
+  if (rawName !== 'DTSTART' && rawName !== 'DTEND') return undefined;
+
+  const parameters = new Map<string, string>();
+  for (const section of sections) {
+    const equals = section.indexOf('=');
+    if (equals <= 0) return undefined;
+    const name = section.slice(0, equals).toUpperCase();
+    const value = unquoteParameterValue(section.slice(equals + 1));
+    if (name !== 'VALUE' || value !== 'DATE' || parameters.has(name)) {
+      return undefined;
+    }
+    parameters.set(name, value);
+  }
+  if (parameters.get('VALUE') !== 'DATE') return undefined;
+
+  const match = /^(\d{4})(\d{2})(\d{2})$/.exec(line.slice(separator + 1));
+  if (!match) return undefined;
+  const expected = {
+    year: Number(match[1]),
+    month: Number(match[2]),
+    day: Number(match[3]),
+  };
+  if (!isValidDate(expected.year, expected.month, expected.day)) {
+    return undefined;
+  }
+  return { name: rawName, expected };
+}
+
+function readDate(property: ICAL.Property, source: ParsedDateSource): string {
+  const value = property.getFirstValue();
+  const { year, month, day } = source.expected;
+  if (
+    property.type !== 'date' ||
+    property.getFirstParameter('tzid') !== undefined ||
+    !(value instanceof ICAL.Time) ||
+    !value.isDate ||
+    value.year !== year ||
+    value.month !== month ||
+    value.day !== day
+  ) {
+    throw new Error('Event DATE source does not match parsed value');
+  }
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function isCalendarDate(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  return isValidDate(Number(match[1]), Number(match[2]), Number(match[3]));
+}
+
+function hasAbsoluteAlarmTrigger(alarmSource: string): boolean {
+  return /(?:^|\r?\n)TRIGGER(?:;[^:\r\n]*)?VALUE=DATE-TIME(?:;[^:\r\n]*)?:/im.test(
+    alarmSource,
+  );
 }
 
 function resolveProjectedDateTime(

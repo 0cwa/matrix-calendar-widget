@@ -19,16 +19,21 @@ import type {
   RoomCalendarPrincipalIdentity,
   RoomCalendarPrincipalIdentityProvider,
 } from '../service/RoomCalendarPrincipalIdentity';
-import type { RoomMentionMessage } from './RoomMentionMessage';
 import {
+  buildUserMentionMessage,
+  MAX_REMINDER_MENTION_USER_IDS,
+  type RoomMentionMessage,
+} from './RoomMentionMessage';
+import {
+  authorizeRoomMentionDelivery,
   RoomMentionMatrixState,
   RoomMentionPowerLevels,
-  authorizeRoomMentionDelivery,
 } from './RoomMentionPolicy';
 import type {
   ReminderSchedulerRuntimeSource,
   RoomReminderSchedulerSender,
 } from './RoomReminderScheduler';
+import type { ReminderDeliverySendResult } from './RoomReminderStore';
 
 const MAX_MATRIX_STATE_RESPONSE_BYTES = 2 * 1024 * 1024;
 const MAX_MATRIX_SEND_RESPONSE_BYTES = 16 * 1024;
@@ -237,7 +242,7 @@ export class MatrixReminderTransportBase
     message: RoomMentionMessage,
     transactionId: string,
     signal: AbortSignal,
-  ): Promise<void> {
+  ): Promise<ReminderDeliverySendResult> {
     throwIfAborted(signal);
     validateMessage(message);
     if (!/^mcal-reminder-[a-f0-9]{64}$/.test(transactionId)) {
@@ -254,18 +259,36 @@ export class MatrixReminderTransportBase
     ) {
       throw new MatrixReminderTransportError('authorization-denied');
     }
+    const mentionMetadata = message.content['m.mentions'];
+    const mentionTarget = 'room' in mentionMetadata ? 'room' : 'users';
     const binding = await authorizeRoomMentionDelivery(
       {
         roomId,
         calendarId,
         roomCalendarPrincipalIdentity: identity,
         configuredBindings: current.roomCalendarBindings,
+        mentionTarget,
       },
       this,
       signal,
     );
     if (!binding)
       throw new MatrixReminderTransportError('authorization-denied');
+
+    let outboundMessage = message;
+    if (!('room' in mentionMetadata) && 'user_ids' in mentionMetadata) {
+      const currentMembers = new Set(
+        await this.getJoinedRoomMembers(roomId, signal),
+      );
+      const currentRecipients = mentionMetadata.user_ids.filter((userId) =>
+        currentMembers.has(userId),
+      );
+      if (currentRecipients.length === 0) return 'no-current-recipients';
+      outboundMessage = buildUserMentionMessage(
+        message.content.body,
+        currentRecipients,
+      );
+    }
 
     throwIfAborted(signal);
     const url = this.clientUrl(
@@ -278,7 +301,7 @@ export class MatrixReminderTransportBase
       response = await this.fetchImpl(url, {
         method: 'PUT',
         headers: this.headers(),
-        body: JSON.stringify(message.content),
+        body: JSON.stringify(outboundMessage.content),
         redirect: 'manual',
         signal: requestSignal,
       });
@@ -306,6 +329,7 @@ export class MatrixReminderTransportBase
     ) {
       throw new MatrixReminderTransportError('invalid-response');
     }
+    return 'sent';
   }
 
   private async requestState(
@@ -669,6 +693,28 @@ async function cancelWithinLimit(
 function validateMessage(message: RoomMentionMessage): void {
   const content = message?.content;
   const mentions = content?.['m.mentions'];
+  const isRoomMention =
+    mentions !== undefined &&
+    Object.keys(mentions).length === 1 &&
+    'room' in mentions &&
+    mentions.room === true;
+  const userIds =
+    mentions !== undefined &&
+    'user_ids' in mentions &&
+    Array.isArray(mentions.user_ids)
+      ? mentions.user_ids
+      : undefined;
+  const isUserMention =
+    userIds !== undefined &&
+    Object.keys(mentions).length === 1 &&
+    userIds.length > 0 &&
+    userIds.length <= MAX_REMINDER_MENTION_USER_IDS &&
+    userIds.every(
+      (userId, index) =>
+        typeof userId === 'string' &&
+        isCanonicalMatrixUserId(userId) &&
+        userIds.indexOf(userId) === index,
+    );
   if (
     !message ||
     message.type !== 'm.room.message' ||
@@ -677,9 +723,7 @@ function validateMessage(message: RoomMentionMessage): void {
     typeof content.body !== 'string' ||
     content.body.trim().length === 0 ||
     Buffer.byteLength(content.body, 'utf8') > 4_096 ||
-    !mentions ||
-    mentions.room !== true ||
-    Object.keys(mentions).some((key) => key !== 'room') ||
+    (!isRoomMention && !isUserMention) ||
     Object.keys(content).some(
       (key) => !['msgtype', 'body', 'm.mentions'].includes(key),
     )

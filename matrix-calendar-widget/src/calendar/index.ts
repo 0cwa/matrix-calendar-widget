@@ -62,8 +62,11 @@ export {
 export {
   isCalendarRoomReminderRepository,
   type CalendarRoomReminderAlarmOption,
+  type CalendarRoomReminderAllDaySchedule,
+  type CalendarRoomReminderConfiguration,
   type CalendarRoomReminderIdentity,
   type CalendarRoomReminderRepository,
+  type CalendarRoomReminderTarget,
 } from './CalendarRoomReminderRepository';
 export {
   isCalendarTargetAvailabilityRepository,

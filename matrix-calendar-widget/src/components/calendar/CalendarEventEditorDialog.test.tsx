@@ -203,6 +203,50 @@ describe('<CalendarEventEditorDialog />', () => {
     await waitFor(() => expect(opener).toHaveFocus());
   });
 
+  it('clears configure intent when requestSubmit does not dispatch submit', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [event],
+    });
+    const onClose = vi.fn();
+    const onSaveAndConfigureRoomReminders = vi.fn();
+
+    render(
+      <CalendarEventEditorDialog
+        calendars={[calendar]}
+        event={event}
+        onClose={onClose}
+        onSaveAndConfigureRoomReminders={onSaveAndConfigureRoomReminders}
+        open
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    const requestSubmit = vi
+      .spyOn(HTMLFormElement.prototype, 'requestSubmit')
+      .mockImplementation(() => undefined);
+    try {
+      await userEvent.click(
+        await screen.findByRole('button', {
+          name: 'Save and configure Matrix reminders',
+        }),
+      );
+    } finally {
+      requestSubmit.mockRestore();
+    }
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onSaveAndConfigureRoomReminders).not.toHaveBeenCalled();
+
+    await userEvent.type(
+      screen.getByRole('textbox', { name: /Title/i }),
+      '{Enter}',
+    );
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(onSaveAndConfigureRoomReminders).not.toHaveBeenCalled();
+  });
+
   it('creates one attachment link and exposes accessible edit controls', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [calendar],

@@ -16,7 +16,12 @@
 
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -32,6 +37,9 @@ import {
   inspectStoppedContainerState,
   isPrivateArtifactPath,
   isSafeRestoreTargetPlan,
+  parseReminderConfigurationSnapshotOutput,
+  sameReminderConfigurationSnapshots,
+  sameReminderDeliverySnapshots,
 } from './element-acceptance-reminder-restore-guards.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -300,6 +308,7 @@ let envFile;
 let stageFile;
 let eventFile;
 let deliveryFile;
+let reminderConfigurationFile;
 let runnerTemp;
 let radicaleArchivePath;
 let postgresDumpPath;
@@ -337,7 +346,17 @@ function initializeConfiguration() {
     required('ELEMENT_ACCEPTANCE_REMINDER_DELIVERY_FILE'),
     runnerTemp,
   );
-  const privatePaths = [envFile, stageFile, eventFile, deliveryFile];
+  reminderConfigurationFile = validatePrivatePath(
+    `${deliveryFile}.config.json`,
+    runnerTemp,
+  );
+  const privatePaths = [
+    envFile,
+    stageFile,
+    eventFile,
+    deliveryFile,
+    reminderConfigurationFile,
+  ];
   if (new Set(privatePaths).size !== privatePaths.length) {
     throw new StageFailure('reminder-compose-validation');
   }
@@ -910,7 +929,7 @@ function parseDeliveryRows(database, phase) {
   }
   const query = [
     'SELECT delivery_key, state, attempt_count, (sent_at IS NOT NULL),',
-    '(claim_token IS NULL), (lease_expires_at IS NULL)',
+    "(claim_token IS NULL AND lease_expires_at IS NULL), COALESCE(skip_reason, '')",
     'FROM matrix_calendar.reminder_deliveries ORDER BY delivery_key;',
   ].join(' ');
   const output = requireSuccess(
@@ -944,11 +963,18 @@ function parseDeliveryRows(database, phase) {
     if (
       fields.length !== 6 ||
       !/^[a-f0-9]{64}$/u.test(fields[0]) ||
-      !['claimed', 'pending', 'sent'].includes(fields[1]) ||
+      !['claimed', 'pending', 'sent', 'skipped'].includes(fields[1]) ||
       !/^\d+$/u.test(fields[2]) ||
       !['t', 'f'].includes(fields[3]) ||
       !['t', 'f'].includes(fields[4]) ||
-      !['t', 'f'].includes(fields[5])
+      !(
+        (fields[1] === 'skipped' &&
+          fields[3] === 'f' &&
+          fields[5] === 'no-current-recipients') ||
+        (fields[1] !== 'skipped' && fields[5] === '')
+      ) ||
+      (fields[1] === 'sent' && fields[3] !== 't') ||
+      (fields[1] !== 'sent' && fields[3] !== 'f')
     ) {
       throw new StageFailure(phase, { count: Math.min(lines.length, 3) });
     }
@@ -957,7 +983,8 @@ function parseDeliveryRows(database, phase) {
       state: fields[1],
       attemptCount: Number(fields[2]),
       sentAtPresent: fields[3] === 't',
-      claimClear: fields[4] === 't' && fields[5] === 't',
+      claimClear: fields[4] === 't',
+      skipReason: fields[5] || null,
     });
   }
   return deliveries;
@@ -979,12 +1006,18 @@ function readDeliverySnapshot(phase) {
         delivery === null ||
         typeof delivery !== 'object' ||
         Array.isArray(delivery) ||
-        Object.keys(delivery).length !== 2 ||
+        Object.keys(delivery).length !== 4 ||
         !Object.hasOwn(delivery, 'deliveryKey') ||
         !Object.hasOwn(delivery, 'attemptCount') ||
+        !Object.hasOwn(delivery, 'state') ||
+        !Object.hasOwn(delivery, 'skipReason') ||
         !/^[a-f0-9]{64}$/u.test(delivery.deliveryKey) ||
         !Number.isSafeInteger(delivery.attemptCount) ||
-        delivery.attemptCount < 1,
+        delivery.attemptCount < 1 ||
+        !['sent', 'skipped'].includes(delivery.state) ||
+        (delivery.state === 'sent' && delivery.skipReason !== null) ||
+        (delivery.state === 'skipped' &&
+          delivery.skipReason !== 'no-current-recipients'),
     ) ||
     new Set(parsed.map((delivery) => delivery.deliveryKey)).size !==
       parsed.length
@@ -1008,10 +1041,20 @@ function summarizeDeliveries(deliveries, expectedCount, snapshots = []) {
   const byKey = new Map(
     deliveries.map((delivery) => [delivery.deliveryKey, delivery]),
   );
-  const preserved = snapshots.every((snapshot) => {
+  const currentSnapshots = snapshots.map((snapshot) => {
     const current = byKey.get(snapshot.deliveryKey);
-    return current?.attemptCount === snapshot.attemptCount;
+    return current
+      ? {
+          deliveryKey: current.deliveryKey,
+          attemptCount: current.attemptCount,
+          state: current.state,
+          skipReason: current.skipReason,
+        }
+      : undefined;
   });
+  const preserved =
+    !currentSnapshots.some((snapshot) => snapshot === undefined) &&
+    sameReminderDeliverySnapshots(snapshots, currentSnapshots);
   const details = {
     count: deliveries.length,
     attemptCount: deliveries.reduce(
@@ -1023,7 +1066,7 @@ function summarizeDeliveries(deliveries, expectedCount, snapshots = []) {
     deliveryKeyUnchanged:
       snapshots.length === 0 ||
       snapshots.every((snapshot) => byKey.has(snapshot.deliveryKey)),
-    attemptCountUnchanged: snapshots.length === 0 || preserved,
+    deliveryMetadataUnchanged: snapshots.length === 0 || preserved,
   };
   return {
     ...details,
@@ -1033,37 +1076,98 @@ function summarizeDeliveries(deliveries, expectedCount, snapshots = []) {
       sent &&
       details.deliveryClaimClear &&
       details.deliveryKeyUnchanged &&
-      details.attemptCountUnchanged,
+      details.deliveryMetadataUnchanged,
   };
 }
 
-function reminderConfigurationCount(database, phase) {
+function reminderConfigurationSnapshot(database, phase) {
   if (
     !['matrix_calendar_test', 'matrix_calendar_restored'].includes(database)
   ) {
     throw new StageFailure(phase);
   }
-  const output = queryPostgres(
+  const schemaVersionOutput = queryPostgres(
     database,
-    'SELECT count(*) FROM matrix_calendar.room_reminder_configurations;',
+    'SELECT COALESCE(MAX(version), 0) FROM matrix_calendar.schema_migrations;',
     'matrix_calendar_app',
     phase,
   );
-  if (!/^\d+$/u.test(output)) throw new StageFailure(phase);
-  return Number(output);
+  if (!/^\d+$/u.test(schemaVersionOutput)) throw new StageFailure(phase);
+  const schemaVersion = Number(schemaVersionOutput);
+  if (schemaVersion !== 4) {
+    throw new StageFailure(phase, { schemaVersionMatches: false });
+  }
+
+  const output = queryPostgres(
+    database,
+    [
+      'SELECT json_build_object(',
+      "'roomId', room_id, 'calendarId', calendar_id,",
+      "'eventUid', event_uid, 'recurrenceId', NULLIF(recurrence_id, ''),",
+      "'alarmUid', alarm_uid, 'target', target_json,",
+      "'allDaySchedule', all_day_schedule_json,",
+      "'scheduleEffectiveAt', CASE WHEN schedule_effective_at IS NULL THEN NULL",
+      'ELSE floor(extract(epoch FROM schedule_effective_at) * 1000)::bigint END,',
+      "'revision', revision",
+      ')::text FROM matrix_calendar.room_reminder_configurations',
+      'ORDER BY room_id, calendar_id, event_uid, recurrence_id, alarm_uid;',
+    ].join(' '),
+    'matrix_calendar_app',
+    phase,
+  );
+  try {
+    return parseReminderConfigurationSnapshotOutput(output);
+  } catch {
+    throw new StageFailure(phase);
+  }
 }
 
-async function verifyReminderConfiguration(database) {
+function readReminderConfigurationSnapshot(phase) {
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(reminderConfigurationFile, 'utf8'));
+  } catch {
+    throw new StageFailure(phase);
+  }
+  if (!Array.isArray(parsed)) throw new StageFailure(phase);
+  try {
+    return parseReminderConfigurationSnapshotOutput(
+      parsed.map((configuration) => JSON.stringify(configuration)).join('\n'),
+    );
+  } catch {
+    throw new StageFailure(phase);
+  }
+}
+
+async function verifyReminderConfiguration(database, requireSnapshot = false) {
   await withStage('reminder-configuration-stored', async () => {
     const titles = readReminderMarkerTitles();
-    const count = reminderConfigurationCount(
+    const configurations = reminderConfigurationSnapshot(
       database,
       'reminder-configuration-stored',
     );
-    if (count !== titles.length) {
-      throw new StageFailure('reminder-configuration-stored', { count });
+    const snapshotExists = existsSync(reminderConfigurationFile);
+    const snapshot = snapshotExists
+      ? readReminderConfigurationSnapshot('reminder-configuration-stored')
+      : undefined;
+    if (
+      configurations.length !== titles.length ||
+      (requireSnapshot && !snapshot) ||
+      (snapshot &&
+        !sameReminderConfigurationSnapshots(snapshot, configurations))
+    ) {
+      throw new StageFailure('reminder-configuration-stored', {
+        count: configurations.length,
+        snapshotCompared: Boolean(snapshot),
+        metadataUnchanged:
+          !snapshot ||
+          sameReminderConfigurationSnapshots(snapshot, configurations),
+      });
     }
-    return { count };
+    return {
+      count: configurations.length,
+      snapshotCompared: Boolean(snapshot),
+    };
   });
 }
 
@@ -1075,21 +1179,33 @@ async function snapshotDelivery() {
       'reminder-delivery-snapshot',
     );
     const summary = summarizeDeliveries(deliveries, titles.length);
+    const configurations = reminderConfigurationSnapshot(
+      'matrix_calendar_test',
+      'reminder-delivery-snapshot',
+    );
     const details = {
       count: summary.count,
       attemptCount: summary.attemptCount,
       deliveryStateSent: summary.deliveryStateSent,
       deliveryClaimClear: summary.deliveryClaimClear,
+      configurationCount: configurations.length,
     };
-    if (!summary.complete) {
+    if (!summary.complete || configurations.length !== titles.length) {
       throw new StageFailure('reminder-delivery-snapshot', details);
     }
     writeFileSync(
+      reminderConfigurationFile,
+      `${JSON.stringify(configurations)}\n`,
+      { encoding: 'utf8', mode: 0o600 },
+    );
+    writeFileSync(
       deliveryFile,
       `${JSON.stringify(
-        deliveries.map(({ deliveryKey, attemptCount }) => ({
+        deliveries.map(({ deliveryKey, attemptCount, state, skipReason }) => ({
           deliveryKey,
           attemptCount,
+          state,
+          skipReason,
         })),
       )}\n`,
       { encoding: 'utf8', mode: 0o600 },
@@ -1840,13 +1956,14 @@ async function main() {
     } else if (mode === 'restore') {
       await restoreStores();
     } else if (mode === 'verify-restart') {
+      await verifyReminderConfiguration('matrix_calendar_test', true);
       await verifyDelivery(
         'matrix_calendar_test',
         'reminder-restart-delivery-row',
         2,
       );
     } else if (mode === 'verify-restore') {
-      await verifyReminderConfiguration('matrix_calendar_restored');
+      await verifyReminderConfiguration('matrix_calendar_restored', true);
       await verifyDelivery(
         'matrix_calendar_restored',
         'restore-delivery-row',

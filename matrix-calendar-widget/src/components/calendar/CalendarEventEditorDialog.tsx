@@ -35,6 +35,7 @@ export function CalendarEventEditorDialog(props: CalendarEventEditorProps) {
     open,
     onClose,
     saving,
+    savingRoomReminderSetup,
     handleSubmit,
     validationError,
     readOnly,
@@ -74,6 +75,7 @@ export function CalendarEventEditorDialog(props: CalendarEventEditorProps) {
           </Button>
           <LoadingButton
             disabled={
+              saving ||
               Boolean(validationError) ||
               readOnly ||
               chooseScope ||
@@ -81,7 +83,7 @@ export function CalendarEventEditorDialog(props: CalendarEventEditorProps) {
               followingTimingUnchanged ||
               (editingOccurrence && !occurrenceHasChanges)
             }
-            loading={saving}
+            loading={saving && !savingRoomReminderSetup}
             type="submit"
             variant="contained"
           >

@@ -71,7 +71,7 @@ describe('GatewayCalendarRepository', () => {
       });
 
       await expect(repository.getRoomCalendarCapabilities()).resolves.toEqual({
-        calendarId,
+        calendarId: publicCalendarId('room', calendarId),
         roomId,
         canReadEvents: true,
         canWriteEvents: true,
@@ -105,7 +105,7 @@ describe('GatewayCalendarRepository', () => {
     });
 
     await expect(repository.getRoomCalendarCapabilities()).resolves.toEqual({
-      calendarId,
+      calendarId: publicCalendarId('room', calendarId),
       roomId,
       canReadEvents: true,
       canWriteEvents: true,
@@ -114,6 +114,26 @@ describe('GatewayCalendarRepository', () => {
     expect(
       new URL(fetchMock.mock.calls[0][0] as string).searchParams.get('roomId'),
     ).toBe(roomId);
+  });
+
+  it('projects raw room capabilities without mutating the gateway value', async () => {
+    const rawCapabilities = {
+      calendarId,
+      canReadEvents: true,
+      canWriteEvents: true,
+      canManageReminders: true,
+    };
+    const repository = createRepository(
+      mockFetch(),
+      'UTC',
+      () => rawCapabilities,
+    );
+
+    await expect(repository.getRoomCalendarCapabilities()).resolves.toEqual({
+      ...rawCapabilities,
+      calendarId: publicCalendarId('room', calendarId),
+    });
+    expect(rawCapabilities.calendarId).toBe(calendarId);
   });
 
   it('rejects a server context that names a different room', async () => {
@@ -267,6 +287,12 @@ describe('GatewayCalendarRepository', () => {
       supportedComponents: ['VEVENT'],
     };
     const roomEvent = { ...event, title: 'Room planning' };
+    const rawRoomCapabilities = {
+      calendarId,
+      canReadEvents: true,
+      canWriteEvents: true,
+      canManageReminders: false,
+    };
     const fetchMock = mockFetch(
       jsonResponse([personalCalendar]),
       jsonResponse([roomCalendar]),
@@ -283,12 +309,11 @@ describe('GatewayCalendarRepository', () => {
         etag: '"updated-room-etag"',
       }),
     );
-    const repository = createRepository(fetchMock, 'UTC', () => ({
-      calendarId,
-      canReadEvents: true,
-      canWriteEvents: true,
-      canManageReminders: false,
-    }));
+    const repository = createRepository(
+      fetchMock,
+      'UTC',
+      () => rawRoomCapabilities,
+    );
     const calendarResult = await repository.listCalendarsWithAvailability();
     const personalPublicId = publicCalendarId('personal', calendarId);
     const roomPublicId = publicCalendarId('room', calendarId);
@@ -301,12 +326,13 @@ describe('GatewayCalendarRepository', () => {
       partialAvailability: false,
       canManageCalendarCollections: true,
       roomCapabilities: {
-        calendarId,
+        calendarId: roomPublicId,
         canReadEvents: true,
         canWriteEvents: true,
         canManageReminders: false,
       },
     });
+    expect(rawRoomCapabilities.calendarId).toBe(calendarId);
 
     const listedEvents = await repository.listEventsWithAvailability(
       [personalPublicId, roomPublicId],
@@ -434,6 +460,9 @@ describe('GatewayCalendarRepository', () => {
       eventUid: event.uid,
       recurrenceId: null,
       alarmUid: 'alarm-stable-1',
+      timingType: 'timed' as const,
+      supported: true,
+      requiresAllDaySchedule: false,
       relatedTo: 'start' as const,
       trigger: {
         weeks: 0,
@@ -459,6 +488,12 @@ describe('GatewayCalendarRepository', () => {
       eventUid: event.uid,
       recurrenceId: null,
       alarmUid: option.alarmUid,
+    };
+    const savedConfiguration = {
+      ...identity,
+      target: { kind: 'room' as const },
+      allDaySchedule: null,
+      revision: 1,
     };
     const fetchMock = mockFetch(
       jsonResponse([]),
@@ -487,7 +522,7 @@ describe('GatewayCalendarRepository', () => {
       }),
       jsonResponse({ options: [option] }),
       jsonResponse({ items: [] }),
-      jsonResponse(identity),
+      jsonResponse(savedConfiguration),
       jsonResponse({ deleted: true }),
     );
     const repository = createRepository(fetchMock, 'UTC', () => ({
@@ -516,8 +551,10 @@ describe('GatewayCalendarRepository', () => {
         publicEvent.id,
         option.alarmUid,
         null,
+        { kind: 'room' },
+        null,
       ),
-    ).resolves.toEqual(identity);
+    ).resolves.toEqual(savedConfiguration);
     await expect(
       repository.disableRoomReminder(identity),
     ).resolves.toBeUndefined();
@@ -542,6 +579,8 @@ describe('GatewayCalendarRepository', () => {
         eventId,
         recurrenceId: null,
         alarmUid: option.alarmUid,
+        target: { kind: 'room' },
+        allDaySchedule: null,
       }),
     );
     const [deleteUrl, deleteInit] = fetchMock.mock.calls[6];
@@ -618,6 +657,33 @@ describe('GatewayCalendarRepository', () => {
     expect(init?.body).toBe(
       JSON.stringify({ description: 'Project planning' }),
     );
+  });
+
+  it('does not expose room capabilities when the room calendar identity mismatches', async () => {
+    const fetchMock = mockFetch(
+      jsonResponse([{ id: calendarId, name: 'Personal' }]),
+      jsonResponse([
+        { id: 'different-room-calendar', name: 'Unexpected room calendar' },
+      ]),
+    );
+    const repository = createRepository(fetchMock, 'UTC', () => ({
+      calendarId: 'team-calendar',
+      canReadEvents: true,
+      canWriteEvents: true,
+      canManageReminders: true,
+    }));
+
+    await expect(repository.listCalendarsWithAvailability()).resolves.toEqual({
+      calendars: [
+        {
+          id: publicCalendarId('personal', calendarId),
+          name: 'Personal',
+        },
+      ],
+      partialAvailability: true,
+      canManageCalendarCollections: true,
+      roomCapabilities: undefined,
+    });
   });
 
   it('sends an empty description to clear the calendar property', async () => {

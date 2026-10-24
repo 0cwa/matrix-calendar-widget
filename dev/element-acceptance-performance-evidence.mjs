@@ -131,7 +131,7 @@ const UNMAPPED_SOURCE_RESOLUTIONS = new Set([
   'unsupported-source',
   'invalid-coordinate',
 ]);
-const ORDINARY_REPORT_VERSIONS = new Set([9, 10, 11, 12, 13]);
+const ORDINARY_REPORT_VERSIONS = new Set([9, 10, 11, 12, 13, 14]);
 const PAGE_ERROR_SUBTYPE_CLASS = new Map([
   ['error', 'error'],
   ['type-error', 'type-error'],
@@ -207,6 +207,35 @@ const VERSION_13_PAGE_ERROR_OBSERVATION_KEYS = [
   'hostStackFirstFrame',
   'hostStackTrustedBundleFrameCount',
 ];
+const VERSION_14_PAGE_ERROR_OBSERVATION_KEYS = [
+  ...VERSION_13_PAGE_ERROR_OBSERVATION_KEYS,
+  'safeErrorName',
+  'safeErrorMessageClass',
+];
+const SAFE_ERROR_NAMES = new Set([
+  'Error',
+  'TypeError',
+  'ReferenceError',
+  'SyntaxError',
+  'RangeError',
+  'URIError',
+  'EvalError',
+  'AggregateError',
+  'DOMException',
+  'Other',
+  'unavailable',
+]);
+const SAFE_ERROR_MESSAGE_CLASSES = new Set([
+  'cannot-read-nullish-property',
+  'cannot-write-nullish-property',
+  'cannot-destructure-nullish-value',
+  'not-a-function',
+  'network-failure',
+  'react-minified-error',
+  'out-of-memory',
+  'other',
+  'unavailable',
+]);
 const API_SAMPLE =
   /^(?:cold-list|warmup-(?:list|month)-[12]|measured-(?:list|month)-[1-5]|overflow-(?:month|day|reset-month|reset-list)|details-warmup-[12]|details-[1-5]|(?:empty|events-25)-(?:default|refresh-setup|refresh)|events-25-details-[1-5])$/u;
 
@@ -351,6 +380,74 @@ export function classifyPerformancePageError(error, fixtureUrls) {
 }
 
 /**
+ * Maps exception details to closed public enums. Runtime text is never copied
+ * to a CI artifact because it can contain private calendar or host data.
+ *
+ * @param {unknown} error Browser error supplied by Playwright.
+ * @returns {{safeErrorName: string, safeErrorMessageClass: string}}
+ */
+export function safePerformancePageErrorDetails(error) {
+  const rawName = readErrorString(error, 'name');
+  const rawMessage = readErrorString(error, 'message');
+  const safeErrorName =
+    error instanceof AggregateError
+      ? 'AggregateError'
+      : error instanceof TypeError
+        ? 'TypeError'
+        : error instanceof ReferenceError
+          ? 'ReferenceError'
+          : error instanceof SyntaxError
+            ? 'SyntaxError'
+            : error instanceof RangeError
+              ? 'RangeError'
+              : error instanceof URIError
+                ? 'URIError'
+                : error instanceof EvalError
+                  ? 'EvalError'
+                  : typeof DOMException === 'function' &&
+                      error instanceof DOMException
+                    ? 'DOMException'
+                    : error instanceof Error
+                      ? 'Error'
+                      : rawName === null
+                        ? 'unavailable'
+                        : 'Other';
+  let safeErrorMessageClass = 'unavailable';
+  if (rawMessage !== null) {
+    safeErrorMessageClass =
+      /cannot read (?:properties|property) of (?:undefined|null)/iu.test(
+        rawMessage,
+      )
+        ? 'cannot-read-nullish-property'
+        : /cannot (?:set|assign) (?:properties|property) of (?:undefined|null)/iu.test(
+              rawMessage,
+            )
+          ? 'cannot-write-nullish-property'
+          : /cannot destructure (?:property|.+?) of (?:undefined|null)/iu.test(
+                rawMessage,
+              )
+            ? 'cannot-destructure-nullish-value'
+            : /\bis not a function\b|\bnot a function\b/iu.test(rawMessage)
+              ? 'not-a-function'
+              : /\b(?:networkerror|failed to fetch|network request failed|net::err_)/iu.test(
+                    rawMessage,
+                  )
+                ? 'network-failure'
+                : /\bminified react error\s*#/iu.test(rawMessage)
+                  ? 'react-minified-error'
+                  : /\bout of memory\b|\bheap out of memory\b/iu.test(
+                        rawMessage,
+                      )
+                    ? 'out-of-memory'
+                    : 'other';
+  }
+  return {
+    safeErrorName,
+    safeErrorMessageClass,
+  };
+}
+
+/**
  * Records the bounded page-error observation used by the ordinary E2E
  * callback. Stack values are classified immediately and never attached to the
  * report; errors after the first eight set an overflow flag.
@@ -391,6 +488,7 @@ export function capturePerformancePageError(
     sourceRefSha256: null,
     sourceLine: null,
     sourceColumn: null,
+    ...(report.version >= 14 ? safePerformancePageErrorDetails(error) : {}),
   };
   report.pageErrorObservations.push(observation);
   return observation;
@@ -522,7 +620,7 @@ function ordinaryPageErrorsPass(report) {
     );
   }
   return (
-    report.version === 13 &&
+    (report.version === 13 || report.version === 14) &&
     report.pageErrorCount !== null &&
     report.pageErrorCount > 0 &&
     report.pageErrorCount <= 8 &&
@@ -1489,7 +1587,9 @@ function validOrdinaryReport(report) {
               ? PAGE_ERROR_OBSERVATION_KEYS
               : report.version === 12
                 ? VERSION_12_PAGE_ERROR_OBSERVATION_KEYS
-                : VERSION_13_PAGE_ERROR_OBSERVATION_KEYS;
+                : report.version === 13
+                  ? VERSION_13_PAGE_ERROR_OBSERVATION_KEYS
+                  : VERSION_14_PAGE_ERROR_OBSERVATION_KEYS;
       if (!hasExactKeys(observation, pageErrorObservationKeys)) {
         return false;
       }
@@ -1621,7 +1721,13 @@ function validOrdinaryReport(report) {
           );
         })();
       const hostStackEvidenceValid =
-        report.version !== 13 || validHostStackEvidence(observation);
+        report.version < 13 || validHostStackEvidence(observation);
+      const safeErrorDetailsValid =
+        report.version < 14 ||
+        (typeof observation.safeErrorName === 'string' &&
+          SAFE_ERROR_NAMES.has(observation.safeErrorName) &&
+          typeof observation.safeErrorMessageClass === 'string' &&
+          SAFE_ERROR_MESSAGE_CLASSES.has(observation.safeErrorMessageClass));
       return (
         ORDINARY_PROFILES.has(observation.profile) &&
         PAGE_ERROR_STAGES.has(observation.stage) &&
@@ -1632,7 +1738,8 @@ function validOrdinaryReport(report) {
         sourceEvidenceValid &&
         sourcePointerValid &&
         sourceMapDiagnosticValid &&
-        hostStackEvidenceValid
+        hostStackEvidenceValid &&
+        safeErrorDetailsValid
       );
     }) &&
     typeof report.pageErrorObservationOverflow === 'boolean' &&
@@ -2144,8 +2251,12 @@ function formatOrdinaryPerformanceEvidence(record) {
   ];
 
   for (const [index, observation] of report.pageErrorObservations.entries()) {
+    const errorDetail =
+      report.version >= 14
+        ? ` exception_name=${observation.safeErrorName} exception_message_class=${observation.safeErrorMessageClass}`
+        : '';
     lines.push(
-      `page_error_observation index=${index + 1} profile=${observation.profile} stage=${observation.stage} error_class=${observation.errorClass} error_subtype=${observation.errorSubtype} error_source=${observation.errorSource} stack_available=${observation.stackAvailable} source_scan_truncated=${observation.sourceScanTruncated}${report.version >= 10 ? ` source_map_status=${observation.sourceMapStatus}${report.version >= 11 ? ` source_map_resolution=${observation.sourceMapResolution}` : ''}${report.version >= 12 ? ` source_map_unsupported_reason=${observation.sourceMapUnsupportedReason} source_map_namespace_class=${observation.sourceMapNamespaceClass}` : ''} source_ref_sha256=${observation.sourceRefSha256 ?? 'none'} source_line=${observation.sourceLine ?? 'none'} source_column=${observation.sourceColumn ?? 'none'}` : ''}${report.version >= 13 ? ` host_stack_status=${observation.hostStackStatus} host_stack_frames=${observation.hostStackFrameCount} host_stack_origin=${observation.hostStackOrigin} host_stack_first_frame=${observation.hostStackFirstFrame} host_stack_trusted_bundle_frames=${observation.hostStackTrustedBundleFrameCount}` : ''}`,
+      `page_error_observation index=${index + 1} profile=${observation.profile} stage=${observation.stage} error_class=${observation.errorClass} error_subtype=${observation.errorSubtype} error_source=${observation.errorSource} stack_available=${observation.stackAvailable} source_scan_truncated=${observation.sourceScanTruncated}${report.version >= 10 ? ` source_map_status=${observation.sourceMapStatus}${report.version >= 11 ? ` source_map_resolution=${observation.sourceMapResolution}` : ''}${report.version >= 12 ? ` source_map_unsupported_reason=${observation.sourceMapUnsupportedReason} source_map_namespace_class=${observation.sourceMapNamespaceClass}` : ''} source_ref_sha256=${observation.sourceRefSha256 ?? 'none'} source_line=${observation.sourceLine ?? 'none'} source_column=${observation.sourceColumn ?? 'none'}` : ''}${report.version >= 13 ? ` host_stack_status=${observation.hostStackStatus} host_stack_frames=${observation.hostStackFrameCount} host_stack_origin=${observation.hostStackOrigin} host_stack_first_frame=${observation.hostStackFirstFrame} host_stack_trusted_bundle_frames=${observation.hostStackTrustedBundleFrameCount}` : ''}${errorDetail}`,
     );
   }
 

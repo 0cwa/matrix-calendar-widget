@@ -128,13 +128,24 @@ describe('<CalendarToolbar />', () => {
     expect(publishPublication).toHaveBeenCalledWith('writable', true);
   });
 
-  it('requires consent again after selecting another calendar', async () => {
+  it('selects the room calendar by its widget label and requires fresh consent', async () => {
+    const roomCalendarId = 'matrix-calendar-target://room/element-acceptance';
+    const targetCalendars: Calendar[] = [
+      { id: 'personal-calendar', name: 'Personal calendar', readOnly: false },
+      {
+        id: roomCalendarId,
+        name: 'Room calendar',
+        readOnly: true,
+        operatorManaged: true,
+        supportedComponents: ['VEVENT'],
+      },
+    ];
     const getPublication = vi
       .fn()
       .mockResolvedValue({ enabled: true, published: false });
     const publishPublication = vi.fn();
     const repository = Object.assign(
-      new InMemoryCalendarRepository({ calendars }),
+      new InMemoryCalendarRepository({ calendars: targetCalendars }),
       {
         getPublicCalendarFeedPublication: getPublication,
         publishPublicCalendarFeed: publishPublication,
@@ -164,12 +175,15 @@ describe('<CalendarToolbar />', () => {
     expect(confirmation).toBeChecked();
 
     fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Calendar' }));
+    const calendarListbox = await screen.findByRole('listbox');
     fireEvent.click(
-      await screen.findByRole('option', { name: 'Unknown calendar' }),
+      within(calendarListbox).getByRole('option', {
+        name: 'Room calendar',
+      }),
     );
 
     await waitFor(() => {
-      expect(getPublication).toHaveBeenCalledWith('unknown');
+      expect(getPublication).toHaveBeenCalledWith(roomCalendarId);
     });
     expect(confirmation).not.toBeChecked();
     expect(screen.getByRole('button', { name: 'Publish feed' })).toBeDisabled();
