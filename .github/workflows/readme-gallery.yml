@@ -4,6 +4,16 @@ name: Refresh README gallery
 # PRs touching the gallery run captures for review without publishing.
 on:
   workflow_dispatch:
+    inputs:
+      profile:
+        description: Select the gallery capture, Thunderbird startup smoke, or private CalDAV client qualification.
+        required: true
+        type: choice
+        default: gallery
+        options:
+          - gallery
+          - calendar-client-smoke
+          - private-caldav-client-smoke
   pull_request:
     paths:
       - '.github/workflows/readme-gallery.yml'
@@ -16,13 +26,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: readme-gallery-${{ github.event_name }}-${{ github.ref }}
+  group: readme-gallery-${{ github.event_name }}-${{ github.ref }}-${{ inputs.profile || 'gallery' }}
   cancel-in-progress: true
 
 jobs:
   screenshots:
     name: Capture gallery screenshots
-    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.profile == 'gallery')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -64,7 +74,7 @@ jobs:
   publish:
     name: Publish screenshot assets
     needs: screenshots
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.profile == 'gallery'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -117,3 +127,184 @@ jobs:
             git commit -m "docs: refresh README gallery from ${GITHUB_SHA:0:12}"
             git push origin HEAD:refs/heads/readme-gallery
           fi
+
+  calendar-client-smoke:
+    name: Thunderbird Calendar-tab startup smoke (not CalDAV qualification)
+    if: github.event_name == 'workflow_dispatch' && inputs.profile == 'calendar-client-smoke'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      TB_DOCKER_IMAGE: thunderbird-calendar-smoke:${{ github.sha }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Build the pinned isolated Thunderbird runtime image
+        id: tb_image
+        run: |
+          set -euo pipefail
+          image_context="$RUNNER_TEMP/thunderbird-smoke-image-context"
+          runner_uid="$(id -u)"
+          runner_gid="$(id -g)"
+          [[ "$runner_uid" =~ ^[0-9]+$ && "$runner_gid" =~ ^[0-9]+$ ]]
+          [[ "$runner_uid" -gt 0 && "$runner_gid" -gt 0 ]]
+          mkdir -m 0700 "$image_context"
+          install -m 0600 dev/thunderbird-calendar-smoke.Dockerfile "$image_context/Dockerfile"
+          docker build --platform linux/amd64 --pull \
+            --build-arg "TASK_UID=$runner_uid" --build-arg "TASK_GID=$runner_gid" \
+            --file "$image_context/Dockerfile" --tag "$TB_DOCKER_IMAGE" "$image_context"
+          docker image inspect --format '{{.Id}}' "$TB_DOCKER_IMAGE" >/dev/null
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+
+      - name: Check closed Thunderbird startup diagnostics offline
+        run: python -B dev/test_thunderbird_calendar_smoke.py
+
+      - name: Check Docker smoke isolation before app download
+        id: tb_preflight
+        run: python -B dev/thunderbird-calendar-smoke.py preflight
+
+      - name: Download and prepare pinned Thunderbird artifacts
+        id: tb_prepare
+        run: python -B dev/thunderbird-calendar-smoke.py prepare
+
+      - name: Start Thunderbird headlessly and check the Calendar tab
+        id: tb_smoke
+        run: python -B dev/thunderbird-calendar-smoke.py smoke
+
+      - name: Finalize closed smoke evidence
+        if: always()
+        env:
+          TB_IMAGE_OUTCOME: ${{ steps.tb_image.outcome }}
+          TB_PREFLIGHT_OUTCOME: ${{ steps.tb_preflight.outcome }}
+          TB_PREPARE_OUTCOME: ${{ steps.tb_prepare.outcome }}
+          TB_SMOKE_OUTCOME: ${{ steps.tb_smoke.outcome }}
+        run: python3 -B dev/thunderbird-calendar-smoke.py finalize
+
+      - name: Add the closed smoke summary to this run
+        if: always()
+        run: |
+          summary="$RUNNER_TEMP/thunderbird-calendar-smoke-summary.json"
+          if [[ ! -s "$summary" ]]; then
+            printf '{"schema":"thunderbird-calendar-startup-smoke@6","qualification_scope":"startup_only_not_caldav","source_sha":"%s","status":"failed","phase":"complete","error_class":"internal_error","failed_artifact":null,"network_error_class":null,"http_status":null,"archive_sha256_verified":false,"archive_sha512_verified":false,"python_artifacts_verified":false,"docker_backend_verified":false,"docker_isolation_verified":false,"marionette_handshake":false,"main_window":false,"calendar_tab":false,"tabmail_present":false,"calendar_mode_registered":false,"calendar_tab_open_before_action":false,"calendar_tab_open_attempted":false,"calendar_tab_open_error":false,"app_version":null,"startup_stage":null,"startup_exception_class":null,"binary_version_probe":null,"binary_version":null,"binary_version_exit_code":null,"marionette_port_ready":false,"marionette_session_created":false,"child_state":"unknown","child_exit_code":null}\n' "$GITHUB_SHA" > "$summary"
+            chmod 0600 "$summary"
+          fi
+          cat "$summary" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload closed smoke evidence only
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: thunderbird-calendar-startup-summary
+          path: ${{ runner.temp }}/thunderbird-calendar-smoke-summary.json
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload bounded startup-only version-probe diagnostic
+        if: always() && steps.tb_smoke.outputs.startup_diagnostic_available == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: thunderbird-startup-probe-diagnostic
+          path: ${{ runner.temp }}/thunderbird-startup-probe-diagnostic.txt
+          if-no-files-found: ignore
+          retention-days: 1
+
+  private-caldav-client-smoke:
+    name: Thunderbird private CalDAV client qualification
+    if: github.event_name == 'workflow_dispatch' && inputs.profile == 'private-caldav-client-smoke'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      TB_DOCKER_IMAGE: thunderbird-calendar-smoke:${{ github.sha }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: yarn
+
+      - name: Install workspace dependencies
+        run: yarn install --frozen-lockfile
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+
+      - name: Build the isolated Thunderbird and pinned Radicale runtime image
+        id: tb_private_image
+        run: |
+          set -euo pipefail
+          image_context="$RUNNER_TEMP/thunderbird-private-caldav-image-context"
+          runner_uid="$(id -u)"
+          runner_gid="$(id -g)"
+          [[ "$runner_uid" =~ ^[0-9]+$ && "$runner_gid" =~ ^[0-9]+$ ]]
+          [[ "$runner_uid" -gt 0 && "$runner_gid" -gt 0 ]]
+          mkdir -m 0700 "$image_context"
+          install -m 0600 dev/thunderbird-private-caldav.Dockerfile "$image_context/Dockerfile"
+          docker build --platform linux/amd64 --pull \
+            --build-context "radicale-auth=$GITHUB_WORKSPACE/radicale-auth" \
+            --build-arg "TASK_UID=$runner_uid" --build-arg "TASK_GID=$runner_gid" \
+            --file "$image_context/Dockerfile" --tag "$TB_DOCKER_IMAGE" "$image_context"
+          docker image inspect --format '{{.Id}}' "$TB_DOCKER_IMAGE" >/dev/null
+
+      - name: Check closed Thunderbird startup diagnostics offline
+        run: python -B dev/test_thunderbird_calendar_smoke.py
+
+      - name: Check the hash-locked private CalDAV dependencies offline
+        run: python -B dev/test_thunderbird_private_caldav_dependencies.py
+
+      - name: Check closed private CalDAV runner evidence offline
+        run: python -B dev/test_thunderbird_private_caldav_smoke.py
+
+      - name: Check Docker isolation before application download
+        id: tb_private_preflight
+        run: python -B dev/thunderbird-calendar-smoke.py preflight
+
+      - name: Download and prepare pinned Thunderbird and Marionette artifacts
+        id: tb_private_prepare
+        run: python -B dev/thunderbird-calendar-smoke.py prepare
+
+      - name: Prepare the hash-locked private CalDAV and Node runtimes
+        id: tb_private_dependencies
+        run: python -B dev/thunderbird-private-caldav-smoke.py prepare
+
+      - name: Install private CalDAV dependencies offline in the task container
+        id: tb_private_install
+        run: python -B dev/thunderbird-private-caldav-smoke.py install
+
+      - name: Run Thunderbird against the isolated private CalDAV fixture
+        id: tb_private_run
+        run: python -B dev/thunderbird-private-caldav-smoke.py run
+
+      - name: Close private CalDAV qualification evidence
+        if: always()
+        env:
+          TB_PRIVATE_IMAGE_OUTCOME: ${{ steps.tb_private_image.outcome }}
+          TB_PRIVATE_PREFLIGHT_OUTCOME: ${{ steps.tb_private_preflight.outcome }}
+          TB_PRIVATE_PREPARE_OUTCOME: ${{ steps.tb_private_prepare.outcome }}
+          TB_PRIVATE_INSTALL_OUTCOME: ${{ steps.tb_private_install.outcome }}
+          TB_PRIVATE_RUN_OUTCOME: ${{ steps.tb_private_run.outcome }}
+        run: python3 -B dev/thunderbird-private-caldav-smoke.py finalize
+
+      - name: Add the closed private CalDAV summary to this run
+        if: always()
+        run: cat "$RUNNER_TEMP/thunderbird-private-caldav-summary.json" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload closed private CalDAV evidence only
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: thunderbird-private-caldav-summary
+          path: ${{ runner.temp }}/thunderbird-private-caldav-summary.json
+          if-no-files-found: error
+          retention-days: 1

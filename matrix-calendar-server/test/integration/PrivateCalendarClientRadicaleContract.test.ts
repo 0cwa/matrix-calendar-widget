@@ -65,6 +65,8 @@ import type { RoomCalendarCalDavAccess } from '../../src/service/RoomCalendarCal
 
 const execFileAsync = promisify(execFile);
 const contractEnabled = process.env.PRIVATE_CALDAV_CONTRACT === '1';
+const nativeThunderbirdProfile =
+  process.env.MCW_PRIVATE_CALDAV_NATIVE_PROFILE === '1';
 const describeContract = contractEnabled ? describe : describe.skip;
 
 const APP_ID_PATTERN = /^mcwpc~[a-f0-9]{48}$/u;
@@ -140,15 +142,17 @@ const configProvider = {
 class PrivateCalendarClientRadicaleContractModule {}
 
 describeContract(
-  'private CalDAV client with Radicale and python-caldav',
+  'private CalDAV clients with Radicale',
   () => {
-    jest.setTimeout(90_000);
+    jest.setTimeout(nativeThunderbirdProfile ? 240_000 : 90_000);
 
     it('discovers and edits only the mapped calendar through the HTTPS gateway', async () => {
       const root = resolvePath(__dirname, '../../..');
       const python =
         process.env.MCW_PRIVATE_CALDAV_PYTHON ??
         '/tmp/mcw-public-feeds-radicale-venv/bin/python';
+      const radicalePython =
+        process.env.MCW_PRIVATE_CALDAV_RADICALE_PYTHON ?? python;
       const caldavSitePackages =
         process.env.MCW_PRIVATE_CALDAV_SITE_PACKAGES ??
         resolvePath(root, '../private-client-contract/site-packages');
@@ -159,10 +163,21 @@ describeContract(
         'tests',
         'private_client_caldav_contract.py',
       );
+      const thunderbirdContract = join(
+        root,
+        'radicale-auth',
+        'tests',
+        'private_client_thunderbird_contract.py',
+      );
       expect(existsSync(python)).toBe(true);
+      expect(existsSync(radicalePython)).toBe(true);
       expect(
         existsSync(join(caldavSitePackages, 'caldav', '__init__.py')),
       ).toBe(true);
+      if (nativeThunderbirdProfile) {
+        expect(existsSync(thunderbirdContract)).toBe(true);
+        expect(existsSync(process.env.MCW_PRIVATE_CALDAV_NATIVE_THUNDERBIRD_BIN ?? '')).toBe(true);
+      }
 
       const temp = await mkdtemp(join(tmpdir(), 'mcw-private-client-runtime-'));
       chmodSync(temp, 0o700);
@@ -180,6 +195,7 @@ describeContract(
       let store: ContractRecordStore | undefined;
       let records: Map<string, PrivateCalendarClientRecord> | undefined;
       let callbackCount = 0;
+      let personalAuthDenyCount = 0;
       let davPolicyCount = 0;
       let rightsPolicyCount = 0;
       let managerPowerChecks = 0;
@@ -346,7 +362,11 @@ describeContract(
         const authenticate = policy.authenticate.bind(policy);
         policy.authenticate = async (...args) => {
           callbackCount += 1;
-          return authenticate(...args);
+          const allowed = await authenticate(...args);
+          if (args[0] === personalAppId && !allowed) {
+            personalAuthDenyCount += 1;
+          }
+          return allowed;
         };
         const authorizeDavRequest = policy.authorizeDavRequest.bind(policy);
         policy.authorizeDavRequest = async (...args) => {
@@ -423,6 +443,75 @@ describeContract(
             async () => {
               await store?.revoke(personalAppId, new Date());
             },
+            () => ({
+              callbackCount,
+              personalAuthDenyCount,
+              personalState: records?.get(personalAppId)?.state ?? 'missing',
+            }),
+            async (operation) => {
+              const ownerAuthorization = openIdAuthorization(
+                'alice',
+                'contract-owner-proof',
+              );
+              if (operation === 'edited') {
+                const canonical = await requestRadicale(
+                  radicalePort,
+                  'GET',
+                  '/alice/personal/event.ics',
+                  Buffer.alloc(0),
+                  ownerAuthorization,
+                );
+                const text = canonical.body.toString('utf8');
+                return (
+                  canonical.status === 200 &&
+                  text.includes('SUMMARY:Edited by native Thunderbird CalDAV provider') &&
+                  text.includes('X-COMPANY-OPAQUE') &&
+                  text.includes('X-KEEP') &&
+                  text.includes('keep-this-value')
+                );
+              }
+              if (operation === 'created') {
+                const canonical = await requestRadicale(
+                  radicalePort,
+                  'GET',
+                  '/alice/personal/native-created-contract-event.ics',
+                  Buffer.alloc(0),
+                  ownerAuthorization,
+                );
+                return (
+                  canonical.status === 200 &&
+                  canonical.body
+                    .toString('utf8')
+                    .includes('SUMMARY:Created by native Thunderbird CalDAV provider')
+                );
+              }
+              if (operation === 'deleted') {
+                const canonical = await requestRadicale(
+                  radicalePort,
+                  'GET',
+                  '/alice/personal/native-created-contract-event.ics',
+                  Buffer.alloc(0),
+                  ownerAuthorization,
+                );
+                return canonical.status === 404;
+              }
+              if (operation === 'revoked') {
+                const canonical = await requestRadicale(
+                  radicalePort,
+                  'GET',
+                  '/alice/personal/event.ics',
+                  Buffer.alloc(0),
+                  ownerAuthorization,
+                );
+                const text = canonical.body.toString('utf8');
+                return (
+                  canonical.status === 200 &&
+                  text.includes('SUMMARY:Edited by native Thunderbird CalDAV provider') &&
+                  !text.includes('SUMMARY:This post-revoke edit must not reach Radicale')
+                );
+              }
+              return false;
+            },
           );
         });
         await listen(controlServer);
@@ -446,9 +535,15 @@ describeContract(
           RADICALE_PRIVATE_CLIENT_CALLBACK_ORIGIN: `https://localhost:${apiAddress}`,
           RADICALE_PRIVATE_CLIENT_CALLBACK_KEY: callbackKeyText,
         };
-        radicale = spawn(python, ['-m', 'radicale', '--config', configPath], {
+        const radicaleEnv = {
+          ...pyEnv,
+          PYTHONPATH: [pluginSource, process.env.PYTHONPATH]
+            .filter(Boolean)
+            .join(delimiter),
+        };
+        radicale = spawn(radicalePython, ['-m', 'radicale', '--config', configPath], {
           cwd: temp,
-          env: pyEnv,
+          env: radicaleEnv,
           stdio: ['ignore', logFd, logFd],
         });
         await waitForRadicale(radicale, radicalePort, logPath);
@@ -841,6 +936,9 @@ describeContract(
             MCW_PRIVATE_CALDAV_ROOM_APP_ID: roomAppId,
             MCW_PRIVATE_CALDAV_ROOM_SECRET: roomSecret,
             MCW_PRIVATE_CALDAV_CONTROL_KEY: controlKey,
+            MCW_PRIVATE_CALDAV_NATIVE_PROFILE: nativeThunderbirdProfile
+              ? '1'
+              : '0',
           },
         });
         let stdout = '';
@@ -883,7 +981,111 @@ describeContract(
         expect(rightsPolicyCount).toBeGreaterThan(20);
         expect(managerPowerChecks).toBeGreaterThan(0);
         expect(records.get(roomAppId)?.state).toBe('revoked');
-        expect(records.get(personalAppId)?.state).toBe('revoked');
+        expect(records.get(personalAppId)?.state).toBe(
+          nativeThunderbirdProfile ? 'active' : 'revoked',
+        );
+
+        if (nativeThunderbirdProfile) {
+          const callbackCountBeforeThunderbird = callbackCount;
+          const nativeProcess = spawn(python, [thunderbirdContract], {
+            cwd: root,
+            env: {
+              ...pyEnv,
+              MCW_PRIVATE_CALDAV_CONTROL_PORT: String(portOf(controlServer)),
+              MCW_PRIVATE_CALDAV_API_ORIGIN: `https://localhost:${apiAddress}`,
+              MCW_PRIVATE_CALDAV_CA_FILE: certificates.caCert,
+              MCW_PRIVATE_CALDAV_PERSONAL_APP_ID: personalAppId,
+              MCW_PRIVATE_CALDAV_PERSONAL_SECRET: personalSecret,
+              MCW_PRIVATE_CALDAV_CONTROL_KEY: controlKey,
+              MCW_PRIVATE_CALDAV_NATIVE_THUNDERBIRD_BIN:
+                process.env.MCW_PRIVATE_CALDAV_NATIVE_THUNDERBIRD_BIN ?? '',
+              MCW_PRIVATE_CALDAV_NATIVE_WORKSPACE:
+                process.env.MCW_PRIVATE_CALDAV_NATIVE_WORKSPACE ?? '',
+            },
+            stdio: ['ignore', 'pipe', 'ignore'],
+          });
+          let nativeStdout = '';
+          nativeProcess.stdout?.on('data', (chunk: Buffer) => {
+            nativeStdout += chunk.toString('utf8');
+          });
+          const nativeExit = await waitForChild(nativeProcess, 180_000);
+          const nativeResultLine = nativeStdout
+            .split(/\r?\n/u)
+            .map((line) => line.trim())
+            .filter((line) => line.startsWith('{'))
+            .at(-1);
+          expect(nativeResultLine).toBeDefined();
+          let nativeResult: Record<string, unknown>;
+          try {
+            nativeResult = JSON.parse(nativeResultLine ?? '{}') as Record<
+              string,
+              unknown
+            >;
+          } catch {
+            throw new Error('Native Thunderbird CalDAV result was invalid.');
+          }
+          if (nativeExit !== 0 || nativeResult.status !== 'passed') {
+            const failureStage =
+              typeof nativeResult.failure_stage === 'string'
+                ? nativeResult.failure_stage
+                : 'unknown';
+            const failureClass =
+              typeof nativeResult.failure_class === 'string'
+                ? nativeResult.failure_class
+                : 'unknown';
+            throw new Error(
+              `Native Thunderbird CalDAV contract failed (${failureStage}/${failureClass}).`,
+            );
+          }
+          const nativePredicates = [
+            'calendarTab',
+            'providerDiscovery',
+            'calendarScope',
+            'refreshNetworkRequest',
+            'canonicalEditRoundtrip',
+            'unknownPropertyPreserved',
+            'canonicalCreateRoundtrip',
+            'canonicalDeleteRoundtrip',
+            'freshRevokeDenied',
+            'callbackAdvancedAfterRevoke',
+            'revokedState',
+            'authDeniedAfterRevoke',
+          ] as const;
+          for (const predicate of nativePredicates) {
+            expect(nativeResult[predicate]).toBe(true);
+          }
+          expect(callbackCount).toBeGreaterThan(callbackCountBeforeThunderbird);
+          expect(records.get(personalAppId)?.state).toBe('revoked');
+
+          const nativeSummaryPath =
+            process.env.MCW_PRIVATE_CALDAV_RESULT_FILE ?? '';
+          expect(nativeSummaryPath).toBe(
+            '/task/workspace/private-caldav-result.json',
+          );
+          const nativeSummary = {
+            schema: 'thunderbird-private-caldav-qualification@1',
+            status: 'passed',
+            appVersion: '158.0.1',
+            calendarTab: true,
+            providerDiscovery: true,
+            calendarScope: true,
+            refreshNetworkRequest: true,
+            canonicalEditRoundtrip: true,
+            unknownPropertyPreserved: true,
+            canonicalCreateRoundtrip: true,
+            canonicalDeleteRoundtrip: true,
+            freshRevokeDenied: true,
+            callbackAdvancedAfterRevoke: true,
+            revokedState: true,
+            authDeniedAfterRevoke: true,
+          };
+          writeFileSync(
+            nativeSummaryPath,
+            `${JSON.stringify(nativeSummary)}\n`,
+            { flag: 'wx', mode: 0o600 },
+          );
+          chmodSync(nativeSummaryPath, 0o600);
+        }
 
         await stopChild(radicale);
         const radicaleLog = readFileSync(logPath, 'utf8');
@@ -1381,11 +1583,39 @@ async function handleControlRequest(
   controlKey: string,
   updatePolicy: (change: { member?: boolean; manager?: boolean }) => void,
   revokePersonal: () => Promise<void>,
+  nativeState: () => {
+    callbackCount: number;
+    personalAuthDenyCount: number;
+    personalState: string;
+  },
+  verifyNativeCanonical: (operation: string) => Promise<boolean>,
 ): Promise<void> {
   try {
     if (
+      request.method === 'GET' &&
+      request.url === '/native-state' &&
+      hasControlKey(request.headers[CONTROL_HEADER], controlKey)
+    ) {
+      const bytes = Buffer.from(JSON.stringify(nativeState()));
+      response
+        .writeHead(200, {
+          'Content-Type': 'application/json',
+          'Content-Length': String(bytes.byteLength),
+          'Cache-Control': 'no-store',
+        })
+        .end(bytes);
+      return;
+    }
+    if (
       request.method !== 'POST' ||
-      !['/policy', '/revoke-personal'].includes(request.url ?? '') ||
+      ![
+        '/policy',
+        '/revoke-personal',
+        '/native-verify-edited',
+        '/native-verify-created',
+        '/native-verify-deleted',
+        '/native-verify-revoked',
+      ].includes(request.url ?? '') ||
       !hasControlKey(request.headers[CONTROL_HEADER], controlKey)
     ) {
       response.writeHead(404).end();
@@ -1399,6 +1629,18 @@ async function handleControlRequest(
     if (request.url === '/revoke-personal') {
       await revokePersonal();
       response.writeHead(204).end();
+      return;
+    }
+    const nativeOperation = request.url?.replace(
+      /^\/native-verify-/u,
+      '',
+    );
+    if (
+      nativeOperation &&
+      ['edited', 'created', 'deleted', 'revoked'].includes(nativeOperation)
+    ) {
+      const valid = await verifyNativeCanonical(nativeOperation);
+      response.writeHead(valid ? 204 : 409).end();
       return;
     }
     const parsed: unknown = JSON.parse(bytes.toString('utf8'));

@@ -52,6 +52,9 @@ CONTROL_KEY = os.environ["MCW_PRIVATE_CALDAV_CONTROL_KEY"]
 CALLBACK_KEY = base64.urlsafe_b64decode(
     os.environ["RADICALE_PRIVATE_CLIENT_CALLBACK_KEY"] + "="
 )
+DEFER_PERSONAL_REVOKE = (
+    os.environ.get("MCW_PRIVATE_CALDAV_NATIVE_PROFILE") == "1"
+)
 API = urllib.parse.urlsplit(API_ORIGIN)
 TLS_CONTEXT = ssl.create_default_context(cafile=CERTIFICATE_AUTHORITY)
 
@@ -403,34 +406,41 @@ def main() -> None:
     )
     assert status == 401, "a committed leave tombstone was revived by rejoin"
 
-    status, _ = control_request("/revoke-personal", b"{}")
-    assert status == 204
-    status, _, _ = request_api(
-        "GET",
-        f"/{PERSONAL_APP_ID}/calendar/event.ics",
-        username=PERSONAL_APP_ID,
-        password=PERSONAL_SECRET,
-    )
-    assert status == 401, "revoked private credential remained usable"
-
-    print(
-        json.dumps(
-            {
-                "status": "passed",
-                "radicale": "3.8.0",
-                "client": "python-caldav 3.5.0",
-                "tls": "trusted CA and hostname; mismatched hostname rejected",
-                "callback": "source HMAC response verified; nonce replay denied",
-                "discovery": "current-user-principal and scoped calendar listing passed",
-                "crud": "read/create/update/conditional stale 412/delete passed",
-                "mixed-collection": "VEVENT usable; VTODO resource readable but wildcard PUT and DELETE denied",
-                "opaque-property": "unknown X-property preserved",
-                "policy": "manager loss read-only; observed leave tombstoned; rejoin denied",
-                "isolation": "sibling credential, reserved OpenID, and external sharing paths denied",
-            },
-            sort_keys=True,
+    if not DEFER_PERSONAL_REVOKE:
+        status, _ = control_request("/revoke-personal", b"{}")
+        assert status == 204
+        status, _, _ = request_api(
+            "GET",
+            f"/{PERSONAL_APP_ID}/calendar/event.ics",
+            username=PERSONAL_APP_ID,
+            password=PERSONAL_SECRET,
         )
-    )
+        assert status == 401, "revoked private credential remained usable"
+    else:
+        status, _, _ = request_api(
+            "GET",
+            f"/{PERSONAL_APP_ID}/calendar/event.ics",
+            username=PERSONAL_APP_ID,
+            password=PERSONAL_SECRET,
+        )
+        assert status == 200, "personal credential was revoked before Thunderbird"
+
+    result = {
+        "status": "passed",
+        "radicale": "3.8.0",
+        "client": "python-caldav 3.5.0",
+        "tls": "trusted CA and hostname; mismatched hostname rejected",
+        "callback": "source HMAC response verified; nonce replay denied",
+        "discovery": "current-user-principal and scoped calendar listing passed",
+        "crud": "read/create/update/conditional stale 412/delete passed",
+        "mixed-collection": "VEVENT usable; VTODO resource readable but wildcard PUT and DELETE denied",
+        "opaque-property": "unknown X-property preserved",
+        "policy": "manager loss read-only; observed leave tombstoned; rejoin denied",
+        "isolation": "sibling credential, reserved OpenID, and external sharing paths denied",
+    }
+    if DEFER_PERSONAL_REVOKE:
+        result["personal_revoke"] = "deferred to native Thunderbird provider"
+    print(json.dumps(result, sort_keys=True))
 
 
 if __name__ == "__main__":
