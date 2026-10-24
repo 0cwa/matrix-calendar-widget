@@ -1251,6 +1251,35 @@ const REMINDER_ALARM_UI_FIELDS = [
   'alarmUiPatchStatus',
   ...REMINDER_ALARM_UI_BOOLEAN_FIELDS,
 ];
+const REMINDER_ALARM_UI_RECORD_FIELDS = new Set([
+  'phase',
+  'status',
+  'httpStatus',
+  'count',
+  'relativeAlarmReadback',
+  ...REMINDER_ALARM_UI_FIELDS,
+]);
+const REMINDER_ALARM_UI_REQUIRED_RECORD_FIELDS = [
+  'phase',
+  'status',
+  'count',
+  'relativeAlarmReadback',
+  ...REMINDER_ALARM_UI_FIELDS,
+];
+const REMINDER_ALARM_UI_DIAGNOSTIC_REASONS = new Set([
+  'record_shape',
+  'invalid_field_types',
+  'invalid_fields',
+  'multiple_contract_errors',
+]);
+const REMINDER_ALARM_UI_DIAGNOSTIC_FIELD_ISSUES = new Set([
+  'type',
+  'value',
+  'enum',
+  'relationship',
+]);
+const MAX_FAILURE_DIAGNOSTIC_INDEX = 9_999;
+const MAX_FAILURE_DIAGNOSTIC_UNKNOWN_KEYS = 99;
 const REMINDER_CONFIGURATION_FIELDS = [
   'reminderStep',
   'reminderSettingsButtonCount',
@@ -2329,45 +2358,167 @@ function validPostCreateVisibilityObservation(record) {
   );
 }
 
-function validReminderAlarmUiObservation(record) {
-  const expectedKeys = new Set([
-    'phase',
-    'status',
-    'count',
-    ...(Object.hasOwn(record, 'httpStatus') ? ['httpStatus'] : []),
-    'relativeAlarmReadback',
-    ...REMINDER_ALARM_UI_FIELDS,
-  ]);
-  return (
-    Object.keys(record).length === expectedKeys.size &&
-    Object.keys(record).every((key) => expectedKeys.has(key)) &&
-    (record.status === 'passed' || record.status === 'failed') &&
-    Number.isInteger(record.count) &&
-    record.count === 1 &&
-    REMINDER_ALARM_UI_STEPS.has(record.alarmUiStep) &&
-    Number.isInteger(record.alarmUiPatchStatus) &&
-    (record.alarmUiPatchStatus === 0 ||
-      (record.alarmUiPatchStatus >= 100 && record.alarmUiPatchStatus <= 599)) &&
-    REMINDER_ALARM_UI_BOOLEAN_FIELDS.every(
-      (key) => typeof record[key] === 'boolean',
-    ) &&
-    (record.alarmUiPatchStatus === 0
-      ? !Object.hasOwn(record, 'httpStatus')
-      : record.httpStatus === record.alarmUiPatchStatus) &&
-    (record.status === 'passed'
-      ? record.alarmUiStep === 'complete' &&
-        record.relativeAlarmReadback === true &&
-        record.alarmUiRelativeAlarmReadback === true &&
-        record.alarmUiAlarmToggleReadback === true &&
-        record.alarmUiRelativeTriggerReadback === true &&
-        record.alarmUiOffsetReadback === true &&
-        record.alarmUiEditorClosed === true &&
-        record.alarmUiDetailsClosed === true &&
-        record.alarmUiPatchStatus >= 200 &&
-        record.alarmUiPatchStatus < 300
-      : record.alarmUiStep !== 'complete' &&
-        record.relativeAlarmReadback === false)
+function diagnoseReminderAlarmUiObservation(record, recordIndex, recordCount) {
+  const missingFields = [];
+  const invalidFields = new Map();
+  const markInvalid = (field, issue) => {
+    if (REMINDER_ALARM_UI_RECORD_FIELDS.has(field)) {
+      invalidFields.set(field, issue);
+    }
+  };
+  const hasField = (field) => Object.hasOwn(record, field);
+
+  for (const field of REMINDER_ALARM_UI_REQUIRED_RECORD_FIELDS) {
+    if (!hasField(field)) missingFields.push(field);
+  }
+
+  if (hasField('phase') && record.phase !== 'reminder-alarm-ui-readback') {
+    markInvalid('phase', 'value');
+  }
+  if (hasField('status')) {
+    if (typeof record.status !== 'string') markInvalid('status', 'type');
+    else if (record.status !== 'passed' && record.status !== 'failed') {
+      markInvalid('status', 'enum');
+    }
+  }
+  if (hasField('count')) {
+    if (!Number.isInteger(record.count)) markInvalid('count', 'type');
+    else if (record.count !== 1) markInvalid('count', 'value');
+  }
+  if (hasField('alarmUiStep')) {
+    if (typeof record.alarmUiStep !== 'string') {
+      markInvalid('alarmUiStep', 'type');
+    } else if (!REMINDER_ALARM_UI_STEPS.has(record.alarmUiStep)) {
+      markInvalid('alarmUiStep', 'enum');
+    }
+  }
+  if (hasField('alarmUiPatchStatus')) {
+    if (!Number.isInteger(record.alarmUiPatchStatus)) {
+      markInvalid('alarmUiPatchStatus', 'type');
+    } else if (
+      record.alarmUiPatchStatus !== 0 &&
+      (record.alarmUiPatchStatus < 100 || record.alarmUiPatchStatus > 599)
+    ) {
+      markInvalid('alarmUiPatchStatus', 'value');
+    }
+  }
+  for (const field of REMINDER_ALARM_UI_BOOLEAN_FIELDS) {
+    if (hasField(field) && typeof record[field] !== 'boolean') {
+      markInvalid(field, 'type');
+    }
+  }
+  if (hasField('relativeAlarmReadback')) {
+    if (typeof record.relativeAlarmReadback !== 'boolean') {
+      markInvalid('relativeAlarmReadback', 'type');
+    }
+  }
+
+  const patchStatusIsInteger = Number.isInteger(record.alarmUiPatchStatus);
+  if (patchStatusIsInteger && record.alarmUiPatchStatus === 0) {
+    if (hasField('httpStatus')) markInvalid('httpStatus', 'relationship');
+  } else if (patchStatusIsInteger) {
+    if (!hasField('httpStatus')) {
+      missingFields.push('httpStatus');
+    } else if (!Number.isInteger(record.httpStatus)) {
+      markInvalid('httpStatus', 'type');
+    } else if (
+      record.httpStatus < 100 ||
+      record.httpStatus > 599 ||
+      record.httpStatus !== record.alarmUiPatchStatus
+    ) {
+      markInvalid('httpStatus', 'relationship');
+    }
+  }
+
+  if (record.status === 'passed' || record.status === 'failed') {
+    if (
+      record.status === 'passed' &&
+      record.alarmUiPatchStatus >= 200 &&
+      record.alarmUiPatchStatus < 300
+    ) {
+      if (hasField('alarmUiStep') && record.alarmUiStep !== 'complete') {
+        markInvalid('alarmUiStep', 'relationship');
+      }
+      if (
+        hasField('relativeAlarmReadback') &&
+        record.relativeAlarmReadback !== true
+      ) {
+        markInvalid('relativeAlarmReadback', 'value');
+      }
+      for (const field of REMINDER_ALARM_UI_BOOLEAN_FIELDS) {
+        if (hasField(field) && record[field] !== true) {
+          markInvalid(field, 'value');
+        }
+      }
+    } else if (record.status === 'passed') {
+      if (
+        Number.isInteger(record.alarmUiPatchStatus) &&
+        (record.alarmUiPatchStatus < 200 || record.alarmUiPatchStatus >= 300)
+      ) {
+        markInvalid('alarmUiPatchStatus', 'relationship');
+      }
+    } else {
+      if (hasField('alarmUiStep') && record.alarmUiStep === 'complete') {
+        markInvalid('alarmUiStep', 'relationship');
+      }
+      if (
+        hasField('relativeAlarmReadback') &&
+        record.relativeAlarmReadback !== false
+      ) {
+        markInvalid('relativeAlarmReadback', 'value');
+      }
+    }
+  }
+
+  const unknownKeyCount = Object.keys(record).filter(
+    (field) =>
+      !REMINDER_ALARM_UI_RECORD_FIELDS.has(field) || !ALLOWED_KEYS.has(field),
+  ).length;
+  const orderedFields = [...REMINDER_ALARM_UI_RECORD_FIELDS];
+  const safeMissingFields = orderedFields.filter((field) =>
+    missingFields.includes(field),
   );
+  const safeInvalidFields = orderedFields
+    .filter((field) => invalidFields.has(field))
+    .map((field) => ({ field, issue: invalidFields.get(field) }));
+  const hasShapeProblem = unknownKeyCount > 0 || safeMissingFields.length > 0;
+  if (!hasShapeProblem && safeInvalidFields.length === 0) return null;
+
+  const hasTypeProblem = safeInvalidFields.some(
+    ({ issue }) => issue === 'type',
+  );
+  const hasValueProblem = safeInvalidFields.some(
+    ({ issue }) => issue !== 'type',
+  );
+  const reason =
+    hasShapeProblem && safeInvalidFields.length > 0
+      ? 'multiple_contract_errors'
+      : hasShapeProblem
+        ? 'record_shape'
+        : hasTypeProblem && !hasValueProblem
+          ? 'invalid_field_types'
+          : 'invalid_fields';
+  const boundedIndex = Math.min(recordIndex, MAX_FAILURE_DIAGNOSTIC_INDEX);
+  const boundedCount = Math.min(recordCount, MAX_FAILURE_DIAGNOSTIC_INDEX);
+  return {
+    reason,
+    recordIndex: boundedIndex,
+    recordIndexCapped: recordIndex > MAX_FAILURE_DIAGNOSTIC_INDEX,
+    recordCount: boundedCount,
+    recordCountCapped: recordCount > MAX_FAILURE_DIAGNOSTIC_INDEX,
+    unknownKeyCount: Math.min(
+      unknownKeyCount,
+      MAX_FAILURE_DIAGNOSTIC_UNKNOWN_KEYS,
+    ),
+    unknownKeyCountCapped:
+      unknownKeyCount > MAX_FAILURE_DIAGNOSTIC_UNKNOWN_KEYS,
+    missingFields: safeMissingFields,
+    invalidFields: safeInvalidFields,
+  };
+}
+
+function validReminderAlarmUiObservation(record) {
+  return diagnoseReminderAlarmUiObservation(record, 1, 1) === null;
 }
 
 function validReminderConfigurationObservation(record) {
@@ -2687,13 +2838,66 @@ function validRuntimeVersions(record) {
 }
 
 class SummaryValidationError extends Error {
-  constructor(category, phase) {
+  constructor(category, phase, diagnostic) {
     super('invalid element acceptance summary');
     this.category = SUMMARY_FAILURE_CATEGORIES.has(category)
       ? category
       : 'summary-unavailable';
     this.phase = PHASES.has(phase) ? phase : 'unknown';
+    this.diagnostic = diagnostic;
   }
+}
+
+function formatReminderAlarmUiFailureDiagnostic(value) {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    !REMINDER_ALARM_UI_DIAGNOSTIC_REASONS.has(value.reason) ||
+    !Number.isInteger(value.recordIndex) ||
+    value.recordIndex < 1 ||
+    value.recordIndex > MAX_FAILURE_DIAGNOSTIC_INDEX ||
+    typeof value.recordIndexCapped !== 'boolean' ||
+    !Number.isInteger(value.recordCount) ||
+    value.recordCount < 1 ||
+    value.recordCount > MAX_FAILURE_DIAGNOSTIC_INDEX ||
+    typeof value.recordCountCapped !== 'boolean' ||
+    !Number.isInteger(value.unknownKeyCount) ||
+    value.unknownKeyCount < 0 ||
+    value.unknownKeyCount > MAX_FAILURE_DIAGNOSTIC_UNKNOWN_KEYS ||
+    typeof value.unknownKeyCountCapped !== 'boolean' ||
+    !Array.isArray(value.missingFields) ||
+    !value.missingFields.every((field) =>
+      REMINDER_ALARM_UI_RECORD_FIELDS.has(field),
+    ) ||
+    !Array.isArray(value.invalidFields) ||
+    !value.invalidFields.every(
+      (field) =>
+        field !== null &&
+        typeof field === 'object' &&
+        !Array.isArray(field) &&
+        REMINDER_ALARM_UI_RECORD_FIELDS.has(field.field) &&
+        REMINDER_ALARM_UI_DIAGNOSTIC_FIELD_ISSUES.has(field.issue),
+    )
+  ) {
+    return '';
+  }
+  const missingFields = [...new Set(value.missingFields)].join(',') || 'none';
+  const invalidFields =
+    value.invalidFields
+      .map(({ field, issue }) => `${field}:${issue}`)
+      .join(',') || 'none';
+  return [
+    `diagnostic_reason=${value.reason}`,
+    `record_index=${value.recordIndex}`,
+    `record_index_capped=${value.recordIndexCapped}`,
+    `record_count=${value.recordCount}`,
+    `record_count_capped=${value.recordCountCapped}`,
+    `missing_fields=${missingFields}`,
+    `invalid_fields=${invalidFields}`,
+    `unknown_key_count=${value.unknownKeyCount}`,
+    `unknown_key_count_capped=${value.unknownKeyCountCapped}`,
+  ].join(' ');
 }
 
 export function formatSanitizerFailureSummary(error, sourceSha) {
@@ -2705,9 +2909,13 @@ export function formatSanitizerFailureSummary(error, sourceSha) {
     ? error.category
     : 'summary-unavailable';
   const phase = PHASES.has(error?.phase) ? error.phase : 'unknown';
+  const diagnostic =
+    phase === 'reminder-alarm-ui-readback'
+      ? formatReminderAlarmUiFailureDiagnostic(error?.diagnostic)
+      : '';
   return [
     `element-acceptance source_sha=${safeSourceSha}`,
-    `phase=summary status=unavailable category=${category} rejected_phase=${phase}`,
+    `phase=summary status=unavailable category=${category} rejected_phase=${phase}${diagnostic ? ` ${diagnostic}` : ''}`,
     '',
   ].join('\n');
 }
@@ -2723,8 +2931,15 @@ export function sanitizeElementAcceptance(input, sourceSha) {
   let performanceTerminalStatus;
   const performanceFixturePhaseStatus = new Map();
   let performanceFixtureSeedCount;
-  for (const line of input.split(/\r?\n/u)) {
+  const inputLines = input.split(/\r?\n/u);
+  const recordCount = inputLines.reduce(
+    (count, line) => count + (line ? 1 : 0),
+    0,
+  );
+  let recordIndex = 0;
+  for (const line of inputLines) {
     if (!line) continue;
+    recordIndex += 1;
 
     let record;
     rejectedPhase = 'unknown';
@@ -2742,6 +2957,10 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       PHASES.has(record.phase)
         ? record.phase
         : 'unknown';
+    const reminderAlarmUiDiagnostic =
+      rejectedPhase === 'reminder-alarm-ui-readback'
+        ? diagnoseReminderAlarmUiObservation(record, recordIndex, recordCount)
+        : undefined;
 
     if (
       record === null ||
@@ -2751,7 +2970,11 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       !PHASES.has(record.phase) ||
       !STATUSES.has(record.status)
     ) {
-      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+      throw new SummaryValidationError(
+        rejectionCategory,
+        rejectedPhase,
+        reminderAlarmUiDiagnostic,
+      );
     }
 
     if (record.phase === 'restore-widget-ready') {
@@ -2977,7 +3200,11 @@ export function sanitizeElementAcceptance(input, sourceSha) {
         !validReminderConfigurationStoredRecord(record)) ||
       (hasReminderDeliveryRecord && !validReminderDeliveryRecord(record))
     ) {
-      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+      throw new SummaryValidationError(
+        rejectionCategory,
+        rejectedPhase,
+        reminderAlarmUiDiagnostic,
+      );
     }
 
     if (

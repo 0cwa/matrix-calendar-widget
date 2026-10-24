@@ -119,6 +119,37 @@ function reminderAlarmUiObservation(overrides = {}) {
   };
 }
 
+function producerReminderAlarmUiObservation(overrides = {}) {
+  return {
+    alarmUiStep: 'event-row-visible',
+    alarmUiPatchStatus: 0,
+    alarmUiRelativeAlarmReadback: false,
+    alarmUiAlarmToggleReadback: false,
+    alarmUiRelativeTriggerReadback: false,
+    alarmUiOffsetReadback: false,
+    alarmUiEditorClosed: false,
+    alarmUiDetailsClosed: false,
+    ...overrides,
+  };
+}
+
+function serializeProducerReminderAlarmUiRecord(
+  status,
+  observation,
+  relativeAlarmReadback,
+) {
+  const httpStatus = observation.alarmUiPatchStatus || undefined;
+  const count = 1;
+  return JSON.stringify({
+    phase: 'reminder-alarm-ui-readback',
+    status,
+    ...(httpStatus === undefined ? {} : { httpStatus }),
+    ...(count === undefined ? {} : { count }),
+    ...observation,
+    relativeAlarmReadback,
+  });
+}
+
 function missingReminderOptionObservation() {
   return {
     phase: 'reminder-room-configuration-enabled',
@@ -1308,9 +1339,145 @@ test('projects failed reminder alarm editor steps and rejects private fields', (
     },
   );
   assert.equal(failure.category, 'invalid-stage-record');
-  assert.doesNotMatch(
-    formatSanitizerFailureSummary(failure, sourceSha),
-    /private sentinel|rawError/u,
+  const safeFailure = formatSanitizerFailureSummary(failure, sourceSha);
+  assert.match(
+    safeFailure,
+    /diagnostic_reason=record_shape record_index=1 record_index_capped=false record_count=1 record_count_capped=false missing_fields=none invalid_fields=none unknown_key_count=1 unknown_key_count_capped=false/u,
+  );
+  assert.doesNotMatch(safeFailure, /private sentinel|rawError/u);
+
+  const manyUnknownFields = Object.fromEntries(
+    Array.from({ length: 105 }, (_, index) => [
+      `private-key-${index}`,
+      'private value sentinel',
+    ]),
+  );
+  let cappedFailure;
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify({ ...alarmFailure, ...manyUnknownFields }),
+        sourceSha,
+      ),
+    (error) => {
+      cappedFailure = error;
+      return true;
+    },
+  );
+  const cappedSummary = formatSanitizerFailureSummary(cappedFailure, sourceSha);
+  assert.match(
+    cappedSummary,
+    /unknown_key_count=99 unknown_key_count_capped=true/u,
+  );
+  assert.doesNotMatch(cappedSummary, /private-key|private value sentinel/u);
+});
+
+test('diagnoses serialized reminder alarm rows without exposing private keys', () => {
+  const defaultPatchObservation = producerReminderAlarmUiObservation({
+    alarmUiStep: 'event-open',
+  });
+  const defaultPatchLine = serializeProducerReminderAlarmUiRecord(
+    'failed',
+    defaultPatchObservation,
+    false,
+  );
+  const defaultPatchRecord = JSON.parse(defaultPatchLine);
+  assert.equal(Object.hasOwn(defaultPatchRecord, 'httpStatus'), false);
+  assert.match(
+    sanitizeElementAcceptance(defaultPatchLine, sourceSha),
+    /phase=reminder-alarm-ui-readback status=failed count=1 alarm_ui_step=event-open alarm_ui_patch_status=0/u,
+  );
+
+  const detailedFailureObservation = producerReminderAlarmUiObservation({
+    alarmUiStep: 'readback-alarm-toggle',
+    alarmUiPatchStatus: 200,
+    alarmUiRelativeAlarmReadback: false,
+    alarmUiAlarmToggleReadback: false,
+    alarmUiRelativeTriggerReadback: false,
+    alarmUiOffsetReadback: false,
+    alarmUiEditorClosed: false,
+    alarmUiDetailsClosed: false,
+  });
+  const detailedFailureLine = serializeProducerReminderAlarmUiRecord(
+    'failed',
+    detailedFailureObservation,
+    false,
+  );
+  assert.match(
+    sanitizeElementAcceptance(detailedFailureLine, sourceSha),
+    /phase=reminder-alarm-ui-readback status=failed count=1 http_status=200 alarm_ui_step=readback-alarm-toggle/u,
+  );
+
+  const duplicateOuterFailureLine = JSON.stringify({
+    phase: 'reminder-alarm-ui-readback',
+    status: 'failed',
+    httpStatus: 200,
+  });
+  let duplicateFailure;
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        [detailedFailureLine, duplicateOuterFailureLine].join('\n'),
+        sourceSha,
+      ),
+    (error) => {
+      duplicateFailure = error;
+      return true;
+    },
+  );
+  assert.match(
+    formatSanitizerFailureSummary(duplicateFailure, sourceSha),
+    /status=unavailable category=invalid-stage-record rejected_phase=reminder-alarm-ui-readback diagnostic_reason=record_shape record_index=2 record_index_capped=false record_count=2 record_count_capped=false missing_fields=count,relativeAlarmReadback,alarmUiStep,alarmUiPatchStatus/u,
+  );
+
+  const undefinedFieldObservation = {
+    ...defaultPatchObservation,
+    alarmUiOffsetReadback: undefined,
+  };
+  const undefinedFieldLine = serializeProducerReminderAlarmUiRecord(
+    'failed',
+    undefinedFieldObservation,
+    false,
+  );
+  let undefinedFieldFailure;
+  assert.throws(
+    () => sanitizeElementAcceptance(undefinedFieldLine, sourceSha),
+    (error) => {
+      undefinedFieldFailure = error;
+      return true;
+    },
+  );
+  const undefinedFieldSummary = formatSanitizerFailureSummary(
+    undefinedFieldFailure,
+    sourceSha,
+  );
+  assert.match(
+    undefinedFieldSummary,
+    /diagnostic_reason=record_shape .*missing_fields=alarmUiOffsetReadback/u,
+  );
+  assert.doesNotMatch(undefinedFieldSummary, /undefined/u);
+
+  const nonFiniteObservation = {
+    ...defaultPatchObservation,
+    alarmUiPatchStatus: Number.NaN,
+  };
+  const nonFiniteLine = serializeProducerReminderAlarmUiRecord(
+    'failed',
+    nonFiniteObservation,
+    false,
+  );
+  assert.equal(JSON.parse(nonFiniteLine).alarmUiPatchStatus, null);
+  let nonFiniteFailure;
+  assert.throws(
+    () => sanitizeElementAcceptance(nonFiniteLine, sourceSha),
+    (error) => {
+      nonFiniteFailure = error;
+      return true;
+    },
+  );
+  assert.match(
+    formatSanitizerFailureSummary(nonFiniteFailure, sourceSha),
+    /diagnostic_reason=invalid_field_types .*invalid_fields=alarmUiPatchStatus:type/u,
   );
 });
 
