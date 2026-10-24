@@ -134,7 +134,7 @@ const syntheticRoomMembers = [
 const syntheticRoomMemberUpdates = new Subject<StateEvent>();
 declare global {
   interface Window {
-    __updateSyntheticRoomMember?: (event: StateEvent) => void;
+    __updateSyntheticRoomMember: (event: StateEvent) => void;
     __syntheticRoomReminderTarget?: CalendarRoomReminderTarget;
   }
 }

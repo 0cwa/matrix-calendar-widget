@@ -61,7 +61,13 @@ test('room manager can search and save an exact Matrix reminder recipient while 
   ).toBeVisible();
 
   await page.evaluate(() => {
-    window.__updateSyntheticRoomMember?.({
+    window.__updateSyntheticRoomMember({
+      type: 'm.room.member',
+      room_id: '!synthetic-room:example.test',
+      state_key: '@alice:example.test',
+      content: { membership: 'join', displayname: 'Alicia' },
+    } as never);
+    window.__updateSyntheticRoomMember({
       type: 'm.room.member',
       room_id: '!synthetic-room:example.test',
       state_key: '@bob:example.test',
@@ -69,11 +75,14 @@ test('room manager can search and save an exact Matrix reminder recipient while 
     } as never);
   });
 
+  await expect(
+    listbox.getByRole('option', { name: 'Alicia', exact: true }),
+  ).toBeVisible();
   await expect(recipients).toHaveValue('@alice:example.test');
   await expect(listbox).toBeVisible();
   await expect(listbox.getByRole('option')).toHaveCount(1);
   await expect(
-    listbox.getByRole('option', { name: 'Alice', exact: true }),
+    listbox.getByRole('option', { name: 'Alicia', exact: true }),
   ).toBeVisible();
 
   await recipients.press('ArrowDown');
@@ -95,7 +104,7 @@ test('room manager can search and save an exact Matrix reminder recipient while 
 
 declare global {
   interface Window {
-    __updateSyntheticRoomMember?: (event: unknown) => void;
+    __updateSyntheticRoomMember: (event: unknown) => void;
     __syntheticRoomReminderTarget?:
       | { kind: 'room' }
       | { kind: 'users'; userIds: string[] }
