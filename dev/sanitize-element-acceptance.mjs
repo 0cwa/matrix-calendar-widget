@@ -1421,6 +1421,8 @@ const REMINDER_LAYOUT_DIMENSION_FIELDS = [
   'narrowDocumentClientWidth',
   'narrowDocumentScrollWidth',
 ];
+const MIN_REMINDER_LAYOUT_VIEWPORT_WIDTH = 319;
+const MAX_REMINDER_LAYOUT_VIEWPORT_WIDTH = 420;
 const MAX_REMINDER_LAYOUT_DIMENSION = 100_000;
 
 function formatReminderLayoutDimension(value) {
@@ -2743,7 +2745,8 @@ function validReminderConfigurationObservation(record) {
     predicateMatchesDimensions(
       'narrowViewportWithinRange',
       ['narrowViewportWidth'],
-      record.narrowViewportWidth >= 320 && record.narrowViewportWidth <= 420,
+      record.narrowViewportWidth >= MIN_REMINDER_LAYOUT_VIEWPORT_WIDTH &&
+        record.narrowViewportWidth <= MAX_REMINDER_LAYOUT_VIEWPORT_WIDTH,
     ) &&
     predicateMatchesDimensions(
       'narrowDialogWithinViewport',

@@ -1813,6 +1813,58 @@ test('sanitizes bounded post-PUT layout measurements and legacy observations', (
     /narrow_viewport_width=420 narrow_dialog_width=421 narrow_dialog_client_width=420\.2 narrow_dialog_scroll_width=421\.2 narrow_document_client_width=420 narrow_document_scroll_width=421/u,
   );
 
+  const elementPanelMinimumBoundary = reminderConfigurationObservation({
+    recipientKind: 'selected',
+    selectedMemberKeyboardFlow: true,
+    narrowSidePanelSafe: true,
+    narrowViewportWithinRange: true,
+    narrowDialogWithinViewport: true,
+    narrowDialogContentsFit: true,
+    narrowDocumentContentsFit: true,
+    narrowViewportWidth: 319,
+    narrowDialogWidth: 255,
+    narrowDialogClientWidth: 255,
+    narrowDialogScrollWidth: 255,
+    narrowDocumentClientWidth: 319,
+    narrowDocumentScrollWidth: 319,
+  });
+  const elementPanelMinimumSummary = sanitizeElementAcceptance(
+    JSON.stringify(elementPanelMinimumBoundary),
+    sourceSha,
+  );
+  assert.match(
+    elementPanelMinimumSummary,
+    /status=passed .*narrow_side_panel_safe=true .*narrow_viewport_within_range=true .*narrow_viewport_width=319 narrow_dialog_width=255/u,
+  );
+
+  const justBelowElementPanelMinimum = reminderConfigurationObservation({
+    status: 'failed',
+    reminderEnabled: false,
+    reminderStep: 'post-put-layout',
+    recipientKind: 'selected',
+    selectedMemberKeyboardFlow: true,
+    narrowSidePanelSafe: false,
+    narrowViewportWithinRange: false,
+    narrowDialogWithinViewport: true,
+    narrowDialogContentsFit: true,
+    narrowDocumentContentsFit: true,
+    narrowViewportWidth: 318.9,
+    narrowDialogWidth: 255,
+    narrowDialogClientWidth: 255,
+    narrowDialogScrollWidth: 255,
+    narrowDocumentClientWidth: 318.9,
+    narrowDocumentScrollWidth: 318.9,
+  });
+  delete justBelowElementPanelMinimum.count;
+  const justBelowElementPanelSummary = sanitizeElementAcceptance(
+    JSON.stringify(justBelowElementPanelMinimum),
+    sourceSha,
+  );
+  assert.match(
+    justBelowElementPanelSummary,
+    /reminder_step=post-put-layout .*narrow_side_panel_safe=false .*narrow_viewport_within_range=false narrow_dialog_within_viewport=true narrow_dialog_contents_fit=true narrow_document_contents_fit=true narrow_viewport_width=318\.9/u,
+  );
+
   const passedWithoutLayoutMeasurement = reminderConfigurationObservation({
     narrowViewportWithinRange: 'not-observed',
     narrowDialogWithinViewport: 'not-observed',
@@ -1902,7 +1954,9 @@ test('sanitizes bounded post-PUT layout measurements and legacy observations', (
   }
 
   for (const nearBoundaryMismatch of [
+    { narrowViewportWidth: 318.9 },
     { narrowViewportWidth: 420.0001 },
+    { narrowViewportWidth: 420.1 },
     { narrowDialogWidth: 421.0001 },
     { narrowDialogScrollWidth: 421.2001 },
     { narrowDocumentScrollWidth: 421.0001 },
