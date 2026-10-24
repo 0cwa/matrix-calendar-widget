@@ -10968,7 +10968,7 @@ if (process.env.ELEMENT_ACCEPTANCE_PRIVATE_UI === 'true') {
         } finally {
           // This only deletes this random resource after verifying its UID and
           // current strong ETag. Cleanup failure never masks the test failure.
-          await checkpoint.run('private-ui-dav-cleanup', () =>
+          await checkpoint.cleanup('private-ui-dav-cleanup', () =>
             bestEffortDeleteOwnedPrivateDavResource(
               requestBase,
               resourceUrl,
@@ -11080,7 +11080,7 @@ if (process.env.ELEMENT_ACCEPTANCE_PRIVATE_UI === 'true') {
           expect(publicFeedMutationCount).toBe(0);
         });
       } finally {
-        await checkpoint.run('private-ui-context-cleanup', async () => {
+        await checkpoint.cleanup('private-ui-context-cleanup', async () => {
           await Promise.all(
             contexts.map((context) => context.close().catch(() => undefined)),
           );

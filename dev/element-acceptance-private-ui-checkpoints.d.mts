@@ -40,6 +40,10 @@ export interface PrivateUiCheckpointJournal {
     phase: PrivateUiCheckpointPhase,
     operation: () => Promise<T> | T,
   ): Promise<T>;
+  cleanup<T>(
+    phase: PrivateUiCheckpointPhase,
+    operation: () => Promise<T> | T,
+  ): Promise<T | undefined>;
   finish(testStatus: string | undefined): void;
 }
 

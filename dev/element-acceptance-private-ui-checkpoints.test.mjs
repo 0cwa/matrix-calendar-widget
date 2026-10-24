@@ -69,6 +69,54 @@ test('writes the entered checkpoint before the operation and stores only closed 
   }
 });
 
+test('checkpoints successful cleanup before test finalization', async () => {
+  const { directory, stageFile } = createStageFile();
+  try {
+    const journal = createPrivateUiCheckpointJournal({
+      stageFile,
+      sourceSha,
+      profile: 'normal-bot',
+    });
+    const result = await journal.cleanup(
+      'private-ui-context-cleanup',
+      () => 'closed',
+    );
+    journal.finish('passed');
+
+    const records = readFileSync(stageFile, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    assert.equal(result, 'closed');
+    assert.deepEqual(records, [
+      {
+        phase: 'private-ui-context-cleanup',
+        status: 'started',
+        sourceSha,
+        profile: 'normal-bot',
+      },
+      {
+        phase: 'private-ui-context-cleanup',
+        status: 'passed',
+        sourceSha,
+        profile: 'normal-bot',
+      },
+      {
+        phase: PRIVATE_UI_RESULT_PHASE,
+        status: 'passed',
+        testStatus: 'passed',
+        lastEnteredPhase: 'private-ui-context-cleanup',
+        lastCompletedPhase: 'private-ui-context-cleanup',
+        failurePhase: null,
+        sourceSha,
+        profile: 'normal-bot',
+      },
+    ]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('preserves failed and timed-out test status without retaining operation errors', async () => {
   const { directory, stageFile } = createStageFile();
   try {
@@ -118,6 +166,33 @@ test('preserves failed and timed-out test status without retaining operation err
     assert.equal(timeoutRecords.at(-1).status, 'failed');
     assert.equal(timeoutRecords.at(-1).testStatus, 'timedOut');
     assert.equal(timeoutRecords.at(-1).failurePhase, 'private-ui-dav-delete');
+
+    const finalizedReceipt = readFileSync(timeoutStage, 'utf8');
+    let ordinaryOperationInvoked = false;
+    await assert.rejects(
+      timeoutJournal.run('private-ui-dav-cleanup', () => {
+        ordinaryOperationInvoked = true;
+      }),
+      /Private acceptance checkpoints are complete/u,
+    );
+    assert.equal(ordinaryOperationInvoked, false);
+    assert.equal(readFileSync(timeoutStage, 'utf8'), finalizedReceipt);
+
+    let cleanupInvoked = false;
+    const cleanupResult = await timeoutJournal.cleanup(
+      'private-ui-dav-cleanup',
+      () => {
+        cleanupInvoked = true;
+        throw new Error('private-cleanup-sentinel-do-not-record');
+      },
+    );
+    assert.equal(cleanupInvoked, true);
+    assert.equal(cleanupResult, undefined);
+    assert.equal(readFileSync(timeoutStage, 'utf8'), finalizedReceipt);
+    assert.doesNotMatch(
+      readFileSync(timeoutStage, 'utf8'),
+      /private-cleanup-sentinel-do-not-record/u,
+    );
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

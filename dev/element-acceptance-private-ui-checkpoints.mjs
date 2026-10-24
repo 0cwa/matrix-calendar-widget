@@ -134,6 +134,60 @@ export function createPrivateUiCheckpointJournal({
     },
 
     /**
+     * Run best-effort teardown even when Playwright has already finalized the
+     * test result. A finalized receipt remains immutable while teardown
+     * errors never replace the test result.
+     *
+     * @template T
+     * @param {string} phase
+     * @param {() => Promise<T> | T} operation
+     * @returns {Promise<T | undefined>}
+     */
+    async cleanup(phase, operation) {
+      if (!checkpointPhases.has(phase) || typeof operation !== 'function') {
+        throw new Error('Private acceptance checkpoint is invalid');
+      }
+
+      let checkpointStarted = false;
+      if (!finished) {
+        try {
+          writeRecord({ phase, status: 'started' });
+          checkpointStarted = true;
+          lastEnteredPhase = phase;
+          activePhase = phase;
+        } catch {
+          // Teardown still runs if writing diagnostics is unavailable.
+        }
+      }
+
+      try {
+        const value = await operation();
+        if (checkpointStarted && !finished) {
+          try {
+            writeRecord({ phase, status: 'passed' });
+            lastCompletedPhase = phase;
+            activePhase = null;
+          } catch {
+            activePhase = null;
+            failurePhase ??= phase;
+          }
+        }
+        return value;
+      } catch {
+        if (checkpointStarted && !finished) {
+          activePhase = null;
+          failurePhase ??= phase;
+          try {
+            writeRecord({ phase, status: 'failed' });
+          } catch {
+            // Keep the test result and never retain a teardown error.
+          }
+        }
+        return undefined;
+      }
+    },
+
+    /**
      * Preserve Playwright's structured result, including a timeout, without
      * retaining its error, attachments, or other test data.
      *
