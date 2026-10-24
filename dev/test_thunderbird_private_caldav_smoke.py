@@ -77,6 +77,12 @@ class PrivateCalDavSmokeTests(unittest.TestCase):
                 "/task/app/thunderbird/thunderbird"
             ),
             "MCW_PRIVATE_CALDAV_NATIVE_WORKSPACE": "/task/workspace",
+            "MCW_PRIVATE_CALDAV_NATIVE_PROBE_UID": (
+                "private-native-revoke-" + "a" * 32
+            ),
+            "MCW_PRIVATE_CALDAV_NATIVE_PROBE_MARKER": (
+                "private-revoke-marker-" + "b" * 32
+            ),
         }
         with patch.dict(os.environ, environment):
             spec = importlib.util.spec_from_file_location(
@@ -88,6 +94,61 @@ class PrivateCalDavSmokeTests(unittest.TestCase):
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
         return module
+
+    def _valid_native_result(self) -> dict[str, object]:
+        return {
+            "schema": SMOKE.RESULT_SCHEMA,
+            "status": "passed",
+            "appVersion": "158.0.1",
+            **{key: True for key in SMOKE.RESULT_FIELDS},
+            "freshRevokeDenied": False,
+            "postRevokeClientOutcome": "indeterminate",
+            "nativeRevocationResponseClass": "unauthorized",
+        }
+
+    def test_native_state_receipt_is_closed_and_fail_closed(self) -> None:
+        contract = self._load_native_thunderbird_contract()
+        probe = {
+            key: False for key in contract.NATIVE_PROBE_BOOLEAN_FIELDS
+        }
+        probe["responseClass"] = "not_seen"
+        state = {
+            "callbackCount": 4,
+            "personalAuthDenyCount": 1,
+            "personalState": "active",
+            "nativeProbe": probe,
+        }
+        with patch.object(
+            contract,
+            "_control_request",
+            return_value=(200, json.dumps(state).encode("utf-8")),
+        ):
+            self.assertEqual(contract._state(), state)
+
+        invalid_states = []
+        with_extra = json.loads(json.dumps(state))
+        with_extra["nativeProbe"]["requestUrl"] = "/private-path"
+        invalid_states.append(with_extra)
+        with_unknown_status = json.loads(json.dumps(state))
+        with_unknown_status["nativeProbe"]["responseClass"] = "SYNTHETIC_DETAIL"
+        invalid_states.append(with_unknown_status)
+        with_unhashable_status = json.loads(json.dumps(state))
+        with_unhashable_status["nativeProbe"]["responseClass"] = []
+        invalid_states.append(with_unhashable_status)
+        with_wrong_type = json.loads(json.dumps(state))
+        with_wrong_type["nativeProbe"]["proofPassed"] = 1
+        invalid_states.append(with_wrong_type)
+        for invalid in invalid_states:
+            with patch.object(
+                contract,
+                "_control_request",
+                return_value=(200, json.dumps(invalid).encode("utf-8")),
+            ):
+                with self.assertRaises(contract.ContractFailure) as raised:
+                    contract._state()
+            self.assertEqual(
+                raised.exception.error_class, "contract_assertion"
+            )
 
     def test_discovery_script_reads_marionette_arguments_as_array_like(self) -> None:
         node = self._node22()
@@ -179,17 +240,42 @@ globalThis.window = {};
 
 async function runCase(rejectModify) {
   const item = {
+    id: "synthetic-uid",
     title: "original",
-    clone() { return { title: this.title, clone: this.clone }; },
+    clone() { return { id: this.id, title: this.title, clone: this.clone }; },
   };
+  let getItemCount = 0;
+  let modifyItemCount = 0;
+  let tombstoneCommittedAndProbeArmed = false;
   window.__mcwPrivateCalDavCalendar = {
-    async getItem() { return item; },
-    async modifyItem() {
+    async getItem(uid) {
+      getItemCount += 1;
+      return uid === item.id ? item : null;
+    },
+    async modifyItem(edited, original) {
+      modifyItemCount += 1;
+      if (
+        !tombstoneCommittedAndProbeArmed || original !== item ||
+        edited === original || edited.title !== marker
+      ) {
+        throw new Error(marker);
+      }
       if (rejectModify) {
         throw new Error(marker);
       }
     },
   };
+  function executeLoadScript() { eval(input.loadScript); }
+  const loaded = await new Promise((resolve) => {
+    executeLoadScript("synthetic-uid", resolve);
+  });
+  if (!loaded || loaded.ok !== true || loaded.probeEventLoaded !== true) {
+    throw new Error(marker);
+  }
+  if (modifyItemCount !== 0) {
+    throw new Error(marker);
+  }
+  tombstoneCommittedAndProbeArmed = true;
   window[receiptKey] = "stale_receipt";
   if (Function(input.receiptScript)("reset") !== "ready") {
     throw new Error(marker);
@@ -200,6 +286,12 @@ async function runCase(rejectModify) {
   });
   const receipt = Function(input.receiptScript)("read_clear");
   if (receipt !== "called_object" || Object.hasOwn(window, receiptKey)) {
+    throw new Error(marker);
+  }
+  if (
+    getItemCount !== 1 || modifyItemCount !== 1 ||
+    Object.hasOwn(window, "__mcwPrivateRevocationProbeItem")
+  ) {
     throw new Error(marker);
   }
   return result;
@@ -225,6 +317,7 @@ async function runCase(rejectModify) {
             input=json.dumps(
                 {
                     "script": contract.POST_REVOKE_EDIT,
+                    "loadScript": contract.LOAD_REVOCATION_PROBE,
                     "receiptScript": contract.POST_REVOKE_CALLBACK_RECEIPT_SCRIPT,
                 }
             ),
@@ -1139,14 +1232,9 @@ async function runCase(testCase) {
 
     def test_closed_native_result_requires_every_real_app_predicate(self) -> None:
         self.assertEqual(
-            SMOKE.RESULT_SCHEMA, "thunderbird-private-caldav-qualification@1"
+            SMOKE.RESULT_SCHEMA, "thunderbird-private-caldav-qualification@2"
         )
-        payload = {
-            "schema": SMOKE.RESULT_SCHEMA,
-            "status": "passed",
-            "appVersion": "158.0.1",
-            **{key: True for key in SMOKE.RESULT_FIELDS},
-        }
+        payload = self._valid_native_result()
         with tempfile.TemporaryDirectory() as temporary:
             result = Path(temporary) / SMOKE.RESULT_FILENAME
             result.write_text(json.dumps(payload), encoding="utf-8")
@@ -1159,14 +1247,46 @@ async function runCase(testCase) {
             with self.assertRaises(ValueError):
                 SMOKE._read_native_result(result)
 
+            payload = self._valid_native_result()
+            payload["freshRevokeDenied"] = False
+            payload["postRevokeClientOutcome"] = "fulfilled"
+            result.write_text(json.dumps(payload), encoding="utf-8")
+            result.chmod(0o600)
+            self.assertEqual(SMOKE._read_native_result(result), payload)
+
+            payload["postRevokeClientOutcome"] = []
+            result.write_text(json.dumps(payload), encoding="utf-8")
+            result.chmod(0o600)
+            with self.assertRaises(ValueError):
+                SMOKE._read_native_result(result)
+
+            payload["postRevokeClientOutcome"] = "rejected"
+            result.write_text(json.dumps(payload), encoding="utf-8")
+            result.chmod(0o600)
+            with self.assertRaises(ValueError):
+                SMOKE._read_native_result(result)
+
+            payload["freshRevokeDenied"] = True
+            result.write_text(json.dumps(payload), encoding="utf-8")
+            result.chmod(0o600)
+            self.assertEqual(SMOKE._read_native_result(result), payload)
+
+            payload["postRevokeClientOutcome"] = "fulfilled"
+            result.write_text(json.dumps(payload), encoding="utf-8")
+            result.chmod(0o600)
+            with self.assertRaises(ValueError):
+                SMOKE._read_native_result(result)
+
+            payload = self._valid_native_result()
+            payload["nativeRevocationPutDenied"] = False
+            result.write_text(json.dumps(payload), encoding="utf-8")
+            result.chmod(0o600)
+            with self.assertRaises(ValueError):
+                SMOKE._read_native_result(result)
+
     def test_closed_native_result_rejects_unexpected_fields(self) -> None:
-        payload = {
-            "schema": SMOKE.RESULT_SCHEMA,
-            "status": "passed",
-            "appVersion": "158.0.1",
-            **{key: True for key in SMOKE.RESULT_FIELDS},
-            "personal_secret": "must-not-be-accepted",
-        }
+        payload = self._valid_native_result()
+        payload["personal_secret"] = "must-not-be-accepted"
         with tempfile.TemporaryDirectory() as temporary:
             result = Path(temporary) / SMOKE.RESULT_FILENAME
             result.write_text(json.dumps(payload), encoding="utf-8")
@@ -1589,6 +1709,10 @@ async function runCase(testCase) {
         )
 
         native_failures = (
+            ("worker_setup", "invalid_probe_uid"),
+            ("worker_setup", "invalid_probe_marker"),
+            ("provider_edit", "probe_event_not_loaded"),
+            ("provider_edit", "probe_event_load_failed"),
             ("profile_ca_import", "profile_setup_failed"),
             ("marionette_constructor", "session_error"),
             ("session_creation", "script_timeout"),
@@ -1877,6 +2001,8 @@ async function runCase(testCase) {
             )
             self.assertFalse(observed["native_provider_passed"])
             self.assertTrue(all(observed[key] is False for key in SMOKE.RESULT_FIELDS))
+            self.assertEqual(observed["postRevokeClientOutcome"], "not_reached")
+            self.assertEqual(observed["nativeRevocationResponseClass"], "not_seen")
             self.assertNotIn("raw worker output", summary_path.read_text())
 
     def test_public_summary_drops_unrecognized_private_fields(self) -> None:
@@ -1888,7 +2014,7 @@ async function runCase(testCase) {
                 summary_path = Path(temporary) / "thunderbird-private-caldav-summary.json"
                 observed = json.loads(summary_path.read_text(encoding="utf-8"))
                 self.assertEqual(set(observed), set(SMOKE._initial_summary("a" * 40)))
-                self.assertEqual(observed["schema"], "thunderbird-private-caldav-summary@3")
+                self.assertEqual(observed["schema"], "thunderbird-private-caldav-summary@4")
                 self.assertNotIn("must-not-be-written", summary_path.read_text())
                 self.assertEqual(summary_path.stat().st_mode & 0o777, 0o600)
 
@@ -1967,6 +2093,9 @@ async function runCase(testCase) {
                 "native_provider_passed": True,
                 "app_version": "158.0.1",
                 **{key: True for key in SMOKE.RESULT_FIELDS},
+                "freshRevokeDenied": False,
+                "postRevokeClientOutcome": "indeterminate",
+                "nativeRevocationResponseClass": "unauthorized",
             }
         )
         with tempfile.TemporaryDirectory() as temporary:

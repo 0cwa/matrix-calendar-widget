@@ -22,6 +22,7 @@ import type {
   NextFunction,
 } from 'express';
 import type { MatrixClient } from 'matrix-bot-sdk';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { execFile, spawn } from 'node:child_process';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { once } from 'node:events';
@@ -69,6 +70,11 @@ import { PrivateCalendarClientPolicy } from '../../src/service/private-client/Pr
 import { RadicalePrivateClientMapClient } from '../../src/service/private-client/RadicalePrivateClientMapClient';
 import { PublicCalendarFeedService } from '../../src/service/public-feed/PublicCalendarFeedService';
 import type { RoomCalendarCalDavAccess } from '../../src/service/RoomCalendarCalDavAccess';
+import {
+  PrivateNativeRevocationProbe,
+  type NativeRevocationProbeRequest,
+  type NativeRevocationProbeState,
+} from './PrivateNativeRevocationProbe';
 
 const execFileAsync = promisify(execFile);
 const contractEnabled = process.env.PRIVATE_CALDAV_CONTRACT === '1';
@@ -113,6 +119,8 @@ function mkCalendar(components: readonly string[] = ['VEVENT']): Buffer {
 const INITIAL_EVENT = Buffer.from(
   'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Matrix Calendar Widget//Private client contract//EN\r\nBEGIN:VEVENT\r\nUID:private-contract-event\r\nDTSTAMP:20261021T100000Z\r\nDTSTART:20261022T090000Z\r\nDTEND:20261022T100000Z\r\nSUMMARY:Canonical event before client edit\r\nX-COMPANY-OPAQUE;X-KEEP=attribute:keep-this-value\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n',
 );
+const PRIVATE_REVOCATION_PROBE_OPAQUE =
+  'X-COMPANY-OPAQUE;X-KEEP=attribute:probe-keep-this-value';
 const PUBLIC_NATIVE_EVENT = Buffer.from(
   'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Matrix Calendar Widget//Public feed native contract//EN\r\nBEGIN:VEVENT\r\nUID:public-native-feed-event\r\nDTSTAMP:20261021T100000Z\r\nDTSTART:20261023T110000Z\r\nDTEND:20261023T113000Z\r\nSUMMARY:Synthetic public feed native contract fixture\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n',
 );
@@ -136,6 +144,19 @@ type ContractRecordStore = Pick<
   PrivateCalendarClientStore,
   'enabled' | 'getByAppId' | 'beginBootstrap' | 'activate' | 'revoke'
 >;
+
+type PrivateNativeRevocationControl = Readonly<{
+  state: () => NativeRevocationProbeState;
+  markProviderItemLoaded: () => boolean;
+  captureCanonicalBaseline: () => Promise<boolean>;
+  arm: () => boolean;
+}>;
+
+function privateNativeRevocationProbeEvent(uid: string): Buffer {
+  return Buffer.from(
+    `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Matrix Calendar Widget//Private native revocation contract//EN\r\nBEGIN:VEVENT\r\nUID:${uid}\r\nDTSTAMP:20261021T100000Z\r\nDTSTART:20261022T110000Z\r\nDTEND:20261022T113000Z\r\nSUMMARY:Canonical private revocation probe baseline\r\n${PRIVATE_REVOCATION_PROBE_OPAQUE}\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n`,
+  );
+}
 
 class PrivateContractMatrixAuth {}
 
@@ -537,6 +558,24 @@ describeContract(
       const callbackKey = randomBytes(32);
       const epochKey = randomBytes(32);
       const controlKey = randomBytes(32).toString('base64url');
+      const nativeProbeUid = nativeThunderbirdProfile
+        ? `private-native-revoke-${randomBytes(16).toString('hex')}`
+        : '';
+      const nativeProbeMarker = nativeThunderbirdProfile
+        ? `private-revoke-marker-${randomBytes(16).toString('hex')}`
+        : '';
+      const nativeProbePath = nativeThunderbirdProfile
+        ? `/${personalAppId}/calendar/${nativeProbeUid}.ics`
+        : '';
+      const nativeProbe = nativeThunderbirdProfile
+        ? new PrivateNativeRevocationProbe(
+            nativeProbePath,
+            personalAppId,
+            personalSecret,
+          )
+        : undefined;
+      const nativeProbeRequestContext =
+        new AsyncLocalStorage<NativeRevocationProbeRequest>();
       let publicFeedSigningKey = randomBytes(32);
       while (timingSafeEqual(publicFeedSigningKey, epochKey)) {
         publicFeedSigningKey = randomBytes(32);
@@ -730,6 +769,16 @@ describeContract(
           if (args[0] === personalAppId && !allowed) {
             personalAuthDenyCount += 1;
           }
+          const probeRequest = nativeProbeRequestContext.getStore();
+          if (nativeProbe && probeRequest) {
+            nativeProbe.recordAuthentication(
+              probeRequest,
+              args[0],
+              args[1],
+              records?.get(personalAppId)?.state === 'revoked',
+              allowed,
+            );
+          }
           return allowed;
         };
         const authorizeDavRequest = policy.authorizeDavRequest.bind(policy);
@@ -790,6 +839,34 @@ describeContract(
           policy,
           contractFetch,
         );
+        if (nativeProbe) {
+          const originalDavGatewayUse = davGateway.use.bind(davGateway);
+          davGateway.use = (request, response, next) => {
+            let target: URL;
+            try {
+              target = new URL(
+                request.originalUrl ?? request.url ?? '',
+                `https://localhost:${apiAddress}`,
+              );
+            } catch {
+              return originalDavGatewayUse(request, response, next);
+            }
+            const probeRequest = nativeProbe.beginRequest(
+              request.method,
+              target.pathname,
+              target.search !== '' || target.hash !== '',
+            );
+            if (!probeRequest) {
+              return originalDavGatewayUse(request, response, next);
+            }
+            response.once('finish', () => {
+              nativeProbe.finishRequest(probeRequest, response.statusCode);
+            });
+            return nativeProbeRequestContext.run(probeRequest, () =>
+              originalDavGatewayUse(request, response, next),
+            );
+          };
+        }
 
         markPublicNativePhase('gateway_start');
         const gateway = await createCalendarGatewayHttpApplication(
@@ -853,11 +930,18 @@ describeContract(
             },
             async () => {
               await store?.revoke(personalAppId, new Date());
+              if (
+                nativeProbe &&
+                records?.get(personalAppId)?.state === 'revoked'
+              ) {
+                nativeProbe.commitTombstone();
+              }
             },
             () => ({
               callbackCount,
               personalAuthDenyCount,
               personalState: records?.get(personalAppId)?.state ?? 'missing',
+              ...(nativeProbe ? { nativeProbe: nativeProbe.state() } : {}),
             }),
             async (operation) => {
               const ownerAuthorization = openIdAuthorization(
@@ -919,6 +1003,25 @@ describeContract(
                   ownerAuthorization,
                 );
                 const text = canonical.body.toString('utf8');
+                const canonicalProbe = nativeProbe
+                  ? await requestRadicale(
+                      radicalePort,
+                      'GET',
+                      `/alice/personal/${nativeProbeUid}.ics`,
+                      Buffer.alloc(0),
+                      ownerAuthorization,
+                    )
+                  : undefined;
+                const probeUnchanged = Boolean(
+                  nativeProbe &&
+                  canonicalProbe?.status === 200 &&
+                  nativeProbe.verifyCanonicalAfterDenial(
+                    canonicalProbe.body,
+                    PRIVATE_REVOCATION_PROBE_OPAQUE,
+                    nativeProbeMarker,
+                  ) &&
+                  nativeProbe.state().proofPassed,
+                );
                 return (
                   canonical.status === 200 &&
                   text.includes(
@@ -926,7 +1029,8 @@ describeContract(
                   ) &&
                   !text.includes(
                     'SUMMARY:This post-revoke edit must not reach Radicale',
-                  )
+                  ) &&
+                  probeUnchanged
                 );
               }
               return false;
@@ -941,6 +1045,36 @@ describeContract(
                 );
               },
             },
+            nativeProbe
+              ? {
+                  state: () => nativeProbe.state(),
+                  markProviderItemLoaded: () =>
+                    records?.get(personalAppId)?.state === 'active' &&
+                    nativeProbe.markProviderItemLoaded(),
+                  captureCanonicalBaseline: async () => {
+                    if (records?.get(personalAppId)?.state !== 'active') {
+                      return false;
+                    }
+                    const canonical = await requestRadicale(
+                      radicalePort,
+                      'GET',
+                      `/alice/personal/${nativeProbeUid}.ics`,
+                      Buffer.alloc(0),
+                      openIdAuthorization('alice', 'contract-owner-proof'),
+                    );
+                    return (
+                      canonical.status === 200 &&
+                      nativeProbe.captureCanonicalBaseline(
+                        canonical.body,
+                        nativeProbeUid,
+                        PRIVATE_REVOCATION_PROBE_OPAQUE,
+                        nativeProbeMarker,
+                      )
+                    );
+                  },
+                  arm: () => nativeProbe.arm(),
+                }
+              : undefined,
           );
         });
         await listen(controlServer);
@@ -1019,6 +1153,20 @@ describeContract(
           INITIAL_EVENT,
           ['VEVENT', 'VTODO'],
         );
+        if (nativeProbe) {
+          const probeSeed = await requestRadicale(
+            radicalePort,
+            'PUT',
+            `/alice/personal/${nativeProbeUid}.ics`,
+            privateNativeRevocationProbeEvent(nativeProbeUid),
+            openIdAuthorization('alice', 'contract-owner-proof'),
+            {
+              'Content-Type': 'text/calendar',
+              'If-None-Match': '*',
+            },
+          );
+          expect([201, 204]).toContain(probeSeed.status);
+        }
         await seedCollection(
           radicalePort,
           '/alice/other/',
@@ -1635,6 +1783,8 @@ describeContract(
               MCW_PRIVATE_CALDAV_CA_FILE: certificates.caCert,
               MCW_PRIVATE_CALDAV_PERSONAL_APP_ID: personalAppId,
               MCW_PRIVATE_CALDAV_PERSONAL_SECRET: personalSecret,
+              MCW_PRIVATE_CALDAV_NATIVE_PROBE_UID: nativeProbeUid,
+              MCW_PRIVATE_CALDAV_NATIVE_PROBE_MARKER: nativeProbeMarker,
               MCW_PRIVATE_CALDAV_CONTROL_KEY: controlKey,
               MCW_PRIVATE_CALDAV_NATIVE_THUNDERBIRD_BIN:
                 process.env.MCW_PRIVATE_CALDAV_NATIVE_THUNDERBIRD_BIN ?? '',
@@ -1685,7 +1835,9 @@ describeContract(
             'unknownPropertyPreserved',
             'canonicalCreateRoundtrip',
             'canonicalDeleteRoundtrip',
-            'freshRevokeDenied',
+            'probeEventLoadedBeforeTombstone',
+            'canonicalProbeBaselineCaptured',
+            'nativeRevocationPutDenied',
             'callbackAdvancedAfterRevoke',
             'revokedState',
             'authDeniedAfterRevoke',
@@ -1693,6 +1845,13 @@ describeContract(
           for (const predicate of nativePredicates) {
             expect(nativeResult[predicate]).toBe(true);
           }
+          expect(typeof nativeResult.freshRevokeDenied).toBe('boolean');
+          expect(['rejected', 'fulfilled', 'indeterminate']).toContain(
+            nativeResult.postRevokeClientOutcome,
+          );
+          expect(['unauthorized', 'forbidden']).toContain(
+            nativeResult.nativeRevocationResponseClass,
+          );
           expect(callbackCount).toBeGreaterThan(callbackCountBeforeThunderbird);
           expect(records.get(personalAppId)?.state).toBe('revoked');
 
@@ -1702,7 +1861,7 @@ describeContract(
             '/task/workspace/private-caldav-result.json',
           );
           const nativeSummary = {
-            schema: 'thunderbird-private-caldav-qualification@1',
+            schema: 'thunderbird-private-caldav-qualification@2',
             status: 'passed',
             appVersion: '158.0.1',
             calendarTab: true,
@@ -1713,7 +1872,13 @@ describeContract(
             unknownPropertyPreserved: true,
             canonicalCreateRoundtrip: true,
             canonicalDeleteRoundtrip: true,
-            freshRevokeDenied: true,
+            probeEventLoadedBeforeTombstone: true,
+            canonicalProbeBaselineCaptured: true,
+            freshRevokeDenied: nativeResult.freshRevokeDenied,
+            nativeRevocationPutDenied: true,
+            postRevokeClientOutcome: nativeResult.postRevokeClientOutcome,
+            nativeRevocationResponseClass:
+              nativeResult.nativeRevocationResponseClass,
             callbackAdvancedAfterRevoke: true,
             revokedState: true,
             authDeniedAfterRevoke: true,
@@ -2226,6 +2391,7 @@ async function handleControlRequest(
     callbackCount: number;
     personalAuthDenyCount: number;
     personalState: string;
+    nativeProbe?: NativeRevocationProbeState;
   },
   verifyNativeCanonical: (operation: string) => Promise<boolean>,
   publicFeedControl?: Readonly<{
@@ -2238,6 +2404,7 @@ async function handleControlRequest(
     }>;
     unpublish: () => Promise<void>;
   }>,
+  nativeRevocationControl?: PrivateNativeRevocationControl,
 ): Promise<void> {
   try {
     if (
@@ -2276,6 +2443,9 @@ async function handleControlRequest(
       ![
         '/policy',
         '/revoke-personal',
+        '/native-probe-loaded',
+        '/native-probe-baseline',
+        '/native-probe-arm',
         '/native-verify-edited',
         '/native-verify-created',
         '/native-verify-deleted',
@@ -2304,6 +2474,24 @@ async function handleControlRequest(
     if (request.url === '/revoke-personal') {
       await revokePersonal();
       response.writeHead(204).end();
+      return;
+    }
+    if (
+      request.url === '/native-probe-loaded' ||
+      request.url === '/native-probe-baseline' ||
+      request.url === '/native-probe-arm'
+    ) {
+      if (!nativeRevocationControl || bytes.toString('utf8') !== '{}') {
+        response.writeHead(404).end();
+        return;
+      }
+      const ready =
+        request.url === '/native-probe-loaded'
+          ? nativeRevocationControl.markProviderItemLoaded()
+          : request.url === '/native-probe-baseline'
+            ? await nativeRevocationControl.captureCanonicalBaseline()
+            : nativeRevocationControl.arm();
+      response.writeHead(ready ? 204 : 409).end();
       return;
     }
     const nativeOperation = request.url?.replace(/^\/native-verify-/u, '');

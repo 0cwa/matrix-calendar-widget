@@ -36,14 +36,62 @@ PERSONAL_SECRET = os.environ["MCW_PRIVATE_CALDAV_PERSONAL_SECRET"]
 CA_FILE = Path(os.environ["MCW_PRIVATE_CALDAV_CA_FILE"])
 THUNDERBIRD = Path(os.environ["MCW_PRIVATE_CALDAV_NATIVE_THUNDERBIRD_BIN"])
 WORKSPACE = Path(os.environ["MCW_PRIVATE_CALDAV_NATIVE_WORKSPACE"])
+PROBE_EVENT_UID = os.environ["MCW_PRIVATE_CALDAV_NATIVE_PROBE_UID"]
+PROBE_MARKER = os.environ["MCW_PRIVATE_CALDAV_NATIVE_PROBE_MARKER"]
 EXPECTED_VERSION = "158.0.1"
 EVENT_UID = "private-contract-event"
 CREATED_UID = "native-created-contract-event"
 EDITED_SUMMARY = "Edited by native Thunderbird CalDAV provider"
 CREATED_SUMMARY = "Created by native Thunderbird CalDAV provider"
-REVOKED_SUMMARY = "This post-revoke edit must not reach Radicale"
 OPAQUE_PROPERTY = "X-COMPANY-OPAQUE"
+PROBE_OPAQUE_PROPERTY = "X-COMPANY-OPAQUE;X-KEEP=attribute:probe-keep-this-value"
 COUNTER_TIMEOUT_SECONDS = 20
+POST_REVOKE_NONE_FAILURES = {
+    "invalid_provider_result_none_not_called_at_probe",
+    "invalid_provider_result_none_called_object",
+    "invalid_provider_result_none_called_undefined",
+    "invalid_provider_result_none_called_other",
+    "invalid_provider_result_none_unavailable",
+}
+NATIVE_PROBE_BOOLEAN_FIELDS = {
+    "baselineReady",
+    "baselineOpaquePresent",
+    "providerItemLoadedBeforeTombstone",
+    "tombstoneCommitted",
+    "armedAfterTombstone",
+    "noEarlierProbePut",
+    "nativePutObserved",
+    "exactCredentialMatched",
+    "revokedPolicyDenied",
+    "deniedResponseObserved",
+    "acceptedProbeObserved",
+    "canonicalUnchanged",
+    "proofPassed",
+}
+NATIVE_PROBE_RESPONSE_CLASSES = {
+    "not_seen",
+    "unauthorized",
+    "forbidden",
+    "accepted",
+    "other",
+    "mixed",
+}
+QUALIFICATION_BOOLEAN_GATES = {
+    "calendarTab",
+    "providerDiscovery",
+    "calendarScope",
+    "refreshNetworkRequest",
+    "canonicalEditRoundtrip",
+    "unknownPropertyPreserved",
+    "canonicalCreateRoundtrip",
+    "canonicalDeleteRoundtrip",
+    "probeEventLoadedBeforeTombstone",
+    "canonicalProbeBaselineCaptured",
+    "nativeRevocationPutDenied",
+    "callbackAdvancedAfterRevoke",
+    "revokedState",
+    "authDeniedAfterRevoke",
+}
 NATIVE_MARIONETTE_FAILURE_STAGES = {
     "marionette_import",
     "profile_setup",
@@ -365,6 +413,27 @@ const done = arguments[arguments.length - 1];
 })().then(done, () => done({ ok: false, failure: "event_delete_failed" }));
 """
 
+LOAD_REVOCATION_PROBE = r"""
+const done = arguments[arguments.length - 1];
+(async () => {
+  try {
+    const calendar = window.__mcwPrivateCalDavCalendar;
+    if (!calendar || typeof calendar.getItem !== "function") {
+      return { ok: false, failure: "calendar_unavailable" };
+    }
+    const uid = arguments[0];
+    const item = await calendar.getItem(uid);
+    if (!item || item.id !== uid) {
+      return { ok: false, failure: "probe_event_not_loaded" };
+    }
+    window.__mcwPrivateRevocationProbeItem = item;
+    return { ok: true, probeEventLoaded: true };
+  } catch (_error) {
+    return { ok: false, failure: "probe_event_load_failed" };
+  }
+})().then(done, () => done({ ok: false, failure: "probe_event_load_failed" }));
+"""
+
 POST_REVOKE_EDIT = r"""
 const done = arguments[arguments.length - 1];
 const receiptWindow = window;
@@ -378,13 +447,16 @@ function finish(value) {
   try {
     receiptWindow.__mcwPrivatePostRevokeCallbackReceipt = receipt;
   } catch (_error) {}
+  try {
+    delete receiptWindow.__mcwPrivateRevocationProbeItem;
+  } catch (_error) {}
   done(value);
 }
 (async () => {
   try {
     const calendar = window.__mcwPrivateCalDavCalendar;
-    const item = await calendar.getItem(arguments[0]);
-    if (!item) {
+    const item = window.__mcwPrivateRevocationProbeItem;
+    if (!calendar || !item || item.id !== arguments[0]) {
       return { ok: false, failure: "event_not_loaded" };
     }
     const edited = item.clone();
@@ -492,9 +564,22 @@ def _state() -> dict[str, object]:
         value = json.loads(body)
     except json.JSONDecodeError:
         raise ContractFailure("control_state") from None
+    if not isinstance(value, dict):
+        raise ContractFailure("control_state")
+    probe = value.get("nativeProbe")
     if (
-        not isinstance(value, dict)
-        or set(value) != {"callbackCount", "personalAuthDenyCount", "personalState"}
+        not isinstance(probe, dict)
+        or set(probe) != {*NATIVE_PROBE_BOOLEAN_FIELDS, "responseClass"}
+        or any(type(probe.get(key)) is not bool for key in NATIVE_PROBE_BOOLEAN_FIELDS)
+        or not isinstance(probe.get("responseClass"), str)
+        or probe.get("responseClass") not in NATIVE_PROBE_RESPONSE_CLASSES
+        or set(value)
+        != {
+            "callbackCount",
+            "personalAuthDenyCount",
+            "personalState",
+            "nativeProbe",
+        }
         or type(value.get("callbackCount")) is not int
         or type(value.get("personalAuthDenyCount")) is not int
         or value["callbackCount"] < 0
@@ -504,6 +589,25 @@ def _state() -> dict[str, object]:
     ):
         raise ContractFailure("control_state")
     return value
+
+
+def _wait_for_native_probe_response() -> dict[str, object]:
+    deadline = time.monotonic() + COUNTER_TIMEOUT_SECONDS
+    while True:
+        state = _state()
+        probe = state["nativeProbe"]
+        assert isinstance(probe, dict)
+        if (
+            probe["deniedResponseObserved"] is True
+            or probe["acceptedProbeObserved"] is True
+            or probe["responseClass"] in {"other", "mixed"}
+        ):
+            return state
+        if time.monotonic() >= deadline:
+            raise ContractFailure(
+                "post_revoke_provider_request", "auth_denial_not_observed"
+            )
+        time.sleep(0.1)
 
 
 def _control_post(path: str) -> None:
@@ -738,6 +842,10 @@ def run() -> dict[str, object]:
         raise ContractFailure("worker_setup", "invalid_binary") from None
     if not re.fullmatch(r"mcwpc~[a-f0-9]{48}", PERSONAL_APP_ID):
         raise ContractFailure("worker_setup", "invalid_app_id")
+    if not re.fullmatch(r"private-native-revoke-[a-f0-9]{32}", PROBE_EVENT_UID):
+        raise ContractFailure("worker_setup", "invalid_probe_uid")
+    if not re.fullmatch(r"private-revoke-marker-[a-f0-9]{32}", PROBE_MARKER):
+        raise ContractFailure("worker_setup", "invalid_probe_marker")
     if not _is_local_https_origin(API_ORIGIN):
         raise ContractFailure("worker_setup", "invalid_origin")
 
@@ -764,7 +872,12 @@ def run() -> dict[str, object]:
         "unknownPropertyPreserved": False,
         "canonicalCreateRoundtrip": False,
         "canonicalDeleteRoundtrip": False,
+        "probeEventLoadedBeforeTombstone": False,
+        "canonicalProbeBaselineCaptured": False,
         "freshRevokeDenied": False,
+        "nativeRevocationPutDenied": False,
+        "postRevokeClientOutcome": "not_reached",
+        "nativeRevocationResponseClass": "not_seen",
         "callbackAdvancedAfterRevoke": False,
         "revokedState": False,
         "authDeniedAfterRevoke": False,
@@ -884,6 +997,32 @@ def run() -> dict[str, object]:
         _control_post("/native-verify-deleted")
         result["canonicalDeleteRoundtrip"] = True
 
+        # Load the run-unique resource through Thunderbird's provider only;
+        # the sole native mutation of this item runs after the tombstone and
+        # fixture arm have both completed below.
+        load_probe = _async_script(
+            marionette,
+            LOAD_REVOCATION_PROBE,
+            [PROBE_EVENT_UID],
+            "provider_edit",
+        )
+        _assert_ok(load_probe, "provider_edit")
+        if load_probe.get("probeEventLoaded") is not True:
+            raise ContractFailure("provider_edit", "probe_event_not_loaded")
+        _control_post("/native-probe-loaded")
+        result["probeEventLoadedBeforeTombstone"] = True
+        _control_post("/native-probe-baseline")
+        baseline_state = _state()
+        baseline_probe = baseline_state["nativeProbe"]
+        if (
+            not isinstance(baseline_probe, dict)
+            or baseline_probe.get("baselineReady") is not True
+            or baseline_probe.get("baselineOpaquePresent") is not True
+            or baseline_probe.get("providerItemLoadedBeforeTombstone") is not True
+        ):
+            raise ContractFailure("control_state")
+        result["canonicalProbeBaselineCaptured"] = True
+
         before_revoke = _state()
         if before_revoke.get("personalState") != "active":
             raise ContractFailure("revoke_setup", "personal_client_not_active")
@@ -893,33 +1032,87 @@ def run() -> dict[str, object]:
         revoked = _state()
         if revoked.get("personalState") != "revoked":
             raise ContractFailure("revoke_setup", "revoked_state_missing")
+        tombstone_probe = revoked["nativeProbe"]
+        if (
+            not isinstance(tombstone_probe, dict)
+            or tombstone_probe.get("tombstoneCommitted") is not True
+        ):
+            raise ContractFailure("control_state")
         result["revokedState"] = True
+        _control_post("/native-probe-arm")
+        armed_state = _state()
+        armed_probe = armed_state["nativeProbe"]
+        if (
+            not isinstance(armed_probe, dict)
+            or armed_probe.get("armedAfterTombstone") is not True
+            or armed_probe.get("noEarlierProbePut") is not True
+        ):
+            raise ContractFailure("control_state")
 
-        post_revoke = _post_revoke_async_script(
-            marionette,
-            POST_REVOKE_EDIT,
-            [EVENT_UID, REVOKED_SUMMARY],
-            post_revoke_window_handle,
+        client_error = False
+        try:
+            # This is the only operation that edits the probe item. Keeping it
+            # after the fixture arm makes the fresh URI attributable to this
+            # native provider call without depending on a denied request body.
+            post_revoke = _post_revoke_async_script(
+                marionette,
+                POST_REVOKE_EDIT,
+                [PROBE_EVENT_UID, PROBE_MARKER],
+                post_revoke_window_handle,
+            )
+        except ContractFailure as error:
+            if error.error_class in POST_REVOKE_NONE_FAILURES:
+                result["postRevokeClientOutcome"] = "indeterminate"
+            else:
+                result["postRevokeClientOutcome"] = "error"
+                client_error = True
+        else:
+            if (
+                post_revoke.get("ok") is True
+                and post_revoke.get("requestRejected") is True
+            ):
+                result["postRevokeClientOutcome"] = "rejected"
+                result["freshRevokeDenied"] = True
+            elif (
+                post_revoke.get("ok") is False
+                and post_revoke.get("requestRejected") is False
+            ):
+                result["postRevokeClientOutcome"] = "fulfilled"
+            else:
+                result["postRevokeClientOutcome"] = "error"
+                client_error = True
+
+        after_revoke = _wait_for_native_probe_response()
+        result["callbackAdvancedAfterRevoke"] = (
+            int(after_revoke["callbackCount"]) > int(revoked["callbackCount"])
         )
-        _assert_ok(post_revoke, "post_revoke_provider_request")
-        after_revoke = _wait_for_callback(int(revoked["callbackCount"]))
-        result["callbackAdvancedAfterRevoke"] = True
-        result["freshRevokeDenied"] = post_revoke.get("requestRejected") is True
-        if not result["freshRevokeDenied"]:
-            raise ContractFailure("post_revoke_provider_request", "revoked_write_accepted")
-        if after_revoke.get("personalState") != "revoked":
-            raise ContractFailure("post_revoke_provider_request", "revoked_state_lost")
         result["authDeniedAfterRevoke"] = (
             int(after_revoke["personalAuthDenyCount"])
             > int(revoked["personalAuthDenyCount"])
         )
-        if not result["authDeniedAfterRevoke"]:
-            raise ContractFailure("post_revoke_provider_request", "auth_denial_not_observed")
+        if after_revoke.get("personalState") != "revoked":
+            raise ContractFailure("post_revoke_provider_request", "revoked_state_lost")
+        if not result["callbackAdvancedAfterRevoke"] or not result["authDeniedAfterRevoke"]:
+            raise ContractFailure(
+                "post_revoke_provider_request", "auth_denial_not_observed"
+            )
         _control_post("/native-verify-revoked")
+        verified_state = _state()
+        verified_probe = verified_state["nativeProbe"]
+        if not isinstance(verified_probe, dict):
+            raise ContractFailure("control_state")
+        result["nativeRevocationResponseClass"] = verified_probe["responseClass"]
+        result["nativeRevocationPutDenied"] = verified_probe["proofPassed"] is True
+        if not result["nativeRevocationPutDenied"]:
+            raise ContractFailure(
+                "post_revoke_provider_request", "auth_denial_not_observed"
+            )
+        if client_error:
+            raise ContractFailure("post_revoke_provider_request", "script_error")
         if not all(
             value is True
             for key, value in result.items()
-            if key != "status"
+            if key in QUALIFICATION_BOOLEAN_GATES
         ):
             raise ContractFailure("complete", "qualification_predicate_failed")
         result["status"] = "passed"

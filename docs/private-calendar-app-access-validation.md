@@ -58,3 +58,24 @@ After updating the branch status and guide, these commands passed:
 - Exercise the gateway against a real Matrix homeserver and room policy.
 - Run required CI checks on the release Node version and obtain the combined
   source review. No deployment or production write was performed.
+
+## Issue #406: native revocation proof boundary
+
+The next native-client qualification records client feedback separately from
+server enforcement. A rejected Thunderbird provider operation is client
+feedback; a fulfilled operation or missing callback is not evidence that the
+client received a revocation error. The fixture can independently prove server
+enforcement only when the actual discovered Thunderbird provider loads a fresh,
+owner-seeded event before revocation, makes no earlier write to that event, and
+then issues the one explicit edit after the tombstone is committed. The
+fixture-only receipt binds that request to the exact private credential and
+resource, records the revoked policy decision and 401/403 response, and
+confirms an owner read still matches the canonical pre-revocation bytes and
+opaque property. It does not log or retain the request body.
+
+That server-side result proves the revoked credential could not change the
+canonical object. It does not claim Thunderbird reported the denial to the
+user. Missing or ambiguous request correlation, a non-denial response, or a
+changed canonical object remains a failed qualification. This issue follow-up
+has not passed the actual hosted Thunderbird fixture and does not change the
+default-off release status.
