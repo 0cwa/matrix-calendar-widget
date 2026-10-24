@@ -383,7 +383,7 @@ describe('<CalendarEventDetailsDialog />', () => {
     expect(screen.getByLabelText('Matrix destination')).toBeInTheDocument();
     expect(
       screen.getByText(
-        /Supported timed Matrix reminders follow the saved CalDAV alert; all-day events need a separate local time and time zone/,
+        'CalDAV alerts are saved in the event for calendar apps. Matrix destinations control who this room bot pings. Reminder delivery also requires current room permissions.',
       ),
     ).toBeInTheDocument();
     expect(repository.listRoomReminderAlarmOptions).toHaveBeenCalledTimes(2);
