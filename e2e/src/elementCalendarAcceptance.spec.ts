@@ -5849,7 +5849,7 @@ async function setRoomReminder(
         }
       };
       observation.recipientSelectionStep = 'member-listbox-ready';
-      await memberInput.click();
+      await memberInput.click({ timeout: 15_000 });
       await expect
         .poll(measureMemberInputListboxAssociation, { timeout: 15_000 })
         .toBe(true);
