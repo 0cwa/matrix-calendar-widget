@@ -6492,14 +6492,17 @@ async function setRoomReminder(
       await memberInput.press('ArrowDown');
       observation.recipientSelectionStep = 'member-enter';
       await memberInput.press('Enter');
+      // Enter closes the selected option popup. A second Escape bubbles to the
+      // owning Dialog and closes the whole reminder form.
+      await expect(memberListbox).toHaveCount(0, { timeout: 15_000 });
       observation.recipientSelectionStep = 'member-keyboard-closed';
-      await memberInput.press('Escape');
       observation.selectedMemberTagCount = Math.min(
         await details.locator('.MuiAutocomplete-tag').count(),
         2,
       );
       selectedMemberKeyboardFlow = observation.selectedMemberTagCount === 1;
       observation.selectedMemberKeyboardFlow = selectedMemberKeyboardFlow;
+      expect(selectedMemberKeyboardFlow).toBe(true);
     }
     observation.recipientSelectionStep = 'complete';
 
