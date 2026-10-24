@@ -102,6 +102,7 @@ export function CalendarEventEditorFields({
     canChooseWeekdays,
     validationError,
     onSaveAndConfigureRoomReminders,
+    submit,
     handleReloadLatest,
     chooseOccurrenceScope,
     handleOccurrenceTextModeChange,
@@ -626,7 +627,6 @@ export function CalendarEventEditorFields({
                   )}
                 </Typography>
                 <LoadingButton
-                  data-save-intent="configure-room-reminders"
                   disabled={
                     saving ||
                     Boolean(validationError) ||
@@ -637,18 +637,13 @@ export function CalendarEventEditorFields({
                     (editingOccurrence && !occurrenceHasChanges)
                   }
                   loading={savingRoomReminderSetup}
-                  onClick={(submitEvent) => {
-                    const form = submitEvent.currentTarget.form;
-                    const saveIntent =
-                      submitEvent.currentTarget.dataset.saveIntent;
+                  onClick={(clickEvent) => {
+                    const form = clickEvent.currentTarget.form;
 
-                    if (form && saveIntent && form.reportValidity()) {
-                      form.dataset.saveIntent = saveIntent;
-                      try {
-                        form.requestSubmit();
-                      } finally {
-                        delete form.dataset.saveIntent;
-                      }
+                    if (form?.reportValidity()) {
+                      void submit({
+                        kind: 'save-and-configure-room-reminders',
+                      });
                     }
                   }}
                   size="small"
