@@ -5824,15 +5824,9 @@ async function setRoomReminder(
       const memberInput = details.getByRole('combobox', {
         name: 'Selected people',
       });
-      observation.recipientSelectionStep = 'member-query-entered';
-      await memberInput.fill(fixture.users.memberB.userId);
-      observation.memberQueryMatchesTargetAfterFill =
-        (await memberInput.inputValue()) === fixture.users.memberB.userId;
       const memberListbox = frame
         .getByRole('listbox')
         .filter({ visible: true });
-      observation.recipientSelectionStep = 'member-listbox-ready';
-      observation.memberListboxCount = Math.min(await memberListbox.count(), 2);
       const measureMemberInputListboxAssociation = async () => {
         try {
           const controls = await memberInput.evaluateAll((inputs) =>
@@ -5854,6 +5848,22 @@ async function setRoomReminder(
           return false;
         }
       };
+      observation.recipientSelectionStep = 'member-listbox-ready';
+      await memberInput.click();
+      await expect
+        .poll(measureMemberInputListboxAssociation, { timeout: 15_000 })
+        .toBe(true);
+      await expect(memberListbox).toHaveCount(1, { timeout: 15_000 });
+      await expect(memberListbox.getByRole('option').first()).toBeVisible({
+        timeout: 15_000,
+      });
+
+      observation.recipientSelectionStep = 'member-query-entered';
+      await memberInput.fill(fixture.users.memberB.userId);
+      observation.memberQueryMatchesTargetAfterFill =
+        (await memberInput.inputValue()) === fixture.users.memberB.userId;
+      observation.recipientSelectionStep = 'member-listbox-ready';
+      observation.memberListboxCount = Math.min(await memberListbox.count(), 2);
       try {
         await expect
           .poll(
