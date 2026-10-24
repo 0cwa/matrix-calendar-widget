@@ -34,8 +34,10 @@ import {
   realpathSync,
   writeFileSync,
 } from 'node:fs';
+import type { ClientRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import { arch, platform, release, tmpdir } from 'node:os';
-import { dirname, isAbsolute, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import {
   extractElementBundleFrames,
@@ -662,6 +664,7 @@ type G6CalDavResult = {
 };
 
 const ELEMENT_WEB_CONFIGURED_TAG = 'v1.12.30';
+const PRIVATE_ACCEPTANCE_GATEWAY_ORIGIN = 'https://127.0.0.1:3001';
 const G6_POSTSAVE_EVENT_COUNT_CAP = 100;
 
 const REMINDER_START_LEAD_MS = 150_000;
@@ -8321,6 +8324,291 @@ function waitForGatewayResponse(
   );
 }
 
+function waitForPrivateClientResponse(
+  page: Page,
+  method: 'GET' | 'POST' | 'DELETE',
+): Promise<Response> {
+  return page.waitForResponse(
+    (response) => {
+      try {
+        const url = new URL(response.url());
+        return (
+          url.origin === new URL(fixture.gatewayUrl).origin &&
+          (method === 'DELETE'
+            ? /^\/v1\/calendar\/private-clients\/mcwpc~[a-f0-9]{48}$/u.test(
+                url.pathname,
+              )
+            : url.pathname === '/v1/calendar/private-clients') &&
+          response.request().method() === method
+        );
+      } catch {
+        return false;
+      }
+    },
+    { timeout: 30_000 },
+  );
+}
+
+async function requestPrivateClientListStatus(
+  page: Page,
+  gatewayUrl: string,
+  roomId: string,
+  calendarId: string,
+): Promise<number> {
+  return page.evaluate(
+    async ({ gatewayUrl, roomId, calendarId }) => {
+      type OpenIdCredentials = {
+        access_token?: unknown;
+        matrix_server_name?: unknown;
+      };
+      type MatrixClient = {
+        getOpenIdToken?: () => Promise<OpenIdCredentials>;
+      };
+      type MatrixClientWindow = Window & {
+        mxMatrixClientPeg?: { get?: () => MatrixClient };
+      };
+
+      try {
+        const matrixClient = (
+          window as MatrixClientWindow
+        ).mxMatrixClientPeg?.get?.();
+        if (!matrixClient?.getOpenIdToken) return 0;
+        const credentials = await matrixClient.getOpenIdToken();
+        if (
+          typeof credentials.access_token !== 'string' ||
+          typeof credentials.matrix_server_name !== 'string'
+        ) {
+          return 0;
+        }
+        const query = new URLSearchParams({
+          target: 'room',
+          roomId,
+          calendarId,
+        });
+        const response = await fetch(
+          `${gatewayUrl}/v1/calendar/private-clients?${query.toString()}`,
+          {
+            headers: {
+              Authorization: `MX-Identity ${btoa(
+                JSON.stringify({
+                  matrix_server_name: credentials.matrix_server_name,
+                  access_token: credentials.access_token,
+                }),
+              )}`,
+            },
+          },
+        );
+        await response.body?.cancel();
+        return response.status;
+      } catch {
+        return 0;
+      }
+    },
+    { gatewayUrl, roomId, calendarId },
+  );
+}
+
+type PrivateDavRequestResult = Readonly<{
+  status: number;
+  bodyBytes: number;
+  etag?: string;
+  expectedTextPresent?: boolean;
+}>;
+
+function requestPrivateDav({
+  url,
+  username,
+  password,
+  caCertificate,
+  method,
+  headers = {},
+  body = '',
+  expectedText,
+}: {
+  url: URL;
+  username: string;
+  password: string;
+  caCertificate: Buffer;
+  method: string;
+  headers?: Record<string, string>;
+  body?: string;
+  expectedText?: string;
+}): Promise<PrivateDavRequestResult> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const fail = () => {
+      if (settled) return;
+      settled = true;
+      reject(new Error('Private CalDAV acceptance request failed'));
+    };
+    const authorization = `Basic ${Buffer.from(
+      `${username}:${password}`,
+      'utf8',
+    ).toString('base64')}`;
+    let request: ClientRequest;
+    try {
+      request = httpsRequest(
+        url,
+        {
+          method,
+          headers: {
+            accept: '*/*',
+            authorization,
+            connection: 'close',
+            ...headers,
+          },
+          ca: caCertificate,
+          agent: false,
+          timeout: 15_000,
+        },
+        (response) => {
+          const chunks: Buffer[] = [];
+          let bodyBytes = 0;
+          response.on('data', (chunk: Buffer) => {
+            bodyBytes += chunk.byteLength;
+            if (bodyBytes > 1_000_000) {
+              request.destroy();
+              fail();
+              return;
+            }
+            chunks.push(Buffer.from(chunk));
+          });
+          response.once('error', fail);
+          response.once('end', () => {
+            if (settled) return;
+            const responseBody = Buffer.concat(chunks);
+            const etag = response.headers.etag;
+            settled = true;
+            resolve({
+              status: response.statusCode ?? 0,
+              bodyBytes,
+              ...(typeof etag === 'string' ? { etag } : {}),
+              ...(expectedText === undefined
+                ? {}
+                : {
+                    expectedTextPresent: responseBody.includes(
+                      Buffer.from(expectedText, 'utf8'),
+                    ),
+                  }),
+            });
+          });
+        },
+      );
+    } catch {
+      fail();
+      return;
+    }
+    request.once('error', fail);
+    request.once('timeout', () => request.destroy());
+    request.end(body);
+  });
+}
+
+async function privateSetupDetailsAbsent(dialog: Locator): Promise<boolean> {
+  const counts = await Promise.all(
+    ['CalDAV URL', 'Username', 'App password'].map((name) =>
+      dialog.getByRole('textbox', { name, exact: true }).count(),
+    ),
+  );
+  return counts.every((count) => count === 0);
+}
+
+function privateTlsDirectoryMatchesRunnerTemp(): boolean {
+  const runnerTemp = process.env.RUNNER_TEMP;
+  const tlsDirectory = process.env.ELEMENT_ACCEPTANCE_PRIVATE_TLS_DIR;
+  return (
+    typeof runnerTemp === 'string' &&
+    typeof tlsDirectory === 'string' &&
+    isAbsolute(runnerTemp) &&
+    isAbsolute(tlsDirectory) &&
+    resolve(tlsDirectory).startsWith(`${resolve(runnerTemp)}${sep}`)
+  );
+}
+
+function readPrivateAcceptanceCaCertificate(): Buffer {
+  const tlsDirectory = process.env.ELEMENT_ACCEPTANCE_PRIVATE_TLS_DIR;
+  if (typeof tlsDirectory !== 'string' || !isAbsolute(tlsDirectory)) {
+    throw new Error('Private acceptance CA certificate is unavailable');
+  }
+  try {
+    return readFileSync(join(tlsDirectory, 'ca.pem'));
+  } catch {
+    throw new Error('Private acceptance CA certificate is unavailable');
+  }
+}
+
+async function selectPrivateAcceptanceCalendar(
+  page: Page,
+  calendarPicker: Locator,
+  targetCalendarOption: Locator,
+): Promise<boolean> {
+  const alreadySelected =
+    (await targetCalendarOption.getAttribute('aria-selected')) === 'true';
+  if (alreadySelected) {
+    await calendarPicker.press('Escape');
+    return true;
+  }
+
+  const selectedListResponse = waitForPrivateClientResponse(page, 'GET');
+  await targetCalendarOption.click();
+  return (await selectedListResponse).status() === 200;
+}
+
+function privateCredentialsMatchGateway(
+  username: string,
+  password: string,
+  credentialUrl: URL,
+): boolean {
+  return [
+    /^mcwpc~[a-f0-9]{48}$/u.test(username),
+    /^[A-Za-z0-9_-]{43}$/u.test(password),
+    credentialUrl.origin === PRIVATE_ACCEPTANCE_GATEWAY_ORIGIN,
+    credentialUrl.pathname === `/${username}/calendar/`,
+    credentialUrl.username === '',
+    credentialUrl.password === '',
+    credentialUrl.search === '',
+    credentialUrl.hash === '',
+  ].every(Boolean);
+}
+
+function parsePrivateCredentialUrl(credentialUrlText: string): URL {
+  try {
+    return new URL(credentialUrlText);
+  } catch {
+    throw new Error('Private app credentials were not rendered');
+  }
+}
+
+function privateDavLifecycleSucceeded(
+  principalDiscovery: PrivateDavRequestResult,
+  collectionDiscovery: PrivateDavRequestResult,
+  createdResource: PrivateDavRequestResult,
+  readCreatedResource: PrivateDavRequestResult,
+  updatedResource: PrivateDavRequestResult,
+  readUpdatedResource: PrivateDavRequestResult,
+): boolean {
+  return (
+    principalDiscovery.status === 207 &&
+    collectionDiscovery.status === 207 &&
+    createdResource.status >= 200 &&
+    createdResource.status < 300 &&
+    readCreatedResource.status === 200 &&
+    readCreatedResource.expectedTextPresent === true &&
+    typeof readCreatedResource.etag === 'string' &&
+    readCreatedResource.etag.length > 0 &&
+    updatedResource.status >= 200 &&
+    updatedResource.status < 300 &&
+    readUpdatedResource.status === 200 &&
+    readUpdatedResource.expectedTextPresent === true
+  );
+}
+
+function revokedPrivateDavCredentialDenied(
+  result: PrivateDavRequestResult,
+): boolean {
+  return result.status === 401 && result.bodyBytes === 0;
+}
+
 function observeReminderWidgetContextResponse(
   page: Page,
   roomId: string,
@@ -10134,4 +10422,343 @@ function recordRuntimeVersions(chromiumVersion: string) {
     })}\n`,
     { encoding: 'utf8', mode: 0o600 },
   );
+}
+
+if (process.env.ELEMENT_ACCEPTANCE_PRIVATE_UI === 'true') {
+  test.describe('private calendar app acceptance', () => {
+    test.use({ trace: 'off', video: 'off', screenshot: 'off' });
+
+    test('Element Web manages private app access and revokes CalDAV authorization', async ({
+      browser,
+    }) => {
+      test.setTimeout(360_000);
+      fixture = readFixture();
+
+      const privateGatewayOriginMatches =
+        new URL(fixture.gatewayUrl).origin ===
+        PRIVATE_ACCEPTANCE_GATEWAY_ORIGIN;
+      expect(privateGatewayOriginMatches).toBe(true);
+
+      expect(privateTlsDirectoryMatchesRunnerTemp()).toBe(true);
+      const caCertificate = readPrivateAcceptanceCaCertificate();
+
+      const allowedOrigins = new Set([
+        new URL(fixture.elementUrl).origin,
+        new URL(fixture.homeserverUrl).origin,
+        new URL(fixture.gatewayUrl).origin,
+        new URL(fixture.widgetUrl).origin,
+        'http://localhost:8008',
+      ]);
+      const contexts: BrowserContext[] = [];
+      let blockedExternalRequests = 0;
+      const makeContext = async () => {
+        const context = await browser.newContext({
+          locale: 'en-US',
+          timezoneId: 'Europe/Stockholm',
+          viewport: { width: 1440, height: 900 },
+        });
+        contexts.push(context);
+        await context.route('**/*', async (route) => {
+          let origin: string;
+          try {
+            origin = new URL(route.request().url()).origin;
+          } catch {
+            blockedExternalRequests += 1;
+            await route.abort('blockedbyclient');
+            return;
+          }
+          if (!allowedOrigins.has(origin)) {
+            blockedExternalRequests += 1;
+            await route.abort('blockedbyclient');
+            return;
+          }
+          await route.continue();
+        });
+        return context;
+      };
+
+      try {
+        const contextA = await makeContext();
+        const pageA = await authenticateInElement(
+          contextA,
+          fixture.users.memberA,
+        );
+        const teamRoomA = await openFixtureRoom(
+          pageA,
+          fixture.roomName,
+          fixture.teamRoomId,
+        );
+        const frameA = await openCalendarWidget(teamRoomA, pageA, {
+          expectWidgetWarning: false,
+        });
+        const privateClientButtonA = frameA.getByRole('button', {
+          name: 'Calendar app access',
+          exact: true,
+        });
+        await expect(privateClientButtonA).toBeVisible();
+        const initialListResponse = waitForPrivateClientResponse(pageA, 'GET');
+        await privateClientButtonA.click();
+        const dialogA = frameA.getByRole('dialog').last();
+        await expect(dialogA).toBeVisible();
+        expect((await initialListResponse).status()).toBe(200);
+
+        const calendarPicker = dialogA.getByRole('combobox', {
+          name: 'Calendar',
+        });
+        await calendarPicker.click();
+        const targetCalendarOption = frameA.getByRole('option', {
+          name: 'Synthetic team calendar',
+          exact: true,
+        });
+        await expect(targetCalendarOption).toHaveCount(1);
+        expect(
+          await selectPrivateAcceptanceCalendar(
+            pageA,
+            calendarPicker,
+            targetCalendarOption,
+          ),
+        ).toBe(true);
+
+        let publicFeedMutationCount = 0;
+        pageA.on('request', (request) => {
+          try {
+            const url = new URL(request.url());
+            if (
+              url.origin === PRIVATE_ACCEPTANCE_GATEWAY_ORIGIN &&
+              url.pathname === '/v1/calendar-feeds/publication' &&
+              ['PUT', 'DELETE'].includes(request.method())
+            ) {
+              publicFeedMutationCount += 1;
+            }
+          } catch {
+            // Keep only the mutation count; never retain the request URL.
+          }
+        });
+
+        const createResponse = waitForPrivateClientResponse(pageA, 'POST');
+        await dialogA
+          .getByRole('button', { name: 'Create app access', exact: true })
+          .click();
+        const createdStatus = (await createResponse).status();
+        expect(createdStatus === 201).toBe(true);
+
+        const credentialUrlText = await dialogA
+          .getByRole('textbox', { name: 'CalDAV URL', exact: true })
+          .inputValue();
+        const credentialUrl = parsePrivateCredentialUrl(credentialUrlText);
+        const username = await dialogA
+          .getByRole('textbox', { name: 'Username', exact: true })
+          .inputValue();
+        const password = await dialogA
+          .getByRole('textbox', { name: 'App password', exact: true })
+          .inputValue();
+        expect(
+          privateCredentialsMatchGateway(username, password, credentialUrl),
+        ).toBe(true);
+        expect(publicFeedMutationCount).toBe(0);
+
+        await expect(
+          dialogA.getByText('Status: Active', { exact: true }),
+        ).toBeVisible();
+        await dialogA
+          .getByRole('button', { name: 'Hide setup details', exact: true })
+          .click();
+        expect(await privateSetupDetailsAbsent(dialogA)).toBe(true);
+
+        const browserStorage = JSON.stringify(await contextA.storageState());
+        const appCredentialWasPersisted =
+          browserStorage.includes(username) ||
+          browserStorage.includes(password) ||
+          browserStorage.includes(credentialUrlText);
+        expect(appCredentialWasPersisted).toBe(false);
+
+        await dialogA
+          .getByRole('button', { name: 'Close', exact: true })
+          .click();
+        const listedAfterReopen = waitForPrivateClientResponse(pageA, 'GET');
+        await privateClientButtonA.click();
+        const reopenedDialogA = frameA.getByRole('dialog').last();
+        expect((await listedAfterReopen).status()).toBe(200);
+        expect(await privateSetupDetailsAbsent(reopenedDialogA)).toBe(true);
+        await expect(
+          reopenedDialogA.getByText('Status: Active', { exact: true }),
+        ).toBeVisible();
+
+        const principalUrl = new URL('../', credentialUrl);
+        const collectionUrl = new URL(credentialUrl.href);
+        const resourceUrl = new URL('private-ui-acceptance.ics', collectionUrl);
+        const eventUid = `private-ui-${randomUUID()}@acceptance.invalid`;
+        const timeValue = (value: Date) =>
+          value
+            .toISOString()
+            .replace(/[-:]/gu, '')
+            .replace(/\.\d{3}Z$/u, 'Z');
+        const eventStart = new Date(Date.now() + 5 * 60_000);
+        const eventEnd = new Date(eventStart.getTime() + 30 * 60_000);
+        const originalSummary = 'Private UI acceptance original';
+        const updatedSummary = 'Private UI acceptance updated';
+        const makeIcs = (summary: string) =>
+          [
+            'BEGIN:VCALENDAR',
+            'VERSION:2.0',
+            'PRODID:-//Matrix Calendar Widget//Private Acceptance//EN',
+            'BEGIN:VEVENT',
+            `UID:${eventUid}`,
+            `DTSTAMP:${timeValue(new Date())}`,
+            `DTSTART:${timeValue(eventStart)}`,
+            `DTEND:${timeValue(eventEnd)}`,
+            `SUMMARY:${summary}`,
+            'END:VEVENT',
+            'END:VCALENDAR',
+            '',
+          ].join('\r\n');
+        const discoveryBody = [
+          '<?xml version="1.0" encoding="utf-8"?>',
+          '<d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>',
+        ].join('');
+        const requestBase = {
+          username,
+          password,
+          caCertificate,
+        };
+        const principalDiscovery = await requestPrivateDav({
+          ...requestBase,
+          url: principalUrl,
+          method: 'PROPFIND',
+          headers: { depth: '0', 'content-type': 'application/xml' },
+          body: discoveryBody,
+        });
+        const collectionDiscovery = await requestPrivateDav({
+          ...requestBase,
+          url: collectionUrl,
+          method: 'PROPFIND',
+          headers: { depth: '1', 'content-type': 'application/xml' },
+          body: discoveryBody,
+        });
+        const createdResource = await requestPrivateDav({
+          ...requestBase,
+          url: resourceUrl,
+          method: 'PUT',
+          headers: {
+            'content-type': 'text/calendar; charset=utf-8',
+            'if-none-match': '*',
+          },
+          body: makeIcs(originalSummary),
+        });
+        const readCreatedResource = await requestPrivateDav({
+          ...requestBase,
+          url: resourceUrl,
+          method: 'GET',
+          expectedText: `SUMMARY:${originalSummary}`,
+        });
+        const updatedResource = await requestPrivateDav({
+          ...requestBase,
+          url: resourceUrl,
+          method: 'PUT',
+          headers: {
+            'content-type': 'text/calendar; charset=utf-8',
+            'if-match': readCreatedResource.etag ?? '',
+          },
+          body: makeIcs(updatedSummary),
+        });
+        const readUpdatedResource = await requestPrivateDav({
+          ...requestBase,
+          url: resourceUrl,
+          method: 'GET',
+          expectedText: `SUMMARY:${updatedSummary}`,
+        });
+        expect(
+          privateDavLifecycleSucceeded(
+            principalDiscovery,
+            collectionDiscovery,
+            createdResource,
+            readCreatedResource,
+            updatedResource,
+            readUpdatedResource,
+          ),
+        ).toBe(true);
+
+        const memberBContext = await makeContext();
+        const memberBPage = await authenticateInElement(
+          memberBContext,
+          fixture.users.memberB,
+        );
+        const memberBRoom = await openFixtureRoom(
+          memberBPage,
+          fixture.roomName,
+          fixture.teamRoomId,
+        );
+        const memberBFrame = await openCalendarWidget(
+          memberBRoom,
+          memberBPage,
+          { expectWidgetWarning: true },
+        );
+        const memberBDialogList = waitForPrivateClientResponse(
+          memberBPage,
+          'GET',
+        );
+        await memberBFrame
+          .getByRole('button', {
+            name: 'Calendar app access',
+            exact: true,
+          })
+          .click();
+        const memberBDialog = memberBFrame.getByRole('dialog').last();
+        expect((await memberBDialogList).status()).toBe(403);
+        await expect(
+          memberBDialog.getByRole('button', {
+            name: 'Create app access',
+            exact: true,
+          }),
+        ).toHaveCount(0);
+
+        const outsiderContext = await makeContext();
+        const outsiderPage = await authenticateInElement(
+          outsiderContext,
+          fixture.users.outsider,
+        );
+        const outsiderRoom = await openFixtureRoom(
+          outsiderPage,
+          fixture.outsiderRoomName,
+          fixture.outsiderRoomId,
+        );
+        await openCalendarWidget(outsiderRoom, outsiderPage, {
+          expectWidgetWarning: false,
+          waitForCalendar: false,
+        });
+        const outsiderPrivateClientStatus =
+          await requestPrivateClientListStatus(
+            outsiderPage,
+            fixture.gatewayUrl,
+            fixture.teamRoomId,
+            fixture.calendarId,
+          );
+        expect(outsiderPrivateClientStatus).toBe(403);
+
+        const revokeResponse = waitForPrivateClientResponse(pageA, 'DELETE');
+        await reopenedDialogA
+          .getByRole('button', { name: 'Revoke', exact: true })
+          .click();
+        await reopenedDialogA
+          .getByRole('button', { name: 'Revoke access', exact: true })
+          .click();
+        expect((await revokeResponse).status()).toBe(200);
+        await expect(
+          reopenedDialogA.getByText('Status: Revoked', { exact: true }),
+        ).toBeVisible();
+
+        const davAfterRevoke = await requestPrivateDav({
+          ...requestBase,
+          url: resourceUrl,
+          method: 'GET',
+        });
+        expect(revokedPrivateDavCredentialDenied(davAfterRevoke)).toBe(true);
+        expect(blockedExternalRequests).toBe(0);
+      } finally {
+        await Promise.all(
+          contexts.map((context) => context.close().catch(() => undefined)),
+        );
+      }
+    });
+  });
 }

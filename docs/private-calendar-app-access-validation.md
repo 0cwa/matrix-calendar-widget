@@ -39,6 +39,49 @@ CalDAV discovery and conditional create/update/delete, stale ETag rejection,
 unknown VEVENT property preservation, unsupported-resource protection,
 and current-policy denial through the gateway. Across the backend unit-test runs, all 87 focused tests passed; the loopback suite required a separate host-permission run because the sandbox denied socket binding.
 
+## Opt-in Element Web private-client acceptance source
+
+The acceptance branch adds a manual-only `private_ui` workflow input whose
+default is false. When enabled, the appservice acceptance run uses the existing
+single gateway and canonical Radicale fixture with public and private features
+enabled together; the public-feed signing key, private epoch key, and callback
+key are generated independently. Normal pull-request and bot-account
+acceptance continue with the input disabled.
+
+The browser reaches both the private-client UI API and raw CalDAV through an
+acceptance-only TLS bridge at `https://127.0.0.1:3001`. The bridge publishes
+only on host loopback, forwards to the existing `gateway:3000`, and joins only
+the internal callback network shared with the gateway and Radicale. It adds no
+Matrix, credential, policy, or CalDAV business logic. Gateway auth remains
+authoritative: Matrix OpenID and room policy protect the UI API, and the
+gateway authenticates private DAV credentials before forwarding DAV requests
+to Radicale. Radicale calls the gateway callback through the same bridge using
+the fixed callback paths and an HMAC key. The test certificate SANs cover the
+browser IP and callback service DNS name. Chromium pins the ephemeral leaf
+SPKI, the existing member/outsider Playwright command receives the temporary
+CA through `NODE_EXTRA_CA_CERTS` only for its Node-side anonymous public-feed
+requests, the direct DAV client uses that CA explicitly, and Radicale reads the
+mounted public CA file. No host trust store is changed.
+
+The new Element Web flow uses three separate synthetic Matrix sessions. It
+creates credentials in the real dialog, checks the one-time reveal and later
+listing, verifies that credentials are absent from browser storage, and
+confirms no public-feed mutation request accompanies private credential
+creation. It then performs real DAV principal and collection discovery, VEVENT
+create/read/update/read, checks a same-room non-manager and a non-member
+outsider are denied, revokes access in the UI, and verifies the same DAV
+credential receives an empty `401` response afterward. The test keeps
+credentials, private URLs, and ICS bodies in memory; assertions observe only
+status values and booleans. Playwright trace, video, and screenshots are
+disabled for this flow, and its temporary output log is mode `0600` and removed
+during cleanup.
+
+This new browser flow and its trust/network preparation tests have not yet been
+run locally or in the hosted workflow. It is test-profile TLS evidence only;
+it does not qualify public TLS, desktop/native clients, deployment, or host
+trust. The prior backend and Radicale checks above remain tied to their
+recorded source commit and do not prove this new UI path.
+
 ## Documentation checks
 
 After updating the branch status and guide, these commands passed:

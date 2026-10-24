@@ -40,6 +40,7 @@ const toolingGlobals = Object.fromEntries(
     'Headers',
     'Request',
     'Response',
+    'structuredClone',
   ].map((name) => [name, 'readonly']),
 );
 
