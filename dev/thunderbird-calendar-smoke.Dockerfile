@@ -12,6 +12,7 @@ RUN set -eux; \
         libasound2 \
         libdbus-glib-1-2 \
         libgtk-3-0 \
+        libx11-xcb1 \
         passwd \
         libxt6; \
     rm -rf /var/lib/apt/lists/*; \
