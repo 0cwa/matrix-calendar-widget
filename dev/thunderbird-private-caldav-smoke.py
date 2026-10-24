@@ -135,6 +135,9 @@ FIXTURE_FAILURE_STAGES = {
     "calendar_tab_open",
     "application_startup",
     "calendar_tab",
+    "provider_invocation",
+    "result_normalization",
+    "calendar_registration",
     "provider_discovery",
     "provider_refresh",
     "provider_edit",
@@ -204,6 +207,12 @@ FIXTURE_FAILURE_CLASSES = {
     "version_mismatch",
     "main_window_missing",
     "provider_discovery_failed",
+    "auth_failed",
+    "certificate_failed",
+    "no_calendars",
+    "canceled",
+    "type_error",
+    "reference_error",
     "personal_client_not_active",
     "revoke_failed",
     "revoked_state_missing",
@@ -259,6 +268,22 @@ NATIVE_FAILURE_PAIRS = {
     ("complete", "qualification_predicate_failed"),
     ("cleanup", "cleanup_failed"),
     ("internal", "unexpected_error"),
+} | {
+    (stage, error_class)
+    for stage in {
+        "provider_invocation",
+        "result_normalization",
+        "calendar_registration",
+    }
+    for error_class in {
+        "auth_failed",
+        "certificate_failed",
+        "no_calendars",
+        "canceled",
+        "type_error",
+        "reference_error",
+        "other",
+    }
 } | {
     (stage, error_class)
     for stage in {

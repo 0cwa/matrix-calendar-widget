@@ -71,6 +71,25 @@ MARIONETTE_EXCEPTION_CLASSES = {
     "NoSuchWindowException": "session_error",
     "SessionNotCreatedException": "session_error",
 }
+NATIVE_DISCOVERY_FAILURE_STAGES = {
+    "provider_invocation",
+    "result_normalization",
+    "calendar_registration",
+}
+NATIVE_DISCOVERY_FAILURE_CLASSES = {
+    "auth_failed",
+    "certificate_failed",
+    "no_calendars",
+    "canceled",
+    "type_error",
+    "reference_error",
+    "other",
+}
+NATIVE_DISCOVERY_FAILURE_PAIRS = {
+    (stage, error_class)
+    for stage in NATIVE_DISCOVERY_FAILURE_STAGES
+    for error_class in NATIVE_DISCOVERY_FAILURE_CLASSES
+}
 
 TABMAIL_OBSERVATION = """
 const tabmail = document.getElementById("tabmail");
@@ -110,6 +129,30 @@ DISCOVER_CALENDAR = r"""
 const scriptArguments = Array.from(arguments);
 const done = scriptArguments.pop();
 const [username, password, location, expectedOrigin, expectedPath] = scriptArguments;
+function nativeDiscoveryErrorClass(error) {
+  let name = "";
+  try {
+    if (error && (typeof error === "object" || typeof error === "function")) {
+      const candidate = error.name;
+      if (typeof candidate === "string") {
+        name = candidate;
+      }
+    }
+  } catch (_error) {
+    return "other";
+  }
+  switch (name) {
+    case "AuthFailedError": return "auth_failed";
+    case "CertError": return "certificate_failed";
+    case "NoneFoundError": return "no_calendars";
+    case "CanceledError":
+    case "NS_ERROR_ABORT": return "canceled";
+    case "TypeError": return "type_error";
+    case "ReferenceError": return "reference_error";
+    default: return "other";
+  }
+}
+let nativeDiscoveryStage = "provider_invocation";
 (async () => {
   try {
     if (typeof cal === "undefined" || !cal.provider || !cal.provider.caldav ||
@@ -119,6 +162,7 @@ const [username, password, location, expectedOrigin, expectedPath] = scriptArgum
     const discovered = await cal.provider.caldav.detectCalendars(
       username, password, location, true
     );
+    nativeDiscoveryStage = "result_normalization";
     let candidates = [];
     if (Array.isArray(discovered)) {
       candidates = discovered;
@@ -145,6 +189,7 @@ const [username, password, location, expectedOrigin, expectedPath] = scriptArgum
         parsed.search !== "" || parsed.hash !== "") {
       return { ok: false, failure: "calendar_scope_mismatch" };
     }
+    nativeDiscoveryStage = "calendar_registration";
     if (!calendar.id || !cal.manager) {
       return { ok: false, failure: "calendar_registration_data_missing" };
     }
@@ -167,10 +212,17 @@ const [username, password, location, expectedOrigin, expectedPath] = scriptArgum
   } catch (error) {
     return {
       ok: false,
-      failure: error && error.name === "NS_ERROR_ABORT" ? "request_aborted" : "discovery_failed",
+      failure: "discovery_failed",
+      failureStage: nativeDiscoveryStage,
+      failureClass: nativeDiscoveryErrorClass(error),
     };
   }
-})().then(done, () => done({ ok: false, failure: "discovery_failed" }));
+})().then(done, error => done({
+  ok: false,
+  failure: "discovery_failed",
+  failureStage: nativeDiscoveryStage,
+  failureClass: nativeDiscoveryErrorClass(error),
+}));
 """
 
 REFRESH_CALENDAR = r"""
@@ -418,6 +470,16 @@ def _async_script(
 
 def _assert_ok(result: dict[str, object], stage: str) -> None:
     if result.get("ok") is not True:
+        failure_stage = result.get("failureStage")
+        failure_class = result.get("failureClass")
+        if failure_stage is not None or failure_class is not None:
+            if (
+                isinstance(failure_stage, str)
+                and isinstance(failure_class, str)
+                and (failure_stage, failure_class) in NATIVE_DISCOVERY_FAILURE_PAIRS
+            ):
+                raise ContractFailure(failure_stage, failure_class)
+            raise ContractFailure(stage, "invalid_provider_result")
         failure = result.get("failure")
         if isinstance(failure, str) and re.fullmatch(r"[a-z_]{1,64}", failure):
             raise ContractFailure(stage, failure)

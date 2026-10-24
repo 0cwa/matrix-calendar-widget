@@ -48,6 +48,23 @@ SPEC.loader.exec_module(SMOKE)
 
 
 class PrivateCalDavSmokeTests(unittest.TestCase):
+    def _node22(self) -> str:
+        node = os.environ.get("MCW_THUNDERBIRD_TEST_NODE") or shutil.which("node")
+        if not node:
+            self.skipTest("Node 22 is unavailable for the JavaScript contract check")
+        version = subprocess.run(
+            [node, "--version"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=5,
+            text=True,
+        )
+        self.assertEqual(version.returncode, 0, "Node version probe failed")
+        self.assertRegex(version.stdout.strip(), r"^v22\.[0-9]+\.[0-9]+$")
+        return node
+
     def _load_native_thunderbird_contract(self):
         environment = {
             "MCW_PRIVATE_CALDAV_API_ORIGIN": "https://localhost:8443",
@@ -73,21 +90,7 @@ class PrivateCalDavSmokeTests(unittest.TestCase):
         return module
 
     def test_discovery_script_reads_marionette_arguments_as_array_like(self) -> None:
-        node = os.environ.get("MCW_THUNDERBIRD_TEST_NODE") or shutil.which("node")
-        if not node:
-            self.skipTest("Node 22 is unavailable for the JavaScript contract check")
-        version = subprocess.run(
-            [node, "--version"],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            check=False,
-            timeout=5,
-            text=True,
-        )
-        self.assertEqual(version.returncode, 0, "Node version probe failed")
-        self.assertRegex(version.stdout.strip(), r"^v22\.[0-9]+\.[0-9]+$")
-
+        node = self._node22()
         contract = self._load_native_thunderbird_contract()
         harness = r"""
 const fs = require("node:fs");
@@ -156,6 +159,148 @@ function executeAsyncScript() { eval(input.script); }
             "actual native discovery script failed in a Marionette-style arguments context",
         )
         self.assertEqual(completed.stdout, "pass\n")
+
+    def test_discovery_script_projects_only_closed_native_failures(self) -> None:
+        node = self._node22()
+        contract = self._load_native_thunderbird_contract()
+        harness = r"""
+const fs = require("node:fs");
+const input = JSON.parse(fs.readFileSync(0, "utf8"));
+const marker = "SYNTHETIC_PRIVATE_DETAIL";
+
+function makeError(name) {
+  const error = name === "TypeError" ? new TypeError(marker) :
+    name === "ReferenceError" ? new ReferenceError(marker) : new Error(marker);
+  error.name = name;
+  return error;
+}
+
+async function runCase(testCase) {
+  const [username, _password, location, expectedOrigin, expectedPath] = input.args;
+  const calendar = { type: "caldav", uri: { spec: location }, id: "synthetic" };
+  const registeredCalendars = new Map();
+  const provider = {
+    detectCalendars: async () => {
+      if (testCase.stage === "provider_invocation") {
+        throw makeError(testCase.errorName);
+      }
+      if (testCase.stage === "result_normalization") {
+        return Object.defineProperty({}, "calendars", {
+          get() { throw makeError(testCase.errorName); },
+        });
+      }
+      return [calendar];
+    },
+  };
+  globalThis.cal = {
+    provider: { caldav: provider },
+    manager: {
+      getCalendarById: (id) => {
+        if (testCase.stage === "calendar_registration") {
+          throw makeError(testCase.errorName);
+        }
+        return registeredCalendars.get(id) || null;
+      },
+      registerCalendar: (value) => registeredCalendars.set(value.id, value),
+    },
+  };
+  globalThis.window = {};
+  function executeAsyncScript() { eval(input.script); }
+  return new Promise((resolve) => {
+    executeAsyncScript(username, input.args[1], location, expectedOrigin, expectedPath, resolve);
+  });
+}
+
+(async () => {
+  const results = [];
+  for (const testCase of input.cases) {
+    results.push(await runCase(testCase));
+  }
+  process.stdout.write(JSON.stringify(results));
+})().catch(() => {
+  process.stderr.write("native discovery error projection failed\n");
+  process.exitCode = 1;
+});
+"""
+        origin = "https://localhost:8443"
+        path = "/mcwpc~" + "a" * 48 + "/calendar/"
+        arguments_ = [
+            "synthetic-user",
+            "synthetic-secret",
+            origin + path,
+            origin,
+            path,
+        ]
+        cases = [
+            {"stage": "provider_invocation", "errorName": "AuthFailedError"},
+            {"stage": "provider_invocation", "errorName": "CertError"},
+            {"stage": "provider_invocation", "errorName": "NoneFoundError"},
+            {"stage": "provider_invocation", "errorName": "CanceledError"},
+            {"stage": "provider_invocation", "errorName": "NS_ERROR_ABORT"},
+            {"stage": "provider_invocation", "errorName": "TypeError"},
+            {"stage": "provider_invocation", "errorName": "ReferenceError"},
+            {"stage": "provider_invocation", "errorName": "PrivateErrorName"},
+            {"stage": "result_normalization", "errorName": "ReferenceError"},
+            {"stage": "calendar_registration", "errorName": "TypeError"},
+        ]
+        completed = subprocess.run(
+            [node, "-e", harness],
+            input=json.dumps(
+                {
+                    "script": contract.DISCOVER_CALENDAR,
+                    "args": arguments_,
+                    "cases": cases,
+                }
+            ),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=10,
+            text=True,
+        )
+        self.assertEqual(completed.returncode, 0, "native failure projection script failed")
+        self.assertNotIn("SYNTHETIC_PRIVATE_DETAIL", completed.stdout)
+        self.assertNotIn("PrivateErrorName", completed.stdout)
+        results = json.loads(completed.stdout)
+        expected = (
+            ("provider_invocation", "auth_failed"),
+            ("provider_invocation", "certificate_failed"),
+            ("provider_invocation", "no_calendars"),
+            ("provider_invocation", "canceled"),
+            ("provider_invocation", "canceled"),
+            ("provider_invocation", "type_error"),
+            ("provider_invocation", "reference_error"),
+            ("provider_invocation", "other"),
+            ("result_normalization", "reference_error"),
+            ("calendar_registration", "type_error"),
+        )
+        self.assertEqual(len(results), len(expected))
+        for result, (failure_stage, failure_class) in zip(results, expected, strict=True):
+            with self.subTest(stage=failure_stage, error_class=failure_class):
+                self.assertEqual(
+                    set(result),
+                    {"ok", "failure", "failureStage", "failureClass"},
+                )
+                self.assertIs(result["ok"], False)
+                self.assertEqual(result["failure"], "discovery_failed")
+                with self.assertRaises(contract.ContractFailure) as raised:
+                    contract._assert_ok(result, "provider_discovery")
+                self.assertEqual(raised.exception.stage, failure_stage)
+                self.assertEqual(raised.exception.error_class, failure_class)
+                self.assertNotIn("SYNTHETIC_PRIVATE_DETAIL", str(raised.exception))
+
+        with self.assertRaises(contract.ContractFailure) as invalid:
+            contract._assert_ok(
+                {
+                    "ok": False,
+                    "failure": "discovery_failed",
+                    "failureStage": "private_stage",
+                    "failureClass": "private_class",
+                },
+                "provider_discovery",
+            )
+        self.assertEqual(invalid.exception.stage, "provider_discovery")
+        self.assertEqual(invalid.exception.error_class, "invalid_provider_result")
 
     def test_radicale_image_copies_dependency_light_callback_module(self) -> None:
         dockerfile = RADICALE_DOCKERFILE.read_text(encoding="utf-8")
@@ -897,6 +1042,21 @@ function executeAsyncScript() { eval(input.script); }
             contract.NATIVE_MARIONETTE_FAILURE_STAGES
             <= SMOKE.FIXTURE_FAILURE_STAGES
         )
+        self.assertEqual(
+            contract.NATIVE_DISCOVERY_FAILURE_STAGES,
+            {"provider_invocation", "result_normalization", "calendar_registration"},
+        )
+        self.assertTrue(
+            contract.NATIVE_DISCOVERY_FAILURE_PAIRS <= SMOKE.NATIVE_FAILURE_PAIRS
+        )
+        self.assertTrue(
+            contract.NATIVE_DISCOVERY_FAILURE_STAGES
+            <= SMOKE.FIXTURE_FAILURE_STAGES
+        )
+        self.assertTrue(
+            contract.NATIVE_DISCOVERY_FAILURE_CLASSES
+            <= SMOKE.FIXTURE_FAILURE_CLASSES
+        )
         exception_classes = {
             "script_timeout",
             "script_error",
@@ -1040,6 +1200,7 @@ function executeAsyncScript() { eval(input.script); }
         )
 
     def test_jest_report_projects_only_a_known_native_failure_pair(self) -> None:
+        contract = self._load_native_thunderbird_contract()
         self.assertTrue(
             all(
                 stage in SMOKE.FIXTURE_FAILURE_STAGES
@@ -1078,6 +1239,7 @@ function executeAsyncScript() { eval(input.script); }
             ("provider_refresh", "script_error"),
             ("provider_edit", "session_error"),
             ("post_revoke_provider_request", "other"),
+            *sorted(contract.NATIVE_DISCOVERY_FAILURE_PAIRS),
         )
         for stage, error_class in native_failures:
             with self.subTest(stage=stage, error_class=error_class):
