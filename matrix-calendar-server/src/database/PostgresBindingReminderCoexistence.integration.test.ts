@@ -16,7 +16,9 @@
 
 import { spawn } from 'child_process';
 import { createHash, randomUUID } from 'crypto';
+import express from 'express';
 import { createReadStream, createWriteStream, mkdtempSync, rmSync } from 'fs';
+import { request as httpRequest } from 'http';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import postgres from 'postgres';
@@ -31,6 +33,8 @@ import { createReminderDeliveryKey } from '../reminder/RoomReminderStore';
 import { PostgresPrivateCalendarClientStore } from '../service/PostgresPrivateCalendarClientStore';
 import { PostgresRoomCalendarBindingStore } from '../service/PostgresRoomCalendarBindingStore';
 import { privateCalendarClientSecretVerifier } from '../service/private-client/PrivateCalendarClientCredentials';
+import { PrivateCalendarClientDavGateway } from '../service/private-client/PrivateCalendarClientDavGateway';
+import { PrivateCalendarClientPolicy } from '../service/private-client/PrivateCalendarClientPolicy';
 
 const bindingDatabaseUrl = process.env.MATRIX_CALENDAR_BINDING_DATABASE_URL;
 const reminderDatabaseUrl = process.env.MATRIX_CALENDAR_REMINDER_DATABASE_URL;
@@ -556,9 +560,10 @@ describeWithAllStores(
     const activeAppId = `mcwpc~${'a'.repeat(48)}`;
     const revokedAppId = `mcwpc~${'b'.repeat(48)}`;
     const clientSecret = Buffer.alloc(32, 0x73).toString('base64url');
-    const epochHash = createHash('sha256')
-      .update(Buffer.alloc(32, 0x61))
-      .digest('hex');
+    const epochKey = Buffer.alloc(32, 0x61);
+    const rotatedEpochKey = Buffer.alloc(32, 0x62);
+    const callbackKey = Buffer.alloc(32, 0x63);
+    const epochHash = createHash('sha256').update(epochKey).digest('hex');
     const deliveryIdentity = { ...reminderIdentity, triggerOrdinal: 1 };
     const deliveryKey = createReminderDeliveryKey(deliveryIdentity);
     const verifyOnly = verifyRestoredCombinedPersistence;
@@ -579,7 +584,11 @@ describeWithAllStores(
     afterAll(async () => {
       if (!stores) return;
       try {
-        if (initialized && !keepCombinedPersistenceData) {
+        if (
+          initialized &&
+          !keepCombinedPersistenceData &&
+          !verifyRestoredCombinedPersistence
+        ) {
           await resetOwnedSchemas(stores.bindingSql);
         }
       } finally {
@@ -587,7 +596,7 @@ describeWithAllStores(
       }
     });
 
-    it('keeps all three stores independent across migration orders, reconnect, and restore', async () => {
+    it('restores all three stores from one custom dump and verifies their state and private epoch', async () => {
       if (!stores)
         throw new Error('Combined PostgreSQL stores are unavailable');
 
@@ -600,6 +609,7 @@ describeWithAllStores(
         for (const store of migrationOrders[0]) await store.migrate();
         await expectAllStoreSchemasOwnedByRole(stores.bindingSql);
         await expectPersistedState(stores);
+        await expectRestoredCredentialEpoch(stores);
         return;
       }
 
@@ -697,6 +707,41 @@ describeWithAllStores(
       });
 
       await expectPersistedState(stores, activationBeforeTargetEdit);
+      await expectRestoredCredentialEpoch(stores);
+
+      const tempDirectory = mkdtempSync(join(tmpdir(), 'matrix-calendar-pg-'));
+      const dumpPath = join(tempDirectory, 'combined-persistence.dump');
+      try {
+        await runPostgresTool(
+          'pg_dump',
+          [
+            '--no-password',
+            '--dbname=matrix_calendar_coexistence_test',
+            '--format=custom',
+            '--no-owner',
+            '--no-acl',
+          ],
+          dumpPath,
+        );
+        await resetOwnedSchemas(stores.bindingSql);
+        await runPostgresTool(
+          'pg_restore',
+          [
+            '--no-password',
+            '--dbname=matrix_calendar_coexistence_test',
+            '--no-owner',
+            '--no-acl',
+          ],
+          dumpPath,
+        );
+      } finally {
+        rmSync(tempDirectory, { recursive: true, force: true });
+      }
+
+      await expectAllStoreSchemasOwnedByRole(stores.bindingSql);
+      await expectPersistedState(stores, activationBeforeTargetEdit);
+      await expectRestoredCredentialEpoch(stores);
+
       await closeCombinedPostgresStores(stores);
       stores = createCombinedPostgresStores();
       await Promise.all([
@@ -713,7 +758,89 @@ describeWithAllStores(
       }
       await expectAllStoreSchemasOwnedByRole(stores.bindingSql);
       await expectPersistedState(stores, activationBeforeTargetEdit);
+      await expectRestoredCredentialEpoch(stores);
     });
+
+    async function expectRestoredCredentialEpoch(
+      current: CombinedPostgresStores,
+    ): Promise<void> {
+      const policyForEpoch = (key: Buffer) =>
+        new PrivateCalendarClientPolicy(
+          {
+            private_calendar_clients_enabled: true,
+            private_calendar_client_epoch_key: key,
+            private_calendar_client_callback_key: callbackKey,
+          } as never,
+          current.privateClients,
+          { canManageCalendars: jest.fn() } as never,
+          { getJoinedRoomMembers: jest.fn() } as never,
+          {} as never,
+          () => now,
+        );
+
+      await expect(
+        policyForEpoch(epochKey).authenticate(activeAppId, clientSecret),
+      ).resolves.toBe(true);
+      await expect(
+        policyForEpoch(rotatedEpochKey).authenticate(activeAppId, clientSecret),
+      ).resolves.toBe(false);
+
+      const rotatedPolicy = policyForEpoch(rotatedEpochKey);
+      const authorizeDavRequest = jest.spyOn(
+        rotatedPolicy,
+        'authorizeDavRequest',
+      );
+      const upstream = jest.fn() as jest.MockedFunction<typeof fetch>;
+      const gateway = new PrivateCalendarClientDavGateway(
+        {
+          private_calendar_clients_enabled: true,
+          private_calendar_client_origin: 'https://calendar.example.test',
+          radicale_url: 'http://radicale.internal/',
+        } as never,
+        rotatedPolicy,
+        upstream,
+      );
+      const app = express();
+      app.use(gateway.use.bind(gateway));
+      app.use((_request, response) => response.status(404).end());
+      const server = app.listen(0, '127.0.0.1');
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+
+      try {
+        const address = server.address();
+        if (!address || typeof address === 'string') {
+          throw new Error('The isolated private-client gateway did not bind');
+        }
+        const statusCode = await new Promise<number | undefined>(
+          (resolve, reject) => {
+            const request = httpRequest(
+              {
+                hostname: '127.0.0.1',
+                port: address.port,
+                path: `/${activeAppId}/calendar/event.ics`,
+                method: 'GET',
+                headers: {
+                  Authorization: `Basic ${Buffer.from(`${activeAppId}:${clientSecret}`).toString('base64')}`,
+                },
+              },
+              (response) => {
+                response.resume();
+                response.once('end', () => resolve(response.statusCode));
+              },
+            );
+            request.once('error', reject);
+            request.end();
+          },
+        );
+        expect(statusCode).toBe(401);
+        expect(authorizeDavRequest).not.toHaveBeenCalled();
+        expect(upstream).not.toHaveBeenCalled();
+      } finally {
+        await new Promise<void>((resolve, reject) => {
+          server.close((error) => (error ? reject(error) : resolve()));
+        });
+      }
+    }
 
     async function expectPersistedState(
       current: CombinedPostgresStores,
