@@ -461,44 +461,53 @@ export type DesktopJourneyEvidenceFailureCode =
   | 'evidence_phase_record_diagnostic_rejected'
   | 'evidence_final_summary_cross_check_rejected';
 
+export type DesktopPhaseOrderReason =
+  | 'desktop_refresh_progress_mismatch'
+  | 'desktop_refresh_pending'
+  | 'desktop_refresh_not_passed'
+  | 'child_summary_before_phase_end'
+  | 'duplicate_phase';
+
+export type DesktopEvidenceOrderDiagnostic = {
+  reason: DesktopPhaseOrderReason;
+  recordIndex: number;
+  recordCount: number;
+  observedPhase: DesktopJourneyPhase | 'unknown';
+  expectedPhase: DesktopJourneyPhase | 'unknown';
+};
+
 export type DesktopJourneyEvidenceClassification =
   | {
       evidenceState: 'invalid';
-      evidenceFailureCode: DesktopJourneyEvidenceFailureCode;
+      evidenceFailureCode: 'evidence_phase_record_order_rejected';
+      evidenceOrderDiagnostic: DesktopEvidenceOrderDiagnostic;
+    }
+  | {
+      evidenceState: 'invalid';
+      evidenceFailureCode: Exclude<
+        DesktopJourneyEvidenceFailureCode,
+        'evidence_phase_record_order_rejected'
+      >;
     }
   | {
       evidenceState: Exclude<DesktopJourneyEvidenceState, 'invalid'>;
     };
 
 export type DesktopChildDiagnostic =
-  | {
+  | ({
       childOutcome: 'exited';
       childExitStatus: number;
-      evidenceState: 'invalid';
-      evidenceFailureCode: DesktopJourneyEvidenceFailureCode;
-    }
-  | {
-      childOutcome: 'exited';
-      childExitStatus: number;
-      evidenceState: Exclude<DesktopJourneyEvidenceState, 'invalid'>;
-    }
-  | {
+    } & DesktopJourneyEvidenceClassification)
+  | ({
       childOutcome: Exclude<DesktopChildOutcome, 'exited'>;
       childExitStatus: null;
-      evidenceState: 'invalid';
-      evidenceFailureCode: DesktopJourneyEvidenceFailureCode;
-    }
-  | {
-      childOutcome: Exclude<DesktopChildOutcome, 'exited'>;
-      childExitStatus: null;
-      evidenceState: Exclude<DesktopJourneyEvidenceState, 'invalid'>;
-    };
+    } & DesktopJourneyEvidenceClassification);
 
 type DesktopJourneyCliSummaryBase = Omit<
   DesktopJourneySummary,
   'schemaVersion' | 'status' | 'desktopChildCompletion'
 > & {
-  schemaVersion: 22;
+  schemaVersion: 23;
   desktopChildDiagnostic: DesktopChildDiagnostic;
 };
 

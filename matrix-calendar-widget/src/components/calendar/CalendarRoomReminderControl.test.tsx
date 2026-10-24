@@ -221,7 +221,7 @@ describe('<CalendarRoomReminderControl />', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        /Supported timed Matrix reminders follow the saved alert; all-day events need a separate local time and time zone/,
+        /CalDAV alerts are saved in the event for calendar apps\. Matrix destinations control who this room bot pings/,
       ),
     ).toBeInTheDocument();
     expect(screen.getByLabelText('Matrix destination')).toBeInTheDocument();
