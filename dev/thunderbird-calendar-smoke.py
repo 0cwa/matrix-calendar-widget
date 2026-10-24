@@ -31,6 +31,7 @@ ROOT_PARENT = Path("/var/tmp")
 WORKER_FILENAME = "thunderbird-calendar-smoke.py"
 LOCK_FILENAME = "thunderbird-calendar-smoke-artifacts.json"
 CONTAINER_TASK_ROOT = Path("/task")
+CONTAINER_RUNTIME_DIR = Path("/tmp/runtime")
 EXPECTED_ARCHIVE_HOST = "archive.mozilla.org"
 EXPECTED_PACKAGE_HOST = "files.pythonhosted.org"
 DOWNLOAD_TIMEOUT_SECONDS = 25
@@ -76,6 +77,51 @@ NETWORK_ERROR_CLASSES = {
     "url_error",
     "unknown",
 }
+STARTUP_STAGES = {
+    "worker_setup",
+    "binary_version_probe",
+    "marionette_import",
+    "marionette_constructor",
+    "profile_validation",
+    "port_probe",
+    "session_creation",
+    "main_window_check",
+    "calendar_tab_check",
+    "worker_cleanup",
+    "worker_result_read",
+    "complete",
+    "container_execution",
+}
+STARTUP_EXCEPTION_CLASSES = {
+    "AssertionError",
+    "ConnectionError",
+    "FileNotFoundError",
+    "ImportError",
+    "ModuleNotFoundError",
+    "OSError",
+    "PermissionError",
+    "RuntimeError",
+    "SubprocessError",
+    "TimeoutError",
+    "TimeoutExpired",
+    "TypeError",
+    "ValueError",
+    "other",
+}
+BINARY_VERSION_PROBE_RESULTS = {
+    "passed",
+    "nonzero_exit",
+    "timeout",
+    "spawn_error",
+    "unparseable",
+    "version_mismatch",
+}
+CHILD_STATES = {"unknown", "running", "exited"}
+BOUNDED_VERSION_RE = re.compile(
+    r"(?<![0-9])([0-9]{1,3}\.[0-9]{1,3}(?:\.[0-9]{1,3})?)(?![0-9])"
+)
+MAX_STARTUP_PROBE_SECONDS = 10
+MAX_VERSION_OUTPUT_CHARS = 512
 PYTHON_ARTIFACT_NAMES = frozenset(
     {
         "setuptools",
@@ -158,7 +204,7 @@ def _summary_path() -> Path:
 
 def _initial_summary(source_sha: str) -> dict[str, Any]:
     return {
-        "schema": "thunderbird-calendar-startup-smoke@4",
+        "schema": "thunderbird-calendar-startup-smoke@5",
         "qualification_scope": "startup_only_not_caldav",
         "source_sha": source_sha,
         "status": "running",
@@ -176,6 +222,15 @@ def _initial_summary(source_sha: str) -> dict[str, Any]:
         "main_window": False,
         "calendar_tab": False,
         "app_version": None,
+        "startup_stage": None,
+        "startup_exception_class": None,
+        "binary_version_probe": None,
+        "binary_version": None,
+        "binary_version_exit_code": None,
+        "marionette_port_ready": False,
+        "marionette_session_created": False,
+        "child_state": "unknown",
+        "child_exit_code": None,
     }
 
 
@@ -188,7 +243,7 @@ def _write_summary(payload: dict[str, Any]) -> None:
     if (
         not isinstance(safe["source_sha"], str)
         or not re.fullmatch(r"[0-9a-f]{40}", safe["source_sha"])
-        or safe["schema"] != "thunderbird-calendar-startup-smoke@4"
+        or safe["schema"] != "thunderbird-calendar-startup-smoke@5"
         or safe["qualification_scope"] != "startup_only_not_caldav"
         or not isinstance(safe["status"], str)
         or safe["status"] not in {"running", "passed", "failed"}
@@ -216,6 +271,68 @@ def _write_summary(payload: dict[str, Any]) -> None:
                 or not 100 <= safe["http_status"] <= 599
             )
         )
+        or (
+            safe["startup_stage"] is not None
+            and (
+                not isinstance(safe["startup_stage"], str)
+                or safe["startup_stage"] not in STARTUP_STAGES
+            )
+        )
+        or (
+            safe["startup_exception_class"] is not None
+            and (
+                not isinstance(safe["startup_exception_class"], str)
+                or safe["startup_exception_class"] not in STARTUP_EXCEPTION_CLASSES
+            )
+        )
+        or (
+            safe["binary_version_probe"] is not None
+            and (
+                not isinstance(safe["binary_version_probe"], str)
+                or safe["binary_version_probe"] not in BINARY_VERSION_PROBE_RESULTS
+            )
+        )
+        or (
+            safe["binary_version"] is not None
+            and (
+                not isinstance(safe["binary_version"], str)
+                or BOUNDED_VERSION_RE.fullmatch(safe["binary_version"]) is None
+            )
+        )
+        or (
+            safe["binary_version_exit_code"] is not None
+            and (
+                type(safe["binary_version_exit_code"]) is not int
+                or not -255 <= safe["binary_version_exit_code"] <= 255
+            )
+        )
+        or (
+            safe["binary_version_probe"] == "passed"
+            and (
+                safe["binary_version"] is None
+                or safe["binary_version_exit_code"] != 0
+            )
+        )
+        or (
+            safe["binary_version"] is not None
+            and safe["binary_version_probe"] not in {"passed", "version_mismatch"}
+        )
+        or type(safe["marionette_port_ready"]) is not bool
+        or type(safe["marionette_session_created"]) is not bool
+        or (
+            safe["marionette_session_created"]
+            and (not safe["marionette_handshake"] or not safe["marionette_port_ready"])
+        )
+        or not isinstance(safe["child_state"], str)
+        or safe["child_state"] not in CHILD_STATES
+        or (
+            safe["child_exit_code"] is not None
+            and (
+                type(safe["child_exit_code"]) is not int
+                or not -255 <= safe["child_exit_code"] <= 255
+                or safe["child_state"] != "exited"
+            )
+        )
         or any(
             type(safe[name]) is not bool
             for name in (
@@ -227,6 +344,8 @@ def _write_summary(payload: dict[str, Any]) -> None:
                 "marionette_handshake",
                 "main_window",
                 "calendar_tab",
+                "marionette_port_ready",
+                "marionette_session_created",
             )
         )
         or (
@@ -950,7 +1069,7 @@ def _require_preflight(source_sha: str) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         raise SmokeFailure("preflight", "invalid_input") from None
     if (
-        value.get("schema") != "thunderbird-calendar-startup-smoke@4"
+        value.get("schema") != "thunderbird-calendar-startup-smoke@5"
         or value.get("source_sha") != source_sha
         or value.get("docker_backend_verified") is not True
         or value.get("docker_isolation_verified") is not True
@@ -1246,6 +1365,109 @@ def _worker_result_path(root: Path) -> Path:
     return root / "workspace" / ".smoke-result.json"
 
 
+def _startup_exception_class(error: BaseException) -> str:
+    name = type(error).__name__
+    return name if name in STARTUP_EXCEPTION_CLASSES else "other"
+
+
+def _bounded_version(output: Any) -> str | None:
+    if not isinstance(output, str) or len(output) > MAX_VERSION_OUTPUT_CHARS:
+        return None
+    match = BOUNDED_VERSION_RE.search(output)
+    return match.group(1) if match is not None else None
+
+
+def _bounded_exit_code(value: Any) -> bool:
+    return type(value) is int and -255 <= value <= 255
+
+
+def _probe_binary_version(binary: Path, result: dict[str, Any]) -> bool:
+    result["startup_stage"] = "binary_version_probe"
+    try:
+        completed = subprocess.run(
+            [str(binary), "--version"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout=MAX_STARTUP_PROBE_SECONDS,
+        )
+    except subprocess.TimeoutExpired as error:
+        result["binary_version_probe"] = "timeout"
+        result["startup_exception_class"] = _startup_exception_class(error)
+        result["error_class"] = "marionette_error"
+        return False
+    except OSError as error:
+        result["binary_version_probe"] = "spawn_error"
+        result["startup_exception_class"] = _startup_exception_class(error)
+        result["error_class"] = "marionette_error"
+        return False
+    except Exception as error:
+        result["binary_version_probe"] = "spawn_error"
+        result["startup_exception_class"] = _startup_exception_class(error)
+        result["error_class"] = "marionette_error"
+        return False
+    if not _bounded_exit_code(completed.returncode):
+        result["binary_version_probe"] = "spawn_error"
+        result["error_class"] = "marionette_error"
+        return False
+    result["binary_version_exit_code"] = completed.returncode
+    if completed.returncode != 0:
+        result["binary_version_probe"] = "nonzero_exit"
+        result["error_class"] = "marionette_error"
+        return False
+    version = _bounded_version(completed.stdout)
+    if version is None:
+        result["binary_version_probe"] = "unparseable"
+        result["error_class"] = "marionette_error"
+        return False
+    result["binary_version"] = version
+    if version != "158.0.1":
+        result["binary_version_probe"] = "version_mismatch"
+        result["error_class"] = "marionette_error"
+        return False
+    result["binary_version_probe"] = "passed"
+    return True
+
+
+def _marionette_port_ready(marionette: Any) -> bool:
+    try:
+        host = getattr(marionette, "host", "localhost")
+        port = getattr(marionette, "port", None)
+        if host not in {"localhost", "127.0.0.1", "::1"} or type(port) is not int or not 1 <= port <= 65535:
+            return False
+        with socket.create_connection((host, port), timeout=0.25):
+            return True
+    except Exception:
+        return False
+
+
+def _observe_marionette_child(result: dict[str, Any], marionette: Any) -> None:
+    try:
+        instance = getattr(marionette, "instance", None)
+        runner = getattr(instance, "runner", None)
+        handler = getattr(runner, "process_handler", None)
+        if handler is None:
+            handler = getattr(instance, "process_handler", None)
+        process = getattr(handler, "proc", None)
+        if process is None:
+            process = getattr(handler, "process", None)
+        poll = getattr(process, "poll", None)
+        if not callable(poll):
+            return
+        exit_code = poll()
+    except Exception:
+        return
+    if exit_code is None:
+        result["child_state"] = "running"
+    elif _bounded_exit_code(exit_code):
+        result["child_state"] = "exited"
+        result["child_exit_code"] = exit_code
+
+
 def _smoke_worker(root: Path) -> int:
     result: dict[str, Any] = {
         "marionette_handshake": False,
@@ -1253,22 +1475,35 @@ def _smoke_worker(root: Path) -> int:
         "calendar_tab": False,
         "app_version": None,
         "error_class": None,
+        "startup_stage": "worker_setup",
+        "startup_exception_class": None,
+        "binary_version_probe": None,
+        "binary_version": None,
+        "binary_version_exit_code": None,
+        "marionette_port_ready": False,
+        "marionette_session_created": False,
+        "child_state": "unknown",
+        "child_exit_code": None,
     }
-    path = _worker_result_path(root)
+    result_path = _worker_result_path(root)
     profile_path: Path | None = None
     marionette = None
     try:
         if root != CONTAINER_TASK_ROOT:
             raise SmokeFailure("preflight", "invalid_input")
         for name in ("config", "cache", "data", "state"):
-            path = root / "workspace" / ".xdg" / name
-            path.mkdir(parents=True, mode=0o700, exist_ok=True)
-            os.chmod(path, 0o700)
+            xdg_path = root / "workspace" / ".xdg" / name
+            xdg_path.mkdir(parents=True, mode=0o700, exist_ok=True)
+            os.chmod(xdg_path, 0o700)
         runtime = Path(os.environ["XDG_RUNTIME_DIR"])
-        if runtime != Path("/tmp/runtime"):
+        if runtime != CONTAINER_RUNTIME_DIR:
             raise SmokeFailure("preflight", "invalid_input")
         runtime.mkdir(mode=0o700, exist_ok=True)
         os.chmod(runtime, 0o700)
+        binary = root / "app" / "thunderbird" / "thunderbird"
+        if not _probe_binary_version(binary, result):
+            return 1
+        result["startup_stage"] = "marionette_import"
         from marionette_driver.marionette import Marionette
 
         prefs = {
@@ -1283,8 +1518,9 @@ def _smoke_worker(root: Path) -> int:
             "startup.homepage_welcome_url": "about:blank",
             "startup.homepage_welcome_url.additional": "",
         }
+        result["startup_stage"] = "marionette_constructor"
         marionette = Marionette(
-            bin=str(root / "app" / "thunderbird" / "thunderbird"),
+            bin=str(binary),
             app="thunderbird",
             workspace=str(root / "workspace"),
             app_args=["--calendar", "--headless"],
@@ -1292,15 +1528,24 @@ def _smoke_worker(root: Path) -> int:
             headless=False,
             startup_timeout=85,
         )
+        result["startup_stage"] = "profile_validation"
         profile_path = Path(marionette.profile_path).resolve()
         profile_path.relative_to((root / "workspace").resolve())
+        result["startup_stage"] = "port_probe"
+        result["marionette_port_ready"] = _marionette_port_ready(marionette)
+        result["startup_stage"] = "session_creation"
         capabilities = marionette.start_session()
         result["marionette_handshake"] = True
+        result["marionette_session_created"] = True
+        result["marionette_port_ready"] = True
+        _observe_marionette_child(result, marionette)
         version = capabilities.get("browserVersion")
         if isinstance(version, str) and re.fullmatch(r"[0-9]+\.[0-9]+(?:\.[0-9]+)?", version):
             result["app_version"] = version
+        result["startup_stage"] = "main_window_check"
         marionette.set_context(marionette.CONTEXT_CHROME)
         result["main_window"] = marionette.get_window_type() == "mail:3pane"
+        result["startup_stage"] = "calendar_tab_check"
         modes = marionette.execute_script(
             "const tabs = document.getElementById('tabmail'); "
             "return tabs.tabInfo.map(info => info.mode.name);"
@@ -1309,13 +1554,21 @@ def _smoke_worker(root: Path) -> int:
         if result["app_version"] != "158.0.1" or not result["main_window"] or not result["calendar_tab"]:
             result["error_class"] = "marionette_error"
             return 1
+        result["startup_stage"] = "complete"
         return 0
-    except Exception:
+    except Exception as error:
         result["error_class"] = "marionette_error"
+        result["startup_exception_class"] = _startup_exception_class(error)
+        if marionette is not None:
+            result["marionette_port_ready"] = (
+                result["marionette_port_ready"] or _marionette_port_ready(marionette)
+            )
+            _observe_marionette_child(result, marionette)
         return 1
     finally:
         try:
             if marionette is not None:
+                _observe_marionette_child(result, marionette)
                 if marionette.session is not None:
                     marionette.quit(in_app=True)
                 marionette.cleanup()
@@ -1323,10 +1576,14 @@ def _smoke_worker(root: Path) -> int:
                 profile_path.relative_to((root / "workspace").resolve())
                 if profile_path.exists():
                     shutil.rmtree(profile_path)
-        except Exception:
+        except Exception as error:
             result["error_class"] = "cleanup_error"
-        path.write_text(json.dumps(result, sort_keys=True) + "\n", encoding="utf-8")
-        os.chmod(path, 0o600)
+            result["startup_stage"] = "worker_cleanup"
+            result["startup_exception_class"] = _startup_exception_class(error)
+        if result["error_class"] is None:
+            result["startup_stage"] = "complete"
+        result_path.write_text(json.dumps(result, sort_keys=True) + "\n", encoding="utf-8")
+        os.chmod(result_path, 0o600)
 
 
 def _read_worker_result(root: Path) -> dict[str, Any]:
@@ -1334,13 +1591,80 @@ def _read_worker_result(root: Path) -> dict[str, Any]:
         value = json.loads(_worker_result_path(root).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         raise SmokeFailure("startup", "marionette_error") from None
-    expected_keys = {"marionette_handshake", "main_window", "calendar_tab", "app_version", "error_class"}
-    if set(value) != expected_keys or any(type(value[key]) is not bool for key in expected_keys - {"app_version", "error_class"}):
+    expected_keys = {
+        "marionette_handshake",
+        "main_window",
+        "calendar_tab",
+        "app_version",
+        "error_class",
+        "startup_stage",
+        "startup_exception_class",
+        "binary_version_probe",
+        "binary_version",
+        "binary_version_exit_code",
+        "marionette_port_ready",
+        "marionette_session_created",
+        "child_state",
+        "child_exit_code",
+    }
+    if not isinstance(value, dict) or set(value) != expected_keys:
+        raise SmokeFailure("startup", "marionette_error")
+    if any(
+        type(value[key]) is not bool
+        for key in (
+            "marionette_handshake",
+            "main_window",
+            "calendar_tab",
+            "marionette_port_ready",
+            "marionette_session_created",
+        )
+    ):
         raise SmokeFailure("startup", "marionette_error")
     if value["error_class"] not in (None, "marionette_error", "cleanup_error"):
         raise SmokeFailure("startup", "marionette_error")
+    if (
+        not isinstance(value["startup_stage"], str)
+        or value["startup_stage"] not in STARTUP_STAGES
+    ):
+        raise SmokeFailure("startup", "marionette_error")
+    if value["startup_exception_class"] not in (None, *STARTUP_EXCEPTION_CLASSES):
+        raise SmokeFailure("startup", "marionette_error")
+    if value["binary_version_probe"] not in (None, *BINARY_VERSION_PROBE_RESULTS):
+        raise SmokeFailure("startup", "marionette_error")
+    if (
+        not isinstance(value["child_state"], str)
+        or value["child_state"] not in CHILD_STATES
+    ):
+        raise SmokeFailure("startup", "marionette_error")
+    for code_field in ("binary_version_exit_code", "child_exit_code"):
+        if value[code_field] is not None and not _bounded_exit_code(value[code_field]):
+            raise SmokeFailure("startup", "marionette_error")
+    if value["child_exit_code"] is not None and value["child_state"] != "exited":
+        raise SmokeFailure("startup", "marionette_error")
+    binary_version = value["binary_version"]
+    if binary_version is not None and (
+        not isinstance(binary_version, str)
+        or BOUNDED_VERSION_RE.fullmatch(binary_version) is None
+    ):
+        raise SmokeFailure("startup", "marionette_error")
+    if value["binary_version_probe"] == "passed" and (
+        binary_version is None or value["binary_version_exit_code"] != 0
+    ):
+        raise SmokeFailure("startup", "marionette_error")
+    if binary_version is not None and value["binary_version_probe"] not in {
+        "passed",
+        "version_mismatch",
+    }:
+        raise SmokeFailure("startup", "marionette_error")
+    if value["marionette_session_created"] and (
+        not value["marionette_handshake"] or not value["marionette_port_ready"]
+    ):
+        raise SmokeFailure("startup", "marionette_error")
     version = value["app_version"]
-    if version is not None and not re.fullmatch(r"[0-9]+\.[0-9]+(?:\.[0-9]+)?", version):
+    if version is not None and (
+        not isinstance(version, str)
+        or not re.fullmatch(r"[0-9]+\.[0-9]+(?:\.[0-9]+)?", version)
+    ):
         raise SmokeFailure("startup", "marionette_error")
     return value
 
@@ -1371,6 +1695,7 @@ def _smoke(payload: dict[str, Any], source_sha: str, root: Path) -> None:
         payload[name] = prepared[name]
     _docker_preflight()
     payload["phase"] = "startup"
+    payload["startup_stage"] = "container_execution"
     mounts = [
         (root / "worker", "/input", True),
         (root / "app", "/task/app", True),
@@ -1398,12 +1723,35 @@ def _smoke(payload: dict[str, Any], source_sha: str, root: Path) -> None:
             failure_phase="startup",
             failure_class="marionette_error",
         )
-        result = _read_worker_result(root)
+        try:
+            result = _read_worker_result(root)
+        except SmokeFailure:
+            payload["startup_stage"] = "worker_result_read"
+            raise
     except SmokeFailure:
         raise
     except (OSError, ValueError):
         raise SmokeFailure("startup", "marionette_error") from None
-    payload.update({key: result[key] for key in ("marionette_handshake", "main_window", "calendar_tab", "app_version")})
+    payload.update(
+        {
+            key: result[key]
+            for key in (
+                "marionette_handshake",
+                "main_window",
+                "calendar_tab",
+                "app_version",
+                "startup_stage",
+                "startup_exception_class",
+                "binary_version_probe",
+                "binary_version",
+                "binary_version_exit_code",
+                "marionette_port_ready",
+                "marionette_session_created",
+                "child_state",
+                "child_exit_code",
+            )
+        }
+    )
     if result["error_class"]:
         raise SmokeFailure("startup", result["error_class"])
     if code != 0 or not all((result["marionette_handshake"], result["main_window"], result["calendar_tab"])):
