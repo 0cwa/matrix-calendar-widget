@@ -90,6 +90,13 @@ function reminderConfigurationObservation(overrides = {}) {
     recipientOptionCount: 1,
     memberQueryMatchesTargetAfterFill: selectedRecipient,
     memberQueryMatchesTargetAtOptionCount: selectedRecipient,
+    memberInputFocusedBeforeFill: selectedRecipient,
+    memberDocumentFocusedBeforeFill: selectedRecipient,
+    memberInputFocusedAfterFill: selectedRecipient,
+    memberDocumentFocusedAfterFill: selectedRecipient,
+    memberInputEventMatchedTarget: selectedRecipient,
+    memberInputBlurEventCount: 0,
+    memberInputSameNodeAfterFill: selectedRecipient,
     memberListboxCount: selectedRecipient ? 1 : 0,
     memberInputControlsUniqueListbox: selectedRecipient,
     memberOptionCount: selectedRecipient ? 1 : 0,
@@ -175,6 +182,13 @@ function missingReminderOptionObservation() {
     recipientOptionCount: 0,
     memberQueryMatchesTargetAfterFill: false,
     memberQueryMatchesTargetAtOptionCount: false,
+    memberInputFocusedBeforeFill: false,
+    memberDocumentFocusedBeforeFill: false,
+    memberInputFocusedAfterFill: false,
+    memberDocumentFocusedAfterFill: false,
+    memberInputEventMatchedTarget: false,
+    memberInputBlurEventCount: 0,
+    memberInputSameNodeAfterFill: false,
     memberListboxCount: 0,
     memberInputControlsUniqueListbox: false,
     memberOptionCount: 0,
@@ -1506,6 +1520,13 @@ test('projects selected-recipient success and failed selection steps', () => {
     memberOptionsContainingTargetIdCount: 1,
     memberListboxCount: 1,
     memberInputControlsUniqueListbox: true,
+    memberInputFocusedBeforeFill: true,
+    memberDocumentFocusedBeforeFill: true,
+    memberInputFocusedAfterFill: false,
+    memberDocumentFocusedAfterFill: true,
+    memberInputEventMatchedTarget: true,
+    memberInputBlurEventCount: 1,
+    memberInputSameNodeAfterFill: false,
     selectedMemberTagCount: 1,
     selectedMemberKeyboardFlow: true,
     narrowSidePanelSafe: true,
@@ -1516,7 +1537,7 @@ test('projects selected-recipient success and failed selection steps', () => {
   );
   assert.match(
     successSummary,
-    /phase=reminder-room-configuration-enabled status=passed reminder_step=complete reminder_settings_button_count=1 reminder_settings_button_visible=true options_get_count=1 options_http_status=200 configuration_get_count=1 configuration_http_status=200 destination_control_count=1 recipient_kind=selected recipient_selection_attempted=true recipient_selection_step=complete recipient_option_count=1 member_option_count=1 selected_member_tag_count=1 selected_member_keyboard_flow=true reminder_target_matches=true all_day_schedule_matches=true narrow_side_panel_safe=true put_count=1 put_http_status=200 member_query_matches_target_after_fill=true member_query_matches_target_at_option_count=true member_listbox_count=1 member_input_controls_unique_listbox=true member_options_containing_target_id_count=1/u,
+    /phase=reminder-room-configuration-enabled status=passed reminder_step=complete reminder_settings_button_count=1 reminder_settings_button_visible=true options_get_count=1 options_http_status=200 configuration_get_count=1 configuration_http_status=200 destination_control_count=1 recipient_kind=selected recipient_selection_attempted=true recipient_selection_step=complete recipient_option_count=1 member_option_count=1 selected_member_tag_count=1 selected_member_keyboard_flow=true reminder_target_matches=true all_day_schedule_matches=true narrow_side_panel_safe=true put_count=1 put_http_status=200 member_query_matches_target_after_fill=true member_query_matches_target_at_option_count=true member_input_focused_before_fill=true member_document_focused_before_fill=true member_input_focused_after_fill=false member_document_focused_after_fill=true member_input_event_matched_target=true member_input_blur_event_count=1 member_input_same_node_after_fill=false member_listbox_count=1 member_input_controls_unique_listbox=true member_options_containing_target_id_count=1/u,
   );
   for (const inconsistentObservation of [
     { recipientSelectionStep: 'unrecognized-step' },
@@ -1524,6 +1545,8 @@ test('projects selected-recipient success and failed selection steps', () => {
     { memberOptionCount: 0 },
     { memberInputControlsUniqueListbox: false },
     { memberInputControlsUniqueListbox: 'true' },
+    { memberInputFocusedAfterFill: 'true' },
+    { memberInputBlurEventCount: 3 },
     { selectedMemberTagCount: 2 },
     { allDayScheduleMatches: false },
   ]) {
@@ -1567,7 +1590,7 @@ test('projects selected-recipient success and failed selection steps', () => {
   );
   assert.match(
     failureSummary,
-    /phase=reminder-room-configuration-enabled status=failed reminder_step=recipient-selection reminder_settings_button_count=1 reminder_settings_button_visible=true options_get_count=1 options_http_status=200 configuration_get_count=1 configuration_http_status=200 destination_control_count=1 recipient_kind=selected recipient_selection_attempted=true recipient_selection_step=member-option-ready recipient_option_count=1 member_option_count=0 selected_member_tag_count=0 selected_member_keyboard_flow=false reminder_target_matches=false all_day_schedule_matches=false narrow_side_panel_safe=true put_count=0 put_http_status=0 member_query_matches_target_after_fill=true member_query_matches_target_at_option_count=true member_listbox_count=1 member_input_controls_unique_listbox=true member_options_containing_target_id_count=0/u,
+    /phase=reminder-room-configuration-enabled status=failed reminder_step=recipient-selection reminder_settings_button_count=1 reminder_settings_button_visible=true options_get_count=1 options_http_status=200 configuration_get_count=1 configuration_http_status=200 destination_control_count=1 recipient_kind=selected recipient_selection_attempted=true recipient_selection_step=member-option-ready recipient_option_count=1 member_option_count=0 selected_member_tag_count=0 selected_member_keyboard_flow=false reminder_target_matches=false all_day_schedule_matches=false narrow_side_panel_safe=true put_count=0 put_http_status=0 member_query_matches_target_after_fill=true member_query_matches_target_at_option_count=true .*member_listbox_count=1 member_input_controls_unique_listbox=true member_options_containing_target_id_count=0/u,
   );
 
   const multipleMemberOptionsFailure = {

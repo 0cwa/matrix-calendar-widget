@@ -168,6 +168,13 @@ type ReminderConfigurationObservation = {
   recipientOptionCount: number;
   memberQueryMatchesTargetAfterFill: boolean;
   memberQueryMatchesTargetAtOptionCount: boolean;
+  memberInputFocusedBeforeFill: boolean;
+  memberDocumentFocusedBeforeFill: boolean;
+  memberInputFocusedAfterFill: boolean;
+  memberDocumentFocusedAfterFill: boolean;
+  memberInputEventMatchedTarget: boolean;
+  memberInputBlurEventCount: number;
+  memberInputSameNodeAfterFill: boolean;
   memberListboxCount: number;
   memberInputControlsUniqueListbox: boolean;
   memberOptionCount: number;
@@ -5631,6 +5638,13 @@ async function setRoomReminder(
     recipientOptionCount: 0,
     memberQueryMatchesTargetAfterFill: false,
     memberQueryMatchesTargetAtOptionCount: false,
+    memberInputFocusedBeforeFill: false,
+    memberDocumentFocusedBeforeFill: false,
+    memberInputFocusedAfterFill: false,
+    memberDocumentFocusedAfterFill: false,
+    memberInputEventMatchedTarget: false,
+    memberInputBlurEventCount: 0,
+    memberInputSameNodeAfterFill: false,
     memberListboxCount: 0,
     memberInputControlsUniqueListbox: false,
     memberOptionCount: 0,
@@ -5858,10 +5872,117 @@ async function setRoomReminder(
         timeout: 15_000,
       });
 
+      const expectedMemberUserId = fixture.users.memberB.userId;
+      const memberInputProbeKey = '__calendarRoomReminderInputProbe';
+      const beforeFill = await memberInput
+        .evaluateAll(
+          (inputs, { expectedUserId, probeKey }) => {
+            if (inputs.length !== 1) return undefined;
+            const input = inputs[0] as HTMLInputElement;
+            type InputProbe = {
+              input: HTMLInputElement;
+              matchedTargetValue: boolean;
+              blurEventCount: number;
+              onInput: () => void;
+              onBlur: () => void;
+            };
+            const probe: InputProbe = {
+              input,
+              matchedTargetValue: false,
+              blurEventCount: 0,
+              onInput: () => undefined,
+              onBlur: () => undefined,
+            };
+            probe.onInput = () => {
+              if (input.value === expectedUserId) {
+                probe.matchedTargetValue = true;
+              }
+            };
+            probe.onBlur = () => {
+              probe.blurEventCount = Math.min(probe.blurEventCount + 1, 2);
+            };
+            input.addEventListener('input', probe.onInput, true);
+            input.addEventListener('blur', probe.onBlur, true);
+            (window as unknown as Record<string, unknown>)[probeKey] = probe;
+            return {
+              inputFocused: document.activeElement === input,
+              documentFocused: document.hasFocus(),
+            };
+          },
+          {
+            expectedUserId: expectedMemberUserId,
+            probeKey: memberInputProbeKey,
+          },
+        )
+        .catch(() => undefined);
+      if (beforeFill) {
+        observation.memberInputFocusedBeforeFill = beforeFill.inputFocused;
+        observation.memberDocumentFocusedBeforeFill =
+          beforeFill.documentFocused;
+      }
+
       observation.recipientSelectionStep = 'member-query-entered';
-      await memberInput.fill(fixture.users.memberB.userId);
-      observation.memberQueryMatchesTargetAfterFill =
-        (await memberInput.inputValue()) === fixture.users.memberB.userId;
+      try {
+        await memberInput.fill(expectedMemberUserId);
+        await expect(memberInput).toHaveValue(expectedMemberUserId, {
+          timeout: 15_000,
+        });
+      } finally {
+        const afterFill = await memberInput
+          .evaluateAll(
+            (inputs, { expectedUserId, probeKey }) => {
+              type InputProbe = {
+                input: HTMLInputElement;
+                matchedTargetValue: boolean;
+                blurEventCount: number;
+                onInput: () => void;
+                onBlur: () => void;
+              };
+              const probe = (window as unknown as Record<string, unknown>)[
+                probeKey
+              ] as InputProbe | undefined;
+              const input = inputs.length === 1 ? inputs[0] : undefined;
+              const result = {
+                queryMatchesTarget:
+                  input instanceof HTMLInputElement &&
+                  input.value === expectedUserId,
+                inputFocused:
+                  input instanceof HTMLInputElement &&
+                  document.activeElement === input,
+                documentFocused: document.hasFocus(),
+                inputEventMatchedTarget: probe?.matchedTargetValue ?? false,
+                blurEventCount: Math.min(probe?.blurEventCount ?? 0, 2),
+                sameInputNode: Boolean(
+                  input instanceof HTMLInputElement &&
+                  probe &&
+                  input === probe.input,
+                ),
+              };
+              if (probe) {
+                probe.input.removeEventListener('input', probe.onInput, true);
+                probe.input.removeEventListener('blur', probe.onBlur, true);
+                delete (window as unknown as Record<string, unknown>)[probeKey];
+              }
+              return result;
+            },
+            {
+              expectedUserId: expectedMemberUserId,
+              probeKey: memberInputProbeKey,
+            },
+          )
+          .catch(() => undefined);
+        if (afterFill) {
+          observation.memberQueryMatchesTargetAfterFill =
+            afterFill.queryMatchesTarget;
+          observation.memberInputFocusedAfterFill = afterFill.inputFocused;
+          observation.memberDocumentFocusedAfterFill =
+            afterFill.documentFocused;
+          observation.memberInputEventMatchedTarget =
+            afterFill.inputEventMatchedTarget;
+          observation.memberInputBlurEventCount = afterFill.blurEventCount;
+          observation.memberInputSameNodeAfterFill = afterFill.sameInputNode;
+        }
+      }
       observation.recipientSelectionStep = 'member-listbox-ready';
       observation.memberListboxCount = Math.min(await memberListbox.count(), 2);
       try {
