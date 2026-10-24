@@ -23,6 +23,7 @@ const ALLOWED_METHODS = new Set([
   'GET',
   'HEAD',
   'OPTIONS',
+  'PATCH',
   'POST',
   'PROPFIND',
   'PUT',
@@ -64,8 +65,7 @@ function normalizeAllowedHosts(value) {
         typeof host !== 'string' ||
         host.length === 0 ||
         host !== host.trim() ||
-        /[\u0000-\u0020\u007f]/u.test(host) ||
-        !/^(?:127\.0\.0\.1:3001|private-gateway-https:3443)$/u.test(host),
+        !ALLOWED_HOSTS.has(host.toLowerCase()),
     )
   ) {
     throw invalidConfiguration();

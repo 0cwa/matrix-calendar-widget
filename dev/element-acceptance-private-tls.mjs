@@ -230,7 +230,7 @@ export function validatePrivateAcceptanceTlsFixture({ directory } = {}) {
   const caCertPath = join(root, 'ca.pem');
   const serverCertPath = join(root, 'server.pem');
   const serverKeyPath = join(root, 'server-key.pem');
-  const fileInfo = [caCertPath, serverCertPath, serverKeyPath].map((path) => {
+  [caCertPath, serverCertPath, serverKeyPath].forEach((path) => {
     const file = lstatSync(path);
     if (
       !file.isFile() ||
@@ -240,7 +240,6 @@ export function validatePrivateAcceptanceTlsFixture({ directory } = {}) {
     ) {
       throw invalidFixture();
     }
-    return file;
   });
   const certificate = new X509Certificate(readFileSync(serverCertPath));
   const subjectPublicKeyInfo = certificate.publicKey.export({

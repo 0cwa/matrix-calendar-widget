@@ -45,6 +45,7 @@ let proxy;
 let backendPort;
 let proxyPort;
 let forwardedDavRequest = false;
+let forwardedApiPatchRequest = false;
 let forwardedCallbackRequest = false;
 
 function listen(server) {
@@ -119,6 +120,9 @@ before(async () => {
   const expectedCallbackBodyHash = createHash('sha256')
     .update('synthetic callback request body')
     .digest('hex');
+  const expectedApiPatchBodyHash = createHash('sha256')
+    .update('synthetic gateway API body')
+    .digest('hex');
   const syntheticAppId = `mcwpc~${'a'.repeat(48)}`;
   const davPath = `/${syntheticAppId}/calendar/probe.ics`;
   const callbackPath = '/v1/private-calendar-client-callback/rights';
@@ -143,6 +147,13 @@ before(async () => {
           request.headers.host === 'private-gateway-https:3443' &&
           request.headers['x-mcw-callback-signature'] === 'synthetic-only' &&
           bodyHash === expectedCallbackBodyHash;
+      }
+      if (request.method === 'PATCH') {
+        forwardedApiPatchRequest =
+          request.url === '/v1/calendar/events' &&
+          request.headers.host === '127.0.0.1:3001' &&
+          request.headers['x-synthetic-acceptance'] === 'api-patch' &&
+          bodyHash === expectedApiPatchBodyHash;
       }
       response.writeHead(request.method === 'PROPFIND' ? 207 : 200, {
         'content-type': 'application/octet-stream',
@@ -214,6 +225,18 @@ test('trusted TLS forwards the fixed Radicale callback request unchanged', async
   });
   assert.equal(result.status === 200, true);
   assert.equal(forwardedCallbackRequest, true);
+});
+
+test('trusted TLS forwards gateway API PATCH requests unchanged', async () => {
+  const result = await requestOverTls({
+    hostHeader: '127.0.0.1:3001',
+    method: 'PATCH',
+    path: '/v1/calendar/events',
+    body: Buffer.from('synthetic gateway API body'),
+    headers: { 'x-synthetic-acceptance': 'api-patch' },
+  });
+  assert.equal(result.status === 200, true);
+  assert.equal(forwardedApiPatchRequest, true);
 });
 
 test('TLS rejects an untrusted chain and a certificate name outside its SANs', async () => {
