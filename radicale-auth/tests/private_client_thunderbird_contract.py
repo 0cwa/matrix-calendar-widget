@@ -74,6 +74,13 @@ MARIONETTE_EXCEPTION_CLASSES = {
 NATIVE_DISCOVERY_FAILURE_STAGES = {
     "provider_invocation",
     "result_normalization",
+    "calendar_id_manager_lookup",
+    "calendar_existing_lookup",
+    "calendar_register",
+    "calendar_readback",
+    "calendar_enable",
+    "calendar_window_handoff",
+    # Keep accepting summaries produced by the previous closed diagnostic.
     "calendar_registration",
 }
 NATIVE_DISCOVERY_FAILURE_CLASSES = {
@@ -189,18 +196,26 @@ let nativeDiscoveryStage = "provider_invocation";
         parsed.search !== "" || parsed.hash !== "") {
       return { ok: false, failure: "calendar_scope_mismatch" };
     }
-    nativeDiscoveryStage = "calendar_registration";
-    if (!calendar.id || !cal.manager) {
+    nativeDiscoveryStage = "calendar_id_manager_lookup";
+    const calendarId = calendar.id;
+    const manager = cal.manager;
+    if (!calendarId || !manager) {
       return { ok: false, failure: "calendar_registration_data_missing" };
     }
-    if (!cal.manager.getCalendarById(calendar.id)) {
-      cal.manager.registerCalendar(calendar);
+    nativeDiscoveryStage = "calendar_existing_lookup";
+    const existing = manager.getCalendarById(calendarId);
+    if (!existing) {
+      nativeDiscoveryStage = "calendar_register";
+      manager.registerCalendar(calendar);
     }
-    const registered = cal.manager.getCalendarById(calendar.id);
+    nativeDiscoveryStage = "calendar_readback";
+    const registered = manager.getCalendarById(calendarId);
     if (!registered || registered.type !== "caldav") {
       return { ok: false, failure: "calendar_not_registered" };
     }
-    registered.enabled = true;
+    nativeDiscoveryStage = "calendar_enable";
+    registered.setProperty("disabled", false);
+    nativeDiscoveryStage = "calendar_window_handoff";
     window.__mcwPrivateCalDavCalendar = registered;
     return {
       ok: true,
