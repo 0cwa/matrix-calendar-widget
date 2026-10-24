@@ -31,8 +31,8 @@ if SMOKE_SPEC is None or SMOKE_SPEC.loader is None:
 SMOKE = importlib.util.module_from_spec(SMOKE_SPEC)
 SMOKE_SPEC.loader.exec_module(SMOKE)
 
-SUMMARY_SCHEMA = "thunderbird-private-caldav-qualification@1"
-RESULT_SCHEMA = SUMMARY_SCHEMA
+SUMMARY_SCHEMA = "thunderbird-private-caldav-summary@2"
+RESULT_SCHEMA = "thunderbird-private-caldav-qualification@1"
 EXPECTED_NODE_PREFIX = (22, 12, 0)
 EXPECTED_WHEEL_COUNT = 19
 WHEEL_TIMEOUT_SECONDS = 300
@@ -65,6 +65,8 @@ FAILURE_CLASSES = {
     "native_result_invalid",
     "native_timeout",
     "preflight_failed",
+    "startup_artifacts_preflight_failed",
+    "workspace_preflight_failed",
     "internal_error",
 }
 PHASES = {"preflight", "prepare", "dependency_install", "fixture_run", "complete"}
@@ -89,6 +91,8 @@ def _initial_summary(source_sha: str) -> dict[str, Any]:
         "failure_class": None,
         "docker_backend_verified": False,
         "docker_isolation_verified": False,
+        "workspace_jest_ready": False,
+        "startup_artifacts_verified": False,
         "thunderbird_archive_verified": False,
         "marionette_artifacts_verified": False,
         "node_version": None,
@@ -131,6 +135,8 @@ def _write_summary(payload: dict[str, Any]) -> None:
             for key in (
                 "docker_backend_verified",
                 "docker_isolation_verified",
+                "workspace_jest_ready",
+                "startup_artifacts_verified",
                 "thunderbird_archive_verified",
                 "marionette_artifacts_verified",
                 "caldav_wheels_verified",
@@ -249,6 +255,8 @@ def _require_prepared(source_sha: str, *, installed: bool = False) -> tuple[Path
         summary.get("source_sha") != source_sha
         or summary.get("docker_backend_verified") is not True
         or summary.get("docker_isolation_verified") is not True
+        or summary.get("workspace_jest_ready") is not True
+        or summary.get("startup_artifacts_verified") is not True
         or summary.get("thunderbird_archive_verified") is not True
         or summary.get("marionette_artifacts_verified") is not True
         or summary.get("caldav_wheels_verified") is not True
@@ -439,10 +447,13 @@ def _prepare() -> None:
             "docker_isolation_verified": preflight["docker_isolation_verified"],
         }
     )
-    stage = "preflight"
+    stage = "workspace_preflight"
     try:
         _workspace()
+        summary["workspace_jest_ready"] = True
+        stage = "startup_artifacts_preflight"
         _require_startup_artifacts(root, source_sha)
+        summary["startup_artifacts_verified"] = True
         stage = "node_runtime"
         node_version, _ = _node_runtime(root)
         stage = "dependency_download"
@@ -465,7 +476,8 @@ def _prepare() -> None:
             {
                 "status": "failed",
                 "failure_class": {
-                    "preflight": "preflight_failed",
+                    "workspace_preflight": "workspace_preflight_failed",
+                    "startup_artifacts_preflight": "startup_artifacts_preflight_failed",
                     "node_runtime": "node_runtime_missing",
                     "dependency_download": "dependency_download_failed",
                 }[stage],
@@ -737,6 +749,8 @@ def _finalize() -> None:
             summary.get("native_provider_passed") is True
             and summary.get("docker_backend_verified") is True
             and summary.get("docker_isolation_verified") is True
+            and summary.get("workspace_jest_ready") is True
+            and summary.get("startup_artifacts_verified") is True
             and summary.get("thunderbird_archive_verified") is True
             and summary.get("marionette_artifacts_verified") is True
             and summary.get("caldav_wheels_verified") is True
