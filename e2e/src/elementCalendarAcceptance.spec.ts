@@ -5847,7 +5847,17 @@ async function setRoomReminder(
         );
       };
       try {
-        await expect(memberListbox).toHaveCount(1, { timeout: 15_000 });
+        await expect
+          .poll(
+            async () => {
+              const associated = await measureMemberInputListboxAssociation();
+              observation.memberInputControlsUniqueListbox = associated;
+              return associated;
+            },
+            { timeout: 15_000 },
+          )
+          .toBe(true);
+        await expect(memberListbox).toHaveCount(1);
       } finally {
         observation.memberListboxCount = await memberListbox
           .count()
