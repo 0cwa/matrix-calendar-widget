@@ -1381,6 +1381,13 @@ def _run() -> bool:
             "container_isolation_unavailable": "container_isolation_unavailable",
             "native_timeout": "native_timeout",
         }.get(error.error_class, "jest_failed")
+        if error.error_class == "native_timeout" and "host_phase_path" in locals():
+            fixture_phase = _read_fixture_phase_marker(host_phase_path, source_sha)
+            summary["fixtureLastPhase"] = fixture_phase or "marker_invalid"
+            try:
+                _write_summary(summary)
+            except Exception:
+                pass
         _fail_summary("fixture_run", failure_class)
         return False
     except Exception:

@@ -990,6 +990,78 @@ class PublicFeedSmokeTests(unittest.TestCase):
             self.assertFalse(saved["nativeProviderPassed"])
             self.assertTrue(all(saved[field] == 0 for field in PUBLIC.COUNT_FIELDS))
 
+    def test_native_timeout_projects_valid_or_invalid_fixture_phase(self) -> None:
+        for marker_content, expected_phase in (
+            (
+                {
+                    "schema": PUBLIC.FIXTURE_PHASE_SCHEMA,
+                    "profile": "public_ics",
+                    "source_sha": SOURCE_SHA,
+                    "phase": "radicale_ready",
+                },
+                "radicale_ready",
+            ),
+            ({"phase": "untrusted detail"}, "marker_invalid"),
+        ):
+            with self.subTest(expected_phase=expected_phase):
+                with tempfile.TemporaryDirectory() as temporary:
+                    base = Path(temporary)
+                    runner_temp = base / "runner-temp"
+                    runner_temp.mkdir()
+                    task_root = base / "task-root"
+                    task_workspace = task_root / "workspace"
+                    task_workspace.mkdir(parents=True)
+                    summary = PUBLIC._initial_summary(SOURCE_SHA)
+
+                    def timeout_after_fixture_phase(
+                        *_args: object, **_kwargs: object
+                    ) -> int:
+                        marker_path = task_workspace / PUBLIC.FIXTURE_PHASE_FILENAME
+                        marker_path.write_text(
+                            json.dumps(marker_content) + "\n", encoding="utf-8"
+                        )
+                        marker_path.chmod(0o600)
+                        raise PUBLIC.SMOKE.SmokeFailure(
+                            "fixture_run", "native_timeout"
+                        )
+
+                    with (
+                        patch.dict(
+                            os.environ,
+                            {
+                                "RUNNER_TEMP": str(runner_temp),
+                                "GITHUB_SHA": SOURCE_SHA,
+                            },
+                        ),
+                        patch.object(
+                            PUBLIC,
+                            "_prepared",
+                            return_value=(task_root, summary, base / "workspace"),
+                        ),
+                        patch.object(
+                            PUBLIC.SMOKE,
+                            "_run_container_bounded",
+                            side_effect=timeout_after_fixture_phase,
+                        ),
+                    ):
+                        self.assertFalse(PUBLIC._run())
+                        saved = PUBLIC._load_summary()
+
+                    self.assertEqual(saved["failure_stage"], "fixture_run")
+                    self.assertEqual(saved["failure_class"], "native_timeout")
+                    self.assertEqual(saved["phase"], "fixture_run")
+                    self.assertEqual(saved["fixtureLastPhase"], expected_phase)
+                    self.assertFalse(saved["nativeProviderPassed"])
+                    self.assertTrue(
+                        all(not saved[field] for field in PUBLIC.SUMMARY_BOOLEAN_FIELDS)
+                    )
+                    self.assertTrue(
+                        all(saved[field] == 0 for field in PUBLIC.COUNT_FIELDS)
+                    )
+                    self.assertEqual(
+                        set(saved), set(PUBLIC._initial_summary(SOURCE_SHA))
+                    )
+
     def test_actual_jest_failure_projects_source_bound_phase_and_cleans_files(
         self,
     ) -> None:
