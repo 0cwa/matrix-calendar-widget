@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 import os
@@ -98,6 +99,11 @@ class PrivateCalDavSmokeTests(unittest.TestCase):
             startup._prepare(payload, source_sha, task_root, startup._load_lock())
         startup._write_summary(payload)
         return startup._summary_path()
+
+    def _make_private_wheelhouse(self, task_root: Path) -> tuple[int, int]:
+        wheelhouse = task_root / "private-caldav-wheels"
+        wheelhouse.mkdir(mode=0o700)
+        return SMOKE.EXPECTED_WHEEL_COUNT, 1000
 
     def test_actual_startup_prepare_output_matches_workspace_and_artifact_gates(self) -> None:
         source_sha = "a" * 40
@@ -227,7 +233,7 @@ class PrivateCalDavSmokeTests(unittest.TestCase):
                     patch.object(
                         SMOKE,
                         "_download_private_wheels",
-                        return_value=(SMOKE.EXPECTED_WHEEL_COUNT, 1000),
+                        side_effect=self._make_private_wheelhouse,
                     ),
                     patch.object(startup, "_capture_container", return_value=""),
                 ):
@@ -235,6 +241,72 @@ class PrivateCalDavSmokeTests(unittest.TestCase):
                     _, prepared = SMOKE._require_prepared(source_sha)
                 self.assertTrue(prepared["workspace_jest_ready"])
                 self.assertTrue(prepared["startup_artifacts_verified"])
+
+                with (
+                    patch.object(startup, "ROOT_PARENT", task_root.parent),
+                    patch.object(startup, "_root_path", return_value=task_root),
+                    patch.object(SMOKE, "_task_root", return_value=task_root),
+                    patch.object(
+                        startup, "_run_container_bounded", return_value=1
+                    ) as failed_install,
+                    self.assertRaises(ValueError),
+                ):
+                    SMOKE._install()
+                failed_summary = SMOKE._load_summary()
+                self.assertEqual(failed_summary["failure_class"], "dependency_install_failed")
+                self.assertEqual(failed_summary["phase"], "dependency_install")
+                self.assertFalse(failed_summary["private_dependencies_installed"])
+                failed_install.assert_called_once()
+
+                SMOKE._write_summary(prepared)
+                with (
+                    patch.object(startup, "ROOT_PARENT", task_root.parent),
+                    patch.object(startup, "_root_path", return_value=task_root),
+                    patch.object(SMOKE, "_task_root", return_value=task_root),
+                    patch.object(
+                        startup, "_run_container_bounded", return_value=0
+                    ) as install,
+                ):
+                    SMOKE._install()
+                install.assert_called_once()
+                install_command = install.call_args.args[1]
+                self.assertEqual(
+                    install_command[:3],
+                    ["/usr/local/bin/python3", "-B", "-c"],
+                )
+                install_program = ast.parse(install_command[3])
+                commands_assignment = next(
+                    node
+                    for node in install_program.body
+                    if isinstance(node, ast.Assign)
+                    and any(
+                        isinstance(target, ast.Name) and target.id == "commands"
+                        for target in node.targets
+                    )
+                )
+                pip_commands = ast.literal_eval(commands_assignment.value)
+                self.assertEqual(
+                    [command[0] for command in pip_commands],
+                    ["/task/venv/bin/python", "/task/venv/bin/python"],
+                )
+                self.assertEqual(pip_commands[1][-2:], ["pip", "check"])
+                self.assertNotIn("sys.executable", install_command[3])
+                self.assertEqual(
+                    install.call_args.kwargs["mounts"],
+                    [
+                        (task_root / "worker", "/input", True),
+                        (task_root / "private-caldav-wheels", "/private-wheels", True),
+                        (task_root / "venv", "/task/venv", False),
+                        (task_root / "workspace", "/task/workspace", False),
+                    ],
+                )
+                self.assertTrue(
+                    all(
+                        source.is_dir()
+                        for source, _target, _readonly in install.call_args.kwargs["mounts"]
+                    )
+                )
+                self.assertTrue(SMOKE._load_summary()["private_dependencies_installed"])
 
                 marionette.unlink()
                 with self.assertRaises(ValueError):
@@ -349,6 +421,273 @@ class PrivateCalDavSmokeTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 SMOKE._read_native_result(result)
 
+    def test_jest_report_projects_only_a_known_native_failure_pair(self) -> None:
+        self.assertTrue(
+            all(
+                stage in SMOKE.FIXTURE_FAILURE_STAGES
+                and error_class in SMOKE.FIXTURE_FAILURE_CLASSES
+                for stage, error_class in SMOKE.NATIVE_FAILURE_PAIRS
+            )
+        )
+        report = {
+            "success": False,
+            "testResults": [
+                {
+                    "assertionResults": [
+                        {
+                            "status": "failed",
+                            "failureMessages": [
+                                "Error: Native Thunderbird CalDAV contract failed "
+                                "(provider_discovery/discovery_cardinality). "
+                                "private marker must not escape",
+                            ],
+                        }
+                    ]
+                }
+            ],
+        }
+        self.assertEqual(
+            SMOKE._classify_jest_report(report),
+            ("provider_discovery", "discovery_cardinality"),
+        )
+
+        report["testResults"][0]["assertionResults"][0]["failureMessages"] = [
+            "Error: Native Thunderbird CalDAV contract failed "
+            "(unknown_stage/private marker)."
+        ]
+        self.assertEqual(
+            SMOKE._classify_jest_report(report),
+            ("unknown", "unrecognized_native_failure"),
+        )
+
+    def test_jest_report_classifies_suite_load_and_fixture_setup_failures(self) -> None:
+        self.assertEqual(
+            SMOKE._classify_jest_report(
+                {
+                    "success": False,
+                    "testResults": [{"testExecError": {"message": "private data"}}],
+                }
+            ),
+            ("suite_load", "jest_suite_failed"),
+        )
+        self.assertEqual(
+            SMOKE._classify_jest_report(
+                {
+                    "success": False,
+                    "testResults": [
+                        {"status": "failed", "assertionResults": []}
+                    ],
+                }
+            ),
+            ("suite_load", "jest_suite_failed"),
+        )
+        self.assertEqual(
+            SMOKE._classify_jest_report(
+                {
+                    "success": False,
+                    "testResults": [
+                        {
+                            "assertionResults": [
+                                {
+                                    "status": "failed",
+                                    "failureMessages": [
+                                        "Python CalDAV contract exited 1: private data"
+                                    ],
+                                }
+                            ]
+                        }
+                    ],
+                }
+            ),
+            ("fixture_setup", "caldav_contract_failed"),
+        )
+
+    def test_jest_report_maps_known_runtime_failures_to_closed_classes(self) -> None:
+        cases = (
+            ("Cannot find module 'private marker'", "module_load_failed"),
+            ("ERR_DLOPEN_FAILED", "native_binding_failed"),
+            (
+                "Jest encountered an unexpected token while loading the test.",
+                "typescript_transform_failed",
+            ),
+            ("Validation Error: invalid Jest config private marker", "invalid_jest_config"),
+            ("Exceeded timeout of 120000 ms for a test", "jest_timeout"),
+        )
+        for message, expected_class in cases:
+            with self.subTest(expected_class=expected_class):
+                self.assertEqual(
+                    SMOKE._classify_jest_report(
+                        {
+                            "success": False,
+                            "testResults": [
+                                {
+                                    "status": "failed",
+                                    "message": message,
+                                    "assertionResults": [],
+                                }
+                            ],
+                        }
+                    ),
+                    ("suite_load", expected_class),
+                )
+
+    def test_jest_report_requires_a_bounded_owned_private_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            report = Path(temporary) / "jest-report.json"
+            report.write_text('{"success":false,"testResults":[]}', encoding="utf-8")
+            report.chmod(0o600)
+            self.assertEqual(SMOKE._read_jest_report(report)["success"], False)
+
+            report.write_text("", encoding="utf-8")
+            report.chmod(0o600)
+            self.assertEqual(
+                SMOKE._jest_report_failure_class(report), "jest_report_missing"
+            )
+
+            report.write_text("not json", encoding="utf-8")
+            report.chmod(0o600)
+            self.assertEqual(
+                SMOKE._jest_report_failure_class(report), "jest_report_invalid"
+            )
+            with self.assertRaises(ValueError):
+                SMOKE._read_jest_report(report)
+
+            report.write_text(
+                '{"success":false,"success":true,"testResults":[]}',
+                encoding="utf-8",
+            )
+            report.chmod(0o600)
+            with self.assertRaises(ValueError):
+                SMOKE._read_jest_report(report)
+
+            report.write_bytes(b"x" * (SMOKE.MAX_JEST_REPORT_BYTES + 1))
+            report.chmod(0o600)
+            with self.assertRaises(ValueError):
+                SMOKE._read_jest_report(report)
+
+            report.unlink()
+            target = Path(temporary) / "target.json"
+            target.write_text('{"success":false,"testResults":[]}', encoding="utf-8")
+            target.chmod(0o600)
+            report.symlink_to(target)
+            self.assertEqual(
+                SMOKE._jest_report_failure_class(report), "jest_report_invalid"
+            )
+            with self.assertRaises(ValueError):
+                SMOKE._read_jest_report(report)
+
+    def test_worker_diagnostic_is_source_bound_and_rejects_untrusted_fields(self) -> None:
+        source_sha = "a" * 40
+        with tempfile.TemporaryDirectory() as temporary:
+            diagnostic = Path(temporary) / SMOKE.WORKER_DIAGNOSTIC_FILENAME
+            SMOKE._write_worker_diagnostic(
+                diagnostic, source_sha, "provider_discovery", "discovery_cardinality"
+            )
+            self.assertEqual(
+                SMOKE._read_worker_diagnostic(diagnostic, source_sha),
+                {
+                    "fixture_failure_stage": "provider_discovery",
+                    "fixture_failure_class": "discovery_cardinality",
+                },
+            )
+            self.assertEqual(diagnostic.stat().st_mode & 0o777, 0o600)
+
+            payload = json.loads(diagnostic.read_text(encoding="utf-8"))
+            payload["secret"] = "must-not-be-accepted"
+            diagnostic.write_text(json.dumps(payload), encoding="utf-8")
+            diagnostic.chmod(0o600)
+            self.assertIsNone(SMOKE._read_worker_diagnostic(diagnostic, source_sha))
+            self.assertIsNone(SMOKE._read_worker_diagnostic(diagnostic, "b" * 40))
+
+            diagnostic.write_text("{}", encoding="utf-8")
+            diagnostic.chmod(0o644)
+            self.assertIsNone(SMOKE._read_worker_diagnostic(diagnostic, source_sha))
+
+            diagnostic.chmod(0o600)
+            diagnostic.write_text("not json", encoding="utf-8")
+            diagnostic.chmod(0o600)
+            self.assertIsNone(SMOKE._read_worker_diagnostic(diagnostic, source_sha))
+
+            diagnostic.unlink()
+            target = Path(temporary) / "target.json"
+            target.write_text("{}", encoding="utf-8")
+            target.chmod(0o600)
+            diagnostic.symlink_to(target)
+            self.assertIsNone(SMOKE._read_worker_diagnostic(diagnostic, source_sha))
+
+            diagnostic.unlink()
+            diagnostic.write_bytes(b"x" * 513)
+            diagnostic.chmod(0o600)
+            self.assertIsNone(SMOKE._read_worker_diagnostic(diagnostic, source_sha))
+
+    def test_summary_validates_and_redacts_fixture_failure_details(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch.dict(os.environ, {"RUNNER_TEMP": temporary}):
+                summary = SMOKE._initial_summary("a" * 40)
+                summary.update(
+                    {
+                        "status": "failed",
+                        "phase": "fixture_run",
+                        "failure_class": "jest_failed",
+                        "fixture_failure_stage": "provider_discovery",
+                        "fixture_failure_class": "discovery_cardinality",
+                    }
+                )
+                SMOKE._write_summary(summary)
+                summary_path = Path(temporary) / "thunderbird-private-caldav-summary.json"
+                self.assertEqual(
+                    json.loads(summary_path.read_text(encoding="utf-8"))["fixture_failure_stage"],
+                    "provider_discovery",
+                )
+
+                summary["fixture_failure_class"] = "private path or raw failure"
+                SMOKE._write_summary(summary)
+                observed = json.loads(summary_path.read_text(encoding="utf-8"))
+                self.assertEqual(observed["failure_class"], "internal_error")
+                self.assertNotIn("private path or raw failure", summary_path.read_text())
+
+    def test_run_fails_closed_while_transferring_worker_diagnostic_to_summary(self) -> None:
+        source_sha = "a" * 40
+        with tempfile.TemporaryDirectory() as temporary:
+            temporary_path = Path(temporary)
+            task_root = temporary_path / "owned-task"
+            workspace = task_root / "workspace"
+            workspace.mkdir(parents=True)
+            summary = SMOKE._initial_summary(source_sha)
+
+            def capture_failure(*_args: object, **kwargs: object) -> str:
+                SMOKE._write_worker_diagnostic(
+                    task_root / "workspace" / SMOKE.WORKER_DIAGNOSTIC_FILENAME,
+                    source_sha,
+                    "provider_discovery",
+                    "discovery_cardinality",
+                )
+                raise RuntimeError("raw worker output must not escape")
+
+            with (
+                patch.dict(
+                    os.environ,
+                    {"GITHUB_SHA": source_sha, "RUNNER_TEMP": temporary},
+                ),
+                patch.object(SMOKE, "_require_prepared", return_value=(task_root, summary)),
+                patch.object(SMOKE, "_workspace", return_value=Path(temporary_path / "checkout")),
+                patch.object(SMOKE.SMOKE, "_capture_container", side_effect=capture_failure),
+            ):
+                with self.assertRaises(RuntimeError):
+                    SMOKE._run()
+
+            summary_path = temporary_path / "thunderbird-private-caldav-summary.json"
+            observed = json.loads(summary_path.read_text(encoding="utf-8"))
+            self.assertEqual(observed["status"], "failed")
+            self.assertEqual(observed["failure_class"], "jest_failed")
+            self.assertEqual(observed["fixture_failure_stage"], "provider_discovery")
+            self.assertEqual(
+                observed["fixture_failure_class"], "discovery_cardinality"
+            )
+            self.assertFalse(observed["native_provider_passed"])
+            self.assertTrue(all(observed[key] is False for key in SMOKE.RESULT_FIELDS))
+            self.assertNotIn("raw worker output", summary_path.read_text())
+
     def test_public_summary_drops_unrecognized_private_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             with patch.dict(os.environ, {"RUNNER_TEMP": temporary}):
@@ -358,7 +697,7 @@ class PrivateCalDavSmokeTests(unittest.TestCase):
                 summary_path = Path(temporary) / "thunderbird-private-caldav-summary.json"
                 observed = json.loads(summary_path.read_text(encoding="utf-8"))
                 self.assertEqual(set(observed), set(SMOKE._initial_summary("a" * 40)))
-                self.assertEqual(observed["schema"], "thunderbird-private-caldav-summary@2")
+                self.assertEqual(observed["schema"], "thunderbird-private-caldav-summary@3")
                 self.assertNotIn("must-not-be-written", summary_path.read_text())
                 self.assertEqual(summary_path.stat().st_mode & 0o777, 0o600)
 
@@ -501,6 +840,43 @@ class PrivateCalDavSmokeTests(unittest.TestCase):
                     )
                     self.assertEqual(skipped["status"], "failed")
                     self.assertEqual(skipped["failure_class"], "jest_failed")
+
+    def test_finalize_preserves_first_fixture_failure_during_cleanup(self) -> None:
+        source_sha = "a" * 40
+        failed = SMOKE._initial_summary(source_sha)
+        failed.update(
+            {
+                "status": "failed",
+                "phase": "fixture_run",
+                "failure_class": "jest_failed",
+                "fixture_failure_stage": "provider_discovery",
+                "fixture_failure_class": "discovery_cardinality",
+            }
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            task_root = Path(temporary) / "owned-task"
+            task_root.mkdir()
+            environment = {
+                "RUNNER_TEMP": temporary,
+                "GITHUB_SHA": source_sha,
+            }
+            with (
+                patch.dict(os.environ, environment),
+                patch.object(SMOKE, "_task_root", return_value=task_root),
+                patch.object(SMOKE.SMOKE, "_cleanup_root", side_effect=RuntimeError),
+            ):
+                SMOKE._write_summary(failed)
+                SMOKE._finalize()
+                observed = json.loads(
+                    (Path(temporary) / "thunderbird-private-caldav-summary.json").read_text()
+                )
+                self.assertEqual(observed["failure_class"], "jest_failed")
+                self.assertEqual(
+                    observed["fixture_failure_stage"], "provider_discovery"
+                )
+                self.assertEqual(
+                    observed["fixture_failure_class"], "discovery_cardinality"
+                )
 
 
 if __name__ == "__main__":

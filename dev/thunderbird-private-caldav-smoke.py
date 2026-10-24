@@ -31,14 +31,18 @@ if SMOKE_SPEC is None or SMOKE_SPEC.loader is None:
 SMOKE = importlib.util.module_from_spec(SMOKE_SPEC)
 SMOKE_SPEC.loader.exec_module(SMOKE)
 
-SUMMARY_SCHEMA = "thunderbird-private-caldav-summary@2"
+SUMMARY_SCHEMA = "thunderbird-private-caldav-summary@3"
 RESULT_SCHEMA = "thunderbird-private-caldav-qualification@1"
+WORKER_DIAGNOSTIC_SCHEMA = "thunderbird-private-caldav-worker-diagnostic@1"
 EXPECTED_NODE_PREFIX = (22, 12, 0)
 EXPECTED_WHEEL_COUNT = 19
 WHEEL_TIMEOUT_SECONDS = 300
 INSTALL_TIMEOUT_SECONDS = 180
 NATIVE_TIMEOUT_SECONDS = 360
 RESULT_FILENAME = "private-caldav-result.json"
+JEST_REPORT_FILENAME = "private-caldav-jest-report.json"
+WORKER_DIAGNOSTIC_FILENAME = "private-caldav-worker-diagnostic.json"
+MAX_JEST_REPORT_BYTES = 1_000_000
 RESULT_FIELDS = {
     "calendarTab",
     "providerDiscovery",
@@ -53,6 +57,183 @@ RESULT_FIELDS = {
     "revokedState",
     "authDeniedAfterRevoke",
 }
+FIXTURE_FAILURE_STAGES = {
+    "unknown",
+    "jest_runner",
+    "suite_load",
+    "fixture_setup",
+    "radicale_start",
+    "native_worker",
+    "native_result",
+    "canonical_assert",
+    "cleanup",
+    "worker_setup",
+    "application_startup",
+    "calendar_tab",
+    "provider_discovery",
+    "provider_refresh",
+    "provider_edit",
+    "provider_create",
+    "provider_delete",
+    "provider_operation",
+    "provider_network_request",
+    "profile_ca_import",
+    "control_state",
+    "canonical_verification",
+    "revoke_setup",
+    "post_revoke_provider_request",
+    "complete",
+    "internal",
+}
+FIXTURE_FAILURE_CLASSES = {
+    "unknown",
+    "jest_process_error",
+    "jest_timeout",
+    "jest_report_missing",
+    "jest_report_invalid",
+    "worker_input_invalid",
+    "jest_suite_failed",
+    "module_load_failed",
+    "native_binding_failed",
+    "typescript_transform_failed",
+    "invalid_jest_config",
+    "jest_assertion_failed",
+    "radicale_not_ready",
+    "caldav_contract_failed",
+    "native_result_invalid",
+    "unrecognized_native_failure",
+    "provider_unavailable",
+    "discovery_cardinality",
+    "calendar_uri_missing",
+    "calendar_scope_mismatch",
+    "calendar_registration_data_missing",
+    "calendar_not_registered",
+    "discovery_failed",
+    "calendar_unavailable",
+    "refresh_failed",
+    "event_not_loaded",
+    "unknown_property_not_loaded",
+    "event_edit_failed",
+    "event_create_failed",
+    "created_event_not_loaded",
+    "event_delete_failed",
+    "revoke_probe_failed",
+    "contract_assertion",
+    "control_state_invalid",
+    "canonical_verification",
+    "callback_not_observed",
+    "profile_setup_failed",
+    "marionette_error",
+    "invalid_provider_result",
+    "calendar_mode_unavailable",
+    "calendar_tab_not_open",
+    "input_missing",
+    "invalid_workspace",
+    "invalid_binary",
+    "invalid_app_id",
+    "invalid_origin",
+    "version_mismatch",
+    "main_window_missing",
+    "provider_discovery_failed",
+    "personal_client_not_active",
+    "revoke_failed",
+    "revoked_state_missing",
+    "revoked_write_accepted",
+    "revoked_state_lost",
+    "auth_denial_not_observed",
+    "qualification_predicate_failed",
+    "cleanup_failed",
+    "unexpected_error",
+}
+NATIVE_FAILURE_PAIRS = {
+    ("worker_setup", "input_missing"),
+    ("worker_setup", "invalid_workspace"),
+    ("worker_setup", "invalid_binary"),
+    ("worker_setup", "invalid_app_id"),
+    ("worker_setup", "invalid_origin"),
+    ("application_startup", "version_mismatch"),
+    ("application_startup", "main_window_missing"),
+    ("calendar_tab", "marionette_error"),
+    ("calendar_tab", "calendar_mode_unavailable"),
+    ("calendar_tab", "calendar_tab_not_open"),
+    ("provider_discovery", "provider_unavailable"),
+    ("provider_discovery", "discovery_cardinality"),
+    ("provider_discovery", "calendar_uri_missing"),
+    ("provider_discovery", "calendar_scope_mismatch"),
+    ("provider_discovery", "calendar_registration_data_missing"),
+    ("provider_discovery", "calendar_not_registered"),
+    ("provider_discovery", "discovery_failed"),
+    ("provider_discovery", "provider_discovery_failed"),
+    ("provider_refresh", "calendar_unavailable"),
+    ("provider_refresh", "refresh_failed"),
+    ("provider_edit", "event_not_loaded"),
+    ("provider_edit", "unknown_property_not_loaded"),
+    ("provider_edit", "event_edit_failed"),
+    ("provider_create", "event_not_loaded"),
+    ("provider_create", "event_create_failed"),
+    ("provider_delete", "created_event_not_loaded"),
+    ("provider_delete", "event_delete_failed"),
+    ("post_revoke_provider_request", "event_not_loaded"),
+    ("post_revoke_provider_request", "revoke_probe_failed"),
+    ("provider_operation", "marionette_error"),
+    ("provider_operation", "invalid_provider_result"),
+    ("provider_network_request", "callback_not_observed"),
+    ("profile_ca_import", "profile_setup_failed"),
+    ("control_state", "contract_assertion"),
+    ("canonical_verification", "contract_assertion"),
+    ("revoke_setup", "personal_client_not_active"),
+    ("revoke_setup", "revoke_failed"),
+    ("revoke_setup", "revoked_state_missing"),
+    ("post_revoke_provider_request", "revoked_write_accepted"),
+    ("post_revoke_provider_request", "revoked_state_lost"),
+    ("post_revoke_provider_request", "auth_denial_not_observed"),
+    ("complete", "qualification_predicate_failed"),
+    ("cleanup", "cleanup_failed"),
+    ("internal", "unexpected_error"),
+}
+NATIVE_FAILURE_MESSAGE = re.compile(
+    r"Native Thunderbird CalDAV contract failed \(([a-z_]{1,64})/([a-z_]{1,64})\)\."
+)
+JEST_TEXT_FAILURE_MARKERS = (
+    (
+        "native_binding_failed",
+        (
+            "err_dlopen_failed",
+            "invalid elf header",
+            "wrong elf class",
+            "module did not self-register",
+            "not a valid win32 application",
+        ),
+    ),
+    (
+        "module_load_failed",
+        ("cannot find module ", "cannot find package ", "err_module_not_found"),
+    ),
+    (
+        "typescript_transform_failed",
+        (
+            "jest encountered an unexpected token",
+            "failed to transform",
+            "failed to parse typescript",
+            "cannot use import statement outside a module",
+        ),
+    ),
+    (
+        "invalid_jest_config",
+        (
+            "validation error:",
+            "could not find a config file based on provided values:",
+        ),
+    ),
+    (
+        "jest_timeout",
+        (
+            "exceeded timeout of ",
+            "test suite timed out",
+            "timeout - async callback was not invoked",
+        ),
+    ),
+)
 FAILURE_CLASSES = {
     "cleanup_failed",
     "container_backend_unavailable",
@@ -101,6 +282,8 @@ def _initial_summary(source_sha: str) -> dict[str, Any]:
         "caldav_wheel_bytes": 0,
         "private_dependencies_installed": False,
         "native_provider_passed": False,
+        "fixture_failure_stage": None,
+        "fixture_failure_class": None,
         "app_version": None,
         "calendarTab": False,
         "providerDiscovery": False,
@@ -159,6 +342,31 @@ def _write_summary(payload: dict[str, Any]) -> None:
         or (
             safe["app_version"] is not None
             and safe["app_version"] != "158.0.1"
+        )
+        or (
+            safe["fixture_failure_stage"] is not None
+            and (
+                not isinstance(safe["fixture_failure_stage"], str)
+                or safe["fixture_failure_stage"] not in FIXTURE_FAILURE_STAGES
+            )
+        )
+        or (
+            safe["fixture_failure_class"] is not None
+            and (
+                not isinstance(safe["fixture_failure_class"], str)
+                or safe["fixture_failure_class"] not in FIXTURE_FAILURE_CLASSES
+            )
+        )
+        or (
+            (safe["fixture_failure_stage"] is None)
+            != (safe["fixture_failure_class"] is None)
+        )
+        or (
+            safe["fixture_failure_stage"] is not None
+            and (
+                safe["status"] != "failed"
+                or safe["phase"] not in {"fixture_run", "complete"}
+            )
         )
     ):
         safe = _initial_summary("0" * 40)
@@ -544,13 +752,13 @@ def _install() -> None:
         (root / "workspace", "/task/workspace", False),
     ]
     python_program = r"""
-import subprocess, sys
+import subprocess
 commands = [
-  [sys.executable, '-B', '-m', 'pip', 'install', '--isolated', '--no-index',
+  ['/task/venv/bin/python', '-B', '-m', 'pip', 'install', '--isolated', '--no-index',
    '--no-deps', '--no-build-isolation', '--no-cache-dir', '--require-hashes',
    '--only-binary=:all:', '--find-links', '/private-wheels',
    '-r', '/input/thunderbird-private-caldav-requirements.txt'],
-  [sys.executable, '-B', '-m', 'pip', 'check'],
+  ['/task/venv/bin/python', '-B', '-m', 'pip', 'check'],
 ]
 for command in commands:
     try:
@@ -626,22 +834,293 @@ def _read_native_result(path: Path) -> dict[str, Any]:
     return value
 
 
+def _classify_jest_report(value: Any) -> tuple[str, str]:
+    """Project Jest output onto fixed diagnostics without returning its text."""
+    if not isinstance(value, dict) or value.get("success") is not False:
+        return "unknown", "jest_report_invalid"
+    suites = value.get("testResults")
+    if not isinstance(suites, list) or len(suites) > 8:
+        return "unknown", "jest_report_invalid"
+
+    native_failures: set[tuple[str, str]] = set()
+    failed_assertion = False
+    suite_error = value.get("testExecError") is not None
+    if isinstance(value.get("testExecError"), dict):
+        error_message = value["testExecError"].get("message")
+        if isinstance(error_message, str):
+            error_class = _jest_text_failure_class(error_message)
+            if error_class is not None:
+                return "suite_load", error_class
+    for suite in suites:
+        if not isinstance(suite, dict):
+            return "unknown", "jest_report_invalid"
+        suite_status = suite.get("status")
+        if suite.get("testExecError") is not None or suite_status not in {
+            "passed",
+            "failed",
+        }:
+            suite_error = True
+
+        assertions = suite.get("assertionResults", suite.get("testResults", []))
+        if not isinstance(assertions, list) or len(assertions) > 64:
+            return "unknown", "jest_report_invalid"
+        if suite_status == "failed" and not assertions:
+            suite_error = True
+            suite_message = suite.get("message")
+            if isinstance(suite_message, str):
+                error_class = _jest_text_failure_class(suite_message)
+                if error_class is not None:
+                    return "suite_load", error_class
+        if isinstance(suite.get("testExecError"), dict):
+            error_message = suite["testExecError"].get("message")
+            if isinstance(error_message, str):
+                error_class = _jest_text_failure_class(error_message)
+                if error_class is not None:
+                    return "suite_load", error_class
+        for assertion in assertions:
+            if not isinstance(assertion, dict):
+                return "unknown", "jest_report_invalid"
+            if assertion.get("status") != "failed":
+                continue
+            failed_assertion = True
+            messages = assertion.get("failureMessages", [])
+            if not isinstance(messages, list) or len(messages) > 64:
+                return "unknown", "jest_report_invalid"
+            for message in messages:
+                if not isinstance(message, str) or len(message) > 100_000:
+                    return "unknown", "jest_report_invalid"
+                native_match = NATIVE_FAILURE_MESSAGE.search(message)
+                if native_match is not None:
+                    pair = (native_match.group(1), native_match.group(2))
+                    if pair in NATIVE_FAILURE_PAIRS:
+                        native_failures.add(pair)
+                    else:
+                        return "unknown", "unrecognized_native_failure"
+                elif "Native Thunderbird CalDAV contract failed (" in message:
+                    return "unknown", "unrecognized_native_failure"
+                elif "Native Thunderbird CalDAV result was invalid." in message:
+                    return "native_result", "native_result_invalid"
+                elif "Python CalDAV contract exited " in message:
+                    return "fixture_setup", "caldav_contract_failed"
+                elif (
+                    "Radicale exited before readiness (" in message
+                    or "Radicale readiness exceeded 10 seconds (" in message
+                ):
+                    return "radicale_start", "radicale_not_ready"
+                else:
+                    error_class = _jest_text_failure_class(message)
+                    if error_class is not None:
+                        return "unknown", error_class
+
+    if len(native_failures) == 1:
+        return next(iter(native_failures))
+    if len(native_failures) > 1:
+        return "unknown", "unrecognized_native_failure"
+    if suite_error:
+        return "suite_load", "jest_suite_failed"
+    if failed_assertion:
+        return "unknown", "jest_assertion_failed"
+    return "unknown", "jest_suite_failed"
+
+
+def _jest_text_failure_class(message: str) -> str | None:
+    if len(message) > 100_000:
+        return None
+    lowered = message.lower()
+    for error_class, markers in JEST_TEXT_FAILURE_MARKERS:
+        if any(marker in lowered for marker in markers):
+            return error_class
+    return None
+
+
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON field")
+        result[key] = value
+    return result
+
+
+def _read_jest_report(path: Path) -> dict[str, Any]:
+    try:
+        metadata = path.lstat()
+        if (
+            path.is_symlink()
+            or not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.getuid()
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_size <= 0
+            or metadata.st_size > MAX_JEST_REPORT_BYTES
+        ):
+            raise ValueError
+        value = json.loads(
+            path.read_text(encoding="utf-8"), object_pairs_hook=_unique_json_object
+        )
+    except (OSError, ValueError, json.JSONDecodeError):
+        raise ValueError("Jest report is invalid") from None
+    if not isinstance(value, dict):
+        raise ValueError("Jest report is invalid")
+    return value
+
+
+def _jest_report_failure_class(path: Path) -> str:
+    try:
+        metadata = path.lstat()
+    except OSError:
+        return "jest_report_missing"
+    if (
+        not path.is_symlink()
+        and stat.S_ISREG(metadata.st_mode)
+        and metadata.st_uid == os.getuid()
+        and stat.S_IMODE(metadata.st_mode) == 0o600
+        and metadata.st_size == 0
+    ):
+        return "jest_report_missing"
+    return "jest_report_invalid"
+
+
+def _write_worker_diagnostic(
+    path: Path,
+    source_sha: str,
+    failure_stage: str,
+    failure_class: str,
+) -> None:
+    if (
+        not isinstance(source_sha, str)
+        or not re.fullmatch(r"[0-9a-f]{40}", source_sha)
+    ):
+        raise ValueError("worker source identity is invalid")
+    if (
+        not isinstance(failure_stage, str)
+        or failure_stage not in FIXTURE_FAILURE_STAGES
+        or not isinstance(failure_class, str)
+        or failure_class not in FIXTURE_FAILURE_CLASSES
+    ):
+        failure_stage, failure_class = "unknown", "unknown"
+    payload = {
+        "schema": WORKER_DIAGNOSTIC_SCHEMA,
+        "status": "failed",
+        "source_sha": source_sha,
+        "fixture_failure_stage": failure_stage,
+        "fixture_failure_class": failure_class,
+    }
+    descriptor = os.open(
+        path,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+    )
+    with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+        json.dump(payload, output, sort_keys=True, separators=(",", ":"))
+        output.write("\n")
+        output.flush()
+        os.fsync(output.fileno())
+
+
+def _read_worker_diagnostic(path: Path, source_sha: str) -> dict[str, str] | None:
+    try:
+        metadata = path.lstat()
+        if (
+            path.is_symlink()
+            or not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.getuid()
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_size > 512
+        ):
+            return None
+        value = json.loads(
+            path.read_text(encoding="utf-8"), object_pairs_hook=_unique_json_object
+        )
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+    expected = {
+        "schema",
+        "status",
+        "source_sha",
+        "fixture_failure_stage",
+        "fixture_failure_class",
+    }
+    if (
+        not isinstance(value, dict)
+        or set(value) != expected
+        or value.get("schema") != WORKER_DIAGNOSTIC_SCHEMA
+        or value.get("status") != "failed"
+        or value.get("source_sha") != source_sha
+        or not isinstance(value.get("fixture_failure_stage"), str)
+        or value.get("fixture_failure_stage") not in FIXTURE_FAILURE_STAGES
+        or not isinstance(value.get("fixture_failure_class"), str)
+        or value.get("fixture_failure_class") not in FIXTURE_FAILURE_CLASSES
+    ):
+        return None
+    return {
+        "fixture_failure_stage": value["fixture_failure_stage"],
+        "fixture_failure_class": value["fixture_failure_class"],
+    }
+
+
+def _close_worker_failure(
+    workspace: Path,
+    source_sha: str,
+    failure_stage: str,
+    failure_class: str,
+) -> None:
+    diagnostic = workspace / WORKER_DIAGNOSTIC_FILENAME
+    report = workspace / JEST_REPORT_FILENAME
+    try:
+        _write_worker_diagnostic(
+            diagnostic, source_sha, failure_stage, failure_class
+        )
+    finally:
+        try:
+            report_metadata = report.lstat()
+            if (
+                stat.S_ISREG(report_metadata.st_mode)
+                and report_metadata.st_uid == os.getuid()
+                and stat.S_IMODE(report_metadata.st_mode) == 0o600
+            ):
+                report.unlink()
+        except OSError:
+            pass
+
+
 def _container_worker() -> int:
     if Path("/task").resolve() != Path("/task"):
         return 2
     node = Path("/task/node/node")
     source = Path("/task/source")
     test_runner = source / "node_modules" / "jest" / "bin" / "jest.js"
+    workspace = Path("/task/workspace")
     result_path = _workspace_result_path()
+    report_path = workspace / JEST_REPORT_FILENAME
+    diagnostic_path = workspace / WORKER_DIAGNOSTIC_FILENAME
+    source_sha = os.environ.get("MCW_PRIVATE_CALDAV_SOURCE_SHA", "")
+
+    def fail(failure_stage: str, failure_class: str) -> int:
+        try:
+            _close_worker_failure(
+                workspace, source_sha, failure_stage, failure_class
+            )
+        except Exception:
+            pass
+        print(json.dumps({"status": "failed", "failure_class": "jest_failed"}))
+        return 1
+
+    if (
+        result_path.exists()
+        or result_path.is_symlink()
+        or report_path.exists()
+        or report_path.is_symlink()
+        or diagnostic_path.exists()
+        or diagnostic_path.is_symlink()
+    ):
+        print(json.dumps({"status": "failed", "failure_class": "input_invalid"}))
+        return 1
     if (
         not node.is_file()
         or not os.access(node, os.X_OK)
         or not test_runner.is_file()
-        or result_path.exists()
-        or result_path.is_symlink()
     ):
-        print(json.dumps({"status": "failed", "failure_class": "input_invalid"}))
-        return 1
+        return fail("jest_runner", "worker_input_invalid")
     log_path = Path("/tmp/thunderbird-private-caldav-jest.log")
     command = [
         str(node),
@@ -651,34 +1130,69 @@ def _container_worker() -> int:
         "test/integration/PrivateCalendarClientRadicaleContract.test.ts",
         "--cacheDirectory",
         "/tmp/private-caldav-jest-cache",
+        "--json",
+        "--outputFile",
+        str(report_path),
     ]
+    failure_stage = "jest_runner"
+    failure_class = "jest_process_error"
     try:
+        report_descriptor = os.open(
+            report_path,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        os.close(report_descriptor)
         descriptor = os.open(
             log_path,
             os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
             0o600,
         )
         with os.fdopen(descriptor, "wb") as log:
+            previous_umask = os.umask(0o077)
             try:
-                result = subprocess.run(
-                    command,
-                    cwd=source / "matrix-calendar-server",
-                    stdin=subprocess.DEVNULL,
-                    stdout=log,
-                    stderr=subprocess.STDOUT,
-                    check=False,
-                    timeout=300,
-                )
-            except (OSError, subprocess.SubprocessError):
-                print(json.dumps({"status": "failed", "failure_class": "jest_failed"}))
-                return 1
+                try:
+                    result = subprocess.run(
+                        command,
+                        cwd=source / "matrix-calendar-server",
+                        stdin=subprocess.DEVNULL,
+                        stdout=log,
+                        stderr=subprocess.STDOUT,
+                        check=False,
+                        timeout=300,
+                    )
+                except subprocess.TimeoutExpired:
+                    return fail("jest_runner", "jest_timeout")
+                except (OSError, subprocess.SubprocessError):
+                    return fail("jest_runner", "jest_process_error")
+            finally:
+                os.umask(previous_umask)
         if result.returncode != 0:
-            print(json.dumps({"status": "failed", "failure_class": "jest_failed"}))
-            return 1
+            try:
+                failure_stage, failure_class = _classify_jest_report(
+                    _read_jest_report(report_path)
+                )
+            except ValueError:
+                failure_stage = "jest_runner"
+                failure_class = _jest_report_failure_class(report_path)
+            return fail(failure_stage, failure_class)
+        try:
+            report_metadata = report_path.lstat()
+            if (
+                not stat.S_ISREG(report_metadata.st_mode)
+                or report_path.is_symlink()
+                or report_metadata.st_uid != os.getuid()
+                or stat.S_IMODE(report_metadata.st_mode) != 0o600
+                or report_metadata.st_size > MAX_JEST_REPORT_BYTES
+            ):
+                raise ValueError
+            report_path.unlink()
+        except (OSError, ValueError):
+            return fail("jest_runner", "jest_report_invalid")
+        failure_stage, failure_class = "native_result", "native_result_invalid"
         value = _read_native_result(result_path)
     except Exception:
-        print(json.dumps({"status": "failed", "failure_class": "native_result_invalid"}))
-        return 1
+        return fail(failure_stage, failure_class)
     safe = {
         "schema": RESULT_SCHEMA,
         "status": "passed",
@@ -694,7 +1208,12 @@ def _run() -> None:
     root, summary = _require_prepared(source_sha, installed=True)
     source = _workspace()
     result_path = root / "workspace" / RESULT_FILENAME
-    if result_path.exists() or result_path.is_symlink():
+    report_path = root / "workspace" / JEST_REPORT_FILENAME
+    diagnostic_path = root / "workspace" / WORKER_DIAGNOSTIC_FILENAME
+    if any(
+        path.exists() or path.is_symlink()
+        for path in (result_path, report_path, diagnostic_path)
+    ):
         raise ValueError("native result path already exists")
     mounts = [
         (root / "worker", "/input", True),
@@ -706,6 +1225,7 @@ def _run() -> None:
     ]
     extra_environment = {
         "PRIVATE_CALDAV_CONTRACT": "1",
+        "MCW_PRIVATE_CALDAV_SOURCE_SHA": source_sha,
         "MCW_PRIVATE_CALDAV_NATIVE_PROFILE": "1",
         "MCW_PRIVATE_CALDAV_PYTHON": "/task/venv/bin/python",
         "MCW_PRIVATE_CALDAV_SITE_PACKAGES": "/task/venv/lib/python3.13/site-packages",
@@ -734,6 +1254,12 @@ def _run() -> None:
         )
         lines = [line for line in stdout.splitlines() if line.startswith("{")]
         if len(lines) != 1:
+            summary.update(
+                {
+                    "fixture_failure_stage": "native_result",
+                    "fixture_failure_class": "native_result_invalid",
+                }
+            )
             raise ValueError("native client output was invalid")
         value = json.loads(lines[0])
         if (
@@ -744,9 +1270,27 @@ def _run() -> None:
             or value.get("appVersion") != "158.0.1"
             or any(value.get(key) is not True for key in RESULT_FIELDS)
         ):
+            summary.update(
+                {
+                    "fixture_failure_stage": "native_result",
+                    "fixture_failure_class": "native_result_invalid",
+                }
+            )
             raise ValueError("native client qualification failed")
         result = _read_native_result(result_path)
     except Exception:
+        diagnostic = _read_worker_diagnostic(
+            root / "workspace" / WORKER_DIAGNOSTIC_FILENAME, source_sha
+        )
+        if diagnostic is not None:
+            summary.update(diagnostic)
+        elif summary.get("fixture_failure_stage") is None:
+            summary.update(
+                {
+                    "fixture_failure_stage": "unknown",
+                    "fixture_failure_class": "unknown",
+                }
+            )
         summary.update(
             {
                 "status": "failed",
@@ -806,6 +1350,14 @@ def _finalize() -> None:
             and all(summary.get(key) is True for key in RESULT_FIELDS)
         )
         if failed is not None:
+            run_failure = (
+                {
+                    "fixture_failure_stage": "unknown",
+                    "fixture_failure_class": "unknown",
+                }
+                if failed == "run"
+                else {}
+            )
             summary.update(
                 {
                     "status": "failed",
@@ -817,6 +1369,7 @@ def _finalize() -> None:
                         "run": "fixture_run",
                     }[failed],
                     "failure_class": failure_classes[failed],
+                    **run_failure,
                 }
             )
         elif result_passed:
@@ -836,13 +1389,16 @@ def _finalize() -> None:
         try:
             SMOKE._cleanup_root(root, source_sha)
         except Exception:
-            summary.update(
-                {
-                    "status": "failed",
-                    "phase": "complete",
-                    "failure_class": "cleanup_failed",
-                }
-            )
+            if summary.get("status") != "failed":
+                summary.update(
+                    {
+                        "status": "failed",
+                        "phase": "complete",
+                        "failure_class": "cleanup_failed",
+                        "fixture_failure_stage": "cleanup",
+                        "fixture_failure_class": "cleanup_failed",
+                    }
+                )
     if summary.get("status") == "running":
         summary.update({"status": "passed", "phase": "complete", "failure_class": None})
     _write_summary(summary)
