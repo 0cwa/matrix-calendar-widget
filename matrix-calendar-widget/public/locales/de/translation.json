@@ -253,9 +253,9 @@
     "copyUrl": "URL kopieren",
     "copyUsername": "Benutzernamen kopieren",
     "create": "App-Zugriff erstellen",
-    "createFailed": "Der App-Zugriff konnte nicht erstellt werden. Prüfe deine Berechtigungen und versuche es erneut.",
     "createdLabel": "Zugriff erstellt {{date}}",
     "createdTitle": "Zugriff erstellt",
+    "createFailed": "Der App-Zugriff konnte nicht erstellt werden. Prüfe deine Berechtigungen und versuche es erneut.",
     "creating": "App-Zugriff wird erstellt…",
     "empty": "Für diesen Kalender wurde noch kein Zugriff für eine Kalender-App erstellt.",
     "expiresLabel": "Läuft ab {{date}}",
@@ -362,6 +362,7 @@
   },
   "cancel": "Abbrechen",
   "common": {
+    "cancel": "Abbrechen",
     "close": "Schließen"
   },
   "copyableTextButton": {

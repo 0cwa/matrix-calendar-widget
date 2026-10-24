@@ -253,9 +253,9 @@
     "copyUrl": "Copy URL",
     "copyUsername": "Copy username",
     "create": "Create app access",
-    "createFailed": "Could not create app access. Check your permissions and try again.",
     "createdLabel": "Access created {{date}}",
     "createdTitle": "Access created",
+    "createFailed": "Could not create app access. Check your permissions and try again.",
     "creating": "Creating app access…",
     "empty": "No calendar app access has been created for this calendar.",
     "expiresLabel": "Expires {{date}}",
@@ -362,6 +362,7 @@
   },
   "cancel": "Cancel",
   "common": {
+    "cancel": "Cancel",
     "close": "Close"
   },
   "copyableTextButton": {
