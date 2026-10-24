@@ -544,13 +544,13 @@ def _install() -> None:
         (root / "workspace", "/task/workspace", False),
     ]
     python_program = r"""
-import subprocess, sys
+import subprocess
 commands = [
-  [sys.executable, '-B', '-m', 'pip', 'install', '--isolated', '--no-index',
+  ['/task/venv/bin/python', '-B', '-m', 'pip', 'install', '--isolated', '--no-index',
    '--no-deps', '--no-build-isolation', '--no-cache-dir', '--require-hashes',
    '--only-binary=:all:', '--find-links', '/private-wheels',
    '-r', '/input/thunderbird-private-caldav-requirements.txt'],
-  [sys.executable, '-B', '-m', 'pip', 'check'],
+  ['/task/venv/bin/python', '-B', '-m', 'pip', 'check'],
 ]
 for command in commands:
     try:

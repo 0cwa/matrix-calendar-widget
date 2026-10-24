@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 import os
@@ -98,6 +99,11 @@ class PrivateCalDavSmokeTests(unittest.TestCase):
             startup._prepare(payload, source_sha, task_root, startup._load_lock())
         startup._write_summary(payload)
         return startup._summary_path()
+
+    def _make_private_wheelhouse(self, task_root: Path) -> tuple[int, int]:
+        wheelhouse = task_root / "private-caldav-wheels"
+        wheelhouse.mkdir(mode=0o700)
+        return SMOKE.EXPECTED_WHEEL_COUNT, 1000
 
     def test_actual_startup_prepare_output_matches_workspace_and_artifact_gates(self) -> None:
         source_sha = "a" * 40
@@ -227,7 +233,7 @@ class PrivateCalDavSmokeTests(unittest.TestCase):
                     patch.object(
                         SMOKE,
                         "_download_private_wheels",
-                        return_value=(SMOKE.EXPECTED_WHEEL_COUNT, 1000),
+                        side_effect=self._make_private_wheelhouse,
                     ),
                     patch.object(startup, "_capture_container", return_value=""),
                 ):
@@ -235,6 +241,72 @@ class PrivateCalDavSmokeTests(unittest.TestCase):
                     _, prepared = SMOKE._require_prepared(source_sha)
                 self.assertTrue(prepared["workspace_jest_ready"])
                 self.assertTrue(prepared["startup_artifacts_verified"])
+
+                with (
+                    patch.object(startup, "ROOT_PARENT", task_root.parent),
+                    patch.object(startup, "_root_path", return_value=task_root),
+                    patch.object(SMOKE, "_task_root", return_value=task_root),
+                    patch.object(
+                        startup, "_run_container_bounded", return_value=1
+                    ) as failed_install,
+                    self.assertRaises(ValueError),
+                ):
+                    SMOKE._install()
+                failed_summary = SMOKE._load_summary()
+                self.assertEqual(failed_summary["failure_class"], "dependency_install_failed")
+                self.assertEqual(failed_summary["phase"], "dependency_install")
+                self.assertFalse(failed_summary["private_dependencies_installed"])
+                failed_install.assert_called_once()
+
+                SMOKE._write_summary(prepared)
+                with (
+                    patch.object(startup, "ROOT_PARENT", task_root.parent),
+                    patch.object(startup, "_root_path", return_value=task_root),
+                    patch.object(SMOKE, "_task_root", return_value=task_root),
+                    patch.object(
+                        startup, "_run_container_bounded", return_value=0
+                    ) as install,
+                ):
+                    SMOKE._install()
+                install.assert_called_once()
+                install_command = install.call_args.args[1]
+                self.assertEqual(
+                    install_command[:3],
+                    ["/usr/local/bin/python3", "-B", "-c"],
+                )
+                install_program = ast.parse(install_command[3])
+                commands_assignment = next(
+                    node
+                    for node in install_program.body
+                    if isinstance(node, ast.Assign)
+                    and any(
+                        isinstance(target, ast.Name) and target.id == "commands"
+                        for target in node.targets
+                    )
+                )
+                pip_commands = ast.literal_eval(commands_assignment.value)
+                self.assertEqual(
+                    [command[0] for command in pip_commands],
+                    ["/task/venv/bin/python", "/task/venv/bin/python"],
+                )
+                self.assertEqual(pip_commands[1][-2:], ["pip", "check"])
+                self.assertNotIn("sys.executable", install_command[3])
+                self.assertEqual(
+                    install.call_args.kwargs["mounts"],
+                    [
+                        (task_root / "worker", "/input", True),
+                        (task_root / "private-caldav-wheels", "/private-wheels", True),
+                        (task_root / "venv", "/task/venv", False),
+                        (task_root / "workspace", "/task/workspace", False),
+                    ],
+                )
+                self.assertTrue(
+                    all(
+                        source.is_dir()
+                        for source, _target, _readonly in install.call_args.kwargs["mounts"]
+                    )
+                )
+                self.assertTrue(SMOKE._load_summary()["private_dependencies_installed"])
 
                 marionette.unlink()
                 with self.assertRaises(ValueError):
