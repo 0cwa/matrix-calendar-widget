@@ -217,6 +217,7 @@ jobs:
           docker exec "$container_id" psql --username reminder_bootstrap --dbname postgres --set ON_ERROR_STOP=1 --command "CREATE DATABASE matrix_calendar_test OWNER matrix_calendar_app;"
           docker exec "$container_id" psql --username reminder_bootstrap --dbname postgres --set ON_ERROR_STOP=1 --command "CREATE DATABASE matrix_calendar_binding_test OWNER matrix_calendar_app;"
           docker exec "$container_id" psql --username reminder_bootstrap --dbname postgres --set ON_ERROR_STOP=1 --command "CREATE DATABASE matrix_calendar_coexistence_test OWNER matrix_calendar_app;"
+          docker exec "$container_id" psql --username reminder_bootstrap --dbname postgres --set ON_ERROR_STOP=1 --command "CREATE DATABASE matrix_calendar_private_clients_test OWNER matrix_calendar_app;"
 
       - name: Test PostgreSQL reminder store
         env:
@@ -253,7 +254,15 @@ jobs:
           MATRIX_CALENDAR_BINDING_DATABASE_TLS_MODE: trusted-private-network
           MATRIX_CALENDAR_REMINDER_DATABASE_URL: postgresql://matrix_calendar_app:matrix_calendar_test_password@localhost:5432/matrix_calendar_coexistence_test
           MATRIX_CALENDAR_REMINDER_DATABASE_TLS_MODE: trusted-private-network
+          MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_URL: postgresql://matrix_calendar_app:matrix_calendar_test_password@localhost:5432/matrix_calendar_coexistence_test
+          MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_TLS_MODE: trusted-private-network
         run: yarn workspace @matrix-calendar-widget/server test:postgres-coexistence-contract
+
+      - name: Test PostgreSQL private calendar client store
+        env:
+          MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_URL: postgresql://matrix_calendar_app:matrix_calendar_test_password@localhost:5432/matrix_calendar_private_clients_test
+          MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_TLS_MODE: trusted-private-network
+        run: yarn workspace @matrix-calendar-widget/server test:postgres-private-client-contract
 
       - name: Build server
         run: yarn workspace @matrix-calendar-widget/server build
