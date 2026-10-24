@@ -62,7 +62,7 @@ Tracked in [#382](https://github.com/0cwa/matrix-calendar-widget/issues/382):
 
 - [x] Readable bot event listings and optional identifiers: merged #383.
 - [x] Opt-in public VEVENT calendar subscriptions: merged #385; operational ingress, log redaction, and signing-key/share-store recovery remain installation requirements.
-- [ ] Independently revocable private credentials for external CalDAV read/write access.
+- [ ] Independently revocable private credentials for external CalDAV read/write access; in development on a dedicated source branch and not merged to main. See [status](./STATUS.md) for the remaining acceptance gates.
 - [ ] Selected joined-member and all-day Matrix reminder delivery: open #384.
 - [ ] Human pilot-room command/setup validation and relevant actual-client journeys.
 

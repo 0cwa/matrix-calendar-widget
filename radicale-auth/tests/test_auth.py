@@ -265,6 +265,13 @@ class AuthValidationTests(unittest.TestCase):
         )
         self.assertEqual(opener.requests, [])
 
+    def test_rejects_reserved_private_client_localparts_from_matrix_openid(self) -> None:
+        reserved = "mcwpc~0123456789abcdef0123456789abcdef0123456789abcdef"
+        opener = FakeOpener(userinfo_response(f"@{reserved}:localhost"))
+
+        self.assertEqual(self.authenticate(opener, username=reserved), "")
+        self.assertEqual(len(opener.requests), 1)
+
     def test_authentication_logs_do_not_contain_tokens_or_credentials(self) -> None:
         opener = FakeOpener(
             urllib.error.HTTPError(
@@ -299,6 +306,58 @@ class RadicaleBaseAuthTests(unittest.TestCase):
         self.assertEqual(auth.login("alice", proof, AuthContext())[0], "alice")
         self.assertEqual(auth.login("alice", proof, AuthContext())[0], "alice")
         self.assertEqual(len(opener.requests), 2)
+
+    def test_reserved_app_ids_use_only_the_current_private_callback(self) -> None:
+        module = __import__(Auth.__module__, fromlist=["PrivateClientCallbackClient"])
+        app_id = "mcwpc~0123456789abcdef0123456789abcdef0123456789abcdef"
+        callback = type(
+            "FakePrivateCallback",
+            (),
+            {"authenticate": lambda self, username, password: username == app_id and password == "private-secret"},
+        )()
+        opener = FakeOpener(userinfo_response())
+        with patch.dict(
+            "os.environ",
+            {
+                HOMESERVER_URL_ENV: HOMESERVER_URL,
+                MATRIX_SERVER_NAME_ENV: MATRIX_SERVER_NAME,
+            },
+        ), patch.object(module, "_build_opener", return_value=opener), patch.object(
+            module.PrivateClientCallbackClient,
+            "from_environment",
+            return_value=callback,
+        ):
+            auth = Auth(FakeConfiguration(cache_logins=True))
+
+        self.assertEqual(auth.login(app_id, "private-secret", AuthContext())[0], app_id)
+        self.assertEqual(auth.login(app_id, "private-secret", AuthContext())[0], app_id)
+        self.assertEqual(auth.login(app_id, "wrong", AuthContext())[0], "")
+        self.assertEqual(len(opener.requests), 0)
+
+    def test_unknown_or_malformed_reserved_ids_never_fall_back_to_openid(self) -> None:
+        module = __import__(Auth.__module__, fromlist=["PrivateClientCallbackClient"])
+        opener = FakeOpener(userinfo_response())
+        callback = type(
+            "FakePrivateCallback",
+            (),
+            {"authenticate": lambda self, username, password: True},
+        )()
+        with patch.dict(
+            "os.environ",
+            {
+                HOMESERVER_URL_ENV: HOMESERVER_URL,
+                MATRIX_SERVER_NAME_ENV: MATRIX_SERVER_NAME,
+            },
+        ), patch.object(module, "_build_opener", return_value=opener), patch.object(
+            module.PrivateClientCallbackClient,
+            "from_environment",
+            return_value=callback,
+        ):
+            auth = Auth(FakeConfiguration())
+
+        malformed = "mcwpc~not-a-valid-app-id"
+        self.assertEqual(auth.login(malformed, encode_credential(), AuthContext())[0], "")
+        self.assertEqual(opener.requests, [])
 
     def test_configuration_requires_a_fixed_homeserver_and_server_name(self) -> None:
         module = __import__(Auth.__module__, fromlist=["_build_opener"])

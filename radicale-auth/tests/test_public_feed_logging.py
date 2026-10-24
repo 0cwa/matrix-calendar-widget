@@ -25,6 +25,7 @@ from matrix_calendar_radicale_auth.public_feed_logging import (
 )
 
 TOKEN_PATH = "/.token/v1/sentinelPublicFeedToken_0123456789abcdef0123456789abcdef0123/"
+PRIVATE_APP_ID = "mcwpc~0123456789abcdef0123456789abcdef0123456789abcdef"
 
 
 class PublicFeedTokenPathFilterTests(unittest.TestCase):
@@ -111,6 +112,28 @@ class PublicFeedTokenPathFilterTests(unittest.TestCase):
         message = record.getMessage()
         self.assertNotIn("sentinelPublicFeedToken", message)
         self.assertIn("%2F.token%2Fv1%2F[REDACTED]%2F", message)
+
+    def test_redacts_complete_private_client_alias_paths(self) -> None:
+        filter_value = PublicFeedTokenPathFilter()
+        paths = (
+            f"/{PRIVATE_APP_ID}/calendar/event-private-name.ics",
+            f"%2F{PRIVATE_APP_ID}%2Fcalendar%2Fevent-private-name.ics",
+        )
+        record = logging.LogRecord(
+            "radicale",
+            logging.INFO,
+            __file__,
+            1,
+            "DAV request %s %s",
+            paths,
+            None,
+        )
+
+        self.assertTrue(filter_value.filter(record))
+        message = record.getMessage()
+        self.assertNotIn(PRIVATE_APP_ID, message)
+        self.assertNotIn("event-private-name", message)
+        self.assertEqual(message.count("[PRIVATE-CALDAV-PATH]"), 2)
 
     def test_unformattable_record_fails_closed(self) -> None:
         filter_value = PublicFeedTokenPathFilter()
