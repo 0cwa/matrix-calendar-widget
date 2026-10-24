@@ -923,7 +923,6 @@ type RoomAppServiceCaseFailureStage =
   | 'demotion'
   | 'leave'
   | 'rejoin'
-  | 'cleanup'
   | 'proof-selected'
   | 'proof-available'
   | 'identities-resolved'
@@ -938,6 +937,13 @@ type RoomAppServiceCaseFailureStage =
   | 'no-caldav-request'
   | 'no-new-openid-proof'
   | 'logs-secret-free';
+type PrivatePolicyCleanupOperation =
+  | 'restore-power-levels'
+  | 'lookup-members'
+  | 'leave-issuer'
+  | 'leave-reader';
+type PrivatePolicyCleanupFailure = PrivatePolicyCleanupOperation;
+type PrivatePolicyBodyResult = 'completed' | 'failed';
 type RoomAppServiceTeardownStage =
   | 'started'
   | 'log-check-started'
@@ -1932,6 +1938,7 @@ describeContract(contractDescription, () => {
       );
     };
 
+    let privatePolicyBodyFailed = false;
     try {
       await inviteAndJoin(issuerUserId, issuerToken);
       await inviteAndJoin(readerUserId, policyReaderToken);
@@ -2155,23 +2162,48 @@ describeContract(contractDescription, () => {
       ).toBe('');
       expect(contractStore.get(record.appId)?.state).toBe('revoked');
       expect(contractStore.revocationCount()).toBe(1);
+    } catch (error) {
+      privatePolicyBodyFailed = true;
+      throw error;
     } finally {
-      try {
-        if (powerLevelsChanged) {
+      markPrivatePolicyBodyResult(
+        privatePolicyBodyFailed ? 'failed' : 'completed',
+      );
+      if (powerLevelsChanged) {
+        markPrivatePolicyCleanupOperation('restore-power-levels');
+        try {
           await writePowerLevels(actorAccessToken, originalPowerLevels);
+        } catch (error) {
+          markPrivatePolicyCleanupFailure('restore-power-levels');
+          if (!privatePolicyBodyFailed) throw error;
         }
-        const joinedMembers: string[] = await ownerMatrixClient
-          .getJoinedRoomMembers(roomId)
-          .catch((): string[] => []);
-        if (joinedMembers.includes(issuerUserId)) {
-          await leaveMember(issuerToken);
-        }
-        if (joinedMembers.includes(readerUserId)) {
-          await leaveMember(policyReaderToken);
-        }
+      }
+      markPrivatePolicyCleanupOperation('lookup-members');
+      let joinedMembers: string[];
+      try {
+        joinedMembers = await ownerMatrixClient.getJoinedRoomMembers(roomId);
       } catch (error) {
-        markRoomAppServiceCaseStage('private-client-live-policy', 'cleanup');
-        throw error;
+        markPrivatePolicyCleanupFailure('lookup-members');
+        if (!privatePolicyBodyFailed) throw error;
+        joinedMembers = [];
+      }
+      if (joinedMembers.includes(issuerUserId)) {
+        markPrivatePolicyCleanupOperation('leave-issuer');
+        try {
+          await leaveMember(issuerToken);
+        } catch (error) {
+          markPrivatePolicyCleanupFailure('leave-issuer');
+          if (!privatePolicyBodyFailed) throw error;
+        }
+      }
+      if (joinedMembers.includes(readerUserId)) {
+        markPrivatePolicyCleanupOperation('leave-reader');
+        try {
+          await leaveMember(policyReaderToken);
+        } catch (error) {
+          markPrivatePolicyCleanupFailure('leave-reader');
+          if (!privatePolicyBodyFailed) throw error;
+        }
       }
     }
   });
@@ -2660,6 +2692,28 @@ function markRoomAppServiceCaseStage(
 ): void {
   appendRoomAppServiceSetupMarker(
     `room-appservice-case-stage-${testCase}-${stage}`,
+  );
+}
+
+function markPrivatePolicyBodyResult(result: PrivatePolicyBodyResult): void {
+  appendRoomAppServiceSetupMarker(
+    `room-appservice-case-body-private-client-live-policy-${result}`,
+  );
+}
+
+function markPrivatePolicyCleanupOperation(
+  operation: PrivatePolicyCleanupOperation,
+): void {
+  appendRoomAppServiceSetupMarker(
+    `room-appservice-case-cleanup-private-client-live-policy-operation-${operation}`,
+  );
+}
+
+function markPrivatePolicyCleanupFailure(
+  failure: PrivatePolicyCleanupFailure,
+): void {
+  appendRoomAppServiceSetupMarker(
+    `room-appservice-case-cleanup-private-client-live-policy-failure-${failure}`,
   );
 }
 

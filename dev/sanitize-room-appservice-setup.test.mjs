@@ -221,18 +221,69 @@ test('projects private-client policy failures to fixed phase and error class', (
     reportWithFailure,
     [
       'room-appservice-setup-complete',
+      'room-appservice-case-body-private-client-live-policy-failed',
       'room-appservice-case-stage-private-client-live-policy-identities',
       'room-appservice-case-stage-private-client-live-policy-credential-rw',
-      'room-appservice-case-stage-private-client-live-policy-cleanup',
+      'room-appservice-http-status-429',
+      'room-appservice-case-cleanup-private-client-live-policy-operation-leave-reader',
+      'room-appservice-http-status-403',
+      'room-appservice-matrix-error-M_FORBIDDEN',
+      'room-appservice-case-cleanup-private-client-live-policy-failure-leave-reader',
+      'room-appservice-http-status-500',
       'room-appservice-case-stage-private-client-live-policy-private-detail',
     ].join('\n'),
   );
 
   assert.equal(
     diagnostic,
-    'room-appservice-test-failure case=room-appservice-private-client-live-policy phase=cleanup error-class=assertion',
+    'room-appservice-test-failure case=room-appservice-private-client-live-policy body-result=failed phase=credential-rw cleanup-operation=leave-reader cleanup-failure=leave-reader cleanup-http-status=403 cleanup-matrix-error=M_FORBIDDEN error-class=unavailable',
   );
   assert.equal(diagnostic.includes(privateDetail), false);
+
+  const runtimeDiagnostic = formatRoomAppServiceFailureDiagnostic(
+    {
+      testResults: [
+        {
+          name: roomSuitePath,
+          status: 'failed',
+          testExecError: { message: privateDetail },
+          assertionResults: [
+            {
+              title:
+                'rechecks private-client room policy against live Synapse state',
+              status: 'failed',
+              failureMessages: [],
+            },
+          ],
+        },
+      ],
+    },
+    [
+      'room-appservice-setup-complete',
+      'room-appservice-case-start-private-client-live-policy',
+    ].join('\n'),
+  );
+  assert.equal(
+    runtimeDiagnostic,
+    'room-appservice-test-failure case=room-appservice-private-client-live-policy body-result=unavailable phase=unavailable cleanup-operation=none cleanup-failure=none cleanup-http-status=unavailable cleanup-matrix-error=unavailable error-class=runtime',
+  );
+  assert.equal(runtimeDiagnostic.includes(privateDetail), false);
+
+  const lookupFailureDiagnostic = formatRoomAppServiceFailureDiagnostic(
+    reportWithFailure,
+    [
+      'room-appservice-setup-complete',
+      'room-appservice-case-body-private-client-live-policy-completed',
+      'room-appservice-case-stage-private-client-live-policy-rejoin',
+      'room-appservice-case-cleanup-private-client-live-policy-operation-lookup-members',
+      'room-appservice-case-cleanup-private-client-live-policy-failure-lookup-members',
+    ].join('\n'),
+  );
+  assert.equal(
+    lookupFailureDiagnostic,
+    'room-appservice-test-failure case=room-appservice-private-client-live-policy body-result=completed phase=rejoin cleanup-operation=lookup-members cleanup-failure=lookup-members cleanup-http-status=unavailable cleanup-matrix-error=unavailable error-class=unavailable',
+  );
+  assert.equal(lookupFailureDiagnostic.includes(privateDetail), false);
 });
 
 test('keeps unknown room failures unmapped and excludes raw test titles', () => {

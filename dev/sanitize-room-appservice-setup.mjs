@@ -29,6 +29,11 @@ import {
   formatRoomReminderSetupHttpStatus,
   formatRoomReminderSetupMatrixErrorCode,
   formatRoomReminderSetupStage,
+  getPrivatePolicyBodyResult,
+  getPrivatePolicyCleanupFailure,
+  getPrivatePolicyCleanupHttpStatus,
+  getPrivatePolicyCleanupMatrixErrorCode,
+  getPrivatePolicyCleanupOperation,
   getRoomAppServiceCaseFailureStage,
   getRoomAppServiceSetupStage,
   getRoomAppServiceTeardownFailure,
@@ -316,7 +321,7 @@ export function formatRoomAppServiceFailureDiagnostic(
     const stage = getRoomAppServiceCaseFailureStage(stageContent, testCase);
     if (testCase === 'private-client-live-policy') {
       failureLines.push(
-        `room-appservice-test-failure case=${match[1]} phase=${stage ?? 'unavailable'} error-class=${getPrivatePolicyFailureClass(suite)}`,
+        `room-appservice-test-failure case=${match[1]} body-result=${getPrivatePolicyBodyResult(stageContent) ?? 'unavailable'} phase=${stage ?? 'unavailable'} cleanup-operation=${getPrivatePolicyCleanupOperation(stageContent) ?? 'none'} cleanup-failure=${getPrivatePolicyCleanupFailure(stageContent) ?? 'none'} cleanup-http-status=${getPrivatePolicyCleanupHttpStatus(stageContent) ?? 'unavailable'} cleanup-matrix-error=${getPrivatePolicyCleanupMatrixErrorCode(stageContent) ?? 'unavailable'} error-class=${getPrivatePolicyFailureClass(suite)}`,
       );
       continue;
     }
@@ -342,18 +347,7 @@ export function formatRoomAppServiceFailureDiagnostic(
 }
 
 function getPrivatePolicyFailureClass(suite) {
-  const assertionFailed = Array.isArray(suite?.assertionResults)
-    ? suite.assertionResults.some(
-        (assertion) =>
-          assertion?.title ===
-            'rechecks private-client room policy against live Synapse state' &&
-          assertion?.status === 'failed',
-      )
-    : false;
-  if (assertionFailed) return 'assertion';
-  if (suite?.testExecError || suite?.failureMessage || suite?.message) {
-    return 'runtime';
-  }
+  if (suite?.testExecError) return 'runtime';
   return 'unavailable';
 }
 
