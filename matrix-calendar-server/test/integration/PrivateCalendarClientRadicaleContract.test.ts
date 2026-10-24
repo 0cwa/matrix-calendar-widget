@@ -29,6 +29,7 @@ import {
   chmodSync,
   closeSync,
   existsSync,
+  constants as fsConstants,
   openSync,
   readFileSync,
   rmSync,
@@ -154,6 +155,26 @@ const publicFeedMetrics = {
 };
 const PUBLIC_NATIVE_RESULT_PATH =
   '/task/workspace/public-feed-native-result.json';
+const PUBLIC_NATIVE_PHASE_PATH =
+  '/task/workspace/public-feed-native-phase.json';
+const PUBLIC_NATIVE_PHASES = new Set([
+  'fixture_module_loaded',
+  'fixture_test_start',
+  'gateway_start',
+  'gateway_ready',
+  'radicale_start',
+  'radicale_ready',
+  'public_publish_start',
+  'public_published',
+  'native_worker_start',
+  'initial_http_start',
+  'initial_http_observed',
+  'native_worker_exit',
+  'native_stdout_parse',
+  'native_result_parsed',
+  'native_result_persisted',
+  'native_assertions',
+]);
 const PUBLIC_NATIVE_RESULT_PREDICATES = [
   'calendarTab',
   'providerTypeICS',
@@ -304,6 +325,40 @@ function persistPublicNativeResult(value: Record<string, unknown>): void {
   chmodSync(resultPath, 0o600);
 }
 
+function markPublicNativePhase(phase: string): void {
+  const sourceSha = process.env.MCW_PUBLIC_ICS_SOURCE_SHA ?? '';
+  if (
+    !publicFeedNativeProfile ||
+    !PUBLIC_NATIVE_PHASES.has(phase) ||
+    !/^[a-f0-9]{40}$/u.test(sourceSha)
+  ) {
+    return;
+  }
+
+  const payload = {
+    schema: 'thunderbird-public-feed-phase@1',
+    profile: 'public_ics',
+    source_sha: sourceSha,
+    phase,
+  };
+  try {
+    const descriptor = openSync(
+      PUBLIC_NATIVE_PHASE_PATH,
+      fsConstants.O_WRONLY | fsConstants.O_TRUNC | fsConstants.O_NOFOLLOW,
+    );
+    try {
+      writeFileSync(descriptor, `${JSON.stringify(payload)}\n`);
+    } finally {
+      closeSync(descriptor);
+    }
+    chmodSync(PUBLIC_NATIVE_PHASE_PATH, 0o600);
+  } catch {
+    // Diagnostics must not change the public native-client qualification path.
+  }
+}
+
+markPublicNativePhase('fixture_module_loaded');
+
 const configProvider = {
   getOrThrow: () => contractConfig,
 };
@@ -390,6 +445,7 @@ describeContract(
     );
 
     it('runs the selected client profile against the Radicale HTTPS fixture', async () => {
+      markPublicNativePhase('fixture_test_start');
       const root = resolvePath(__dirname, '../../..');
       const python =
         process.env.MCW_PUBLIC_ICS_PYTHON ??
@@ -735,6 +791,7 @@ describeContract(
           contractFetch,
         );
 
+        markPublicNativePhase('gateway_start');
         const gateway = await createCalendarGatewayHttpApplication(
           PrivateCalendarClientRadicaleContractModule,
           PrivateContractMatrixAuth,
@@ -781,6 +838,7 @@ describeContract(
           nestApplication.getHttpAdapter().getInstance(),
         );
         await listen(httpsServer, '127.0.0.1', apiAddress);
+        markPublicNativePhase('gateway_ready');
 
         controlServer = createHttpServer((request, response) => {
           void handleControlRequest(
@@ -941,6 +999,7 @@ describeContract(
             radicaleEnv.RADICALE_PRIVATE_CLIENT_CALLBACK_KEY,
           ).toBeUndefined();
         }
+        markPublicNativePhase('radicale_start');
         radicale = spawn(
           radicalePython,
           ['-m', 'radicale', '--config', configPath],
@@ -951,6 +1010,7 @@ describeContract(
           },
         );
         await waitForRadicale(radicale, radicalePort, logPath);
+        markPublicNativePhase('radicale_ready');
 
         await seedCollection(
           radicalePort,
@@ -972,6 +1032,7 @@ describeContract(
           INITIAL_EVENT,
         );
         if (publicFeedNativeProfile) {
+          markPublicNativePhase('public_publish_start');
           const publicEventWrite = await requestRadicale(
             radicalePort,
             'PUT',
@@ -1001,6 +1062,7 @@ describeContract(
               publicUrl.hash === '',
           ).toBe(true);
           publicFeedRequestPath = publicUrl.pathname;
+          markPublicNativePhase('public_published');
 
           const publicFeedThunderbirdContract = join(
             root,
@@ -1022,6 +1084,7 @@ describeContract(
               .filter((name) => typeof process.env[name] === 'string')
               .map((name) => [name, process.env[name] as string] as const),
           );
+          markPublicNativePhase('native_worker_start');
           const publicProcess = spawn(python, [publicFeedThunderbirdContract], {
             cwd: root,
             env: {
@@ -1031,6 +1094,9 @@ describeContract(
               MCW_PUBLIC_ICS_CA_FILE: certificates.caCert,
               MCW_PUBLIC_ICS_CONTROL_PORT: String(portOf(controlServer!)),
               MCW_PUBLIC_ICS_CONTROL_KEY: controlKey,
+              MCW_PUBLIC_ICS_PHASE_FILE: PUBLIC_NATIVE_PHASE_PATH,
+              MCW_PUBLIC_ICS_SOURCE_SHA:
+                process.env.MCW_PUBLIC_ICS_SOURCE_SHA ?? '',
               MCW_PUBLIC_ICS_RESULT_FILE:
                 process.env.MCW_PUBLIC_ICS_RESULT_FILE ?? '',
               MCW_PUBLIC_ICS_NATIVE_THUNDERBIRD_BIN: nativeThunderbirdBinary,
@@ -1047,6 +1113,8 @@ describeContract(
               publicProcess,
               PUBLIC_NATIVE_WORKER_TIMEOUT_MS,
             );
+            markPublicNativePhase('native_worker_exit');
+            markPublicNativePhase('native_stdout_parse');
             const resultLine = publicStdout
               .split(/\r?\n/u)
               .map((line) => line.trim())
@@ -1062,7 +1130,10 @@ describeContract(
             } catch {
               throw new Error('Native public-feed result was invalid.');
             }
+            markPublicNativePhase('native_result_parsed');
             persistPublicNativeResult(publicResult);
+            markPublicNativePhase('native_result_persisted');
+            markPublicNativePhase('native_assertions');
             if (publicExit !== 0 || publicResult.status !== 'passed') {
               const safeFailureValue = (value: unknown) =>
                 typeof value === 'string' && /^[a-z_]{1,64}$/u.test(value)

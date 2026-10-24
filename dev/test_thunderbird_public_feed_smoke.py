@@ -817,6 +817,63 @@ class PublicFeedSmokeTests(unittest.TestCase):
             path.chmod(0o600)
             self.assertIsNone(PUBLIC._read_fixture_diagnostic(path, SOURCE_SHA))
 
+    def test_fixture_phase_marker_is_source_bound_closed_and_mode_checked(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = root / PUBLIC.FIXTURE_PHASE_FILENAME
+            invalid_path = root / "invalid-phase.json"
+            with self.assertRaises(ValueError):
+                PUBLIC._write_fixture_phase_marker(
+                    invalid_path, SOURCE_SHA, "raw assertion detail"
+                )
+            with self.assertRaises(ValueError):
+                PUBLIC._write_fixture_phase_marker(path, "not-a-commit", "jest_start")
+            self.assertFalse(path.exists())
+
+            PUBLIC._write_fixture_phase_marker(path, SOURCE_SHA, "jest_start")
+            self.assertEqual(
+                PUBLIC._read_fixture_phase_marker(path, SOURCE_SHA), "jest_start"
+            )
+            self.assertIsNone(PUBLIC._read_fixture_phase_marker(path, "b" * 40))
+            saved = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(set(saved), {"schema", "profile", "source_sha", "phase"})
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+            path.write_text(
+                json.dumps({**saved, "profile": "private"}), encoding="utf-8"
+            )
+            path.chmod(0o600)
+            self.assertIsNone(PUBLIC._read_fixture_phase_marker(path, SOURCE_SHA))
+
+            path.write_text(
+                json.dumps({**saved, "phase": "event title"}), encoding="utf-8"
+            )
+            path.chmod(0o600)
+            self.assertIsNone(PUBLIC._read_fixture_phase_marker(path, SOURCE_SHA))
+
+            path.write_text('{"schema":"bad","schema":"duplicate"}', encoding="utf-8")
+            path.chmod(0o600)
+            self.assertIsNone(PUBLIC._read_fixture_phase_marker(path, SOURCE_SHA))
+
+            path.write_text("{malformed", encoding="utf-8")
+            path.chmod(0o600)
+            self.assertIsNone(PUBLIC._read_fixture_phase_marker(path, SOURCE_SHA))
+
+            path.write_bytes(b" " * (PUBLIC.MAX_FIXTURE_PHASE_BYTES + 1))
+            path.chmod(0o600)
+            self.assertIsNone(PUBLIC._read_fixture_phase_marker(path, SOURCE_SHA))
+
+            path.write_text(json.dumps(saved), encoding="utf-8")
+            path.chmod(0o644)
+            self.assertIsNone(PUBLIC._read_fixture_phase_marker(path, SOURCE_SHA))
+            path.chmod(0o600)
+            link = root / "phase-link.json"
+            link.symlink_to(path)
+            self.assertIsNone(PUBLIC._read_fixture_phase_marker(link, SOURCE_SHA))
+
+            with patch.object(PUBLIC.os, "getuid", return_value=os.getuid() + 1):
+                self.assertIsNone(PUBLIC._read_fixture_phase_marker(path, SOURCE_SHA))
+
     def test_run_projects_fixture_failure_without_setting_native_success_flags(
         self,
     ) -> None:
@@ -836,6 +893,24 @@ class PublicFeedSmokeTests(unittest.TestCase):
                     kwargs["extra_environment"]["MCW_PUBLIC_ICS_SOURCE_SHA"],
                     SOURCE_SHA,
                 )
+                phase_path = task_workspace / PUBLIC.FIXTURE_PHASE_FILENAME
+                self.assertEqual(
+                    PUBLIC._read_fixture_phase_marker(phase_path, SOURCE_SHA),
+                    "jest_start",
+                )
+                phase_path.write_text(
+                    json.dumps(
+                        {
+                            "schema": PUBLIC.FIXTURE_PHASE_SCHEMA,
+                            "profile": "public_ics",
+                            "source_sha": SOURCE_SHA,
+                            "phase": "radicale_ready",
+                        }
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                phase_path.chmod(0o600)
                 PUBLIC._write_fixture_diagnostic(
                     task_workspace / PUBLIC.FIXTURE_DIAGNOSTIC_FILENAME,
                     SOURCE_SHA,
@@ -871,11 +946,296 @@ class PublicFeedSmokeTests(unittest.TestCase):
             self.assertEqual(saved["fixtureFailureClass"], "jest_assertion_failed")
             self.assertEqual(saved["fixtureFailureLine"], 804)
             self.assertEqual(saved["fixtureFailureColumn"], 19)
+            self.assertEqual(saved["fixtureLastPhase"], "radicale_ready")
             self.assertTrue(
                 all(not saved[field] for field in PUBLIC.SUMMARY_BOOLEAN_FIELDS)
             )
             self.assertTrue(all(saved[field] == 0 for field in PUBLIC.COUNT_FIELDS))
             self.assertEqual(set(saved), set(PUBLIC._initial_summary(SOURCE_SHA)))
+
+    def test_run_reports_invalid_phase_marker_as_a_fixed_closed_value(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            runner_temp = base / "runner-temp"
+            runner_temp.mkdir()
+            task_root = base / "task-root"
+            task_workspace = task_root / "workspace"
+            task_workspace.mkdir(parents=True)
+            summary = PUBLIC._initial_summary(SOURCE_SHA)
+
+            def fail_without_marker(*_args: object, **_kwargs: object) -> int:
+                (task_workspace / PUBLIC.FIXTURE_PHASE_FILENAME).unlink()
+                return 1
+
+            with (
+                patch.dict(
+                    os.environ,
+                    {"RUNNER_TEMP": str(runner_temp), "GITHUB_SHA": SOURCE_SHA},
+                ),
+                patch.object(
+                    PUBLIC,
+                    "_prepared",
+                    return_value=(task_root, summary, base / "workspace"),
+                ),
+                patch.object(
+                    PUBLIC.SMOKE,
+                    "_run_container_bounded",
+                    side_effect=fail_without_marker,
+                ),
+            ):
+                self.assertFalse(PUBLIC._run())
+                saved = PUBLIC._load_summary()
+
+            self.assertEqual(saved["fixtureLastPhase"], "marker_invalid")
+            self.assertFalse(saved["nativeProviderPassed"])
+            self.assertTrue(all(saved[field] == 0 for field in PUBLIC.COUNT_FIELDS))
+
+    def test_native_timeout_projects_valid_or_invalid_fixture_phase(self) -> None:
+        for marker_content, expected_phase in (
+            (
+                {
+                    "schema": PUBLIC.FIXTURE_PHASE_SCHEMA,
+                    "profile": "public_ics",
+                    "source_sha": SOURCE_SHA,
+                    "phase": "radicale_ready",
+                },
+                "radicale_ready",
+            ),
+            ({"phase": "untrusted detail"}, "marker_invalid"),
+        ):
+            with self.subTest(expected_phase=expected_phase):
+                with tempfile.TemporaryDirectory() as temporary:
+                    base = Path(temporary)
+                    runner_temp = base / "runner-temp"
+                    runner_temp.mkdir()
+                    task_root = base / "task-root"
+                    task_workspace = task_root / "workspace"
+                    task_workspace.mkdir(parents=True)
+                    summary = PUBLIC._initial_summary(SOURCE_SHA)
+
+                    def timeout_after_fixture_phase(
+                        *_args: object, **_kwargs: object
+                    ) -> int:
+                        marker_path = task_workspace / PUBLIC.FIXTURE_PHASE_FILENAME
+                        marker_path.write_text(
+                            json.dumps(marker_content) + "\n", encoding="utf-8"
+                        )
+                        marker_path.chmod(0o600)
+                        raise PUBLIC.SMOKE.SmokeFailure(
+                            "fixture_run", "native_timeout"
+                        )
+
+                    with (
+                        patch.dict(
+                            os.environ,
+                            {
+                                "RUNNER_TEMP": str(runner_temp),
+                                "GITHUB_SHA": SOURCE_SHA,
+                            },
+                        ),
+                        patch.object(
+                            PUBLIC,
+                            "_prepared",
+                            return_value=(task_root, summary, base / "workspace"),
+                        ),
+                        patch.object(
+                            PUBLIC.SMOKE,
+                            "_run_container_bounded",
+                            side_effect=timeout_after_fixture_phase,
+                        ),
+                    ):
+                        self.assertFalse(PUBLIC._run())
+                        saved = PUBLIC._load_summary()
+
+                    self.assertEqual(saved["failure_stage"], "fixture_run")
+                    self.assertEqual(saved["failure_class"], "native_timeout")
+                    self.assertEqual(saved["phase"], "fixture_run")
+                    self.assertEqual(saved["fixtureLastPhase"], expected_phase)
+                    self.assertFalse(saved["nativeProviderPassed"])
+                    self.assertTrue(
+                        all(not saved[field] for field in PUBLIC.SUMMARY_BOOLEAN_FIELDS)
+                    )
+                    self.assertTrue(
+                        all(saved[field] == 0 for field in PUBLIC.COUNT_FIELDS)
+                    )
+                    self.assertEqual(
+                        set(saved), set(PUBLIC._initial_summary(SOURCE_SHA))
+                    )
+
+    def test_actual_jest_failure_projects_source_bound_phase_and_cleans_files(
+        self,
+    ) -> None:
+        node_value = os.environ.get("MCW_VALIDATION_NODE22") or shutil.which("node")
+        if node_value is None:
+            self.skipTest("Node.js is unavailable")
+        node = Path(node_value)
+        if not node.is_file() or not os.access(node, os.X_OK):
+            self.skipTest("retained Node.js binary is unavailable")
+        node_version = subprocess.run(
+            [str(node), "--version"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            timeout=5,
+        ).stdout.strip()
+        if not re.fullmatch(r"v22\.[0-9]+\.[0-9]+", node_version):
+            self.skipTest("Node.js 22 is unavailable")
+
+        repository = PUBLIC.SCRIPT_DIR.parent
+        test_runner = repository / "node_modules" / "jest" / "bin" / "jest.js"
+        dependency_root = repository / "node_modules"
+        if not test_runner.is_file() or not dependency_root.is_dir():
+            self.skipTest("cached Jest dependencies are unavailable")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            runner_temp = base / "runner-temp"
+            runner_temp.mkdir()
+            task_root = base / "task-root"
+            task_workspace = task_root / "workspace"
+            task_workspace.mkdir(parents=True)
+            logs = task_root / "logs"
+            logs.mkdir()
+            project = base / "project"
+            server = project / "matrix-calendar-server"
+            test_path = (
+                server
+                / "test"
+                / "integration"
+                / "PrivateCalendarClientRadicaleContract.test.ts"
+            )
+            test_path.parent.mkdir(parents=True)
+            (server / "node_modules").symlink_to(
+                dependency_root, target_is_directory=True
+            )
+            (server / "package.json").write_text(
+                json.dumps(
+                    {
+                        "name": "public-phase-probe",
+                        "version": "0.0.0",
+                        "jest": {
+                            "preset": "ts-jest",
+                            "testEnvironment": "node",
+                            "transform": {"^.+\\.(ts|tsx)$": "ts-jest"},
+                            "testRegex": "PrivateCalendarClientRadicaleContract\\.test\\.ts$",
+                            "moduleFileExtensions": ["ts", "tsx", "js"],
+                            "roots": ["<rootDir>/test"],
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (server / "tsconfig.json").write_text(
+                json.dumps(
+                    {
+                        "compilerOptions": {
+                            "target": "ES2022",
+                            "module": "commonjs",
+                            "sourceMap": True,
+                            "esModuleInterop": True,
+                            "skipLibCheck": True,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            test_path.write_text(
+                """
+import { writeFileSync } from 'node:fs';
+
+test('constant public phase failure', () => {
+  const marker = {
+    schema: 'thunderbird-public-feed-phase@1',
+    profile: 'public_ics',
+    source_sha: process.env.MCW_PHASE_PROBE_SOURCE_SHA,
+    phase: 'initial_http_start',
+  };
+  writeFileSync(
+    process.env.MCW_PHASE_PROBE_PATH as string,
+    `${JSON.stringify(marker)}\\n`,
+    { mode: 0o600 },
+  );
+  const failure = new Error('constant synthetic failure');
+  failure.stack =
+    'Error: constant synthetic failure\\n    at Object.<anonymous> (/tmp/unrelated.js:1:1)';
+  throw failure;
+});
+""",
+                encoding="utf-8",
+            )
+
+            summary = PUBLIC._initial_summary(SOURCE_SHA)
+            marker_path = task_workspace / PUBLIC.FIXTURE_PHASE_FILENAME
+            report_path = task_workspace / PUBLIC.JEST_REPORT_FILENAME
+            log_path = logs / "public-feed-jest.log"
+            environment = {
+                "RUNNER_TEMP": str(runner_temp),
+                "GITHUB_SHA": SOURCE_SHA,
+                "MCW_PHASE_PROBE_PATH": str(marker_path),
+                "MCW_PHASE_PROBE_SOURCE_SHA": SOURCE_SHA,
+            }
+
+            def run_actual_jest(*_args: object, **kwargs: object) -> int:
+                self.assertEqual(
+                    kwargs["extra_environment"]["MCW_PUBLIC_ICS_SOURCE_SHA"],
+                    SOURCE_SHA,
+                )
+                result_code, failure = PUBLIC._invoke_public_jest(
+                    node=node,
+                    test_runner=test_runner,
+                    test_path=test_path,
+                    working_directory=server,
+                    report_path=report_path,
+                    log_path=log_path,
+                    cache_directory=str(base / "jest-cache"),
+                    timeout=60,
+                )
+                self.assertEqual(result_code, 1)
+                self.assertIsNotNone(failure)
+                if failure is None:
+                    return 0
+                self.assertEqual(failure[:2], ("fixture_run", "jest_assertion_failed"))
+                self.assertEqual(failure[2:], (None, None))
+                PUBLIC._write_fixture_diagnostic(
+                    task_workspace / PUBLIC.FIXTURE_DIAGNOSTIC_FILENAME,
+                    SOURCE_SHA,
+                    *failure,
+                )
+                self.assertFalse(report_path.exists())
+                return result_code
+
+            with (
+                patch.dict(os.environ, environment),
+                patch.object(
+                    PUBLIC,
+                    "_prepared",
+                    return_value=(task_root, summary, project),
+                ),
+                patch.object(
+                    PUBLIC.SMOKE,
+                    "_run_container_bounded",
+                    side_effect=run_actual_jest,
+                ),
+            ):
+                self.assertFalse(PUBLIC._run())
+                saved = PUBLIC._load_summary()
+
+            self.assertEqual(saved["fixtureFailureStage"], "fixture_run")
+            self.assertEqual(saved["fixtureFailureClass"], "jest_assertion_failed")
+            self.assertIsNone(saved["fixtureFailureLine"])
+            self.assertIsNone(saved["fixtureFailureColumn"])
+            self.assertEqual(saved["fixtureLastPhase"], "initial_http_start")
+            self.assertFalse(saved["nativeProviderPassed"])
+            self.assertTrue(all(saved[key] == 0 for key in PUBLIC.COUNT_FIELDS))
+            self.assertFalse(report_path.exists())
+            self.assertTrue(marker_path.exists())
+            marker_path.unlink()
+            log_path.unlink()
+            (task_workspace / PUBLIC.FIXTURE_DIAGNOSTIC_FILENAME).unlink()
+            self.assertFalse(marker_path.exists())
+            self.assertFalse(log_path.exists())
 
     def test_container_environment_rejects_private_or_extra_public_credentials(
         self,
@@ -1030,7 +1390,7 @@ class PublicFeedSmokeTests(unittest.TestCase):
                 ):
                     self.assertTrue(PUBLIC._prepare())
                 summary = PUBLIC._load_summary()
-                self.assertEqual(summary["schema"], "thunderbird-public-ics-summary@3")
+                self.assertEqual(summary["schema"], "thunderbird-public-ics-summary@4")
                 self.assertTrue(summary["startupArtifactsVerified"])
                 self.assertIsNone(summary["startupArtifactsFailure"])
                 self.assertTrue(summary["thunderbirdArchiveVerified"])
