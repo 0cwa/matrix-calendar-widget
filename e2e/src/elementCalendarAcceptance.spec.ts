@@ -256,6 +256,9 @@ type ReminderConfigurationObservation = {
   reminderPutStatus: number;
 };
 
+// The standard Element side panel measured a 319 CSS-pixel content viewport.
+const MIN_REMINDER_LAYOUT_VIEWPORT_WIDTH = 319;
+const MAX_REMINDER_LAYOUT_VIEWPORT_WIDTH = 420;
 const MAX_REMINDER_RECIPIENT_ROSTER_SIZE = 20_000;
 
 function summarizeReminderRecipientRoster(
@@ -6061,43 +6064,51 @@ async function setRoomReminder(
       throw new Error('Matrix reminder destination control is unavailable');
     }
 
-    const layout = await details.evaluate((element) => {
-      const viewportWidth = document.documentElement.clientWidth;
-      const dialogWidth = element.getBoundingClientRect().width;
-      const dialogClientWidth = element.clientWidth;
-      const dialogScrollWidth = element.scrollWidth;
-      const documentClientWidth = document.documentElement.clientWidth;
-      const documentScrollWidth = document.documentElement.scrollWidth;
-      const viewportWithinRange = viewportWidth >= 320 && viewportWidth <= 420;
-      const dialogWithinViewport = dialogWidth <= viewportWidth + 1;
-      const dialogContentsFit = dialogScrollWidth <= dialogClientWidth + 1;
-      const documentContentsFit = documentScrollWidth <= viewportWidth + 1;
-      const safe =
-        viewportWidth >= 320 &&
-        viewportWidth <= 420 &&
-        dialogWidth <= viewportWidth + 1 &&
-        dialogScrollWidth <= dialogClientWidth + 1 &&
-        documentScrollWidth <= viewportWidth + 1;
-      // Keep raw dimensions for validation; only sanitizer output is rounded.
-      const boundedDimension = (value: number): number | 'not-observed' =>
-        Number.isFinite(value) && value >= 0 && value <= 100_000
-          ? value
-          : 'not-observed';
+    const layout = await details.evaluate(
+      (element, viewportBounds) => {
+        const viewportWidth = document.documentElement.clientWidth;
+        const dialogWidth = element.getBoundingClientRect().width;
+        const dialogClientWidth = element.clientWidth;
+        const dialogScrollWidth = element.scrollWidth;
+        const documentClientWidth = document.documentElement.clientWidth;
+        const documentScrollWidth = document.documentElement.scrollWidth;
+        const viewportWithinRange =
+          viewportWidth >= viewportBounds.minimum &&
+          viewportWidth <= viewportBounds.maximum;
+        const dialogWithinViewport = dialogWidth <= viewportWidth + 1;
+        const dialogContentsFit = dialogScrollWidth <= dialogClientWidth + 1;
+        const documentContentsFit = documentScrollWidth <= viewportWidth + 1;
+        const safe =
+          viewportWidth >= viewportBounds.minimum &&
+          viewportWidth <= viewportBounds.maximum &&
+          dialogWidth <= viewportWidth + 1 &&
+          dialogScrollWidth <= dialogClientWidth + 1 &&
+          documentScrollWidth <= viewportWidth + 1;
+        // Keep raw dimensions for validation; only sanitizer output is rounded.
+        const boundedDimension = (value: number): number | 'not-observed' =>
+          Number.isFinite(value) && value >= 0 && value <= 100_000
+            ? value
+            : 'not-observed';
 
-      return {
-        safe,
-        viewportWithinRange,
-        dialogWithinViewport,
-        dialogContentsFit,
-        documentContentsFit,
-        viewportWidth: boundedDimension(viewportWidth),
-        dialogWidth: boundedDimension(dialogWidth),
-        dialogClientWidth: boundedDimension(dialogClientWidth),
-        dialogScrollWidth: boundedDimension(dialogScrollWidth),
-        documentClientWidth: boundedDimension(documentClientWidth),
-        documentScrollWidth: boundedDimension(documentScrollWidth),
-      };
-    });
+        return {
+          safe,
+          viewportWithinRange,
+          dialogWithinViewport,
+          dialogContentsFit,
+          documentContentsFit,
+          viewportWidth: boundedDimension(viewportWidth),
+          dialogWidth: boundedDimension(dialogWidth),
+          dialogClientWidth: boundedDimension(dialogClientWidth),
+          dialogScrollWidth: boundedDimension(dialogScrollWidth),
+          documentClientWidth: boundedDimension(documentClientWidth),
+          documentScrollWidth: boundedDimension(documentScrollWidth),
+        };
+      },
+      {
+        minimum: MIN_REMINDER_LAYOUT_VIEWPORT_WIDTH,
+        maximum: MAX_REMINDER_LAYOUT_VIEWPORT_WIDTH,
+      },
+    );
     observation.narrowSidePanelSafe = layout.safe;
     observation.narrowViewportWithinRange = layout.viewportWithinRange;
     observation.narrowDialogWithinViewport = layout.dialogWithinViewport;
