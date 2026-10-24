@@ -53,6 +53,8 @@ class PublicCalendarFeedThunderbirdWorkerTests(unittest.TestCase):
             "MCW_PUBLIC_ICS_CA_FILE": str(ca_file),
             "MCW_PUBLIC_ICS_NATIVE_THUNDERBIRD_BIN": str(thunderbird),
             "MCW_PUBLIC_ICS_NATIVE_WORKSPACE": "/task/workspace",
+            "MCW_PUBLIC_ICS_PHASE_FILE": "/task/workspace/public-feed-native-phase.json",
+            "MCW_PUBLIC_ICS_SOURCE_SHA": "a" * 40,
         }
         with patch.dict(os.environ, environment):
             cls.worker = importlib.util.module_from_spec(SPEC)
@@ -134,6 +136,50 @@ class PublicCalendarFeedThunderbirdWorkerTests(unittest.TestCase):
         ):
             with self.assertRaises(self.worker.ContractFailure):
                 self.worker._state()
+
+    def test_worker_updates_only_the_closed_owned_phase_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            marker = workspace / self.worker.PHASE_FILENAME
+            marker.write_text(
+                json.dumps(
+                    {
+                        "schema": self.worker.PHASE_SCHEMA,
+                        "profile": "public_ics",
+                        "source_sha": "a" * 40,
+                        "phase": "jest_start",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            marker.chmod(0o600)
+            with (
+                patch.object(self.worker, "WORKSPACE", workspace),
+                patch.object(self.worker, "PHASE_FILE", marker),
+                patch.object(self.worker, "SOURCE_SHA", "a" * 40),
+            ):
+                self.worker._record_phase("initial_http_start")
+                saved = json.loads(marker.read_text(encoding="utf-8"))
+                self.assertEqual(
+                    saved,
+                    {
+                        "schema": self.worker.PHASE_SCHEMA,
+                        "profile": "public_ics",
+                        "source_sha": "a" * 40,
+                        "phase": "initial_http_start",
+                    },
+                )
+                self.assertEqual(marker.stat().st_mode & 0o777, 0o600)
+                self.assertFalse(
+                    (workspace / f"{self.worker.PHASE_FILENAME}.tmp").exists()
+                )
+
+                self.worker._record_phase("private event text")
+                self.assertEqual(
+                    json.loads(marker.read_text(encoding="utf-8"))["phase"],
+                    "initial_http_start",
+                )
 
     def test_public_provider_script_uses_marionette_function_arguments(self) -> None:
         node = shutil.which("node")

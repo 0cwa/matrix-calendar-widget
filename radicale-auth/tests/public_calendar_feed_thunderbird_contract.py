@@ -40,6 +40,11 @@ THUNDERBIRD = Path(
     os.environ.get("MCW_PUBLIC_ICS_NATIVE_THUNDERBIRD_BIN", "/nonexistent")
 )
 WORKSPACE = Path(os.environ.get("MCW_PUBLIC_ICS_NATIVE_WORKSPACE", "/nonexistent"))
+PHASE_FILE = Path(os.environ.get("MCW_PUBLIC_ICS_PHASE_FILE", "/nonexistent"))
+SOURCE_SHA = os.environ.get("MCW_PUBLIC_ICS_SOURCE_SHA", "")
+PHASE_FILENAME = "public-feed-native-phase.json"
+PHASE_SCHEMA = "thunderbird-public-feed-phase@1"
+PHASES = {"native_worker_start", "initial_http_start", "initial_http_observed"}
 # Marionette launches Thunderbird from this process. Keep the feed capability
 # and fixture-control key inside the worker instead of inheriting them into the
 # browser process environment.
@@ -316,7 +321,47 @@ def _valid_inputs() -> bool:
         and CA_FILE.is_file()
         and THUNDERBIRD.is_file()
         and WORKSPACE == Path("/task/workspace")
+        and PHASE_FILE == WORKSPACE / PHASE_FILENAME
+        and re.fullmatch(r"[0-9a-f]{40}", SOURCE_SHA) is not None
     )
+
+
+def _record_phase(phase: str) -> None:
+    if (
+        phase not in PHASES
+        or re.fullmatch(r"[0-9a-f]{40}", SOURCE_SHA) is None
+        or not WORKSPACE.is_absolute()
+        or PHASE_FILE != WORKSPACE / PHASE_FILENAME
+    ):
+        return
+    temporary = WORKSPACE / f"{PHASE_FILENAME}.tmp"
+    created = False
+    try:
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        created = True
+        payload = {
+            "schema": PHASE_SCHEMA,
+            "profile": "public_ics",
+            "source_sha": SOURCE_SHA,
+            "phase": phase,
+        }
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            output.write(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+            output.write("\n")
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, PHASE_FILE)
+        os.chmod(PHASE_FILE, 0o600)
+    except OSError:
+        if created:
+            try:
+                temporary.unlink()
+            except OSError:
+                pass
 
 
 def _run_certutil(profile: Path) -> None:
@@ -451,6 +496,7 @@ def run() -> dict[str, object]:
 
     if not _valid_inputs():
         raise ContractFailure("input_preflight", "invalid_input")
+    _record_phase("native_worker_start")
     profile_seed = Path(
         tempfile.mkdtemp(prefix="mcw-public-feed-profile-seed-", dir=WORKSPACE)
     )
@@ -509,6 +555,7 @@ def run() -> dict[str, object]:
             raise ContractFailure("calendar_tab", "calendar_tab_unavailable")
         _wait_for_calendar_tab(marionette)
 
+        _record_phase("initial_http_start")
         opened = _run_script(marionette, CREATE_PUBLIC_ICS, [PUBLIC_URL, API_ORIGIN])
         if not isinstance(opened, dict) or opened.get("ok") is not True:
             failure = (
@@ -521,12 +568,15 @@ def run() -> dict[str, object]:
             raise ContractFailure("provider_setup", "provider_unavailable")
 
         before_initial_refresh = _state()
+        if before_initial_refresh["status200Count"] > 0:
+            _record_phase("initial_http_observed")
         refreshed = _run_script(marionette, REFRESH_PUBLIC_ICS, [])
         if not isinstance(refreshed, dict) or refreshed.get("ok") is not True:
             raise ContractFailure("initial_refresh", "provider_unavailable")
         initial = _wait_for_public_response(
             before_initial_refresh, "status200Count", "initial_refresh"
         )
+        _record_phase("initial_http_observed")
         event_seen = _run_script(marionette, EVENT_PRESENT, [EVENT_UID])
         if event_seen is not True:
             raise ContractFailure("event_observation", "canonical_event_not_observed")

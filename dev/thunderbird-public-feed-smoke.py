@@ -33,22 +33,30 @@ if JEST_REPORT_SPEC is None or JEST_REPORT_SPEC.loader is None:
 JEST_REPORT = importlib.util.module_from_spec(JEST_REPORT_SPEC)
 JEST_REPORT_SPEC.loader.exec_module(JEST_REPORT)
 
-# Summary @3 adds closed, source-bound fixture failure projection fields.
-SUMMARY_SCHEMA = "thunderbird-public-ics-summary@3"
+# Summary @4 adds the closed, source-bound last fixture phase.
+SUMMARY_SCHEMA = "thunderbird-public-ics-summary@4"
 RESULT_SCHEMA = "thunderbird-public-ics-qualification@1"
 FIXTURE_DIAGNOSTIC_SCHEMA = "thunderbird-public-feed-jest-diagnostic@1"
+FIXTURE_PHASE_SCHEMA = "thunderbird-public-feed-phase@1"
 EXPECTED_APP_VERSION = "158.0.1"
 EXPECTED_NODE_PREFIX = (22, 12, 0)
 NATIVE_RESULT_FILENAME = "public-feed-native-result.json"
 JEST_REPORT_FILENAME = "public-feed-jest-report.json"
 FIXTURE_DIAGNOSTIC_FILENAME = "public-feed-jest-diagnostic.json"
+FIXTURE_PHASE_FILENAME = "public-feed-native-phase.json"
+FIXTURE_PHASE_TEMP_FILENAME = f"{FIXTURE_PHASE_FILENAME}.tmp"
 CONTAINER_RESULT_PATH = Path("/task/workspace") / NATIVE_RESULT_FILENAME
 CONTAINER_JEST_REPORT_PATH = Path("/task/workspace") / JEST_REPORT_FILENAME
 CONTAINER_FIXTURE_DIAGNOSTIC_PATH = (
     Path("/task/workspace") / FIXTURE_DIAGNOSTIC_FILENAME
 )
+CONTAINER_FIXTURE_PHASE_PATH = Path("/task/workspace") / FIXTURE_PHASE_FILENAME
+CONTAINER_FIXTURE_PHASE_TEMP_PATH = (
+    Path("/task/workspace") / FIXTURE_PHASE_TEMP_FILENAME
+)
 MAX_JEST_REPORT_BYTES = 1_000_000
 MAX_FIXTURE_DIAGNOSTIC_BYTES = 512
+MAX_FIXTURE_PHASE_BYTES = 512
 JEST_PROCESS_MARGIN_SECONDS = 60
 CONTAINER_CLEANUP_MARGIN_SECONDS = 60
 # The fixture is allowed 843 seconds, Jest 903, and the Docker invocation 963.
@@ -146,6 +154,26 @@ STARTUP_ARTIFACT_FAILURES = {
     "unknown",
 }
 FIXTURE_FAILURE_STAGES = {"fixture_run", "jest_runner", "native_result", "suite_load"}
+FIXTURE_PHASES = {
+    "jest_start",
+    "fixture_module_loaded",
+    "fixture_test_start",
+    "gateway_start",
+    "gateway_ready",
+    "radicale_start",
+    "radicale_ready",
+    "public_publish_start",
+    "public_published",
+    "native_worker_start",
+    "initial_http_start",
+    "initial_http_observed",
+    "native_worker_exit",
+    "native_stdout_parse",
+    "native_result_parsed",
+    "native_result_persisted",
+    "native_assertions",
+}
+FIXTURE_LAST_PHASES = FIXTURE_PHASES | {"marker_invalid"}
 FIXTURE_FAILURE_CLASSES = {
     "jest_assertion_failed",
     "jest_process_error",
@@ -221,6 +249,7 @@ def _initial_summary(source_sha: str) -> dict[str, Any]:
         "fixtureFailureClass": None,
         "fixtureFailureLine": None,
         "fixtureFailureColumn": None,
+        "fixtureLastPhase": None,
         "dockerBackendVerified": False,
         "dockerIsolationVerified": False,
         "workspaceJestReady": False,
@@ -287,6 +316,7 @@ def _success_gates(value: dict[str, Any]) -> bool:
                 "fixtureFailureClass",
                 "fixtureFailureLine",
                 "fixtureFailureColumn",
+                "fixtureLastPhase",
             )
         )
         and all(value.get(key) is True for key in SUMMARY_BOOLEAN_FIELDS)
@@ -358,6 +388,7 @@ def _write_summary(payload: dict[str, Any]) -> None:
             safe["fixtureFailureLine"],
             safe["fixtureFailureColumn"],
         )
+        or safe["fixtureLastPhase"] not in (None, *FIXTURE_LAST_PHASES)
         or (safe["fixtureFailureStage"] is not None and safe["status"] != "failed")
         or (safe["startupArtifactsFailure"] is not None and safe["status"] != "failed")
         or any(type(safe[key]) is not bool for key in SUMMARY_BOOLEAN_FIELDS)
@@ -454,6 +485,7 @@ def _load_summary() -> dict[str, Any]:
             value.get("fixtureFailureLine"),
             value.get("fixtureFailureColumn"),
         )
+        or value.get("fixtureLastPhase") not in (None, *FIXTURE_LAST_PHASES)
         or (
             value.get("fixtureFailureStage") is not None
             and value.get("status") != "failed"
@@ -1001,6 +1033,59 @@ def _read_fixture_diagnostic(path: Path, source_sha: str) -> dict[str, Any] | No
     }
 
 
+def _write_fixture_phase_marker(path: Path, source_sha: str, phase: str) -> None:
+    if re.fullmatch(r"[0-9a-f]{40}", source_sha) is None or phase not in FIXTURE_PHASES:
+        raise ValueError("public fixture phase is invalid")
+    payload = {
+        "schema": FIXTURE_PHASE_SCHEMA,
+        "profile": "public_ics",
+        "source_sha": source_sha,
+        "phase": phase,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n"
+    if len(encoded.encode("utf-8")) > MAX_FIXTURE_PHASE_BYTES:
+        raise ValueError("public fixture phase is invalid")
+    descriptor = os.open(
+        path,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+    )
+    with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+        output.write(encoded)
+        output.flush()
+        os.fsync(output.fileno())
+
+
+def _read_fixture_phase_marker(path: Path, source_sha: str) -> str | None:
+    if re.fullmatch(r"[0-9a-f]{40}", source_sha) is None:
+        return None
+    try:
+        metadata = path.lstat()
+        if (
+            path.is_symlink()
+            or not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.getuid()
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_size > MAX_FIXTURE_PHASE_BYTES
+        ):
+            return None
+        value = JEST_REPORT.read_owned_json_object(
+            path, max_bytes=MAX_FIXTURE_PHASE_BYTES
+        )
+    except (OSError, ValueError):
+        return None
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"schema", "profile", "source_sha", "phase"}
+        or value.get("schema") != FIXTURE_PHASE_SCHEMA
+        or value.get("profile") != "public_ics"
+        or value.get("source_sha") != source_sha
+        or value.get("phase") not in FIXTURE_PHASES
+    ):
+        return None
+    return value["phase"]
+
+
 def _remove_jest_report(path: Path) -> bool:
     try:
         path.unlink()
@@ -1137,6 +1222,8 @@ def _container_worker() -> int:
         or CONTAINER_JEST_REPORT_PATH.is_symlink()
         or CONTAINER_FIXTURE_DIAGNOSTIC_PATH.exists()
         or CONTAINER_FIXTURE_DIAGNOSTIC_PATH.is_symlink()
+        or CONTAINER_FIXTURE_PHASE_TEMP_PATH.exists()
+        or CONTAINER_FIXTURE_PHASE_TEMP_PATH.is_symlink()
     ):
         return 1
 
@@ -1157,6 +1244,13 @@ def _container_worker() -> int:
             )
         except Exception:
             pass
+
+    if (
+        _read_fixture_phase_marker(CONTAINER_FIXTURE_PHASE_PATH, source_sha)
+        != "jest_start"
+    ):
+        record_failure("jest_runner", "worker_input_invalid")
+        return 1
 
     if (
         not node.is_file()
@@ -1198,11 +1292,20 @@ def _run() -> bool:
         host_result_path = root / "workspace" / NATIVE_RESULT_FILENAME
         host_diagnostic_path = root / "workspace" / FIXTURE_DIAGNOSTIC_FILENAME
         host_report_path = root / "workspace" / JEST_REPORT_FILENAME
+        host_phase_path = root / "workspace" / FIXTURE_PHASE_FILENAME
+        host_phase_temp_path = root / "workspace" / FIXTURE_PHASE_TEMP_FILENAME
         if any(
             path.exists() or path.is_symlink()
-            for path in (host_result_path, host_diagnostic_path, host_report_path)
+            for path in (
+                host_result_path,
+                host_diagnostic_path,
+                host_report_path,
+                host_phase_path,
+                host_phase_temp_path,
+            )
         ):
             raise ValueError("native result already exists")
+        _write_fixture_phase_marker(host_phase_path, source_sha, "jest_start")
         mounts = [
             (root / "app", "/task/app", True),
             (root / "venv", "/task/venv", True),
@@ -1231,6 +1334,8 @@ def _run() -> bool:
             extra_environment=_public_container_environment(source_sha),
         )
         if exit_code != 0:
+            fixture_phase = _read_fixture_phase_marker(host_phase_path, source_sha)
+            summary["fixtureLastPhase"] = fixture_phase or "marker_invalid"
             try:
                 native_result = _read_native_result(host_result_path, allow_failed=True)
             except ValueError:
