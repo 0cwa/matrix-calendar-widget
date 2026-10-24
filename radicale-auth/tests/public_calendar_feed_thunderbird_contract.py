@@ -179,8 +179,9 @@ return typeof Services !== "undefined" && Services.logins &&
 # creates this provider with `createCalendar("ics", uri)` and registration
 # triggers refresh. The ICS provider also exposes `refresh()` and `getItem()`.
 CREATE_PUBLIC_ICS = r"""
-const done = arguments[arguments.length - 1];
-const [url, expectedOrigin] = arguments.slice(0, -1);
+const callbackArguments = Array.from(arguments);
+const done = callbackArguments.pop();
+const [url, expectedOrigin] = callbackArguments;
 (async () => {
   try {
     if (typeof cal === "undefined" || !cal.manager ||
