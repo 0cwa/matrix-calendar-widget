@@ -87,6 +87,7 @@ function reminderConfigurationObservation(overrides = {}) {
     recipientRosterHttpStatus: 200,
     recipientRosterCount: 1,
     recipientRosterShapeValid: true,
+    recipientRosterTargetPresent: selectedRecipient,
     recipientRosterOutcome: 'nonempty',
     reminderDestinationControlCount: 1,
     recipientKind: 'room',
@@ -94,6 +95,23 @@ function reminderConfigurationObservation(overrides = {}) {
     recipientSelectionStep: 'complete',
     recipientOptionCount: 1,
     memberInputProbeInstalled: selectedRecipient,
+    memberInputDomCount: selectedRecipient ? 1 : 0,
+    memberInputAriaExpanded: selectedRecipient ? 'true' : 'not-observed',
+    memberInputControlsTokenCount: selectedRecipient ? 1 : 0,
+    memberInputControlsNodePresent: selectedRecipient,
+    memberInputControlsListbox: selectedRecipient,
+    memberListboxDomCount: selectedRecipient ? 1 : 0,
+    memberOptionDomCount: selectedRecipient ? 1 : 0,
+    memberListboxOwnAriaHidden: selectedRecipient ? 'absent' : 'not-observed',
+    memberListboxAncestorAriaHidden: selectedRecipient
+      ? 'false'
+      : 'not-observed',
+    memberListboxOwnInert: selectedRecipient ? 'false' : 'not-observed',
+    memberListboxAncestorInert: selectedRecipient ? 'false' : 'not-observed',
+    memberListboxCssVisibility: selectedRecipient ? 'visible' : 'not-observed',
+    memberNoOptionsTextPresent: false,
+    memberLoadErrorVisible: false,
+    memberPickerObservationError: 'none',
     memberQueryMatchesTargetAfterFill: selectedRecipient,
     memberQueryMatchesTargetAtOptionCount: selectedRecipient,
     memberInputFocusedBeforeFill: selectedRecipient,
@@ -185,6 +203,7 @@ function missingReminderOptionObservation() {
     recipientRosterHttpStatus: 0,
     recipientRosterCount: 0,
     recipientRosterShapeValid: false,
+    recipientRosterTargetPresent: false,
     recipientRosterOutcome: 'unobserved',
     reminderDestinationControlCount: 0,
     recipientKind: 'unknown',
@@ -192,6 +211,21 @@ function missingReminderOptionObservation() {
     recipientSelectionStep: 'destination-clicked',
     recipientOptionCount: 0,
     memberInputProbeInstalled: false,
+    memberInputDomCount: 0,
+    memberInputAriaExpanded: 'not-observed',
+    memberInputControlsTokenCount: 0,
+    memberInputControlsNodePresent: false,
+    memberInputControlsListbox: false,
+    memberListboxDomCount: 0,
+    memberOptionDomCount: 0,
+    memberListboxOwnAriaHidden: 'not-observed',
+    memberListboxAncestorAriaHidden: 'not-observed',
+    memberListboxOwnInert: 'not-observed',
+    memberListboxAncestorInert: 'not-observed',
+    memberListboxCssVisibility: 'not-observed',
+    memberNoOptionsTextPresent: false,
+    memberLoadErrorVisible: false,
+    memberPickerObservationError: 'none',
     memberQueryMatchesTargetAfterFill: false,
     memberQueryMatchesTargetAtOptionCount: false,
     memberInputFocusedBeforeFill: false,
@@ -1184,6 +1218,17 @@ test('requires UI, Matrix delivery, and timeline evidence for reminder recovery'
     reminderConfigurationObservation({
       memberOptionsContainingTargetIdCount: 3,
     }),
+    reminderConfigurationObservation({ recipientRosterTargetPresent: 'true' }),
+    reminderConfigurationObservation({ memberInputAriaExpanded: 'expanded' }),
+    reminderConfigurationObservation({ memberInputDomCount: 3 }),
+    reminderConfigurationObservation({ memberListboxDomCount: 3 }),
+    reminderConfigurationObservation({ memberOptionDomCount: 3 }),
+    reminderConfigurationObservation({
+      memberListboxCssVisibility: 'display:block',
+    }),
+    reminderConfigurationObservation({
+      memberPickerObservationError: 'TypeError: private',
+    }),
     reminderConfigurationObservation({ unexpectedMemberText: 'private value' }),
     reminderConfigurationObservation({
       recipientKind: 'selected',
@@ -1551,6 +1596,11 @@ test('projects selected-recipient success and failed selection steps', () => {
     successSummary,
     /phase=reminder-room-configuration-enabled status=passed reminder_step=complete reminder_settings_button_count=1 reminder_settings_button_visible=true options_get_count=1 options_http_status=200 configuration_get_count=1 configuration_http_status=200 recipient_roster_get_count=1 recipient_roster_http_status=200 recipient_roster_count=1 recipient_roster_shape_valid=true recipient_roster_outcome=nonempty destination_control_count=1 recipient_kind=selected recipient_selection_attempted=true recipient_selection_step=complete recipient_option_count=1 member_input_probe_installed=true member_option_count=1 selected_member_tag_count=1 selected_member_keyboard_flow=true reminder_target_matches=true all_day_schedule_matches=true narrow_side_panel_safe=true put_count=1 put_http_status=200 member_query_matches_target_after_fill=true member_query_matches_target_at_option_count=true member_input_focused_before_fill=true member_document_focused_before_fill=true member_input_focused_after_fill=false member_document_focused_after_fill=true member_input_event_matched_target=true member_input_blur_event_count=1 member_input_same_node_after_fill=false member_listbox_count=1 member_input_controls_unique_listbox=true member_options_containing_target_id_count=1/u,
   );
+  assert.match(
+    successSummary,
+    /recipient_roster_target_present=true member_input_dom_count=1 member_input_aria_expanded=true member_input_controls_token_count=1 member_input_controls_node_present=true member_input_controls_listbox=true member_listbox_dom_count=1 member_option_dom_count=1 member_listbox_own_aria_hidden=absent member_listbox_ancestor_aria_hidden=false member_listbox_own_inert=false member_listbox_ancestor_inert=false member_listbox_css_visibility=visible member_no_options_text_present=false member_load_error_visible=false member_picker_observation_error=none/u,
+  );
+  assert.doesNotMatch(successSummary, /@member-b|Member B|No options/u);
   for (const inconsistentObservation of [
     { recipientSelectionStep: 'unrecognized-step' },
     { memberInputProbeInstalled: 'true' },
@@ -1607,6 +1657,52 @@ test('projects selected-recipient success and failed selection steps', () => {
   assert.match(
     failureSummary,
     /phase=reminder-room-configuration-enabled status=failed reminder_step=recipient-selection reminder_settings_button_count=1 reminder_settings_button_visible=true options_get_count=1 options_http_status=200 configuration_get_count=1 configuration_http_status=200 recipient_roster_get_count=1 recipient_roster_http_status=200 recipient_roster_count=1 recipient_roster_shape_valid=true recipient_roster_outcome=nonempty destination_control_count=1 recipient_kind=selected recipient_selection_attempted=true recipient_selection_step=member-option-ready recipient_option_count=1 member_input_probe_installed=true member_option_count=0 selected_member_tag_count=0 selected_member_keyboard_flow=false reminder_target_matches=false all_day_schedule_matches=false narrow_side_panel_safe=true put_count=0 put_http_status=0 member_query_matches_target_after_fill=true member_query_matches_target_at_option_count=true .*member_listbox_count=1 member_input_controls_unique_listbox=true member_options_containing_target_id_count=0/u,
+  );
+
+  const ariaHiddenListboxFailure = {
+    ...selectedFailure,
+    recipientSelectionStep: 'member-listbox-ready',
+    memberQueryMatchesTargetAfterFill: true,
+    memberInputAriaExpanded: 'true',
+    memberInputControlsNodePresent: true,
+    memberInputControlsListbox: true,
+    memberListboxCount: 0,
+    memberListboxDomCount: 1,
+    memberOptionCount: 0,
+    memberOptionDomCount: 1,
+    memberInputControlsUniqueListbox: false,
+    memberListboxOwnAriaHidden: 'absent',
+    memberListboxAncestorAriaHidden: 'true',
+    memberListboxOwnInert: 'false',
+    memberListboxAncestorInert: 'false',
+    memberListboxCssVisibility: 'visible',
+    memberNoOptionsTextPresent: false,
+    memberLoadErrorVisible: false,
+  };
+  const ariaHiddenListboxSummary = sanitizeElementAcceptance(
+    JSON.stringify(ariaHiddenListboxFailure),
+    sourceSha,
+  );
+  assert.match(
+    ariaHiddenListboxSummary,
+    /member_input_aria_expanded=true .*member_input_controls_node_present=true member_input_controls_listbox=true .*member_listbox_dom_count=1 member_option_dom_count=1 member_listbox_own_aria_hidden=absent member_listbox_ancestor_aria_hidden=true member_listbox_own_inert=false member_listbox_ancestor_inert=false member_listbox_css_visibility=visible member_no_options_text_present=false member_load_error_visible=false member_picker_observation_error=none/u,
+  );
+  assert.doesNotMatch(
+    ariaHiddenListboxSummary,
+    /@member-b|Member B|No options/u,
+  );
+
+  const locatorObservationFailure = {
+    ...ariaHiddenListboxFailure,
+    memberPickerObservationError: 'listbox-association',
+  };
+  const locatorObservationSummary = sanitizeElementAcceptance(
+    JSON.stringify(locatorObservationFailure),
+    sourceSha,
+  );
+  assert.match(
+    locatorObservationSummary,
+    /member_picker_observation_error=listbox-association/u,
   );
 
   const multipleMemberOptionsFailure = {

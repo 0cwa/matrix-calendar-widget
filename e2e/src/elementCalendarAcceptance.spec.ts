@@ -153,6 +153,33 @@ type ReminderConfigurationStep =
   | 'put-response'
   | 'complete';
 
+type MemberInputExpandedState =
+  | 'true'
+  | 'false'
+  | 'absent'
+  | 'other'
+  | 'not-observed';
+type MemberAriaHiddenState =
+  | 'true'
+  | 'false'
+  | 'absent'
+  | 'other'
+  | 'not-observed';
+type MemberInertState = 'true' | 'false' | 'not-observed';
+type MemberCssVisibility = 'visible' | 'hidden' | 'unknown' | 'not-observed';
+type MemberPickerObservationError =
+  | 'none'
+  | 'input-missing'
+  | 'input-not-unique'
+  | 'input-probe-install'
+  | 'input-probe-read'
+  | 'input-association'
+  | 'listbox-association'
+  | 'dom-sample'
+  | 'listbox-count'
+  | 'listbox-final-count'
+  | 'multiple';
+
 type ReminderConfigurationObservation = {
   reminderStep: ReminderConfigurationStep;
   reminderSettingsButtonCount: number;
@@ -165,6 +192,7 @@ type ReminderConfigurationObservation = {
   recipientRosterHttpStatus: number;
   recipientRosterCount: number;
   recipientRosterShapeValid: boolean;
+  recipientRosterTargetPresent: boolean;
   recipientRosterOutcome:
     | 'unobserved'
     | 'http_error'
@@ -177,6 +205,21 @@ type ReminderConfigurationObservation = {
   recipientSelectionStep: ReminderRecipientSelectionStep;
   recipientOptionCount: number;
   memberInputProbeInstalled: boolean;
+  memberInputDomCount: number;
+  memberInputAriaExpanded: MemberInputExpandedState;
+  memberInputControlsTokenCount: number;
+  memberInputControlsNodePresent: boolean;
+  memberInputControlsListbox: boolean;
+  memberListboxDomCount: number;
+  memberOptionDomCount: number;
+  memberListboxOwnAriaHidden: MemberAriaHiddenState;
+  memberListboxAncestorAriaHidden: MemberAriaHiddenState;
+  memberListboxOwnInert: MemberInertState;
+  memberListboxAncestorInert: MemberInertState;
+  memberListboxCssVisibility: MemberCssVisibility;
+  memberNoOptionsTextPresent: boolean;
+  memberLoadErrorVisible: boolean;
+  memberPickerObservationError: MemberPickerObservationError;
   memberQueryMatchesTargetAfterFill: boolean;
   memberQueryMatchesTargetAtOptionCount: boolean;
   memberInputFocusedBeforeFill: boolean;
@@ -201,14 +244,19 @@ type ReminderConfigurationObservation = {
 
 const MAX_REMINDER_RECIPIENT_ROSTER_SIZE = 20_000;
 
-function summarizeReminderRecipientRoster(value: unknown): {
+function summarizeReminderRecipientRoster(
+  value: unknown,
+  expectedUserId: string,
+): {
   recipientRosterCount: number;
   recipientRosterShapeValid: boolean;
+  recipientRosterTargetPresent: boolean;
   recipientRosterOutcome: 'empty' | 'invalid_shape' | 'nonempty';
 } {
   const invalid = (recipientRosterCount = 0) => ({
     recipientRosterCount,
     recipientRosterShapeValid: false,
+    recipientRosterTargetPresent: false,
     recipientRosterOutcome: 'invalid_shape' as const,
   });
   if (
@@ -264,6 +312,7 @@ function summarizeReminderRecipientRoster(value: unknown): {
   return {
     recipientRosterCount,
     recipientRosterShapeValid: true,
+    recipientRosterTargetPresent: seen.has(expectedUserId),
     recipientRosterOutcome: recipientRosterCount === 0 ? 'empty' : 'nonempty',
   };
 }
@@ -5721,6 +5770,7 @@ async function setRoomReminder(
     recipientRosterHttpStatus: 0,
     recipientRosterCount: 0,
     recipientRosterShapeValid: false,
+    recipientRosterTargetPresent: false,
     recipientRosterOutcome: 'unobserved',
     reminderDestinationControlCount: 0,
     recipientKind: 'unknown',
@@ -5728,6 +5778,21 @@ async function setRoomReminder(
     recipientSelectionStep: 'destination-clicked',
     recipientOptionCount: 0,
     memberInputProbeInstalled: false,
+    memberInputDomCount: 0,
+    memberInputAriaExpanded: 'not-observed',
+    memberInputControlsTokenCount: 0,
+    memberInputControlsNodePresent: false,
+    memberInputControlsListbox: false,
+    memberListboxDomCount: 0,
+    memberOptionDomCount: 0,
+    memberListboxOwnAriaHidden: 'not-observed',
+    memberListboxAncestorAriaHidden: 'not-observed',
+    memberListboxOwnInert: 'not-observed',
+    memberListboxAncestorInert: 'not-observed',
+    memberListboxCssVisibility: 'not-observed',
+    memberNoOptionsTextPresent: false,
+    memberLoadErrorVisible: false,
+    memberPickerObservationError: 'none',
     memberQueryMatchesTargetAfterFill: false,
     memberQueryMatchesTargetAtOptionCount: false,
     memberInputFocusedBeforeFill: false,
@@ -5753,6 +5818,19 @@ async function setRoomReminder(
   let dueAt: number | undefined;
   let latestRecipientRosterRequest: Request | undefined;
   let latestRecipientRosterResponse: Response | undefined;
+  let sampleMemberPickerDomState: (() => Promise<void>) | undefined;
+  const noteMemberPickerObservationError = (
+    error: Exclude<MemberPickerObservationError, 'none' | 'multiple'>,
+  ) => {
+    if (
+      observation.memberPickerObservationError === 'none' ||
+      observation.memberPickerObservationError === error
+    ) {
+      observation.memberPickerObservationError = error;
+    } else {
+      observation.memberPickerObservationError = 'multiple';
+    }
+  };
   const roomPath = `/v1/calendar/rooms/${fixture.teamRoomId}/reminders`;
   const gatewayOrigin = new URL(fixture.gatewayUrl).origin;
   const classifyRequest = (urlValue: string, method: string) => {
@@ -5789,6 +5867,7 @@ async function setRoomReminder(
       observation.recipientRosterHttpStatus = 0;
       observation.recipientRosterCount = 0;
       observation.recipientRosterShapeValid = false;
+      observation.recipientRosterTargetPresent = false;
       observation.recipientRosterOutcome = 'unobserved';
     } else if (kind === 'options') {
       observation.reminderOptionsGetCount = Math.min(
@@ -5860,6 +5939,7 @@ async function setRoomReminder(
       observation.recipientRosterHttpStatus = 0;
       observation.recipientRosterCount = 0;
       observation.recipientRosterShapeValid = false;
+      observation.recipientRosterTargetPresent = false;
       observation.recipientRosterOutcome = 'http_error';
     }
   };
@@ -5872,23 +5952,31 @@ async function setRoomReminder(
     if (status < 200 || status >= 300) {
       observation.recipientRosterCount = 0;
       observation.recipientRosterShapeValid = false;
+      observation.recipientRosterTargetPresent = false;
       observation.recipientRosterOutcome = 'http_error';
       return;
     }
 
     try {
-      const roster = summarizeReminderRecipientRoster(await response.json());
+      const roster = summarizeReminderRecipientRoster(
+        await response.json(),
+        fixture.users.memberB.userId,
+      );
       observation.recipientRosterCount = roster.recipientRosterCount;
       observation.recipientRosterShapeValid = roster.recipientRosterShapeValid;
+      observation.recipientRosterTargetPresent =
+        roster.recipientRosterTargetPresent;
       observation.recipientRosterOutcome = roster.recipientRosterOutcome;
     } catch {
       observation.recipientRosterCount = 0;
       observation.recipientRosterShapeValid = false;
+      observation.recipientRosterTargetPresent = false;
       observation.recipientRosterOutcome = 'invalid_shape';
     }
   };
   const writeFailure = async () => {
     await sampleRecipientRosterResponse();
+    await sampleMemberPickerDomState?.();
     const httpStatus =
       observation.reminderPutStatus ||
       observation.reminderOptionsGetStatus ||
@@ -6008,26 +6096,219 @@ async function setRoomReminder(
       const memberListbox = frame
         .getByRole('listbox')
         .filter({ visible: true });
-      const measureMemberInputListboxAssociation = async () => {
+      sampleMemberPickerDomState = async () => {
         try {
-          const controls = await memberInput.evaluateAll((inputs) =>
+          const sample = await memberInput.evaluateAll((inputs) => {
+            const capCount = (count: number) => Math.min(count, 2);
+            if (inputs.length !== 1) {
+              return {
+                observationError:
+                  inputs.length === 0
+                    ? ('input-missing' as const)
+                    : ('input-not-unique' as const),
+                inputDomCount: capCount(inputs.length),
+                inputAriaExpanded: 'not-observed' as const,
+                controlsTokenCount: 0,
+                controlsNodePresent: false,
+                controlsListbox: false,
+                listboxDomCount: 0,
+                optionDomCount: 0,
+                listboxOwnAriaHidden: 'not-observed' as const,
+                listboxAncestorAriaHidden: 'not-observed' as const,
+                listboxOwnInert: 'not-observed' as const,
+                listboxAncestorInert: 'not-observed' as const,
+                listboxCssVisibility: 'not-observed' as const,
+                noOptionsTextPresent: false,
+                loadErrorVisible: false,
+              };
+            }
+
+            const input = inputs[0];
+            const doc = input.ownerDocument;
+            const mapAriaHidden = (
+              element: Element | null,
+            ): MemberAriaHiddenState => {
+              if (!element) return 'not-observed';
+              const value = element.getAttribute('aria-hidden');
+              if (value === null) return 'absent';
+              if (value === 'true' || value === 'false') return value;
+              return 'other';
+            };
+            const ancestorAriaHidden = (
+              element: Element | null,
+            ): MemberAriaHiddenState => {
+              if (!element) return 'not-observed';
+              let ancestor = element.parentElement;
+              let depth = 0;
+              let foundOther = false;
+              for (; ancestor && depth < 32; depth += 1) {
+                const value = ancestor.getAttribute('aria-hidden');
+                if (value === 'true') return 'true';
+                if (value !== null && value !== 'false') foundOther = true;
+                ancestor = ancestor.parentElement;
+              }
+              if (ancestor) return 'other';
+              return foundOther ? 'other' : 'false';
+            };
+            const inertState = (element: Element | null): MemberInertState => {
+              if (!element) return 'not-observed';
+              const isInert =
+                element.hasAttribute('inert') ||
+                ('inert' in element &&
+                  Boolean(
+                    (element as HTMLElement & { inert?: boolean }).inert,
+                  ));
+              return isInert ? 'true' : 'false';
+            };
+            const ancestorInert = (
+              element: Element | null,
+            ): MemberInertState => {
+              if (!element) return 'not-observed';
+              let ancestor = element.parentElement;
+              let depth = 0;
+              for (; ancestor && depth < 32; depth += 1) {
+                if (
+                  ancestor.hasAttribute('inert') ||
+                  ('inert' in ancestor &&
+                    Boolean(
+                      (ancestor as HTMLElement & { inert?: boolean }).inert,
+                    ))
+                ) {
+                  return 'true';
+                }
+                ancestor = ancestor.parentElement;
+              }
+              return ancestor ? 'not-observed' : 'false';
+            };
+            const cssVisibility = (
+              element: Element | null,
+            ): MemberCssVisibility => {
+              if (!element) return 'not-observed';
+              if (!doc.defaultView) return 'unknown';
+              let current: Element | null = element;
+              let depth = 0;
+              for (; current && depth < 32; depth += 1) {
+                const style = doc.defaultView.getComputedStyle(current);
+                if (
+                  current.hasAttribute('hidden') ||
+                  style.display === 'none' ||
+                  style.visibility === 'hidden' ||
+                  style.visibility === 'collapse' ||
+                  style.opacity === '0'
+                ) {
+                  return 'hidden';
+                }
+                current = current.parentElement;
+              }
+              return current ? 'unknown' : 'visible';
+            };
+            const controls =
+              input
+                .getAttribute('aria-controls')
+                ?.trim()
+                .split(/\s+/u)
+                .filter(Boolean) ?? [];
+            const controlledNode =
+              controls.length === 1 ? doc.getElementById(controls[0]) : null;
+            const listboxes = Array.from(
+              doc.querySelectorAll('[role="listbox"]'),
+            );
+            const alertNodes = Array.from(
+              doc.querySelectorAll('[role="alert"]'),
+            );
+            const loadErrorVisible = alertNodes.some(
+              (alert) =>
+                /could not load joined room members/iu.test(
+                  alert.textContent ?? '',
+                ) && cssVisibility(alert) === 'visible',
+            );
+            const controlledText = controlledNode?.textContent
+              ?.replace(/\s+/gu, ' ')
+              .trim();
+            const expanded = input.getAttribute('aria-expanded');
+
+            return {
+              observationError: 'none' as const,
+              inputDomCount: 1,
+              inputAriaExpanded: (expanded === null
+                ? 'absent'
+                : expanded === 'true' || expanded === 'false'
+                  ? expanded
+                  : 'other') as MemberInputExpandedState,
+              controlsTokenCount: capCount(controls.length),
+              controlsNodePresent: controlledNode !== null,
+              controlsListbox:
+                controlledNode?.getAttribute('role') === 'listbox',
+              listboxDomCount: capCount(listboxes.length),
+              optionDomCount: capCount(
+                controlledNode?.querySelectorAll('[role="option"]').length ?? 0,
+              ),
+              listboxOwnAriaHidden: mapAriaHidden(controlledNode),
+              listboxAncestorAriaHidden: ancestorAriaHidden(controlledNode),
+              listboxOwnInert: inertState(controlledNode),
+              listboxAncestorInert: ancestorInert(controlledNode),
+              listboxCssVisibility: cssVisibility(controlledNode),
+              noOptionsTextPresent: Boolean(
+                controlledText &&
+                /^(?:no options(?: available)?|no matching members)$/iu.test(
+                  controlledText,
+                ),
+              ),
+              loadErrorVisible,
+            };
+          });
+
+          observation.memberInputDomCount = sample.inputDomCount;
+          observation.memberInputAriaExpanded = sample.inputAriaExpanded;
+          observation.memberInputControlsTokenCount = sample.controlsTokenCount;
+          observation.memberInputControlsNodePresent =
+            sample.controlsNodePresent;
+          observation.memberInputControlsListbox = sample.controlsListbox;
+          observation.memberListboxDomCount = sample.listboxDomCount;
+          observation.memberOptionDomCount = sample.optionDomCount;
+          observation.memberListboxOwnAriaHidden = sample.listboxOwnAriaHidden;
+          observation.memberListboxAncestorAriaHidden =
+            sample.listboxAncestorAriaHidden;
+          observation.memberListboxOwnInert = sample.listboxOwnInert;
+          observation.memberListboxAncestorInert = sample.listboxAncestorInert;
+          observation.memberListboxCssVisibility = sample.listboxCssVisibility;
+          observation.memberNoOptionsTextPresent = sample.noOptionsTextPresent;
+          observation.memberLoadErrorVisible = sample.loadErrorVisible;
+          if (sample.observationError !== 'none') {
+            noteMemberPickerObservationError(sample.observationError);
+          }
+        } catch {
+          noteMemberPickerObservationError('dom-sample');
+        }
+      };
+      const measureMemberInputListboxAssociation = async () => {
+        let controls: string | null;
+        try {
+          controls = await memberInput.evaluateAll((inputs) =>
             inputs.length === 1
               ? inputs[0].getAttribute('aria-controls')
               : null,
           );
-          const controlledIds = await memberListbox.evaluateAll((listboxes) =>
-            listboxes.map((listbox) => listbox.id),
-          );
-          const tokens = controls?.trim().split(/\s+/) ?? [];
-          return (
-            tokens.length === 1 &&
-            tokens[0].length > 0 &&
-            controlledIds.length === 1 &&
-            controlledIds[0] === tokens[0]
-          );
         } catch {
+          noteMemberPickerObservationError('input-association');
           return false;
         }
+        let controlledIds: string[];
+        try {
+          controlledIds = await memberListbox.evaluateAll((listboxes) =>
+            listboxes.map((listbox) => listbox.id),
+          );
+        } catch {
+          noteMemberPickerObservationError('listbox-association');
+          return false;
+        }
+        const tokens = controls?.trim().split(/\s+/u) ?? [];
+        return (
+          tokens.length === 1 &&
+          tokens[0].length > 0 &&
+          controlledIds.length === 1 &&
+          controlledIds[0] === tokens[0]
+        );
       };
       const expectedMemberUserId = fixture.users.memberB.userId;
       const memberInputProbeKey = '__calendarRoomReminderInputProbe';
@@ -6074,6 +6355,9 @@ async function setRoomReminder(
         )
         .catch(() => undefined);
       observation.memberInputProbeInstalled = beforeFill !== undefined;
+      if (!beforeFill) {
+        noteMemberPickerObservationError('input-probe-install');
+      }
       if (beforeFill) {
         observation.memberInputFocusedBeforeFill = beforeFill.inputFocused;
         observation.memberDocumentFocusedBeforeFill =
@@ -6133,6 +6417,9 @@ async function setRoomReminder(
             },
           )
           .catch(() => undefined);
+        if (!afterFill) {
+          noteMemberPickerObservationError('input-probe-read');
+        }
         if (afterFill) {
           observation.memberQueryMatchesTargetAfterFill =
             afterFill.queryMatchesTarget;
@@ -6145,8 +6432,17 @@ async function setRoomReminder(
           observation.memberInputSameNodeAfterFill = afterFill.sameInputNode;
         }
       }
+      await sampleMemberPickerDomState?.();
       observation.recipientSelectionStep = 'member-listbox-ready';
-      observation.memberListboxCount = Math.min(await memberListbox.count(), 2);
+      try {
+        observation.memberListboxCount = Math.min(
+          await memberListbox.count(),
+          2,
+        );
+      } catch {
+        noteMemberPickerObservationError('listbox-count');
+        throw new Error('Member listbox observation failed');
+      }
       try {
         await expect
           .poll(
@@ -6163,9 +6459,15 @@ async function setRoomReminder(
         observation.memberListboxCount = await memberListbox
           .count()
           .then((count) => Math.min(count, 2))
-          .catch(() => observation.memberListboxCount);
+          .catch(() => {
+            noteMemberPickerObservationError('listbox-final-count');
+            return observation.memberListboxCount;
+          });
         observation.memberInputControlsUniqueListbox =
-          await measureMemberInputListboxAssociation().catch(() => false);
+          await measureMemberInputListboxAssociation().catch(() => {
+            noteMemberPickerObservationError('listbox-association');
+            return false;
+          });
       }
       expect(observation.memberInputControlsUniqueListbox).toBe(true);
       const memberOptions = memberListbox.getByRole('option');

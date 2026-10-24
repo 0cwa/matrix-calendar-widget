@@ -1225,6 +1225,40 @@ const REMINDER_RECIPIENT_SELECTION_STEPS = new Set([
   'member-keyboard-closed',
   'complete',
 ]);
+const MEMBER_INPUT_EXPANDED_STATES = new Set([
+  'true',
+  'false',
+  'absent',
+  'other',
+  'not-observed',
+]);
+const MEMBER_ARIA_HIDDEN_STATES = new Set([
+  'true',
+  'false',
+  'absent',
+  'other',
+  'not-observed',
+]);
+const MEMBER_INERT_STATES = new Set(['true', 'false', 'not-observed']);
+const MEMBER_CSS_VISIBILITY_STATES = new Set([
+  'visible',
+  'hidden',
+  'unknown',
+  'not-observed',
+]);
+const MEMBER_PICKER_OBSERVATION_ERRORS = new Set([
+  'none',
+  'input-missing',
+  'input-not-unique',
+  'input-probe-install',
+  'input-probe-read',
+  'input-association',
+  'listbox-association',
+  'dom-sample',
+  'listbox-count',
+  'listbox-final-count',
+  'multiple',
+]);
 const REMINDER_ALARM_UI_STEPS = new Set([
   'event-row-visible',
   'event-open',
@@ -1306,6 +1340,7 @@ const REMINDER_CONFIGURATION_FIELDS = [
   'recipientRosterHttpStatus',
   'recipientRosterCount',
   'recipientRosterShapeValid',
+  'recipientRosterTargetPresent',
   'recipientRosterOutcome',
   'reminderDestinationControlCount',
   'recipientKind',
@@ -1313,6 +1348,21 @@ const REMINDER_CONFIGURATION_FIELDS = [
   'recipientSelectionStep',
   'recipientOptionCount',
   'memberInputProbeInstalled',
+  'memberInputDomCount',
+  'memberInputAriaExpanded',
+  'memberInputControlsTokenCount',
+  'memberInputControlsNodePresent',
+  'memberInputControlsListbox',
+  'memberListboxDomCount',
+  'memberOptionDomCount',
+  'memberListboxOwnAriaHidden',
+  'memberListboxAncestorAriaHidden',
+  'memberListboxOwnInert',
+  'memberListboxAncestorInert',
+  'memberListboxCssVisibility',
+  'memberNoOptionsTextPresent',
+  'memberLoadErrorVisible',
+  'memberPickerObservationError',
   'memberQueryMatchesTargetAfterFill',
   'memberQueryMatchesTargetAtOptionCount',
   'memberInputFocusedBeforeFill',
@@ -1342,8 +1392,12 @@ const REMINDER_CONFIGURATION_COUNTER_FIELDS = [
   'reminderDestinationControlCount',
   'recipientOptionCount',
   'memberInputBlurEventCount',
+  'memberInputDomCount',
+  'memberInputControlsTokenCount',
   'memberListboxCount',
+  'memberListboxDomCount',
   'memberOptionCount',
+  'memberOptionDomCount',
   'memberOptionsContainingTargetIdCount',
   'selectedMemberTagCount',
   'reminderPutCount',
@@ -2630,6 +2684,13 @@ function validReminderConfigurationObservation(record) {
     typeof record.reminderEnabled === 'boolean' &&
     REMINDER_CONFIGURATION_STEPS.has(record.reminderStep) &&
     REMINDER_RECIPIENT_SELECTION_STEPS.has(record.recipientSelectionStep) &&
+    MEMBER_INPUT_EXPANDED_STATES.has(record.memberInputAriaExpanded) &&
+    MEMBER_ARIA_HIDDEN_STATES.has(record.memberListboxOwnAriaHidden) &&
+    MEMBER_ARIA_HIDDEN_STATES.has(record.memberListboxAncestorAriaHidden) &&
+    MEMBER_INERT_STATES.has(record.memberListboxOwnInert) &&
+    MEMBER_INERT_STATES.has(record.memberListboxAncestorInert) &&
+    MEMBER_CSS_VISIBILITY_STATES.has(record.memberListboxCssVisibility) &&
+    MEMBER_PICKER_OBSERVATION_ERRORS.has(record.memberPickerObservationError) &&
     REMINDER_CONFIGURATION_COUNTER_FIELDS.every(
       (key) =>
         Number.isInteger(record[key]) && record[key] >= 0 && record[key] <= 2,
@@ -2644,7 +2705,12 @@ function validReminderConfigurationObservation(record) {
       'reminderSettingsButtonVisible',
       'recipientSelectionAttempted',
       'recipientRosterShapeValid',
+      'recipientRosterTargetPresent',
       'memberInputProbeInstalled',
+      'memberInputControlsNodePresent',
+      'memberInputControlsListbox',
+      'memberNoOptionsTextPresent',
+      'memberLoadErrorVisible',
       'memberQueryMatchesTargetAfterFill',
       'memberQueryMatchesTargetAtOptionCount',
       'memberInputFocusedBeforeFill',
@@ -4428,6 +4494,22 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           `member_listbox_count=${record.memberListboxCount}`,
           `member_input_controls_unique_listbox=${record.memberInputControlsUniqueListbox}`,
           `member_options_containing_target_id_count=${record.memberOptionsContainingTargetIdCount}`,
+          `recipient_roster_target_present=${record.recipientRosterTargetPresent}`,
+          `member_input_dom_count=${record.memberInputDomCount}`,
+          `member_input_aria_expanded=${record.memberInputAriaExpanded}`,
+          `member_input_controls_token_count=${record.memberInputControlsTokenCount}`,
+          `member_input_controls_node_present=${record.memberInputControlsNodePresent}`,
+          `member_input_controls_listbox=${record.memberInputControlsListbox}`,
+          `member_listbox_dom_count=${record.memberListboxDomCount}`,
+          `member_option_dom_count=${record.memberOptionDomCount}`,
+          `member_listbox_own_aria_hidden=${record.memberListboxOwnAriaHidden}`,
+          `member_listbox_ancestor_aria_hidden=${record.memberListboxAncestorAriaHidden}`,
+          `member_listbox_own_inert=${record.memberListboxOwnInert}`,
+          `member_listbox_ancestor_inert=${record.memberListboxAncestorInert}`,
+          `member_listbox_css_visibility=${record.memberListboxCssVisibility}`,
+          `member_no_options_text_present=${record.memberNoOptionsTextPresent}`,
+          `member_load_error_visible=${record.memberLoadErrorVisible}`,
+          `member_picker_observation_error=${record.memberPickerObservationError}`,
         ].join(' '),
       );
       continue;
