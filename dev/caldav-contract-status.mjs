@@ -110,6 +110,10 @@ const CASE_IDS = new Map([
     'room-appservice-bot-command-write',
   ],
   [
+    'room-appservice-radicale-contract\0rechecks private-client room policy against live Synapse state',
+    'room-appservice-private-client-live-policy',
+  ],
+  [
     'room-appservice-radicale-contract\0denies an unauthorized room bot command before proof or CalDAV I/O',
     'room-appservice-bot-command-denial',
   ],

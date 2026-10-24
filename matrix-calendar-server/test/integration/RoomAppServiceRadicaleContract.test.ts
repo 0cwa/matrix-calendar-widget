@@ -15,6 +15,7 @@
  */
 
 import {
+  ForbiddenException,
   INestApplication,
   INestMicroservice,
   LoggerService,
@@ -26,11 +27,11 @@ import { HttpAdapterHost, NestFactory } from '@nestjs/core';
 import { MicroserviceOptions } from '@nestjs/microservices';
 import { NextFunction, Request, Response } from 'express';
 import fetchMock from 'jest-fetch-mock';
-import { MatrixClient } from 'matrix-bot-sdk';
+import { MatrixClient, type PowerLevelsEventContent } from 'matrix-bot-sdk';
 import { getRequestFn, setRequestFn } from 'matrix-bot-sdk/lib/request';
 import { PinoLogger } from 'nestjs-pino';
 import { execFileSync } from 'node:child_process';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { appendFileSync } from 'node:fs';
 import { createServer, request as httpRequest } from 'node:http';
 import { AddressInfo } from 'node:net';
@@ -51,6 +52,10 @@ import { MatrixRoomMembershipGuard } from '../../src/guard/MatrixRoomMembershipG
 import { IAppConfiguration } from '../../src/IAppConfiguration';
 import { AutojoinRoomsMixin } from '../../src/matrix/mixins/AutojoinRoomsMixin';
 import { MatrixAuthMiddleware } from '../../src/middleware/MatrixAuthMiddleware';
+import type {
+  PrivateCalendarClientRecord,
+  PrivateCalendarClientStore,
+} from '../../src/model/IPrivateCalendarClientStore';
 import type { RoomCalendarBindingRecord } from '../../src/model/IRoomCalendarBindingStore';
 import { StateEventName } from '../../src/model/StateEventName';
 import { WidgetType } from '../../src/model/WidgetType';
@@ -66,8 +71,14 @@ import { CommandService } from '../../src/service/CommandService';
 import { ConfiguredRoomCalendarPrincipalIdentityProvider } from '../../src/service/ConfiguredRoomCalendarPrincipalIdentityProvider';
 import { DisabledRoomCalendarBindingStore } from '../../src/service/DisabledRoomCalendarBindingStore';
 import type { RoomCalendarBindingRegistry } from '../../src/service/IRoomCalendarBindingRegistry';
-import { MatrixCalendarAuthorizationFactory } from '../../src/service/MatrixCalendarAuthorization';
+import {
+  MATRIX_CALENDAR_MANAGE_POLICY,
+  MatrixCalendarAuthorizationFactory,
+} from '../../src/service/MatrixCalendarAuthorization';
 import { PostgresRoomCalendarBindingStore } from '../../src/service/PostgresRoomCalendarBindingStore';
+import { privateCalendarClientSecretVerifier } from '../../src/service/private-client/PrivateCalendarClientCredentials';
+import { PrivateCalendarClientPolicy } from '../../src/service/private-client/PrivateCalendarClientPolicy';
+import { PrivateCalendarClientService } from '../../src/service/private-client/PrivateCalendarClientService';
 import { RoomCalendarBindingRegistryAdapter } from '../../src/service/RoomCalendarBindingRegistryAdapter';
 import { RoomCalendarBindingError } from '../../src/service/RoomCalendarBindingResolver';
 import { RoomCalendarCalDavAccess } from '../../src/service/RoomCalendarCalDavAccess';
@@ -280,6 +291,88 @@ const principalOpenIdRequests: Array<{
   readonly bodyIsEmptyObject: boolean;
 }> = [];
 const gatewayLogLines: string[] = [];
+
+function createPrivatePolicyRecord(input: {
+  readonly createdBy: string;
+  readonly roomId: string;
+  readonly calendarId: string;
+  readonly canonicalPath: string;
+  readonly epochKey: Buffer;
+}): { readonly record: PrivateCalendarClientRecord; readonly secret: string } {
+  const appId = `mcwpc~${randomBytes(24).toString('hex')}`;
+  const secret = randomBytes(32).toString('base64url');
+  const createdAt = new Date();
+  return {
+    secret,
+    record: {
+      appId,
+      createdBy: input.createdBy,
+      target: {
+        target: 'room',
+        roomId: input.roomId,
+        calendarId: input.calendarId,
+      },
+      canonicalPath: input.canonicalPath,
+      secretVerifier: privateCalendarClientSecretVerifier(appId, secret),
+      credentialEpochHash: createHash('sha256')
+        .update(input.epochKey)
+        .digest('hex'),
+      state: 'active',
+      mapState: 'present',
+      createdAt,
+      expiresAt: new Date(createdAt.getTime() + 60 * 60 * 1000),
+    },
+  };
+}
+
+function createPrivatePolicyStore(
+  initialRecords: readonly PrivateCalendarClientRecord[],
+): {
+  readonly store: PrivateCalendarClientStore;
+  readonly get: (appId: string) => PrivateCalendarClientRecord | undefined;
+  readonly revocationCount: () => number;
+} {
+  const records = new Map(
+    initialRecords.map((record) => [record.appId, record]),
+  );
+  let revocations = 0;
+  const unexpectedOperation = async (): Promise<never> => {
+    throw new Error('Unexpected private-client store operation');
+  };
+  const store = {
+    enabled: true,
+    createPending: unexpectedOperation,
+    async getByAppId(appId: string) {
+      return records.get(appId);
+    },
+    async listForTarget() {
+      return [];
+    },
+    beginBootstrap: unexpectedOperation,
+    activate: unexpectedOperation,
+    async revoke(appId: string, now: Date) {
+      const record = records.get(appId);
+      if (!record) return undefined;
+      revocations += 1;
+      const revoked: PrivateCalendarClientRecord = {
+        ...record,
+        state: 'revoked',
+        mapState: 'cleanup-pending',
+        secretVerifier: undefined,
+        revokedAt: now,
+      };
+      records.set(appId, revoked);
+      return revoked;
+    },
+    markMapRemoved: unexpectedOperation,
+  } as unknown as PrivateCalendarClientStore;
+
+  return {
+    store,
+    get: (appId) => records.get(appId),
+    revocationCount: () => revocations,
+  };
+}
 
 describe('normal bot account registration command', () => {
   it('chooses non-admin for non-interactive Synapse registration', () => {
@@ -814,9 +907,22 @@ type RoomAppServiceCase =
   | 'event-write'
   | 'unauthorized-write'
   | 'bot-command-write'
-  | 'bot-command-denial';
-type RoomAppServiceFailureCase = 'subject-binding' | 'cross-room-denial';
+  | 'bot-command-denial'
+  | 'private-client-live-policy';
+type RoomAppServiceFailureCase =
+  | 'subject-binding'
+  | 'cross-room-denial'
+  | 'private-client-live-policy';
 type RoomAppServiceCaseFailureStage =
+  | 'identities'
+  | 'room-setup'
+  | 'baseline'
+  | 'credential-rw'
+  | 'issuance-denials'
+  | 'unknown-membership'
+  | 'demotion'
+  | 'leave'
+  | 'rejoin'
   | 'proof-selected'
   | 'proof-available'
   | 'identities-resolved'
@@ -831,6 +937,13 @@ type RoomAppServiceCaseFailureStage =
   | 'no-caldav-request'
   | 'no-new-openid-proof'
   | 'logs-secret-free';
+type PrivatePolicyCleanupOperation =
+  | 'restore-power-levels'
+  | 'lookup-members'
+  | 'leave-issuer'
+  | 'leave-reader';
+type PrivatePolicyCleanupFailure = PrivatePolicyCleanupOperation;
+type PrivatePolicyBodyResult = 'completed' | 'failed';
 type RoomAppServiceTeardownStage =
   | 'started'
   | 'log-check-started'
@@ -1734,6 +1847,375 @@ describeContract(contractDescription, () => {
     markRoomAppServiceTeardownStage('complete');
   });
 
+  // matrixJson can wait twice for server-directed 30s retries in this fixture.
+  // Allow that bounded delay plus time for the remaining local room operations.
+  it('rechecks private-client room policy against live Synapse state', async () => {
+    markRoomAppServiceCaseStarted('private-client-live-policy');
+    markRoomAppServiceCaseStage('private-client-live-policy', 'identities');
+    const policyReaderToken =
+      roomPrincipalMode === 'appservice'
+        ? serviceUserAccessTokens[0]
+        : principalAccessToken;
+    if (!policyReaderToken) {
+      throw new Error('Private-client policy reader token is unavailable');
+    }
+
+    const ownerUserId = await matrixUserIdForAccessToken(actorAccessToken);
+    const issuer = await registerNormalBotAccount();
+    const issuerUserId = issuer.userId;
+    const issuerToken = issuer.accessToken;
+    const readerUserId = await matrixUserIdForAccessToken(policyReaderToken);
+    expect(readerUserId).toBe(principalUserId);
+    expect(new Set([ownerUserId, issuerUserId, readerUserId]).size).toBe(3);
+    const roomOwnerPowerLevel = 100;
+    const calendarManagerPowerLevel = 50;
+    expect(calendarManagerPowerLevel).toBeLessThan(roomOwnerPowerLevel);
+
+    markRoomAppServiceCaseStage('private-client-live-policy', 'room-setup');
+    const roomId = await createRoom(
+      'Private client Synapse policy contract',
+      actorAccessToken,
+    );
+    const calendarId = `contract-private-policy-${randomUUID().replace(/-/gu, '')}`;
+    const policyRoomConfiguration = {
+      ...testConfiguration,
+      room_calendar_bindings: [
+        ...testConfiguration.room_calendar_bindings,
+        { roomId, calendarId },
+      ],
+    } as IAppConfiguration;
+    const registry = new RoomCalendarBindingRegistryAdapter(
+      policyRoomConfiguration.room_calendar_bindings,
+      new DisabledRoomCalendarBindingStore(),
+    );
+    const proofProvider = new MatrixRoomCalendarPrincipalOpenIdProofProvider(
+      policyRoomConfiguration,
+      getRoomPrincipalIdentityProvider(),
+      nativeFetch,
+    );
+    const policyRoomAccess = new RoomCalendarCalDavAccess(
+      policyRoomConfiguration,
+      registry,
+      proofProvider,
+    );
+    const ownerMatrixClient = new MatrixClient(homeserverUrl, actorAccessToken);
+    const policyMatrixClient = new MatrixClient(
+      homeserverUrl,
+      policyReaderToken,
+    );
+    const originalPowerLevels = (await ownerMatrixClient.getRoomStateEvent(
+      roomId,
+      StateEventName.M_ROOM_POWER_LEVELS_EVENT,
+      '',
+    )) as PowerLevelsEventContent;
+    let powerLevelsChanged = false;
+
+    const writePowerLevels = async (
+      token: string,
+      content: PowerLevelsEventContent,
+    ) =>
+      matrixJson(
+        `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/m.room.power_levels/`,
+        { method: 'PUT', token, body: content },
+      );
+    const inviteAndJoin = async (
+      userId: string,
+      token: string,
+    ): Promise<void> => {
+      await matrixJson(
+        `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/invite`,
+        {
+          method: 'POST',
+          token: actorAccessToken,
+          body: { user_id: userId },
+        },
+      );
+      await matrixJson(
+        `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/join`,
+        { method: 'POST', token, body: {} },
+      );
+      await waitForRoomMember(roomId, userId);
+    };
+    const leaveMember = async (token: string): Promise<void> => {
+      await matrixJson(
+        `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/leave`,
+        { method: 'POST', token, body: {} },
+      );
+    };
+
+    let privatePolicyBodyFailed = false;
+    try {
+      await inviteAndJoin(issuerUserId, issuerToken);
+      await inviteAndJoin(readerUserId, policyReaderToken);
+
+      const managerPowerLevels: PowerLevelsEventContent = {
+        ...originalPowerLevels,
+        users: {
+          ...originalPowerLevels.users,
+          [ownerUserId]: roomOwnerPowerLevel,
+          [issuerUserId]: roomOwnerPowerLevel,
+          [readerUserId]: 0,
+        },
+        events: {
+          ...originalPowerLevels.events,
+          [MATRIX_CALENDAR_MANAGE_POLICY]: calendarManagerPowerLevel,
+        },
+        state_default: calendarManagerPowerLevel,
+      };
+      powerLevelsChanged = true;
+      await writePowerLevels(actorAccessToken, managerPowerLevels);
+
+      markRoomAppServiceCaseStage('private-client-live-policy', 'baseline');
+      const target = {
+        roomId,
+        calendarId,
+        principal: { kind: 'service' as const },
+      };
+      const calendar = await policyRoomAccess.forAuthorizedTarget(
+        target,
+        'read',
+      );
+      await createServiceCalendar(
+        calendar.calendarUrl,
+        calendar.userId,
+        calendar.credential,
+      );
+
+      const epochKey = randomBytes(32);
+      const callbackKey = randomBytes(32);
+      const { record, secret } = createPrivatePolicyRecord({
+        createdBy: issuerUserId,
+        roomId,
+        calendarId,
+        canonicalPath: new URL(calendar.calendarUrl).pathname,
+        epochKey,
+      });
+      const missingRoomId = `!private-policy-missing-${randomUUID()}:localhost`;
+      const unknownMembershipCredential = createPrivatePolicyRecord({
+        createdBy: issuerUserId,
+        roomId: missingRoomId,
+        calendarId: 'missing-policy-calendar',
+        canonicalPath: '/missing-policy-calendar/',
+        epochKey,
+      });
+      const contractStore = createPrivatePolicyStore([
+        record,
+        unknownMembershipCredential.record,
+      ]);
+      const privateClientConfig = {
+        ...policyRoomConfiguration,
+        private_calendar_clients_enabled: true,
+        private_calendar_client_epoch_key: epochKey,
+        private_calendar_client_callback_key: callbackKey,
+        private_calendar_client_origin: 'https://api.example.test',
+        private_calendar_client_database_url:
+          'postgresql://private-policy.invalid/private_policy_contract',
+      } as IAppConfiguration;
+      const authorizationFactory = new MatrixCalendarAuthorizationFactory(
+        policyMatrixClient,
+      );
+      const policy = new PrivateCalendarClientPolicy(
+        privateClientConfig,
+        contractStore.store,
+        authorizationFactory,
+        policyMatrixClient,
+        policyRoomAccess,
+      );
+
+      expect(
+        await authorizationFactory.canManageCalendars(issuerUserId, roomId),
+      ).toBe(true);
+
+      markRoomAppServiceCaseStage(
+        'private-client-live-policy',
+        'credential-rw',
+      );
+      expect(await policy.authenticate(record.appId, secret)).toBe(true);
+      expect(
+        await policy.authorizeDavRequest(record.appId, 'GET', 'resource'),
+      ).toBe(true);
+      expect(
+        await policy.authorizeDavRequest(record.appId, 'PUT', 'resource'),
+      ).toBe(true);
+      expect(
+        await policy.rights(
+          record.appId,
+          `/${record.appId}/calendar/synthetic-event.ics`,
+        ),
+      ).toBe('rw');
+
+      const mapFetch = jest.fn(async () => new Response(null, { status: 503 }));
+      const privateClientService = new PrivateCalendarClientService(
+        privateClientConfig,
+        authorizationFactory,
+        new MatrixOpenIdCalDavCredentialProviderFactory(),
+        policyRoomAccess,
+        contractStore.store,
+        mapFetch as unknown as typeof fetch,
+      );
+      const readerContext = {
+        userId: readerUserId,
+        locale: 'en',
+        timezone: 'UTC',
+      };
+      markRoomAppServiceCaseStage(
+        'private-client-live-policy',
+        'issuance-denials',
+      );
+      await expect(
+        privateClientService.create(readerContext, undefined, {
+          target: 'room',
+          roomId,
+          calendarId,
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(
+        privateClientService.revoke(readerContext, undefined, record.appId),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(
+        privateClientService.create(
+          {
+            userId: issuerUserId,
+            locale: 'en',
+            timezone: 'UTC',
+          },
+          undefined,
+          {
+            target: 'room',
+            roomId: nonmemberRoomId,
+            calendarId: 'contract-nonmember',
+          },
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(mapFetch).not.toHaveBeenCalled();
+
+      markRoomAppServiceCaseStage(
+        'private-client-live-policy',
+        'unknown-membership',
+      );
+      await expect(
+        policyMatrixClient.getJoinedRoomMembers(missingRoomId),
+      ).rejects.toBeDefined();
+      const unknownPolicy = new PrivateCalendarClientPolicy(
+        privateClientConfig,
+        contractStore.store,
+        authorizationFactory,
+        policyMatrixClient,
+        policyRoomAccess,
+      );
+      expect(
+        await unknownPolicy.authenticate(
+          unknownMembershipCredential.record.appId,
+          unknownMembershipCredential.secret,
+        ),
+      ).toBe(false);
+      expect(
+        contractStore.get(unknownMembershipCredential.record.appId)?.state,
+      ).toBe('active');
+      expect(contractStore.revocationCount()).toBe(0);
+
+      const readOnlyPowerLevels: PowerLevelsEventContent = {
+        ...managerPowerLevels,
+        users: {
+          ...managerPowerLevels.users,
+          [issuerUserId]: 0,
+          [readerUserId]: calendarManagerPowerLevel,
+        },
+      };
+      markRoomAppServiceCaseStage('private-client-live-policy', 'demotion');
+      await writePowerLevels(issuerToken, readOnlyPowerLevels);
+      expect(
+        await authorizationFactory.canManageCalendars(readerUserId, roomId),
+      ).toBe(true);
+      expect(await policy.authenticate(record.appId, secret)).toBe(true);
+      expect(
+        await policy.authorizeDavRequest(record.appId, 'GET', 'resource'),
+      ).toBe(true);
+      expect(
+        await policy.authorizeDavRequest(record.appId, 'PUT', 'resource'),
+      ).toBe(false);
+      expect(
+        await policy.rights(
+          record.appId,
+          `/${record.appId}/calendar/synthetic-event.ics`,
+        ),
+      ).toBe('r');
+
+      markRoomAppServiceCaseStage('private-client-live-policy', 'leave');
+      await leaveMember(issuerToken);
+      await waitForRoomMembership(
+        policyMatrixClient,
+        roomId,
+        issuerUserId,
+        false,
+      );
+      expect(
+        await policy.authorizeDavRequest(record.appId, 'GET', 'resource'),
+      ).toBe(false);
+      expect(contractStore.get(record.appId)?.state).toBe('revoked');
+      expect(contractStore.get(record.appId)?.secretVerifier).toBeUndefined();
+      expect(contractStore.revocationCount()).toBe(1);
+
+      markRoomAppServiceCaseStage('private-client-live-policy', 'rejoin');
+      await inviteAndJoin(issuerUserId, issuerToken);
+      expect(await policy.authenticate(record.appId, secret)).toBe(false);
+      expect(
+        await policy.authorizeDavRequest(record.appId, 'GET', 'resource'),
+      ).toBe(false);
+      expect(
+        await policy.rights(
+          record.appId,
+          `/${record.appId}/calendar/synthetic-event.ics`,
+        ),
+      ).toBe('');
+      expect(contractStore.get(record.appId)?.state).toBe('revoked');
+      expect(contractStore.revocationCount()).toBe(1);
+    } catch (error) {
+      privatePolicyBodyFailed = true;
+      throw error;
+    } finally {
+      markPrivatePolicyBodyResult(
+        privatePolicyBodyFailed ? 'failed' : 'completed',
+      );
+      if (powerLevelsChanged) {
+        markPrivatePolicyCleanupOperation('restore-power-levels');
+        try {
+          await writePowerLevels(actorAccessToken, originalPowerLevels);
+        } catch (error) {
+          markPrivatePolicyCleanupFailure('restore-power-levels');
+          if (!privatePolicyBodyFailed) throw error;
+        }
+      }
+      markPrivatePolicyCleanupOperation('lookup-members');
+      let joinedMembers: string[];
+      try {
+        joinedMembers = await ownerMatrixClient.getJoinedRoomMembers(roomId);
+      } catch (error) {
+        markPrivatePolicyCleanupFailure('lookup-members');
+        if (!privatePolicyBodyFailed) throw error;
+        joinedMembers = [];
+      }
+      if (joinedMembers.includes(issuerUserId)) {
+        markPrivatePolicyCleanupOperation('leave-issuer');
+        try {
+          await leaveMember(issuerToken);
+        } catch (error) {
+          markPrivatePolicyCleanupFailure('leave-issuer');
+          if (!privatePolicyBodyFailed) throw error;
+        }
+      }
+      if (joinedMembers.includes(readerUserId)) {
+        markPrivatePolicyCleanupOperation('leave-reader');
+        try {
+          await leaveMember(policyReaderToken);
+        } catch (error) {
+          markPrivatePolicyCleanupFailure('leave-reader');
+          if (!privatePolicyBodyFailed) throw error;
+        }
+      }
+    }
+  }, 90_000);
+
   it('lists only the exact room binding through the selected principal', async () => {
     markRoomAppServiceCaseStarted('exact-binding');
     for (let index = 0; index < roomIds.length; index += 1) {
@@ -2221,6 +2703,28 @@ function markRoomAppServiceCaseStage(
   );
 }
 
+function markPrivatePolicyBodyResult(result: PrivatePolicyBodyResult): void {
+  appendRoomAppServiceSetupMarker(
+    `room-appservice-case-body-private-client-live-policy-${result}`,
+  );
+}
+
+function markPrivatePolicyCleanupOperation(
+  operation: PrivatePolicyCleanupOperation,
+): void {
+  appendRoomAppServiceSetupMarker(
+    `room-appservice-case-cleanup-private-client-live-policy-operation-${operation}`,
+  );
+}
+
+function markPrivatePolicyCleanupFailure(
+  failure: PrivatePolicyCleanupFailure,
+): void {
+  appendRoomAppServiceSetupMarker(
+    `room-appservice-case-cleanup-private-client-live-policy-failure-${failure}`,
+  );
+}
+
 function markRoomAppServiceTeardownStage(
   stage: RoomAppServiceTeardownStage,
 ): void {
@@ -2408,6 +2912,21 @@ async function waitForRoomMember(
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error('Normal bot did not join the invited room');
+}
+
+async function waitForRoomMembership(
+  matrixClient: MatrixClient,
+  roomId: string,
+  userId: string,
+  joined: boolean,
+): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const members = await matrixClient.getJoinedRoomMembers(roomId);
+    if (members.includes(userId) === joined) return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error('Synapse membership did not reach the expected state');
 }
 
 async function waitForCommandReply(
