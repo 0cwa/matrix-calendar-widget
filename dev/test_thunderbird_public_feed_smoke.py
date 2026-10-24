@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -111,6 +112,52 @@ class PublicFeedSmokeTests(unittest.TestCase):
         old_node = self._summary()
         old_node["nodeVersion"] = "22.11.9"
         self.assertFalse(PUBLIC._success_gates(old_node))
+
+    def test_timeout_budget_orders_fixture_jest_container_and_workflow(self) -> None:
+        fixture = (
+            Path(__file__).parents[1]
+            / "matrix-calendar-server"
+            / "test"
+            / "integration"
+            / "PrivateCalendarClientRadicaleContract.test.ts"
+        )
+        fixture_source = fixture.read_text(encoding="utf-8")
+        fixture_timeout = re.search(
+            r"PUBLIC_NATIVE_FIXTURE_TIMEOUT_MS\s*=\s*\n\s*PUBLIC_NATIVE_WORKER_TIMEOUT_MS\s*\+\s*\n\s*PUBLIC_NATIVE_CHILD_TERMINATION_GRACE_MS\s*\+\s*\n\s*PUBLIC_NATIVE_FIXTURE_SETUP_TEARDOWN_MARGIN_MS",
+            fixture_source,
+        )
+        self.assertIsNotNone(fixture_timeout)
+        fixture_values = {
+            name: int(match.group(1).replace("_", ""))
+            for name in (
+                "PUBLIC_NATIVE_WORKER_TIMEOUT_MS",
+                "PUBLIC_NATIVE_CHILD_TERMINATION_GRACE_MS",
+                "PUBLIC_NATIVE_FIXTURE_SETUP_TEARDOWN_MARGIN_MS",
+            )
+            if (match := re.search(rf"{name}\s*=\s*([0-9_]+)", fixture_source))
+        }
+        fixture_ms = sum(fixture_values.values())
+        self.assertEqual(fixture_ms, 783_000)
+        self.assertEqual(
+            PUBLIC.JEST_TIMEOUT_SECONDS * 1000,
+            fixture_ms + PUBLIC.JEST_PROCESS_MARGIN_SECONDS * 1000,
+        )
+        self.assertEqual(
+            PUBLIC.NATIVE_TIMEOUT_SECONDS * 1000,
+            PUBLIC.JEST_TIMEOUT_SECONDS * 1000
+            + PUBLIC.CONTAINER_CLEANUP_MARGIN_SECONDS * 1000,
+        )
+
+        workflow = (
+            Path(__file__).parents[1] / ".github" / "workflows" / "readme-gallery.yml"
+        ).read_text(encoding="utf-8")
+        public_job = workflow.split("  public-ics-feed-smoke:", maxsplit=1)[1]
+        workflow_timeout = re.search(r"(?m)^    timeout-minutes: ([0-9]+)$", public_job)
+        self.assertIsNotNone(workflow_timeout)
+        self.assertGreater(
+            int(workflow_timeout.group(1)) * 60,
+            PUBLIC.NATIVE_TIMEOUT_SECONDS,
+        )
 
     def test_native_failure_result_has_its_own_closed_stage_and_class_allowlists(
         self,

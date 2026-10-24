@@ -86,6 +86,16 @@ const nativeThunderbirdWorkspace =
 const describeContract =
   contractEnabled || publicFeedNativeProfile ? describe : describe.skip;
 
+// Worker phase budget is 555s, followed by 45s worker slack. This adds 3s
+// termination grace and 180s for production fixture setup/teardown.
+const PUBLIC_NATIVE_WORKER_TIMEOUT_MS = 600_000;
+const PUBLIC_NATIVE_CHILD_TERMINATION_GRACE_MS = 3_000;
+const PUBLIC_NATIVE_FIXTURE_SETUP_TEARDOWN_MARGIN_MS = 180_000;
+const PUBLIC_NATIVE_FIXTURE_TIMEOUT_MS =
+  PUBLIC_NATIVE_WORKER_TIMEOUT_MS +
+  PUBLIC_NATIVE_CHILD_TERMINATION_GRACE_MS +
+  PUBLIC_NATIVE_FIXTURE_SETUP_TEARDOWN_MARGIN_MS;
+
 const APP_ID_PATTERN = /^mcwpc~[a-f0-9]{48}$/u;
 const TEST_MATRIX_SERVER = 'example.test';
 const TEST_ACTOR = '@alice:example.test';
@@ -372,7 +382,11 @@ describeContract(
   'Radicale client contracts (private CalDAV and public ICS)',
   () => {
     jest.setTimeout(
-      nativeThunderbirdProfile || publicFeedNativeProfile ? 240_000 : 90_000,
+      publicFeedNativeProfile
+        ? PUBLIC_NATIVE_FIXTURE_TIMEOUT_MS
+        : nativeThunderbirdProfile
+          ? 240_000
+          : 90_000,
     );
 
     it('runs the selected client profile against the Radicale HTTPS fixture', async () => {
@@ -1029,7 +1043,10 @@ describeContract(
             publicStdout += chunk.toString('utf8');
           });
           try {
-            const publicExit = await waitForChild(publicProcess, 180_000);
+            const publicExit = await waitForChild(
+              publicProcess,
+              PUBLIC_NATIVE_WORKER_TIMEOUT_MS,
+            );
             const resultLine = publicStdout
               .split(/\r?\n/u)
               .map((line) => line.trim())

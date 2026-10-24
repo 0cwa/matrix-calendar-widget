@@ -20,6 +20,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -132,6 +133,65 @@ class PublicCalendarFeedThunderbirdWorkerTests(unittest.TestCase):
         ):
             with self.assertRaises(self.worker.ContractFailure):
                 self.worker._state()
+
+    def test_native_timeout_budget_matches_the_worker_and_fixture_deadlines(
+        self,
+    ) -> None:
+        self.assertEqual(self.worker.WORKER_PHASE_BUDGET_SECONDS, 555)
+        self.assertEqual(self.worker.EVENT_OBSERVATION_MAX_SECONDS, 6)
+        self.assertLessEqual(
+            self.worker.EVENT_OBSERVATION_MAX_SECONDS,
+            self.worker.MARIONETTE_SCRIPT_TIMEOUT_SECONDS,
+        )
+
+        fixture = (
+            Path(__file__).parents[2]
+            / "matrix-calendar-server"
+            / "test"
+            / "integration"
+            / "PrivateCalendarClientRadicaleContract.test.ts"
+        )
+        fixture_source = fixture.read_text(encoding="utf-8")
+        worker_timeout = re.search(
+            r"PUBLIC_NATIVE_WORKER_TIMEOUT_MS\s*=\s*([0-9_]+)",
+            fixture_source,
+        )
+        termination_grace = re.search(
+            r"PUBLIC_NATIVE_CHILD_TERMINATION_GRACE_MS\s*=\s*([0-9_]+)",
+            fixture_source,
+        )
+        fixture_margin = re.search(
+            r"PUBLIC_NATIVE_FIXTURE_SETUP_TEARDOWN_MARGIN_MS\s*=\s*([0-9_]+)",
+            fixture_source,
+        )
+        fixture_timeout = re.search(
+            r"PUBLIC_NATIVE_FIXTURE_TIMEOUT_MS\s*=\s*\n\s*PUBLIC_NATIVE_WORKER_TIMEOUT_MS\s*\+\s*\n\s*PUBLIC_NATIVE_CHILD_TERMINATION_GRACE_MS\s*\+\s*\n\s*PUBLIC_NATIVE_FIXTURE_SETUP_TEARDOWN_MARGIN_MS",
+            fixture_source,
+        )
+        self.assertIsNotNone(worker_timeout)
+        self.assertIsNotNone(termination_grace)
+        self.assertIsNotNone(fixture_margin)
+        self.assertIsNotNone(fixture_timeout)
+        worker_timeout_ms = int(worker_timeout.group(1).replace("_", ""))
+        self.assertGreaterEqual(
+            worker_timeout_ms, self.worker.WORKER_PHASE_BUDGET_SECONDS * 1000
+        )
+        self.assertEqual(worker_timeout_ms, 600_000)
+        self.assertEqual(int(termination_grace.group(1).replace("_", "")), 3_000)
+        self.assertEqual(int(fixture_margin.group(1).replace("_", "")), 180_000)
+
+        worker_source = (
+            Path(__file__)
+            .with_name("public_calendar_feed_thunderbird_contract.py")
+            .read_text(encoding="utf-8")
+        )
+        self.assertIn("socket_timeout=MARIONETTE_SOCKET_TIMEOUT_SECONDS", worker_source)
+        self.assertIn(
+            "marionette.timeout.script = MARIONETTE_SCRIPT_TIMEOUT_SECONDS",
+            worker_source,
+        )
+        self.assertIn("nativeThunderbirdProfile\n          ? 240_000", fixture_source)
+        self.assertIn("waitForChild(nativeProcess, 180_000)", fixture_source)
 
 
 if __name__ == "__main__":

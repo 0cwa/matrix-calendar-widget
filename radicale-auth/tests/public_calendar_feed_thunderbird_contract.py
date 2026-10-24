@@ -49,6 +49,39 @@ for _environment_name in tuple(os.environ):
 EXPECTED_VERSION = "158.0.1"
 EVENT_UID = "public-native-feed-event"
 REQUEST_TIMEOUT_SECONDS = 25
+CONTROL_REQUEST_TIMEOUT_SECONDS = 5
+CERTUTIL_COMMAND_TIMEOUT_SECONDS = 10
+CERTUTIL_COMMAND_COUNT = 2
+MARIONETTE_STARTUP_TIMEOUT_SECONDS = 85
+MARIONETTE_SOCKET_TIMEOUT_SECONDS = 15
+MARIONETTE_SCRIPT_TIMEOUT_SECONDS = 10
+MARIONETTE_SHUTDOWN_TIMEOUT_SECONDS = 70
+CALENDAR_TAB_TIMEOUT_SECONDS = 15
+EVENT_OBSERVATION_MAX_SECONDS = 6
+MARIONETTE_SETUP_RPC_COUNT = 5
+MARIONETTE_PROVIDER_SCRIPT_COUNT = 6
+MARIONETTE_QUIT_RPC_COUNT = 2
+PUBLIC_RESPONSE_WAIT_COUNT = 3
+DIRECT_CONTROL_REQUEST_COUNT = 4
+WORKER_CLEANUP_ALLOWANCE_SECONDS = 80
+
+# The pinned Marionette driver's default socket timeout is 360 seconds. Keep
+# this worker's individual Marionette calls and scripts bounded instead. The
+# parent fixture also applies a whole-worker deadline that includes cleanup.
+WORKER_PHASE_BUDGET_SECONDS = (
+    CERTUTIL_COMMAND_COUNT * CERTUTIL_COMMAND_TIMEOUT_SECONDS
+    + MARIONETTE_STARTUP_TIMEOUT_SECONDS
+    + MARIONETTE_SETUP_RPC_COUNT * MARIONETTE_SOCKET_TIMEOUT_SECONDS
+    + CALENDAR_TAB_TIMEOUT_SECONDS
+    + MARIONETTE_SCRIPT_TIMEOUT_SECONDS
+    + MARIONETTE_PROVIDER_SCRIPT_COUNT * MARIONETTE_SCRIPT_TIMEOUT_SECONDS
+    + PUBLIC_RESPONSE_WAIT_COUNT
+    * (REQUEST_TIMEOUT_SECONDS + CONTROL_REQUEST_TIMEOUT_SECONDS)
+    + DIRECT_CONTROL_REQUEST_COUNT * CONTROL_REQUEST_TIMEOUT_SECONDS
+    + MARIONETTE_SHUTDOWN_TIMEOUT_SECONDS
+    + MARIONETTE_QUIT_RPC_COUNT * MARIONETTE_SOCKET_TIMEOUT_SECONDS
+    + WORKER_CLEANUP_ALLOWANCE_SECONDS
+)
 
 RESULT_SCHEMA = "thunderbird-public-ics-qualification@1"
 RESULT_FIELDS = {
@@ -299,7 +332,7 @@ def _run_certutil(profile: Path) -> None:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 check=False,
-                timeout=10,
+                timeout=CERTUTIL_COMMAND_TIMEOUT_SECONDS,
             )
         except (OSError, subprocess.SubprocessError):
             raise ContractFailure("profile_setup", "trust_setup_failed") from None
@@ -308,7 +341,9 @@ def _run_certutil(profile: Path) -> None:
 
 
 def _control_request(method: str, path: str, body: bytes = b"") -> tuple[int, bytes]:
-    connection = http.client.HTTPConnection("127.0.0.1", CONTROL_PORT, timeout=5)
+    connection = http.client.HTTPConnection(
+        "127.0.0.1", CONTROL_PORT, timeout=CONTROL_REQUEST_TIMEOUT_SECONDS
+    )
     try:
         headers = {"X-Contract-Key": CONTROL_KEY}
         if body:
@@ -387,7 +422,7 @@ def _run_script(marionette: object, script: str, args: list[object]) -> object:
 
 
 def _wait_for_calendar_tab(marionette: object) -> None:
-    deadline = time.monotonic() + 15
+    deadline = time.monotonic() + CALENDAR_TAB_TIMEOUT_SECONDS
     while True:
         try:
             opened = marionette.execute_script(CALENDAR_TAB_OPEN)
@@ -441,12 +476,15 @@ def run() -> dict[str, object]:
             app_args=["--calendar", "--headless"],
             prefs=prefs,
             headless=False,
-            startup_timeout=85,
+            socket_timeout=MARIONETTE_SOCKET_TIMEOUT_SECONDS,
+            startup_timeout=MARIONETTE_STARTUP_TIMEOUT_SECONDS,
             profile=str(profile_seed),
         )
         profile_path = Path(marionette.profile_path).resolve(strict=True)
         profile_path.relative_to(WORKSPACE.resolve(strict=True))
         capabilities = marionette.start_session()
+        marionette.timeout.script = MARIONETTE_SCRIPT_TIMEOUT_SECONDS
+        marionette.shutdown_timeout = MARIONETTE_SHUTDOWN_TIMEOUT_SECONDS
         if capabilities.get("browserVersion") != EXPECTED_VERSION:
             raise ContractFailure("application_startup", "version_mismatch")
         marionette.set_context(marionette.CONTEXT_CHROME)

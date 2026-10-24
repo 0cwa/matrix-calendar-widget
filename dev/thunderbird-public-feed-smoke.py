@@ -32,8 +32,12 @@ EXPECTED_APP_VERSION = "158.0.1"
 EXPECTED_NODE_PREFIX = (22, 12, 0)
 NATIVE_RESULT_FILENAME = "public-feed-native-result.json"
 CONTAINER_RESULT_PATH = Path("/task/workspace") / NATIVE_RESULT_FILENAME
-NATIVE_TIMEOUT_SECONDS = 360
-JEST_TIMEOUT_SECONDS = 300
+JEST_PROCESS_MARGIN_SECONDS = 60
+CONTAINER_CLEANUP_MARGIN_SECONDS = 60
+# The fixture is allowed 783 seconds, Jest 843, and the Docker invocation 903.
+# Keep 60 seconds between each outer deadline for startup and process cleanup.
+JEST_TIMEOUT_SECONDS = 843
+NATIVE_TIMEOUT_SECONDS = 903
 
 PREDICATE_FIELDS = {
     "calendarTab",
