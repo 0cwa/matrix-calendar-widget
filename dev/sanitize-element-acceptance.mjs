@@ -2798,6 +2798,9 @@ function validReminderConfigurationObservation(record) {
     (!hasAllLayoutDiagnostics ||
       hasObservedLayoutPredicates ||
       layoutPredicatesNotObserved) &&
+    (record.status !== 'passed' ||
+      !hasAnyLayoutDiagnostic ||
+      hasObservedLayoutPredicates) &&
     REMINDER_LAYOUT_DIMENSION_FIELDS.every(
       (key) =>
         !Object.hasOwn(record, key) ||

@@ -130,16 +130,6 @@ function reminderConfigurationObservation(overrides = {}) {
     reminderTargetMatches: true,
     allDayScheduleMatches: true,
     narrowSidePanelSafe: true,
-    narrowViewportWithinRange: 'not-observed',
-    narrowDialogWithinViewport: 'not-observed',
-    narrowDialogContentsFit: 'not-observed',
-    narrowDocumentContentsFit: 'not-observed',
-    narrowViewportWidth: 'not-observed',
-    narrowDialogWidth: 'not-observed',
-    narrowDialogClientWidth: 'not-observed',
-    narrowDialogScrollWidth: 'not-observed',
-    narrowDocumentClientWidth: 'not-observed',
-    narrowDocumentScrollWidth: 'not-observed',
     reminderPutCount: 1,
     reminderPutStatus: 200,
     ...overrides,
@@ -1821,6 +1811,27 @@ test('sanitizes bounded post-PUT layout measurements and legacy observations', (
   assert.match(
     exactBoundarySummary,
     /narrow_viewport_width=420 narrow_dialog_width=421 narrow_dialog_client_width=420\.2 narrow_dialog_scroll_width=421\.2 narrow_document_client_width=420 narrow_document_scroll_width=421/u,
+  );
+
+  const passedWithoutLayoutMeasurement = reminderConfigurationObservation({
+    narrowViewportWithinRange: 'not-observed',
+    narrowDialogWithinViewport: 'not-observed',
+    narrowDialogContentsFit: 'not-observed',
+    narrowDocumentContentsFit: 'not-observed',
+    narrowViewportWidth: 'not-observed',
+    narrowDialogWidth: 'not-observed',
+    narrowDialogClientWidth: 'not-observed',
+    narrowDialogScrollWidth: 'not-observed',
+    narrowDocumentClientWidth: 'not-observed',
+    narrowDocumentScrollWidth: 'not-observed',
+  });
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(passedWithoutLayoutMeasurement),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
   );
 
   const legacyFailure = { ...postPutLayoutFailure };
