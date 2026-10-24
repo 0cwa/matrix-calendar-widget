@@ -1801,7 +1801,30 @@ test('sanitizes bounded post-PUT layout measurements and legacy observations', (
     /sensitive-title|private-dom-text|@member|Member B|<[^>]*>/u,
   );
 
+  const exactBoundary = reminderConfigurationObservation({
+    narrowSidePanelSafe: true,
+    narrowViewportWithinRange: true,
+    narrowDialogWithinViewport: true,
+    narrowDialogContentsFit: true,
+    narrowDocumentContentsFit: true,
+    narrowViewportWidth: 420,
+    narrowDialogWidth: 421,
+    narrowDialogClientWidth: 420.2,
+    narrowDialogScrollWidth: 421.2,
+    narrowDocumentClientWidth: 420,
+    narrowDocumentScrollWidth: 421,
+  });
+  const exactBoundarySummary = sanitizeElementAcceptance(
+    JSON.stringify(exactBoundary),
+    sourceSha,
+  );
+  assert.match(
+    exactBoundarySummary,
+    /narrow_viewport_width=420 narrow_dialog_width=421 narrow_dialog_client_width=420\.2 narrow_dialog_scroll_width=421\.2 narrow_document_client_width=420 narrow_document_scroll_width=421/u,
+  );
+
   const legacyFailure = { ...postPutLayoutFailure };
+  legacyFailure.reminderStep = 'put-response';
   delete legacyFailure.narrowViewportWithinRange;
   delete legacyFailure.narrowDialogWithinViewport;
   delete legacyFailure.narrowDialogContentsFit;
@@ -1849,6 +1872,10 @@ test('sanitizes bounded post-PUT layout measurements and legacy observations', (
     { reminderPutCount: 0 },
     { reminderPutStatus: 503 },
     { narrowSidePanelSafe: true },
+    { narrowViewportWithinRange: true },
+    { narrowDocumentClientWidth: 449 },
+    { narrowDialogWidth: 449.0001 },
+    { narrowDialogScrollWidth: 449.0001 },
   ]) {
     assert.throws(
       () =>
@@ -1862,6 +1889,45 @@ test('sanitizes bounded post-PUT layout measurements and legacy observations', (
       /invalid element acceptance summary/u,
     );
   }
+
+  for (const nearBoundaryMismatch of [
+    { narrowViewportWidth: 420.0001 },
+    { narrowDialogWidth: 421.0001 },
+    { narrowDialogScrollWidth: 421.2001 },
+    { narrowDocumentScrollWidth: 421.0001 },
+    { narrowDocumentClientWidth: 420.0001 },
+  ]) {
+    assert.throws(
+      () =>
+        sanitizeElementAcceptance(
+          JSON.stringify({ ...exactBoundary, ...nearBoundaryMismatch }),
+          sourceSha,
+        ),
+      /invalid element acceptance summary/u,
+      'raw fractional dimensions must be checked before one-decimal summary formatting',
+    );
+  }
+
+  const incompletePostPutLayout = { ...postPutLayoutFailure };
+  incompletePostPutLayout.narrowDialogContentsFit = 'not-observed';
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(incompletePostPutLayout),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
+  const partialPredicateGroup = { ...postPutLayoutFailure };
+  delete partialPredicateGroup.narrowDialogContentsFit;
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify(partialPredicateGroup),
+        sourceSha,
+      ),
+    /invalid element acceptance summary/u,
+  );
 });
 
 test('requires selected-user Matrix mentions to exclude a room broadcast', () => {

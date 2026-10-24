@@ -6078,9 +6078,10 @@ async function setRoomReminder(
         dialogWidth <= viewportWidth + 1 &&
         dialogScrollWidth <= dialogClientWidth + 1 &&
         documentScrollWidth <= viewportWidth + 1;
+      // Keep raw dimensions for validation; only sanitizer output is rounded.
       const boundedDimension = (value: number): number | 'not-observed' =>
         Number.isFinite(value) && value >= 0 && value <= 100_000
-          ? Math.round(value * 10) / 10
+          ? value
           : 'not-observed';
 
       return {

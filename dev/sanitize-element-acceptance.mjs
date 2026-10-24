@@ -1422,6 +1422,13 @@ const REMINDER_LAYOUT_DIMENSION_FIELDS = [
   'narrowDocumentScrollWidth',
 ];
 const MAX_REMINDER_LAYOUT_DIMENSION = 100_000;
+
+function formatReminderLayoutDimension(value) {
+  if (value === 'not-observed' || value === undefined) {
+    return 'not-observed';
+  }
+  return String(Math.round(value * 10) / 10);
+}
 const REMINDER_CONFIGURATION_COUNTER_FIELDS = [
   'reminderSettingsButtonCount',
   'reminderOptionsGetCount',
@@ -2714,9 +2721,50 @@ function validReminderConfigurationObservation(record) {
   const optionalLayoutFields = new Set(
     OPTIONAL_REMINDER_LAYOUT_DIAGNOSTIC_FIELDS,
   );
+  const hasAnyLayoutDiagnostic =
+    OPTIONAL_REMINDER_LAYOUT_DIAGNOSTIC_FIELDS.some((key) =>
+      Object.hasOwn(record, key),
+    );
+  const hasAllLayoutDiagnostics =
+    OPTIONAL_REMINDER_LAYOUT_DIAGNOSTIC_FIELDS.every((key) =>
+      Object.hasOwn(record, key),
+    );
   const hasObservedLayoutPredicates = REMINDER_LAYOUT_PREDICATE_FIELDS.every(
-    (key) => Object.hasOwn(record, key) && typeof record[key] === 'boolean',
+    (key) => typeof record[key] === 'boolean',
   );
+  const layoutPredicatesNotObserved = REMINDER_LAYOUT_PREDICATE_FIELDS.every(
+    (key) => record[key] === 'not-observed',
+  );
+  const layoutMeasurements = (keys) =>
+    keys.every((key) => typeof record[key] === 'number');
+  const predicateMatchesDimensions = (predicate, keys, expected) =>
+    !layoutMeasurements(keys) || record[predicate] === expected;
+  const layoutDimensionsConsistent =
+    predicateMatchesDimensions(
+      'narrowViewportWithinRange',
+      ['narrowViewportWidth'],
+      record.narrowViewportWidth >= 320 && record.narrowViewportWidth <= 420,
+    ) &&
+    predicateMatchesDimensions(
+      'narrowDialogWithinViewport',
+      ['narrowDialogWidth', 'narrowViewportWidth'],
+      record.narrowDialogWidth <= record.narrowViewportWidth + 1,
+    ) &&
+    predicateMatchesDimensions(
+      'narrowDialogContentsFit',
+      ['narrowDialogScrollWidth', 'narrowDialogClientWidth'],
+      record.narrowDialogScrollWidth <= record.narrowDialogClientWidth + 1,
+    ) &&
+    predicateMatchesDimensions(
+      'narrowDocumentContentsFit',
+      ['narrowDocumentScrollWidth', 'narrowViewportWidth'],
+      record.narrowDocumentScrollWidth <= record.narrowViewportWidth + 1,
+    ) &&
+    (!layoutMeasurements([
+      'narrowViewportWidth',
+      'narrowDocumentClientWidth',
+    ]) ||
+      record.narrowViewportWidth === record.narrowDocumentClientWidth);
   const expectedKeys = new Set([
     'phase',
     'status',
@@ -2740,12 +2788,16 @@ function validReminderConfigurationObservation(record) {
     MEMBER_INERT_STATES.has(record.memberListboxAncestorInert) &&
     MEMBER_CSS_VISIBILITY_STATES.has(record.memberListboxCssVisibility) &&
     MEMBER_PICKER_OBSERVATION_ERRORS.has(record.memberPickerObservationError) &&
+    (!hasAnyLayoutDiagnostic || hasAllLayoutDiagnostics) &&
     REMINDER_LAYOUT_PREDICATE_FIELDS.every(
       (key) =>
         !Object.hasOwn(record, key) ||
         typeof record[key] === 'boolean' ||
         record[key] === 'not-observed',
     ) &&
+    (!hasAllLayoutDiagnostics ||
+      hasObservedLayoutPredicates ||
+      layoutPredicatesNotObserved) &&
     REMINDER_LAYOUT_DIMENSION_FIELDS.every(
       (key) =>
         !Object.hasOwn(record, key) ||
@@ -2755,6 +2807,7 @@ function validReminderConfigurationObservation(record) {
           record[key] >= 0 &&
           record[key] <= MAX_REMINDER_LAYOUT_DIMENSION),
     ) &&
+    layoutDimensionsConsistent &&
     (!hasObservedLayoutPredicates ||
       record.narrowSidePanelSafe ===
         REMINDER_LAYOUT_PREDICATE_FIELDS.every((key) => record[key])) &&
@@ -2806,6 +2859,8 @@ function validReminderConfigurationObservation(record) {
         record.reminderPutCount === 1 &&
         record.reminderPutStatus >= 200 &&
         record.reminderPutStatus < 300 &&
+        hasAllLayoutDiagnostics &&
+        hasObservedLayoutPredicates &&
         !record.narrowSidePanelSafe)) &&
     (!Object.hasOwn(record, 'count') ||
       (record.status === 'passed' && record.count === 1)) &&
@@ -4588,12 +4643,12 @@ export function sanitizeElementAcceptance(input, sourceSha) {
           `narrow_dialog_within_viewport=${record.narrowDialogWithinViewport ?? 'not-observed'}`,
           `narrow_dialog_contents_fit=${record.narrowDialogContentsFit ?? 'not-observed'}`,
           `narrow_document_contents_fit=${record.narrowDocumentContentsFit ?? 'not-observed'}`,
-          `narrow_viewport_width=${record.narrowViewportWidth ?? 'not-observed'}`,
-          `narrow_dialog_width=${record.narrowDialogWidth ?? 'not-observed'}`,
-          `narrow_dialog_client_width=${record.narrowDialogClientWidth ?? 'not-observed'}`,
-          `narrow_dialog_scroll_width=${record.narrowDialogScrollWidth ?? 'not-observed'}`,
-          `narrow_document_client_width=${record.narrowDocumentClientWidth ?? 'not-observed'}`,
-          `narrow_document_scroll_width=${record.narrowDocumentScrollWidth ?? 'not-observed'}`,
+          `narrow_viewport_width=${formatReminderLayoutDimension(record.narrowViewportWidth)}`,
+          `narrow_dialog_width=${formatReminderLayoutDimension(record.narrowDialogWidth)}`,
+          `narrow_dialog_client_width=${formatReminderLayoutDimension(record.narrowDialogClientWidth)}`,
+          `narrow_dialog_scroll_width=${formatReminderLayoutDimension(record.narrowDialogScrollWidth)}`,
+          `narrow_document_client_width=${formatReminderLayoutDimension(record.narrowDocumentClientWidth)}`,
+          `narrow_document_scroll_width=${formatReminderLayoutDimension(record.narrowDocumentScrollWidth)}`,
         ].join(' '),
       );
       continue;
