@@ -65,6 +65,36 @@ class SessionFailure:
         pass
 
 
+class SuccessfulStartup:
+    CONTEXT_CHROME = "chrome"
+    host = "localhost"
+    port = 2828
+    session = None
+
+    def __init__(self, workspace: str, **_kwargs: object):
+        self.profile_path = str(Path(workspace) / "profile")
+        Path(self.profile_path).mkdir()
+
+    def start_session(self) -> dict[str, str]:
+        self.session = object()
+        return {"browserVersion": "158.0.1"}
+
+    def set_context(self, _context: str) -> None:
+        pass
+
+    def get_window_type(self) -> str:
+        return "mail:3pane"
+
+    def execute_script(self, _script: str) -> list[str]:
+        return ["calendar"]
+
+    def quit(self, *, in_app: bool) -> None:
+        pass
+
+    def cleanup(self) -> None:
+        pass
+
+
 class ThunderbirdSmokeDiagnosticTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(prefix="tb-smoke-diagnostic-")
@@ -75,7 +105,13 @@ class ThunderbirdSmokeDiagnosticTests(unittest.TestCase):
         self.runtime_dir = self.base / "runtime"
         self.runtime_dir.mkdir()
 
-    def _run_worker(self, marionette_class: type, *, port_ready: bool) -> dict[str, object]:
+    def _run_worker(
+        self,
+        marionette_class: type,
+        *,
+        port_ready: bool,
+        expected_exit: int = 1,
+    ) -> dict[str, object]:
         package = types.ModuleType("marionette_driver")
         package.__path__ = []
         module = types.ModuleType("marionette_driver.marionette")
@@ -103,7 +139,7 @@ class ThunderbirdSmokeDiagnosticTests(unittest.TestCase):
             patch.object(SMOKE.subprocess, "run", return_value=completed),
             patch.object(SMOKE.socket, "create_connection", return_value=FakeSocket()),
         ):
-            self.assertEqual(SMOKE._smoke_worker(self.task_root), 1)
+            self.assertEqual(SMOKE._smoke_worker(self.task_root), expected_exit)
             result_path = SMOKE._worker_result_path(self.task_root)
             self.assertTrue(result_path.is_file())
             self.assertEqual(result_path.stat().st_mode & 0o777, 0o600)
@@ -136,6 +172,43 @@ class ThunderbirdSmokeDiagnosticTests(unittest.TestCase):
         self.assertEqual(result["binary_version_probe"], "passed")
         self.assertFalse(result["marionette_session_created"])
         self.assertEqual(result["child_state"], "unknown")
+
+    def test_constructor_error_diagnostic_is_retained_and_redacted(self) -> None:
+        message = (
+            "loader failed at /private/profile/defaults/prefs.js "
+            "while reading https://example.invalid/private?token=hidden"
+        )
+
+        class PrivateConstructorFailure:
+            def __init__(self, **_kwargs: object):
+                raise RuntimeError(message)
+
+        github_output = self.base / "github-output"
+        github_output.write_text("", encoding="utf-8")
+        with patch.dict(
+            os.environ,
+            {"GITHUB_OUTPUT": str(github_output), "RUNNER_TEMP": str(self.base)},
+        ):
+            result = self._run_worker(PrivateConstructorFailure, port_ready=False)
+            SMOKE._persist_worker_startup_diagnostic(self.task_root, result)
+
+        host_diagnostic = self.base / SMOKE.HOST_STARTUP_DIAGNOSTIC
+        self.assertTrue(host_diagnostic.is_file())
+        self.assertEqual(host_diagnostic.stat().st_mode & 0o777, 0o600)
+        safe_text = host_diagnostic.read_text(encoding="utf-8")
+        self.assertIn("RuntimeError: loader failed", safe_text)
+        self.assertIn("[redacted-path]", safe_text)
+        self.assertIn("[redacted-url]", safe_text)
+        self.assertNotIn("/private/profile", safe_text)
+        self.assertNotIn("https://example.invalid", safe_text)
+        self.assertNotIn("token=hidden", safe_text)
+        self.assertLessEqual(
+            len(safe_text.encode("utf-8")), SMOKE.MAX_STARTUP_DIAGNOSTIC_BYTES
+        )
+        self.assertEqual(
+            github_output.read_text(encoding="utf-8"),
+            "startup_diagnostic_available=true\n",
+        )
 
     def test_session_failure_reports_port_and_available_child_state(self) -> None:
         result = self._run_worker(SessionFailure, port_ready=True)
@@ -234,7 +307,9 @@ class ThunderbirdSmokeDiagnosticTests(unittest.TestCase):
         ):
             SMOKE._clear_host_startup_diagnostic()
 
-        result = self._run_worker(ConstructorFailure, port_ready=False)
+        result = self._run_worker(
+            SuccessfulStartup, port_ready=True, expected_exit=0
+        )
         self.assertEqual(result["binary_version_probe"], "passed")
         with patch.dict(
             os.environ,

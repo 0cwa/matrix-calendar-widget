@@ -1465,7 +1465,12 @@ def _write_worker_startup_diagnostic(root: Path, stderr: Any) -> None:
 
 
 def _persist_worker_startup_diagnostic(root: Path, result: dict[str, Any]) -> None:
-    if result.get("binary_version_probe") != "nonzero_exit":
+    version_probe_failed = result.get("binary_version_probe") == "nonzero_exit"
+    constructor_failed = (
+        result.get("startup_stage") == "marionette_constructor"
+        and result.get("startup_exception_class") is not None
+    )
+    if not (version_probe_failed or constructor_failed):
         return
     source = _worker_startup_diagnostic_path(root)
     try:
@@ -1692,6 +1697,11 @@ def _smoke_worker(root: Path) -> int:
     except Exception as error:
         result["error_class"] = "marionette_error"
         result["startup_exception_class"] = _startup_exception_class(error)
+        if result["startup_stage"] == "marionette_constructor":
+            _write_worker_startup_diagnostic(
+                root,
+                f"{result['startup_exception_class']}: {error}",
+            )
         if marionette is not None:
             result["marionette_port_ready"] = (
                 result["marionette_port_ready"] or _marionette_port_ready(marionette)
