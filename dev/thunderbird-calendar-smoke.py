@@ -14,6 +14,7 @@ import shutil
 import signal
 import socket
 import ssl
+import stat
 import subprocess
 import sys
 import tarfile
@@ -1391,21 +1392,51 @@ def _sanitize_startup_probe_stderr(value: Any) -> str:
     if isinstance(value, bytes):
         text = value[:MAX_STARTUP_DIAGNOSTIC_BYTES].decode("utf-8", errors="replace")
     elif isinstance(value, str):
-        text = value.encode("utf-8", errors="replace")[:MAX_STARTUP_DIAGNOSTIC_BYTES].decode(
-            "utf-8", errors="ignore"
-        )
+        text = value.encode("utf-8", errors="replace")[
+            :MAX_STARTUP_DIAGNOSTIC_BYTES
+        ].decode("utf-8", errors="ignore")
     else:
         return ""
     text = ANSI_ESCAPE_RE.sub("", text)
     text = STARTUP_URL_RE.sub("[redacted-url]", text)
     text = ABSOLUTE_PATH_RE.sub("[redacted-path]", text)
-    text = "".join(character for character in text if character.isprintable() or character == " ")
+    text = "".join(
+        character for character in text if character.isprintable() or character == " "
+    )
     text = re.sub(r"\s+", " ", text).strip()
-    return text.encode("utf-8")[:MAX_STARTUP_DIAGNOSTIC_BYTES].decode("utf-8", errors="ignore")
+    return text.encode("utf-8")[: MAX_STARTUP_DIAGNOSTIC_BYTES - 1].decode(
+        "utf-8", errors="ignore"
+    )
 
 
 def _worker_startup_diagnostic_path(root: Path) -> Path:
     return root / "workspace" / WORKER_STARTUP_DIAGNOSTIC
+
+
+def _host_startup_diagnostic_path() -> Path:
+    return _summary_path().parent / HOST_STARTUP_DIAGNOSTIC
+
+
+def _clear_host_startup_diagnostic() -> None:
+    path = _host_startup_diagnostic_path()
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return
+    except OSError:
+        raise SmokeFailure("startup", "invalid_input") from None
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_uid != os.getuid()
+        or metadata.st_nlink != 1
+        or stat.S_IMODE(metadata.st_mode) != 0o600
+        or metadata.st_size > MAX_STARTUP_DIAGNOSTIC_BYTES + 1
+    ):
+        raise SmokeFailure("startup", "invalid_input")
+    try:
+        path.unlink()
+    except OSError:
+        raise SmokeFailure("startup", "invalid_input") from None
 
 
 def _write_worker_startup_diagnostic(root: Path, stderr: Any) -> None:
@@ -1442,18 +1473,18 @@ def _persist_worker_startup_diagnostic(root: Path, result: dict[str, Any]) -> No
         if (
             source.is_symlink()
             or not source.is_file()
-            or metadata.st_size > MAX_STARTUP_DIAGNOSTIC_BYTES + 1
+            or metadata.st_size > MAX_STARTUP_DIAGNOSTIC_BYTES
         ):
             return
         with source.open("rb") as input_file:
             diagnostic = _sanitize_startup_probe_stderr(
-                input_file.read(MAX_STARTUP_DIAGNOSTIC_BYTES + 1)
+                input_file.read(MAX_STARTUP_DIAGNOSTIC_BYTES)
             )
     except OSError:
         return
     if not diagnostic:
         return
-    destination = _summary_path().parent / HOST_STARTUP_DIAGNOSTIC
+    destination = _host_startup_diagnostic_path()
     try:
         descriptor = os.open(
             destination,
@@ -1470,6 +1501,14 @@ def _persist_worker_startup_diagnostic(root: Path, result: dict[str, Any]) -> No
     except OSError:
         try:
             destination.unlink()
+        except OSError:
+            pass
+        return
+    output_path = os.environ.get("GITHUB_OUTPUT")
+    if output_path:
+        try:
+            with Path(output_path).open("a", encoding="utf-8") as output:
+                output.write("startup_diagnostic_available=true\n")
         except OSError:
             pass
 
@@ -1764,6 +1803,7 @@ def _read_worker_result(root: Path) -> dict[str, Any]:
 
 
 def _smoke(payload: dict[str, Any], source_sha: str, root: Path) -> None:
+    _clear_host_startup_diagnostic()
     _verify_owner(root, source_sha)
     try:
         prepared = json.loads(_summary_path().read_text(encoding="utf-8"))

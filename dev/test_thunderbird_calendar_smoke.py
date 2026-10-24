@@ -152,15 +152,16 @@ class ThunderbirdSmokeDiagnosticTests(unittest.TestCase):
         stderr = (
             b"libmoz.so: cannot load /private/build/profile/libmoz.so "
             b"from https://example.invalid/private?token=hidden\x1b[31m\x00\n"
-            + b"x" * 4096
-        )
+        ) + b"x" * 4096
         completed = subprocess.CompletedProcess(
             ["thunderbird", "--version"], 255, stdout="", stderr=stderr
         )
         environment = {
             "XDG_RUNTIME_DIR": str(self.runtime_dir),
             "RUNNER_TEMP": str(self.base),
+            "GITHUB_OUTPUT": str(self.base / "github-output"),
         }
+        Path(environment["GITHUB_OUTPUT"]).write_text("", encoding="utf-8")
         with (
             patch.object(SMOKE, "CONTAINER_TASK_ROOT", self.task_root),
             patch.object(SMOKE, "CONTAINER_RUNTIME_DIR", self.runtime_dir),
@@ -174,7 +175,7 @@ class ThunderbirdSmokeDiagnosticTests(unittest.TestCase):
             self.assertTrue(worker_diagnostic.is_file())
             self.assertLessEqual(
                 worker_diagnostic.stat().st_size,
-                SMOKE.MAX_STARTUP_DIAGNOSTIC_BYTES + 1,
+                SMOKE.MAX_STARTUP_DIAGNOSTIC_BYTES,
             )
             SMOKE._persist_worker_startup_diagnostic(self.task_root, result)
 
@@ -191,21 +192,70 @@ class ThunderbirdSmokeDiagnosticTests(unittest.TestCase):
         self.assertNotIn("\x1b", safe_text)
         self.assertNotIn("\x00", safe_text)
         self.assertLessEqual(
-            len(safe_text.encode("utf-8")),
-            SMOKE.MAX_STARTUP_DIAGNOSTIC_BYTES + 1,
+            len(safe_text.encode("utf-8")), SMOKE.MAX_STARTUP_DIAGNOSTIC_BYTES
         )
 
         shutil.rmtree(self.task_root)
         self.assertTrue(host_diagnostic.is_file())
+        self.assertEqual(
+            (self.base / "github-output").read_text(encoding="utf-8"),
+            "startup_diagnostic_available=true\n",
+        )
+
+    def test_startup_diagnostic_byte_limit_includes_final_newline(self) -> None:
+        SMOKE._write_worker_startup_diagnostic(self.task_root, b"x" * 4096)
+        worker_diagnostic = SMOKE._worker_startup_diagnostic_path(self.task_root)
+        self.assertEqual(
+            worker_diagnostic.stat().st_size, SMOKE.MAX_STARTUP_DIAGNOSTIC_BYTES
+        )
+        with patch.dict(os.environ, {"RUNNER_TEMP": str(self.base)}):
+            SMOKE._persist_worker_startup_diagnostic(
+                self.task_root, {"binary_version_probe": "nonzero_exit"}
+            )
+        host_diagnostic = self.base / SMOKE.HOST_STARTUP_DIAGNOSTIC
+        self.assertEqual(
+            host_diagnostic.stat().st_size, SMOKE.MAX_STARTUP_DIAGNOSTIC_BYTES
+        )
+        self.assertTrue(host_diagnostic.read_bytes().endswith(b"\n"))
 
     def test_successful_version_probe_creates_no_startup_diagnostic_artifact(
         self,
     ) -> None:
+        host_diagnostic = self.base / SMOKE.HOST_STARTUP_DIAGNOSTIC
+        host_diagnostic.write_text(
+            "stale diagnostic from a prior attempt\n", encoding="utf-8"
+        )
+        os.chmod(host_diagnostic, 0o600)
+        github_output = self.base / "github-output"
+        github_output.write_text("", encoding="utf-8")
+        with patch.dict(
+            os.environ,
+            {"RUNNER_TEMP": str(self.base), "GITHUB_OUTPUT": str(github_output)},
+        ):
+            SMOKE._clear_host_startup_diagnostic()
+
         result = self._run_worker(ConstructorFailure, port_ready=False)
         self.assertEqual(result["binary_version_probe"], "passed")
-        SMOKE._persist_worker_startup_diagnostic(self.task_root, result)
+        with patch.dict(
+            os.environ,
+            {"RUNNER_TEMP": str(self.base), "GITHUB_OUTPUT": str(github_output)},
+        ):
+            SMOKE._persist_worker_startup_diagnostic(self.task_root, result)
         self.assertFalse(SMOKE._worker_startup_diagnostic_path(self.task_root).exists())
-        self.assertFalse((self.base / SMOKE.HOST_STARTUP_DIAGNOSTIC).exists())
+        self.assertFalse(host_diagnostic.exists())
+        self.assertEqual(github_output.read_text(encoding="utf-8"), "")
+
+    def test_stale_symlink_is_rejected_without_removing_its_target(self) -> None:
+        target = self.base / "unrelated-file.txt"
+        target.write_text("keep this file", encoding="utf-8")
+        diagnostic = self.base / SMOKE.HOST_STARTUP_DIAGNOSTIC
+        diagnostic.symlink_to(target)
+        environment = {"RUNNER_TEMP": str(self.base)}
+        with patch.dict(os.environ, environment):
+            with self.assertRaises(SMOKE.SmokeFailure):
+                SMOKE._clear_host_startup_diagnostic()
+        self.assertTrue(diagnostic.is_symlink())
+        self.assertEqual(target.read_text(encoding="utf-8"), "keep this file")
 
 
 if __name__ == "__main__":
