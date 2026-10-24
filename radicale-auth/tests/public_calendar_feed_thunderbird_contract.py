@@ -55,25 +55,35 @@ CERTUTIL_COMMAND_COUNT = 2
 MARIONETTE_STARTUP_TIMEOUT_SECONDS = 85
 MARIONETTE_SOCKET_TIMEOUT_SECONDS = 15
 MARIONETTE_SCRIPT_TIMEOUT_SECONDS = 10
+MARIONETTE_HELLO_TIMEOUT_SECONDS = 60
 MARIONETTE_SHUTDOWN_TIMEOUT_SECONDS = 70
 CALENDAR_TAB_TIMEOUT_SECONDS = 15
 EVENT_OBSERVATION_MAX_SECONDS = 6
+# These five RPCs are NewSession, script-timeout setup, context, window, and
+# tabmail checks; the initial 60-second transport hello is accounted separately.
 MARIONETTE_SETUP_RPC_COUNT = 5
 MARIONETTE_PROVIDER_SCRIPT_COUNT = 6
 MARIONETTE_QUIT_RPC_COUNT = 2
 PUBLIC_RESPONSE_WAIT_COUNT = 3
 DIRECT_CONTROL_REQUEST_COUNT = 4
 WORKER_CLEANUP_ALLOWANCE_SECONDS = 80
+# The final calendar-tab poll can start just before the deadline and consume
+# one full script timeout after it.
+CALENDAR_TAB_PHASE_BUDGET_SECONDS = (
+    CALENDAR_TAB_TIMEOUT_SECONDS + MARIONETTE_SCRIPT_TIMEOUT_SECONDS
+)
 
-# The pinned Marionette driver's default socket timeout is 360 seconds. Keep
-# this worker's individual Marionette calls and scripts bounded instead. The
-# parent fixture also applies a whole-worker deadline that includes cleanup.
+# Reviewed against marionette-driver 3.7.1 wheel SHA-256
+# 6c9286604cff5ae86e9b490078c1ecb54c6625576967e1b9ae93a952817692ef:
+# TcpTransport.connect() permits 60 seconds for the initial hello before
+# NewSession uses the configured 15-second socket timeout. Keep the worker's
+# other calls/scripts bounded; the parent fixture adds a whole-worker deadline.
 WORKER_PHASE_BUDGET_SECONDS = (
     CERTUTIL_COMMAND_COUNT * CERTUTIL_COMMAND_TIMEOUT_SECONDS
     + MARIONETTE_STARTUP_TIMEOUT_SECONDS
+    + MARIONETTE_HELLO_TIMEOUT_SECONDS
     + MARIONETTE_SETUP_RPC_COUNT * MARIONETTE_SOCKET_TIMEOUT_SECONDS
-    + CALENDAR_TAB_TIMEOUT_SECONDS
-    + MARIONETTE_SCRIPT_TIMEOUT_SECONDS
+    + CALENDAR_TAB_PHASE_BUDGET_SECONDS
     + MARIONETTE_PROVIDER_SCRIPT_COUNT * MARIONETTE_SCRIPT_TIMEOUT_SECONDS
     + PUBLIC_RESPONSE_WAIT_COUNT
     * (REQUEST_TIMEOUT_SECONDS + CONTROL_REQUEST_TIMEOUT_SECONDS)

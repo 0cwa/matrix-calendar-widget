@@ -34,10 +34,10 @@ NATIVE_RESULT_FILENAME = "public-feed-native-result.json"
 CONTAINER_RESULT_PATH = Path("/task/workspace") / NATIVE_RESULT_FILENAME
 JEST_PROCESS_MARGIN_SECONDS = 60
 CONTAINER_CLEANUP_MARGIN_SECONDS = 60
-# The fixture is allowed 783 seconds, Jest 843, and the Docker invocation 903.
+# The fixture is allowed 843 seconds, Jest 903, and the Docker invocation 963.
 # Keep 60 seconds between each outer deadline for startup and process cleanup.
-JEST_TIMEOUT_SECONDS = 843
-NATIVE_TIMEOUT_SECONDS = 903
+JEST_TIMEOUT_SECONDS = 903
+NATIVE_TIMEOUT_SECONDS = 963
 
 PREDICATE_FIELDS = {
     "calendarTab",

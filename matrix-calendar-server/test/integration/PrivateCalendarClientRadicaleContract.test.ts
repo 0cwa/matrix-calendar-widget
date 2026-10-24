@@ -86,9 +86,9 @@ const nativeThunderbirdWorkspace =
 const describeContract =
   contractEnabled || publicFeedNativeProfile ? describe : describe.skip;
 
-// Worker phase budget is 555s, followed by 45s worker slack. This adds 3s
+// Worker phase budget is 615s, followed by 45s worker slack. This adds 3s
 // termination grace and 180s for production fixture setup/teardown.
-const PUBLIC_NATIVE_WORKER_TIMEOUT_MS = 600_000;
+const PUBLIC_NATIVE_WORKER_TIMEOUT_MS = 660_000;
 const PUBLIC_NATIVE_CHILD_TERMINATION_GRACE_MS = 3_000;
 const PUBLIC_NATIVE_FIXTURE_SETUP_TEARDOWN_MARGIN_MS = 180_000;
 const PUBLIC_NATIVE_FIXTURE_TIMEOUT_MS =

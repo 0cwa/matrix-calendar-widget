@@ -137,7 +137,9 @@ class PublicCalendarFeedThunderbirdWorkerTests(unittest.TestCase):
     def test_native_timeout_budget_matches_the_worker_and_fixture_deadlines(
         self,
     ) -> None:
-        self.assertEqual(self.worker.WORKER_PHASE_BUDGET_SECONDS, 555)
+        self.assertEqual(self.worker.WORKER_PHASE_BUDGET_SECONDS, 615)
+        self.assertEqual(self.worker.MARIONETTE_HELLO_TIMEOUT_SECONDS, 60)
+        self.assertEqual(self.worker.CALENDAR_TAB_PHASE_BUDGET_SECONDS, 25)
         self.assertEqual(self.worker.EVENT_OBSERVATION_MAX_SECONDS, 6)
         self.assertLessEqual(
             self.worker.EVENT_OBSERVATION_MAX_SECONDS,
@@ -176,7 +178,10 @@ class PublicCalendarFeedThunderbirdWorkerTests(unittest.TestCase):
         self.assertGreaterEqual(
             worker_timeout_ms, self.worker.WORKER_PHASE_BUDGET_SECONDS * 1000
         )
-        self.assertEqual(worker_timeout_ms, 600_000)
+        self.assertEqual(
+            worker_timeout_ms,
+            self.worker.WORKER_PHASE_BUDGET_SECONDS * 1000 + 45_000,
+        )
         self.assertEqual(int(termination_grace.group(1).replace("_", "")), 3_000)
         self.assertEqual(int(fixture_margin.group(1).replace("_", "")), 180_000)
 
@@ -186,6 +191,8 @@ class PublicCalendarFeedThunderbirdWorkerTests(unittest.TestCase):
             .read_text(encoding="utf-8")
         )
         self.assertIn("socket_timeout=MARIONETTE_SOCKET_TIMEOUT_SECONDS", worker_source)
+        self.assertIn("+ MARIONETTE_HELLO_TIMEOUT_SECONDS", worker_source)
+        self.assertIn("+ CALENDAR_TAB_PHASE_BUDGET_SECONDS", worker_source)
         self.assertIn(
             "marionette.timeout.script = MARIONETTE_SCRIPT_TIMEOUT_SECONDS",
             worker_source,

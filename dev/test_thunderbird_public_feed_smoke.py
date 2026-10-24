@@ -137,7 +137,7 @@ class PublicFeedSmokeTests(unittest.TestCase):
             if (match := re.search(rf"{name}\s*=\s*([0-9_]+)", fixture_source))
         }
         fixture_ms = sum(fixture_values.values())
-        self.assertEqual(fixture_ms, 783_000)
+        self.assertEqual(fixture_ms, 843_000)
         self.assertEqual(
             PUBLIC.JEST_TIMEOUT_SECONDS * 1000,
             fixture_ms + PUBLIC.JEST_PROCESS_MARGIN_SECONDS * 1000,
