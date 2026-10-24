@@ -225,6 +225,13 @@ class PrivateCalDavSmokeTests(unittest.TestCase):
                 ModuleNotFoundError("private message", name="caldav.lib.error"),
                 "module_missing",
             ),
+            (
+                "callback_imports",
+                ModuleNotFoundError(
+                    "private message", name="matrix_calendar_private_client_callback"
+                ),
+                "module_missing",
+            ),
             ("callback_imports", ImportError("private message"), "import_error"),
             (
                 "env_port_validation",

@@ -86,6 +86,7 @@ KNOWN_SETUP_IMPORT_MODULES = {
     "jh2",
     "lxml",
     "matrix_calendar_radicale_auth",
+    "matrix_calendar_private_client_callback",
     "niquests",
     "os",
     "qh3",
