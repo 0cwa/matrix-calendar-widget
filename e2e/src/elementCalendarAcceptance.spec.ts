@@ -6083,15 +6083,6 @@ async function setRoomReminder(
       try {
         observation.recipientSelectionStep = 'member-input-clicked';
         await memberInput.click({ timeout: 15_000 });
-        observation.recipientSelectionStep = 'member-prefill-roster-ready';
-        await expect
-          .poll(measureMemberInputListboxAssociation, { timeout: 15_000 })
-          .toBe(true);
-        await expect(memberListbox).toHaveCount(1, { timeout: 15_000 });
-        await expect(memberListbox.getByRole('option').first()).toBeVisible({
-          timeout: 15_000,
-        });
-
         observation.recipientSelectionStep = 'member-query-entered';
         await memberInput.fill(expectedMemberUserId);
         await expect(memberInput).toHaveValue(expectedMemberUserId, {

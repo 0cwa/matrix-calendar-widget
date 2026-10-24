@@ -33,6 +33,7 @@ import {
   type CalendarRoomReminderAlarmOption,
   type CalendarRoomReminderConfiguration,
 } from '../../calendar';
+import { GatewayCalendarRepository } from '../../calendar/GatewayCalendarRepository';
 import { CalendarRoomReminderControl } from './CalendarRoomReminderControl';
 
 const eventUid = 'event@example.test';
@@ -754,5 +755,87 @@ describe('<CalendarRoomReminderControl />', () => {
       memberObserver.complete();
       window.history.replaceState({}, '', previousLocation);
     }
+  });
+
+  it('uses gateway joined recipients for full-ID search and saves the selected user', async () => {
+    const targetUserId = '@member-b:example.test';
+    let requestUrl = '';
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      requestUrl = String(input);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          recipients: [
+            { userId: '@member-a:example.test', displayName: 'Member A' },
+            { userId: targetUserId, displayName: 'Member B' },
+          ],
+        }),
+      } as Response;
+    });
+    const repository = new GatewayCalendarRepository({
+      baseUrl: 'https://gateway.example.test',
+      roomId,
+      getAuthorizationHeader: async () => undefined,
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+    const enableRoomReminder = vi.fn(async (...args: unknown[]) => {
+      const [, , , recurrenceId, target, allDaySchedule] = args;
+      return createConfiguration(timedOption, {
+        recurrenceId: recurrenceId as string | null,
+        target: target as CalendarRoomReminderConfiguration['target'],
+        allDaySchedule:
+          allDaySchedule as CalendarRoomReminderConfiguration['allDaySchedule'],
+      });
+    });
+    Object.assign(repository, {
+      listRoomReminderAlarmOptions: vi.fn().mockResolvedValue([timedOption]),
+      listRoomReminderConfigurations: vi.fn().mockResolvedValue([]),
+      enableRoomReminder,
+      disableRoomReminder: vi.fn().mockResolvedValue(undefined),
+    });
+
+    renderControl(repository as unknown as InMemoryCalendarRepository);
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Reminder settings' }),
+    );
+    await screen.findByText('Alarm 1: −15m relative to event start');
+    await chooseDestination('users', 'Selected people');
+
+    const input = screen.getByRole('combobox', { name: 'Selected people' });
+    expect(input).toBeInstanceOf(HTMLInputElement);
+    expect(input).toBeEnabled();
+    expect((input as HTMLInputElement).disabled).toBe(false);
+    expect((input as HTMLInputElement).readOnly).toBe(false);
+    expect(
+      screen.queryByText(/calendar server could not load joined room members/i),
+    ).not.toBeInTheDocument();
+
+    // The searchable picker need not open an empty-query list before typing.
+    await userEvent.type(input, targetUserId);
+    expect(input).toHaveValue(targetUserId);
+    const listbox = await screen.findByRole('listbox');
+    expect(input).toHaveAttribute('aria-controls', listbox.getAttribute('id'));
+    expect(await screen.findAllByRole('option')).toHaveLength(1);
+    expect(
+      await screen.findByRole('option', { name: 'Member B', exact: true }),
+    ).toBeVisible();
+
+    await userEvent.keyboard('{ArrowDown}{Enter}');
+    expect(screen.getByRole('button', { name: 'Member B' })).toBeVisible();
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Save Matrix destination' }),
+    );
+    await waitFor(() => expect(enableRoomReminder).toHaveBeenCalledTimes(1));
+    expect(enableRoomReminder).toHaveBeenCalledWith(
+      calendarId,
+      eventId,
+      timedOption.alarmUid,
+      null,
+      { kind: 'users', userIds: [targetUserId] },
+      null,
+    );
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(new URL(requestUrl).pathname).toContain('/reminders/recipients');
   });
 });
