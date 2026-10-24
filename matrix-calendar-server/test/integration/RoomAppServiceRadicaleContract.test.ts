@@ -1865,6 +1865,9 @@ describeContract(contractDescription, () => {
     const readerUserId = await matrixUserIdForAccessToken(policyReaderToken);
     expect(readerUserId).toBe(principalUserId);
     expect(new Set([ownerUserId, issuerUserId, readerUserId]).size).toBe(3);
+    const roomOwnerPowerLevel = 100;
+    const calendarManagerPowerLevel = 50;
+    expect(calendarManagerPowerLevel).toBeLessThan(roomOwnerPowerLevel);
 
     markRoomAppServiceCaseStage('private-client-live-policy', 'room-setup');
     const roomId = await createRoom(
@@ -1947,15 +1950,15 @@ describeContract(contractDescription, () => {
         ...originalPowerLevels,
         users: {
           ...originalPowerLevels.users,
-          [ownerUserId]: 100,
-          [issuerUserId]: 100,
+          [ownerUserId]: roomOwnerPowerLevel,
+          [issuerUserId]: roomOwnerPowerLevel,
           [readerUserId]: 0,
         },
         events: {
           ...originalPowerLevels.events,
-          [MATRIX_CALENDAR_MANAGE_POLICY]: 50,
+          [MATRIX_CALENDAR_MANAGE_POLICY]: calendarManagerPowerLevel,
         },
-        state_default: 50,
+        state_default: calendarManagerPowerLevel,
       };
       powerLevelsChanged = true;
       await writePowerLevels(actorAccessToken, managerPowerLevels);
@@ -2114,11 +2117,14 @@ describeContract(contractDescription, () => {
         users: {
           ...managerPowerLevels.users,
           [issuerUserId]: 0,
-          [readerUserId]: 100,
+          [readerUserId]: calendarManagerPowerLevel,
         },
       };
       markRoomAppServiceCaseStage('private-client-live-policy', 'demotion');
       await writePowerLevels(issuerToken, readOnlyPowerLevels);
+      expect(
+        await authorizationFactory.canManageCalendars(readerUserId, roomId),
+      ).toBe(true);
       expect(await policy.authenticate(record.appId, secret)).toBe(true);
       expect(
         await policy.authorizeDavRequest(record.appId, 'GET', 'resource'),
