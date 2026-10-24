@@ -16,8 +16,6 @@
 
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { createServer as createHttpServer } from 'node:http';
-import https from 'node:https';
 import {
   chmodSync,
   lstatSync,
@@ -25,18 +23,20 @@ import {
   readFileSync,
   rmSync,
 } from 'node:fs';
+import { createServer as createHttpServer } from 'node:http';
+import https from 'node:https';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import {
-  createPrivateAcceptanceTlsFixture,
-  validatePrivateAcceptanceTlsFixture,
-} from './element-acceptance-private-tls.mjs';
 import {
   createPrivateAcceptanceHttpsProxy,
   dropToGatewayRuntimeUser,
   readTlsMaterialAndDropPrivileges,
 } from './element-acceptance-private-https-proxy.mjs';
+import {
+  createPrivateAcceptanceTlsFixture,
+  validatePrivateAcceptanceTlsFixture,
+} from './element-acceptance-private-tls.mjs';
 
 let fixtureDirectory;
 let certificateFixture;
