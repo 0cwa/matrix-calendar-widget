@@ -166,6 +166,7 @@ type ReminderConfigurationObservation = {
   recipientSelectionAttempted: boolean;
   recipientSelectionStep: ReminderRecipientSelectionStep;
   recipientOptionCount: number;
+  memberInputProbeInstalled: boolean;
   memberQueryMatchesTargetAfterFill: boolean;
   memberQueryMatchesTargetAtOptionCount: boolean;
   memberInputFocusedBeforeFill: boolean;
@@ -230,7 +231,13 @@ type ReminderRecipientSelectionStep =
   | 'destination-clicked'
   | 'destination-listbox-ready'
   | 'destination-option-selected'
+  | 'destination-menu-close-wait'
+  | 'destination-menu-closed'
+  | 'member-input-probe-install'
+  | 'member-input-clicked'
+  | 'member-prefill-roster-ready'
   | 'member-query-entered'
+  | 'member-query-settled'
   | 'member-listbox-ready'
   | 'member-option-ready'
   | 'member-option-count-checked'
@@ -5636,6 +5643,7 @@ async function setRoomReminder(
     recipientSelectionAttempted: false,
     recipientSelectionStep: 'destination-clicked',
     recipientOptionCount: 0,
+    memberInputProbeInstalled: false,
     memberQueryMatchesTargetAfterFill: false,
     memberQueryMatchesTargetAtOptionCount: false,
     memberInputFocusedBeforeFill: false,
@@ -5822,7 +5830,17 @@ async function setRoomReminder(
       .getByRole('listbox')
       .filter({ visible: true });
     observation.recipientSelectionStep = 'destination-listbox-ready';
-    await expect(destinationListbox).toHaveCount(1);
+    await expect(destinationListbox).toHaveCount(1, { timeout: 15_000 });
+    const destinationListboxId = await destinationListbox.evaluateAll(
+      (listboxes) =>
+        listboxes.length === 1 && listboxes[0].id.length > 0
+          ? listboxes[0].id
+          : undefined,
+    );
+    expect(destinationListboxId).toBeTruthy();
+    const selectedDestinationListbox = frame.locator(
+      `[id=${JSON.stringify(destinationListboxId)}]`,
+    );
     const destinationOption = destinationListbox.getByRole('option', {
       name: plan.recipient === 'room' ? 'Whole room' : 'Selected people',
       exact: true,
@@ -5833,6 +5851,12 @@ async function setRoomReminder(
     );
     observation.recipientSelectionStep = 'destination-option-selected';
     await destinationOption.click();
+    observation.recipientSelectionStep = 'destination-menu-close-wait';
+    await selectedDestinationListbox.waitFor({
+      state: 'hidden',
+      timeout: 15_000,
+    });
+    observation.recipientSelectionStep = 'destination-menu-closed';
     let selectedMemberKeyboardFlow = false;
     if (plan.recipient === 'selected') {
       const memberInput = details.getByRole('combobox', {
@@ -5862,18 +5886,9 @@ async function setRoomReminder(
           return false;
         }
       };
-      observation.recipientSelectionStep = 'member-listbox-ready';
-      await memberInput.click({ timeout: 15_000 });
-      await expect
-        .poll(measureMemberInputListboxAssociation, { timeout: 15_000 })
-        .toBe(true);
-      await expect(memberListbox).toHaveCount(1, { timeout: 15_000 });
-      await expect(memberListbox.getByRole('option').first()).toBeVisible({
-        timeout: 15_000,
-      });
-
       const expectedMemberUserId = fixture.users.memberB.userId;
       const memberInputProbeKey = '__calendarRoomReminderInputProbe';
+      observation.recipientSelectionStep = 'member-input-probe-install';
       const beforeFill = await memberInput
         .evaluateAll(
           (inputs, { expectedUserId, probeKey }) => {
@@ -5915,18 +5930,31 @@ async function setRoomReminder(
           },
         )
         .catch(() => undefined);
+      observation.memberInputProbeInstalled = beforeFill !== undefined;
       if (beforeFill) {
         observation.memberInputFocusedBeforeFill = beforeFill.inputFocused;
         observation.memberDocumentFocusedBeforeFill =
           beforeFill.documentFocused;
       }
 
-      observation.recipientSelectionStep = 'member-query-entered';
       try {
+        observation.recipientSelectionStep = 'member-input-clicked';
+        await memberInput.click({ timeout: 15_000 });
+        observation.recipientSelectionStep = 'member-prefill-roster-ready';
+        await expect
+          .poll(measureMemberInputListboxAssociation, { timeout: 15_000 })
+          .toBe(true);
+        await expect(memberListbox).toHaveCount(1, { timeout: 15_000 });
+        await expect(memberListbox.getByRole('option').first()).toBeVisible({
+          timeout: 15_000,
+        });
+
+        observation.recipientSelectionStep = 'member-query-entered';
         await memberInput.fill(expectedMemberUserId);
         await expect(memberInput).toHaveValue(expectedMemberUserId, {
           timeout: 15_000,
         });
+        observation.recipientSelectionStep = 'member-query-settled';
       } finally {
         const afterFill = await memberInput
           .evaluateAll(
