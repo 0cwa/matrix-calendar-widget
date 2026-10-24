@@ -33,6 +33,33 @@ export interface RoomMentionPowerLevels {
   readonly notifications?: Readonly<Record<string, RoomMentionPowerLevel>>;
 }
 
+export type RoomMentionRecipient = Readonly<{
+  userId: string;
+  displayName: string | null;
+}>;
+
+export function normalizeRoomMentionDisplayName(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = Array.from(value.normalize('NFC'), (character) => {
+    const codePoint = character.codePointAt(0);
+    return codePoint !== undefined && isRoomMentionControlCodePoint(codePoint)
+      ? ' '
+      : character;
+  })
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!normalized) return null;
+  return Array.from(normalized).slice(0, 256).join('');
+}
+
+function isRoomMentionControlCodePoint(codePoint: number): boolean {
+  return (
+    (codePoint >= 0x00 && codePoint <= 0x1f) ||
+    (codePoint >= 0x7f && codePoint <= 0x9f)
+  );
+}
+
 /**
  * This port must return undefined only when m.room.power_levels is genuinely
  * absent. Transport and state lookup errors must reject so policy fails closed.
@@ -46,6 +73,11 @@ export interface RoomMentionMatrixState {
     roomId: string,
     signal?: AbortSignal,
   ): Promise<readonly string[]>;
+  /** Optional directory projection for the manager-facing reminder picker. */
+  getJoinedRoomRecipients?(
+    roomId: string,
+    signal?: AbortSignal,
+  ): Promise<readonly RoomMentionRecipient[]>;
   /** Preserve raw string/number fields; do not coerce before policy evaluation. */
   getPowerLevels(
     roomId: string,

@@ -26,7 +26,7 @@ import {
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ComponentProps, PropsWithChildren } from 'react';
-import { of, Subject } from 'rxjs';
+import { EMPTY, Subject } from 'rxjs';
 import { afterEach, vi } from 'vitest';
 import {
   CalendarRepositoryProvider,
@@ -43,13 +43,6 @@ const members = [
   { userId: '@alice:example.test', displayName: 'Alice' },
   { userId: '@bob:example.test', displayName: 'Bob' },
 ];
-const roomMemberEvents = members.map((member) => ({
-  type: 'm.room.member',
-  room_id: roomId,
-  state_key: member.userId,
-  content: { membership: 'join', displayname: member.displayName },
-}));
-
 afterEach(() => vi.restoreAllMocks());
 
 async function chooseDestination(
@@ -137,6 +130,7 @@ function createRepository(
   });
   const disableRoomReminder = vi.fn().mockResolvedValue(undefined);
   const repository = Object.assign(new InMemoryCalendarRepository(), {
+    listRoomReminderRecipients: vi.fn().mockResolvedValue(members),
     listRoomReminderAlarmOptions: vi.fn().mockResolvedValue(options),
     listRoomReminderConfigurations: vi.fn().mockResolvedValue(configurations),
     enableRoomReminder,
@@ -147,8 +141,6 @@ function createRepository(
 
 function createWrapper(
   repository: InMemoryCalendarRepository,
-  memberReadUnavailable = false,
-  memberEvents = roomMemberEvents,
   memberObserver?: Subject<unknown>,
 ) {
   return function Wrapper({ children }: PropsWithChildren<{}>) {
@@ -156,12 +148,10 @@ function createWrapper(
       <WidgetApiMockProvider
         value={
           {
-            receiveStateEvents: memberReadUnavailable
-              ? vi.fn().mockRejectedValue(new Error('member list unavailable'))
-              : vi.fn().mockResolvedValue(memberEvents),
+            receiveStateEvents: vi.fn().mockResolvedValue([]),
             observeStateEvents: vi
               .fn()
-              .mockReturnValue(memberObserver ?? of(...memberEvents)),
+              .mockReturnValue(memberObserver ?? EMPTY),
           } as unknown as WidgetApi
         }
       >
@@ -176,8 +166,6 @@ function createWrapper(
 function renderControl(
   repository: InMemoryCalendarRepository,
   overrides: Partial<ComponentProps<typeof CalendarRoomReminderControl>> = {},
-  memberReadUnavailable = false,
-  memberEvents = roomMemberEvents,
   memberObserver?: Subject<unknown>,
 ) {
   return render(
@@ -207,12 +195,7 @@ function renderControl(
       {...overrides}
     />,
     {
-      wrapper: createWrapper(
-        repository,
-        memberReadUnavailable,
-        memberEvents,
-        memberObserver,
-      ),
+      wrapper: createWrapper(repository, memberObserver),
     },
   );
 }
@@ -343,8 +326,8 @@ describe('<CalendarRoomReminderControl />', () => {
       },
     };
     const widgetApi = {
-      receiveStateEvents: vi.fn().mockResolvedValue(roomMemberEvents),
-      observeStateEvents: vi.fn().mockReturnValue(of(...roomMemberEvents)),
+      receiveStateEvents: vi.fn().mockResolvedValue([]),
+      observeStateEvents: vi.fn().mockReturnValue(EMPTY),
     } as unknown as WidgetApi;
     const renderWithRepository = (repository: InMemoryCalendarRepository) => (
       <WidgetApiMockProvider value={widgetApi}>
@@ -532,11 +515,16 @@ describe('<CalendarRoomReminderControl />', () => {
       [timedOption],
       [existing],
     );
-    renderControl(repository, {}, true);
+    repository.listRoomReminderRecipients.mockRejectedValueOnce(
+      new Error('private roster transport failure'),
+    );
+    renderControl(repository);
 
     fireEvent.click(screen.getByRole('button', { name: 'Reminder settings' }));
     expect(
-      await screen.findByText(/Joined room members are not available yet/),
+      await screen.findByText(
+        /calendar server could not load joined room members/i,
+      ),
     ).toBeInTheDocument();
     expect(
       screen.queryByText(/saved recipient\(s\) are no longer joined/),
@@ -545,6 +533,17 @@ describe('<CalendarRoomReminderControl />', () => {
       screen.getByRole('button', { name: 'Save Matrix destination' }),
     ).toBeDisabled();
     expect(enableRoomReminder).not.toHaveBeenCalled();
+
+    repository.listRoomReminderRecipients.mockResolvedValueOnce(members);
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() =>
+      expect(
+        screen.queryByText(
+          /calendar server could not load joined room members/i,
+        ),
+      ).not.toBeInTheDocument(),
+    );
+    expect(repository.listRoomReminderRecipients).toHaveBeenCalledTimes(2);
   });
 
   it('saves an explicit all-day schedule for selected joined members', async () => {
@@ -676,8 +675,15 @@ describe('<CalendarRoomReminderControl />', () => {
     );
     const memberObserver = new Subject<unknown>();
     const { repository } = createRepository([timedOption]);
+    let currentRecipients = fixtureMembers.map((member) => ({
+      userId: member.userId,
+      displayName: member.displayName,
+    }));
+    repository.listRoomReminderRecipients.mockImplementation(async () =>
+      currentRecipients.map((member) => ({ ...member })),
+    );
     try {
-      renderControl(repository, {}, false, fixtureEvents, memberObserver);
+      renderControl(repository, {}, memberObserver);
       await userEvent.click(
         screen.getByRole('button', { name: 'Reminder settings' }),
       );
@@ -695,6 +701,11 @@ describe('<CalendarRoomReminderControl />', () => {
       expect(await screen.findAllByRole('option')).toHaveLength(1);
 
       await act(async () => {
+        currentRecipients = [
+          { userId: fixtureMembers[0].userId, displayName: 'member-a-updated' },
+          { userId: targetId, displayName: 'member-b' },
+          { userId: botId, displayName: 'bot' },
+        ];
         memberObserver.next({
           ...fixtureEvents[0],
           content: { membership: 'join', displayname: 'member-a-updated' },
@@ -721,6 +732,11 @@ describe('<CalendarRoomReminderControl />', () => {
       expect(screen.getByRole('button', { name: 'member-b' })).toBeVisible();
 
       await act(async () => {
+        currentRecipients = [
+          { userId: fixtureMembers[0].userId, displayName: 'member-a-updated' },
+          { userId: targetId, displayName: 'member-b-renamed' },
+          { userId: botId, displayName: 'bot' },
+        ];
         memberObserver.next({
           ...fixtureEvents[1],
           content: { membership: 'join', displayname: 'member-b-renamed' },

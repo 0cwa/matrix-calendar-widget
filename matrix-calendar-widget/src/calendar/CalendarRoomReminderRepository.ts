@@ -47,6 +47,11 @@ export type CalendarRoomReminderIdentity = {
   alarmUid: string;
 };
 
+export type CalendarRoomReminderRecipient = Readonly<{
+  userId: string;
+  displayName: string | null;
+}>;
+
 export type CalendarRoomReminderTarget =
   | Readonly<{ kind: 'room' }>
   | Readonly<{ kind: 'users'; userIds: readonly string[] }>;
@@ -65,6 +70,9 @@ export type CalendarRoomReminderConfiguration = CalendarRoomReminderIdentity &
   }>;
 
 export interface CalendarRoomReminderRepository {
+  /** Complete current joined-member options for the bound room, when supported. */
+  listRoomReminderRecipients?(): Promise<CalendarRoomReminderRecipient[]>;
+
   listRoomReminderAlarmOptions(
     calendarId: CalendarId,
     eventId: CalendarEventId,

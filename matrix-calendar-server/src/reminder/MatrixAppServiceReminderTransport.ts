@@ -26,8 +26,10 @@ import {
 } from './RoomMentionMessage';
 import {
   authorizeRoomMentionDelivery,
+  normalizeRoomMentionDisplayName,
   RoomMentionMatrixState,
   RoomMentionPowerLevels,
+  RoomMentionRecipient,
 } from './RoomMentionPolicy';
 import type {
   ReminderSchedulerRuntimeSource,
@@ -161,6 +163,36 @@ export class MatrixReminderTransportBase
       throw new MatrixReminderTransportError('invalid-response');
     }
     return members;
+  }
+
+  async getJoinedRoomRecipients(
+    roomId: string,
+    signal?: AbortSignal,
+  ): Promise<readonly RoomMentionRecipient[]> {
+    const response = await this.requestJson(
+      this.roomPath(roomId, '/joined_members'),
+      signal,
+      MAX_MATRIX_STATE_RESPONSE_BYTES,
+    );
+    if (response.status !== 200) {
+      throw new MatrixReminderTransportError('request-failed');
+    }
+    const root = asRecord(response.body);
+    const joined = asRecord(root?.joined);
+    if (!joined) throw new MatrixReminderTransportError('invalid-response');
+    const members = Object.entries(joined);
+    if (
+      members.length > MAX_ROOM_MEMBERS ||
+      members.some(([id]) => !isCanonicalMatrixUserId(id))
+    ) {
+      throw new MatrixReminderTransportError('invalid-response');
+    }
+    return members.map(([userId, profile]) => ({
+      userId,
+      displayName: normalizeRoomMentionDisplayName(
+        asRecord(profile)?.display_name,
+      ),
+    }));
   }
 
   async getPowerLevels(

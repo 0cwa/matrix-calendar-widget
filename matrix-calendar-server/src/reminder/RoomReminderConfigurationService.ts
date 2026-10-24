@@ -33,7 +33,9 @@ import { CanonicalReminderResourceData } from './CanonicalReminderIdentityResolv
 import { resolveTriggerableReminderConfiguration } from './ReminderConfigurationSourceValidator';
 import {
   RoomMentionMatrixState,
+  RoomMentionRecipient,
   authorizeRoomMentionScheduling,
+  normalizeRoomMentionDisplayName,
 } from './RoomMentionPolicy';
 import {
   RoomReminderConfigurationRecord,
@@ -56,6 +58,12 @@ export type RoomReminderConfigurationPage = {
   items: RoomReminderConfigurationRecord[];
   nextCursor?: string;
 };
+
+export type RoomReminderRecipientsResponse = Readonly<{
+  recipients: readonly RoomMentionRecipient[];
+}>;
+
+const MAX_ROOM_REMINDER_RECIPIENTS = 20_000;
 
 /**
  * Actor-facing configuration only. This service never sends messages and does
@@ -155,6 +163,43 @@ export class RoomReminderConfigurationService {
           }
         : {}),
     };
+  }
+
+  async listRecipients(
+    actorUserId: unknown,
+    roomId: unknown,
+  ): Promise<RoomReminderRecipientsResponse> {
+    this.assertEnabled();
+    const actor = requireCanonicalActor(actorUserId);
+    const target = await this.authorize(actor, roomId);
+    const getRecipients = this.matrixState.getJoinedRoomRecipients;
+    if (typeof getRecipients !== 'function') throw unavailable();
+
+    try {
+      const rows = await getRecipients.call(this.matrixState, target.roomId);
+      if (!Array.isArray(rows) || rows.length > MAX_ROOM_REMINDER_RECIPIENTS) {
+        throw new Error('invalid roster');
+      }
+
+      const seen = new Set<string>();
+      const recipients = rows.map((row) => {
+        if (
+          !row ||
+          !isCanonicalMatrixUserId(row.userId) ||
+          seen.has(row.userId)
+        ) {
+          throw new Error('invalid roster');
+        }
+        seen.add(row.userId);
+        return {
+          userId: row.userId,
+          displayName: normalizeRoomMentionDisplayName(row.displayName),
+        };
+      });
+      return { recipients };
+    } catch {
+      throw unavailable();
+    }
   }
 
   async upsert(
@@ -389,6 +434,10 @@ function requireCanonicalActor(value: unknown): string {
     throw new UnauthorizedException('Matrix user identity is unavailable');
   }
   return value;
+}
+
+function isCanonicalMatrixUserId(value: unknown): value is string {
+  return typeof value === 'string' && /^@[^\s:#?]+:[^\s?#]+$/.test(value);
 }
 
 function publicConfiguration(

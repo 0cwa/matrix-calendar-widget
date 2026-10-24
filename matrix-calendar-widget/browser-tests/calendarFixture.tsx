@@ -38,7 +38,7 @@ import i18next from 'i18next';
 import { useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { I18nextProvider, initReactI18next } from 'react-i18next';
-import { of } from 'rxjs';
+import { Subject } from 'rxjs';
 import en from '../public/locales/en/translation.json';
 import type {
   CalendarRoomCapabilities,
@@ -46,6 +46,7 @@ import type {
   CalendarRoomReminderAllDaySchedule,
   CalendarRoomReminderConfiguration,
   CalendarRoomReminderIdentity,
+  CalendarRoomReminderRecipient,
   CalendarRoomReminderRepository,
   CalendarRoomReminderTarget,
   CalendarTargetAvailabilityRepository,
@@ -111,29 +112,38 @@ const roomCalendar: Calendar = {
 };
 const syntheticRoomId = '!synthetic-room:example.test';
 const syntheticBotUserId = '@calendar-bot:example.test';
-const syntheticRoomMembers = [
-  {
-    type: 'm.room.member',
-    room_id: syntheticRoomId,
-    state_key: '@alice:example.test',
-    content: { membership: 'join', displayname: 'Alice' },
-  },
-  {
-    type: 'm.room.member',
-    room_id: syntheticRoomId,
-    state_key: '@bob:example.test',
-    content: { membership: 'join', displayname: 'Bob' },
-  },
-  {
-    type: 'm.room.member',
-    room_id: syntheticRoomId,
-    state_key: syntheticBotUserId,
-    content: { membership: 'join', displayname: 'Calendar bot' },
-  },
-] as unknown as StateEvent[];
+const syntheticJoinedRecipients = new Map<string, string | null>([
+  ['@alice:example.test', 'Alice'],
+  ['@bob:example.test', 'Bob'],
+  [syntheticBotUserId, 'Calendar bot'],
+]);
+const syntheticRoomMemberUpdates = new Subject<StateEvent>();
+declare global {
+  interface Window {
+    __updateSyntheticRoomMember: (event: StateEvent) => void;
+    __syntheticRoomReminderTarget?: CalendarRoomReminderTarget;
+  }
+}
+window.__updateSyntheticRoomMember = (event) => {
+  if (event.room_id === syntheticRoomId && event.type === 'm.room.member') {
+    const member = event as StateEvent<{
+      membership?: string;
+      displayname?: string;
+    }>;
+    if (member.content.membership === 'join') {
+      syntheticJoinedRecipients.set(
+        member.state_key,
+        member.content.displayname ?? null,
+      );
+    } else {
+      syntheticJoinedRecipients.delete(member.state_key);
+    }
+  }
+  syntheticRoomMemberUpdates.next(event);
+};
 const syntheticRoomWidgetApi = {
-  receiveStateEvents: async () => syntheticRoomMembers,
-  observeStateEvents: () => of(...syntheticRoomMembers),
+  receiveStateEvents: async () => [],
+  observeStateEvents: () => syntheticRoomMemberUpdates.asObservable(),
 } as unknown as WidgetApi;
 const roomEvent: CalendarEvent = {
   id: 'synthetic-room-event',
@@ -523,6 +533,13 @@ class SyntheticRoomCalendarRepository
     return event.uid === roomAlarmOption.eventUid ? [roomAlarmOption] : [];
   }
 
+  async listRoomReminderRecipients(): Promise<CalendarRoomReminderRecipient[]> {
+    return [...syntheticJoinedRecipients].map(([userId, displayName]) => ({
+      userId,
+      displayName,
+    }));
+  }
+
   async listRoomReminderConfigurations(): Promise<
     CalendarRoomReminderConfiguration[]
   > {
@@ -545,6 +562,12 @@ class SyntheticRoomCalendarRepository
     ) {
       throw new Error('Synthetic room reminder is unavailable');
     }
+    if (
+      target.kind === 'users' &&
+      target.userIds.some((userId) => !syntheticJoinedRecipients.has(userId))
+    ) {
+      throw new Error('Synthetic recipient is no longer joined');
+    }
     const configuration: CalendarRoomReminderConfiguration = {
       eventUid: event.uid,
       alarmUid,
@@ -554,6 +577,7 @@ class SyntheticRoomCalendarRepository
       revision: 1,
     };
     this.reminderConfigurations.set(alarmUid, configuration);
+    window.__syntheticRoomReminderTarget = target;
     return configuration;
   }
 

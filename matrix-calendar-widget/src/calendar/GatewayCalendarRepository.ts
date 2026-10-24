@@ -39,6 +39,7 @@ import type {
   CalendarRoomReminderAllDaySchedule,
   CalendarRoomReminderConfiguration,
   CalendarRoomReminderIdentity,
+  CalendarRoomReminderRecipient,
   CalendarRoomReminderRepository,
   CalendarRoomReminderTarget,
 } from './CalendarRoomReminderRepository';
@@ -319,6 +320,17 @@ export class GatewayCalendarRepository
       { cache: 'no-store' },
     );
     return parseRoomReminderOptions(response);
+  }
+
+  async listRoomReminderRecipients(): Promise<CalendarRoomReminderRecipient[]> {
+    const response = await this.transport.requestJson<unknown>(
+      this.transport.url(
+        `/v1/calendar/rooms/${encodePathSegment(this.options.roomId)}/reminders/recipients`,
+        {},
+      ),
+      { cache: 'no-store' },
+    );
+    return parseRoomReminderRecipients(response);
   }
 
   async listRoomReminderConfigurations(): Promise<
@@ -1102,6 +1114,57 @@ function parseRoomReminderConfigurationPage(value: unknown): {
     nextCursor = value.nextCursor;
   }
   return { items, ...(nextCursor ? { nextCursor } : {}) };
+}
+
+function parseRoomReminderRecipients(
+  value: unknown,
+): CalendarRoomReminderRecipient[] {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.keys(value).length !== 1 ||
+    !('recipients' in value) ||
+    !Array.isArray(value.recipients) ||
+    value.recipients.length > 20_000
+  ) {
+    throw invalidRoomReminderResponse();
+  }
+
+  const seen = new Set<string>();
+  return value.recipients.map((recipient) => {
+    if (
+      !recipient ||
+      typeof recipient !== 'object' ||
+      Array.isArray(recipient) ||
+      Object.keys(recipient).length !== 2 ||
+      !('userId' in recipient) ||
+      typeof recipient.userId !== 'string' ||
+      !/^@[^\s:#?]+:[^\s?#]+$/.test(recipient.userId) ||
+      seen.has(recipient.userId) ||
+      !('displayName' in recipient) ||
+      !isNormalizedReminderDisplayName(recipient.displayName)
+    ) {
+      throw invalidRoomReminderResponse();
+    }
+    seen.add(recipient.userId);
+    return {
+      userId: recipient.userId,
+      displayName: recipient.displayName,
+    };
+  });
+}
+
+function isNormalizedReminderDisplayName(
+  value: unknown,
+): value is string | null {
+  if (value === null) return true;
+  if (typeof value !== 'string' || Array.from(value).length > 256) return false;
+  return (
+    value.length > 0 &&
+    !containsControlCharacters(value) &&
+    value === value.normalize('NFC').replace(/\s+/g, ' ').trim()
+  );
 }
 
 function parseRoomReminderIdentity(

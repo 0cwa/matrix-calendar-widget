@@ -85,7 +85,7 @@ Time values retain floating, named-zone, or all-day semantics. All-day end dates
 
 ## Reminders and room action notices
 
-A canonical `VALARM` defines alarm timing. The separate reminder store associates supported event/alarm identities with Matrix delivery. The current merged delivery target is a whole-room mention using `m.mentions.room`; selected recipients and explicit all-day Matrix schedules are tracked separately in [#382](https://github.com/0cwa/matrix-calendar-widget/issues/382).
+A canonical `VALARM` defines alarm timing. The separate reminder store associates supported event/alarm identities with Matrix delivery. The current merged delivery target is a whole-room mention using `m.mentions.room`; selected recipients and explicit all-day Matrix schedules are tracked separately in [#382](https://github.com/0cwa/matrix-calendar-widget/issues/382). [ADR047](./adrs/adr047-authoritative-reminder-recipient-roster.md) defines the manager-authorized gateway roster read used by the selected-recipient picker. Element's cached room-member events can refresh that roster, but do not establish completeness or membership authority.
 
 Reminder configuration and delivery have independent default-off gates. Delivery also requires room access, a valid binding, service configuration, and the app-owned database. The scheduler rereads canonical event/alarm data and rechecks binding, encryption state, and mention permission before sending. Native scheduled delivery refuses encrypted or unknown room state. Persistent claims and stable Matrix transaction IDs support retries; they do not promise exactly-once delivery. Coordination assumes one server replica.
 

@@ -116,6 +116,64 @@ describe('GatewayCalendarRepository', () => {
     ).toBe(roomId);
   });
 
+  it('loads the recipient roster from the configured Matrix room route', async () => {
+    const recipients = [
+      { userId: '@alice:example.test', displayName: 'Alice' },
+      { userId: '@bob:example.test', displayName: null },
+    ];
+    const fetchMock = mockFetch(jsonResponse({ recipients }));
+    const repository = createRepository(fetchMock);
+
+    await expect(repository.listRoomReminderRecipients()).resolves.toEqual(
+      recipients,
+    );
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(new URL(url as string).pathname).toBe(
+      '/v1/calendar/rooms/%21team%3Aexample.test/reminders/recipients',
+    );
+    expect(new URL(url as string).searchParams.toString()).toBe('');
+    expect(init?.cache).toBe('no-store');
+    expect(init?.method).toBeUndefined();
+    expect(new Headers(init?.headers).get('Authorization')).toBe(
+      'MX-Identity delegated',
+    );
+  });
+
+  it('accepts a normalized display label with 256 Unicode code points', async () => {
+    const displayName = '😀'.repeat(256);
+    const repository = createRepository(
+      mockFetch(
+        jsonResponse({
+          recipients: [{ userId: '@alice:example.test', displayName }],
+        }),
+      ),
+    );
+
+    await expect(repository.listRoomReminderRecipients()).resolves.toEqual([
+      { userId: '@alice:example.test', displayName },
+    ]);
+  });
+
+  it('rejects recipient responses containing extra or malformed profile data', async () => {
+    const fetchMock = mockFetch(
+      jsonResponse({
+        recipients: [
+          {
+            userId: '@alice:example.test',
+            displayName: 'Alice',
+            avatarUrl: 'mxc://private-avatar',
+          },
+        ],
+      }),
+    );
+    const repository = createRepository(fetchMock);
+
+    await expect(
+      repository.listRoomReminderRecipients(),
+    ).rejects.toBeInstanceOf(CalendarRepositoryError);
+  });
+
   it('projects raw room capabilities without mutating the gateway value', async () => {
     const rawCapabilities = {
       calendarId,

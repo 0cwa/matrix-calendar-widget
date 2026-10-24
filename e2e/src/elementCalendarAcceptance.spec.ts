@@ -161,6 +161,16 @@ type ReminderConfigurationObservation = {
   reminderOptionsGetStatus: number;
   reminderConfigGetCount: number;
   reminderConfigGetStatus: number;
+  recipientRosterGetCount: number;
+  recipientRosterHttpStatus: number;
+  recipientRosterCount: number;
+  recipientRosterShapeValid: boolean;
+  recipientRosterOutcome:
+    | 'unobserved'
+    | 'http_error'
+    | 'empty'
+    | 'invalid_shape'
+    | 'nonempty';
   reminderDestinationControlCount: number;
   recipientKind: 'room' | 'selected' | 'unknown';
   recipientSelectionAttempted: boolean;
@@ -188,6 +198,75 @@ type ReminderConfigurationObservation = {
   reminderPutCount: number;
   reminderPutStatus: number;
 };
+
+const MAX_REMINDER_RECIPIENT_ROSTER_SIZE = 20_000;
+
+function summarizeReminderRecipientRoster(value: unknown): {
+  recipientRosterCount: number;
+  recipientRosterShapeValid: boolean;
+  recipientRosterOutcome: 'empty' | 'invalid_shape' | 'nonempty';
+} {
+  const invalid = (recipientRosterCount = 0) => ({
+    recipientRosterCount,
+    recipientRosterShapeValid: false,
+    recipientRosterOutcome: 'invalid_shape' as const,
+  });
+  if (
+    !isRecord(value) ||
+    Object.keys(value).length !== 1 ||
+    !('recipients' in value) ||
+    !Array.isArray(value.recipients)
+  ) {
+    return invalid();
+  }
+
+  const recipients = value.recipients;
+  const recipientRosterCount = Math.min(
+    recipients.length,
+    MAX_REMINDER_RECIPIENT_ROSTER_SIZE,
+  );
+  if (recipients.length > MAX_REMINDER_RECIPIENT_ROSTER_SIZE) {
+    return invalid(recipientRosterCount);
+  }
+
+  const seen = new Set<string>();
+  for (const recipient of recipients) {
+    if (
+      !isRecord(recipient) ||
+      Object.keys(recipient).length !== 2 ||
+      !('userId' in recipient) ||
+      typeof recipient.userId !== 'string' ||
+      !/^@[^\s:#?]+:[^\s?#]+$/u.test(recipient.userId) ||
+      seen.has(recipient.userId) ||
+      !('displayName' in recipient)
+    ) {
+      return invalid(recipientRosterCount);
+    }
+    const displayName = recipient.displayName;
+    const displayNameValid =
+      displayName === null ||
+      (typeof displayName === 'string' &&
+        Array.from(displayName).length <= 256 &&
+        displayName.length > 0 &&
+        !Array.from(displayName).some((character) => {
+          const codePoint = character.codePointAt(0);
+          return (
+            codePoint !== undefined &&
+            (codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f))
+          );
+        }) &&
+        displayName ===
+          displayName.normalize('NFC').replace(/\s+/gu, ' ').trim());
+    if (!displayNameValid) return invalid(recipientRosterCount);
+    seen.add(recipient.userId);
+  }
+
+  return {
+    recipientRosterCount,
+    recipientRosterShapeValid: true,
+    recipientRosterOutcome: recipientRosterCount === 0 ? 'empty' : 'nonempty',
+  };
+}
 
 type ReminderAlarmUiObservation = {
   alarmUiStep: ReminderAlarmUiStep;
@@ -5638,6 +5717,11 @@ async function setRoomReminder(
     reminderOptionsGetStatus: 0,
     reminderConfigGetCount: 0,
     reminderConfigGetStatus: 0,
+    recipientRosterGetCount: 0,
+    recipientRosterHttpStatus: 0,
+    recipientRosterCount: 0,
+    recipientRosterShapeValid: false,
+    recipientRosterOutcome: 'unobserved',
     reminderDestinationControlCount: 0,
     recipientKind: 'unknown',
     recipientSelectionAttempted: false,
@@ -5667,6 +5751,8 @@ async function setRoomReminder(
   };
   let effectivePlan = plan;
   let dueAt: number | undefined;
+  let latestRecipientRosterRequest: Request | undefined;
+  let latestRecipientRosterResponse: Response | undefined;
   const roomPath = `/v1/calendar/rooms/${fixture.teamRoomId}/reminders`;
   const gatewayOrigin = new URL(fixture.gatewayUrl).origin;
   const classifyRequest = (urlValue: string, method: string) => {
@@ -5674,6 +5760,9 @@ async function setRoomReminder(
       const url = new URL(urlValue);
       if (url.origin !== gatewayOrigin) return undefined;
       const pathname = decodeURIComponent(url.pathname);
+      if (method === 'GET' && pathname === `${roomPath}/recipients`) {
+        return 'recipients' as const;
+      }
       if (method === 'GET' && pathname === `${roomPath}/options`) {
         return 'options' as const;
       }
@@ -5690,7 +5779,18 @@ async function setRoomReminder(
   };
   const onRequest = (request: Request) => {
     const kind = classifyRequest(request.url(), request.method());
-    if (kind === 'options') {
+    if (kind === 'recipients') {
+      observation.recipientRosterGetCount = Math.min(
+        observation.recipientRosterGetCount + 1,
+        2,
+      );
+      latestRecipientRosterRequest = request;
+      latestRecipientRosterResponse = undefined;
+      observation.recipientRosterHttpStatus = 0;
+      observation.recipientRosterCount = 0;
+      observation.recipientRosterShapeValid = false;
+      observation.recipientRosterOutcome = 'unobserved';
+    } else if (kind === 'options') {
       observation.reminderOptionsGetCount = Math.min(
         observation.reminderOptionsGetCount + 1,
         2,
@@ -5738,7 +5838,13 @@ async function setRoomReminder(
   };
   const onResponse = (response: Response) => {
     const kind = classifyRequest(response.url(), response.request().method());
-    if (kind === 'options') {
+    if (
+      kind === 'recipients' &&
+      response.request() === latestRecipientRosterRequest
+    ) {
+      observation.recipientRosterHttpStatus = response.status();
+      latestRecipientRosterResponse = response;
+    } else if (kind === 'options') {
       observation.reminderOptionsGetStatus = response.status();
     } else if (kind === 'config') {
       observation.reminderConfigGetStatus = response.status();
@@ -5746,7 +5852,43 @@ async function setRoomReminder(
       observation.reminderPutStatus = response.status();
     }
   };
+  const onRequestFailed = (request: Request) => {
+    if (
+      classifyRequest(request.url(), request.method()) === 'recipients' &&
+      request === latestRecipientRosterRequest
+    ) {
+      observation.recipientRosterHttpStatus = 0;
+      observation.recipientRosterCount = 0;
+      observation.recipientRosterShapeValid = false;
+      observation.recipientRosterOutcome = 'http_error';
+    }
+  };
+  const sampleRecipientRosterResponse = async () => {
+    const response = latestRecipientRosterResponse;
+    if (!response) return;
+
+    const status = response.status();
+    observation.recipientRosterHttpStatus = status;
+    if (status < 200 || status >= 300) {
+      observation.recipientRosterCount = 0;
+      observation.recipientRosterShapeValid = false;
+      observation.recipientRosterOutcome = 'http_error';
+      return;
+    }
+
+    try {
+      const roster = summarizeReminderRecipientRoster(await response.json());
+      observation.recipientRosterCount = roster.recipientRosterCount;
+      observation.recipientRosterShapeValid = roster.recipientRosterShapeValid;
+      observation.recipientRosterOutcome = roster.recipientRosterOutcome;
+    } catch {
+      observation.recipientRosterCount = 0;
+      observation.recipientRosterShapeValid = false;
+      observation.recipientRosterOutcome = 'invalid_shape';
+    }
+  };
   const writeFailure = async () => {
+    await sampleRecipientRosterResponse();
     const httpStatus =
       observation.reminderPutStatus ||
       observation.reminderOptionsGetStatus ||
@@ -5761,6 +5903,7 @@ async function setRoomReminder(
 
   page.on('request', onRequest);
   page.on('response', onResponse);
+  page.on('requestfailed', onRequestFailed);
   try {
     await expect(row).toBeVisible();
     await row.click();
@@ -6161,6 +6304,7 @@ async function setRoomReminder(
       .click();
     await details.getByRole('button', { name: 'Close', exact: true }).click();
     observation.reminderStep = 'complete';
+    await sampleRecipientRosterResponse();
     record(activePhase, 'passed', observation.reminderPutStatus, 1, {
       ...observation,
       reminderEnabled: true,
@@ -6176,6 +6320,7 @@ async function setRoomReminder(
   } finally {
     page.off('request', onRequest);
     page.off('response', onResponse);
+    page.off('requestfailed', onRequestFailed);
   }
 }
 

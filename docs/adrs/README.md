@@ -19,22 +19,23 @@ ADR001–ADR003 were inherited from NeoDateFix and describe its meeting product.
 
 ## Matrix identity, rooms, and reminders
 
-| Record                                                                | Decision                                                    |
-| --------------------------------------------------------------------- | ----------------------------------------------------------- |
-| [ADR007](./adr007-matrix-reminder-sidecar-metadata.md)                | Model Matrix reminder targets as sidecar metadata           |
-| [ADR009](./adr009-radicale-openid-delegation.md)                      | Delegate Matrix OpenID to Radicale without Matrix passwords |
-| [ADR010](./adr010-mixed-calendar-principal-model.md)                  | Use personal widget calendars and room-owned bot calendars  |
-| [ADR014](./adr014-split-widget-and-bot-calendar-principals.md)        | Select calendar principals by target                        |
-| [ADR015](./adr015-server-managed-room-calendar-bindings.md)           | Manage room/calendar bindings in server configuration       |
-| [ADR022](./adr022-manager-only-caldav-diagnostics.md)                 | Expose manager-only CalDAV collection diagnostics           |
-| [ADR024](./adr024-in-repo-radicale-openid-auth.md)                    | Own a clean-room OpenID authentication module for Radicale  |
-| [ADR028](./adr028-room-reminder-configuration-and-delivery.md)        | Configure room reminders against canonical calendar alarms  |
-| [ADR030](./adr030-gated-room-event-operations.md)                     | Gate room-owned event operations                            |
-| [ADR032](./adr032-room-calendar-action-messages.md)                   | Send room calendar action notices                           |
-| [ADR033](./adr033-room-reminder-alarm-options.md)                     | Bounded room reminder alarm options                         |
-| [ADR041](./adr041-optional-normal-bot-account-for-room-operations.md) | Support an optional normal bot account for room operations  |
-| [ADR042](./adr042-calendar-only-legacy-meeting-apis-disabled.md)      | Disable legacy meeting APIs for the calendar pilot          |
-| [ADR043](./adr043-moderator-room-calendar-setup.md)                   | Set up a room calendar through a moderator command          |
+| Record                                                                | Decision                                                         |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| [ADR007](./adr007-matrix-reminder-sidecar-metadata.md)                | Model Matrix reminder targets as sidecar metadata                |
+| [ADR009](./adr009-radicale-openid-delegation.md)                      | Delegate Matrix OpenID to Radicale without Matrix passwords      |
+| [ADR010](./adr010-mixed-calendar-principal-model.md)                  | Use personal widget calendars and room-owned bot calendars       |
+| [ADR014](./adr014-split-widget-and-bot-calendar-principals.md)        | Select calendar principals by target                             |
+| [ADR015](./adr015-server-managed-room-calendar-bindings.md)           | Manage room/calendar bindings in server configuration            |
+| [ADR022](./adr022-manager-only-caldav-diagnostics.md)                 | Expose manager-only CalDAV collection diagnostics                |
+| [ADR024](./adr024-in-repo-radicale-openid-auth.md)                    | Own a clean-room OpenID authentication module for Radicale       |
+| [ADR028](./adr028-room-reminder-configuration-and-delivery.md)        | Configure room reminders against canonical calendar alarms       |
+| [ADR030](./adr030-gated-room-event-operations.md)                     | Gate room-owned event operations                                 |
+| [ADR032](./adr032-room-calendar-action-messages.md)                   | Send room calendar action notices                                |
+| [ADR033](./adr033-room-reminder-alarm-options.md)                     | Bounded room reminder alarm options                              |
+| [ADR041](./adr041-optional-normal-bot-account-for-room-operations.md) | Support an optional normal bot account for room operations       |
+| [ADR042](./adr042-calendar-only-legacy-meeting-apis-disabled.md)      | Disable legacy meeting APIs for the calendar pilot               |
+| [ADR043](./adr043-moderator-room-calendar-setup.md)                   | Set up a room calendar through a moderator command               |
+| [ADR047](./adr047-authoritative-reminder-recipient-roster.md)         | Read selected-reminder recipients from current Matrix membership |
 
 ## Calendar semantics and preservation
 
@@ -74,4 +75,4 @@ ADR001–ADR003 were inherited from NeoDateFix and describe its meeting product.
 
 Use the [ADR template](./adr000-template.md) for a change to persistence, authentication, public APIs, permissions, calendar semantics, or deployment topology. Explain the context, decision, consequences, and how it relates to existing records. Routine implementation and documentation changes do not need a new ADR.
 
-Preserve established numbers. Gaps are intentional; inspect open PRs before assigning a number. At the 21 October 2026 documentation snapshot, ADR044 belongs to the still-open reminder work in [PR #384](https://github.com/0cwa/matrix-calendar-widget/pull/384); it is not a merged decision in this index.
+Preserve established numbers. Gaps are intentional; inspect open PRs before assigning a number. At the 21 October 2026 documentation snapshot, ADR044 belongs to the still-open reminder work in [PR #384](https://github.com/0cwa/matrix-calendar-widget/pull/384); it is not a merged decision in this index. ADR047 adds the manager-authorized roster read needed to complete that picker in clients with partial member caches.
