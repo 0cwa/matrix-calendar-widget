@@ -41,7 +41,7 @@ import {
   Typography,
 } from '@mui/material';
 import { DateTime } from 'luxon';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   isCalendarRoomReminderRepository,
@@ -90,6 +90,11 @@ export function CalendarEventDetailsDialog({
     revision: number;
   }>();
   const reminderSettingsRequestRevision = useRef(0);
+  const eventDetailsDialogRef = useRef<HTMLDivElement>(null);
+  const getEventDetailsDialogElement = useCallback(
+    () => eventDetailsDialogRef.current,
+    [],
+  );
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState<
@@ -365,6 +370,7 @@ export function CalendarEventDetailsDialog({
         maxWidth="sm"
         onClose={onClose}
         open={Boolean(currentEvent) && !editing}
+        ref={eventDetailsDialogRef}
       >
         {currentEvent && (
           <>
@@ -545,6 +551,7 @@ export function CalendarEventDetailsDialog({
                     )}
                     calendarTimezone={eventCalendar?.timezone}
                     openRequest={reminderSettingsOpenRequest}
+                    popperContainer={getEventDetailsDialogElement}
                     refreshToken={reminderOptionsRevision}
                     onEditCalendarReminder={() => setEditing(true)}
                   />

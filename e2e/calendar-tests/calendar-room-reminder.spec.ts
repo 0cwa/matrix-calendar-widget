@@ -40,15 +40,30 @@ test('room manager can search and save an exact Matrix reminder recipient while 
   const recipients = dialog.getByRole('combobox', {
     name: 'Selected people',
   });
+  const modalRoot = page.locator('.MuiDialog-root').last();
   await recipients.click();
   await expect(page.getByRole('option', { name: 'Alice' })).toBeVisible();
   await expect(page.getByRole('option', { name: 'Bob' })).toBeVisible();
+  const popper = modalRoot.locator('.MuiAutocomplete-popper');
+  const listbox = modalRoot.getByRole('listbox');
+  await expect(popper).toBeVisible();
+  await expect(listbox).toBeVisible();
+  expect(
+    await listbox.evaluate((element) =>
+      Boolean(element.closest('[aria-hidden="true"]')),
+    ),
+  ).toBe(false);
+  const popperBounds = await popper.boundingBox();
+  expect(popperBounds).not.toBeNull();
+  expect(popperBounds!.x).toBeGreaterThanOrEqual(0);
+  expect(popperBounds!.y).toBeGreaterThanOrEqual(0);
+  expect(popperBounds!.x + popperBounds!.width).toBeLessThanOrEqual(1280);
+  expect(popperBounds!.y + popperBounds!.height).toBeLessThanOrEqual(900);
   await expect(
     page.getByRole('option', { name: 'Calendar bot', exact: true }),
   ).toHaveCount(0);
   await recipients.fill('@alice:example.test');
 
-  const listbox = page.getByRole('listbox');
   await expect(listbox).toBeVisible();
   const controlsId = await recipients.evaluate((element) =>
     element.getAttribute('aria-controls'),
