@@ -74,7 +74,7 @@ test('emits only a categorized setup error, repository frame, and case counts', 
   assert.equal(
     diagnostic,
     [
-      'room-appservice-setup-test-results stage=register-service-user http-status=unavailable matrix-errcode=unavailable total=3 passed=0 failed=3 pending=0 test-bodies-started=0/7',
+      'room-appservice-setup-test-results stage=register-service-user http-status=unavailable matrix-errcode=unavailable total=3 passed=0 failed=3 pending=0 test-bodies-started=0/8',
       'room-appservice-setup-exception class=TypeError message="service request failed" source=matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts:205:12',
     ].join('\n'),
   );
@@ -87,11 +87,11 @@ test('emits only a categorized setup error, repository frame, and case counts', 
 test('does not expose a test-body failure as a setup exception', () => {
   const diagnostic = formatRoomAppServiceSetupDiagnostic(
     report('AssertionError: event title mismatch'),
-    'room-appservice-setup-start\nroom-appservice-case-start-exact-binding\nroom-appservice-case-start-event-write\nroom-appservice-case-start-bot-command-write\n',
+    'room-appservice-setup-start\nroom-appservice-case-start-exact-binding\nroom-appservice-case-start-event-write\nroom-appservice-case-start-bot-command-write\nroom-appservice-case-start-private-client-live-policy\n',
   );
   assert.equal(
     diagnostic,
-    'room-appservice-setup-diagnostic not-a-setup-failure test-bodies=3/7',
+    'room-appservice-setup-diagnostic not-a-setup-failure test-bodies=4/8',
   );
   assert.equal(diagnostic.includes('event title mismatch'), false);
 });
@@ -128,7 +128,7 @@ test('captures a sanitized suite-load exception when setup never started', () =>
   assert.equal(
     diagnostic,
     [
-      'room-appservice-suite-load-test-results stage=unavailable http-status=unavailable matrix-errcode=unavailable total=0 passed=0 failed=0 pending=0 test-bodies-started=0/7',
+      'room-appservice-suite-load-test-results stage=unavailable http-status=unavailable matrix-errcode=unavailable total=0 passed=0 failed=0 pending=0 test-bodies-started=0/8',
       'room-appservice-suite-load-exception class=SyntaxError message="module not found" source=matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts:18:1',
     ].join('\n'),
   );
@@ -197,6 +197,42 @@ test('maps a current room contract failure to its fixed case and checkpoint', ()
     'room-appservice-test-failure case=room-appservice-subject-binding stage=subject-is-principal',
   );
   assert.equal(diagnostic.includes('private Matrix identity details'), false);
+});
+
+test('projects private-client policy failures to fixed phase and error class', () => {
+  const privateDetail = 'private user, room, token, and assertion values';
+  const reportWithFailure = {
+    testResults: [
+      {
+        name: roomSuitePath,
+        status: 'failed',
+        assertionResults: [
+          {
+            title:
+              'rechecks private-client room policy against live Synapse state',
+            status: 'failed',
+            failureMessages: [privateDetail],
+          },
+        ],
+      },
+    ],
+  };
+  const diagnostic = formatRoomAppServiceFailureDiagnostic(
+    reportWithFailure,
+    [
+      'room-appservice-setup-complete',
+      'room-appservice-case-stage-private-client-live-policy-identities',
+      'room-appservice-case-stage-private-client-live-policy-credential-rw',
+      'room-appservice-case-stage-private-client-live-policy-cleanup',
+      'room-appservice-case-stage-private-client-live-policy-private-detail',
+    ].join('\n'),
+  );
+
+  assert.equal(
+    diagnostic,
+    'room-appservice-test-failure case=room-appservice-private-client-live-policy phase=cleanup error-class=assertion',
+  );
+  assert.equal(diagnostic.includes(privateDetail), false);
 });
 
 test('keeps unknown room failures unmapped and excludes raw test titles', () => {
@@ -305,7 +341,7 @@ test('reports hook failures with no assertion results using a safe category', ()
   assert.equal(
     diagnostic,
     [
-      'room-appservice-setup-test-results stage=register-service-user http-status=unavailable matrix-errcode=unavailable total=0 passed=0 failed=0 pending=0 test-bodies-started=0/7',
+      'room-appservice-setup-test-results stage=register-service-user http-status=unavailable matrix-errcode=unavailable total=0 passed=0 failed=0 pending=0 test-bodies-started=0/8',
       'room-appservice-setup-exception class=AxiosError message="HTTP request failed with status 403" source=unavailable',
     ].join('\n'),
   );
@@ -328,7 +364,7 @@ test('reports bounded Matrix request status and code for Room fixture setup', ()
   assert.equal(
     diagnostic,
     [
-      'room-appservice-setup-test-results stage=actor-login http-status=403 matrix-errcode=M_FORBIDDEN total=3 passed=0 failed=3 pending=0 test-bodies-started=0/7',
+      'room-appservice-setup-test-results stage=actor-login http-status=403 matrix-errcode=M_FORBIDDEN total=3 passed=0 failed=3 pending=0 test-bodies-started=0/8',
       'room-appservice-setup-exception class=Error message="Matrix fixture HTTP status 403" source=matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts:616:11',
     ].join('\n'),
   );

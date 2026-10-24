@@ -907,9 +907,23 @@ type RoomAppServiceCase =
   | 'event-write'
   | 'unauthorized-write'
   | 'bot-command-write'
-  | 'bot-command-denial';
-type RoomAppServiceFailureCase = 'subject-binding' | 'cross-room-denial';
+  | 'bot-command-denial'
+  | 'private-client-live-policy';
+type RoomAppServiceFailureCase =
+  | 'subject-binding'
+  | 'cross-room-denial'
+  | 'private-client-live-policy';
 type RoomAppServiceCaseFailureStage =
+  | 'identities'
+  | 'room-setup'
+  | 'baseline'
+  | 'credential-rw'
+  | 'issuance-denials'
+  | 'unknown-membership'
+  | 'demotion'
+  | 'leave'
+  | 'rejoin'
+  | 'cleanup'
   | 'proof-selected'
   | 'proof-available'
   | 'identities-resolved'
@@ -1828,6 +1842,8 @@ describeContract(contractDescription, () => {
   });
 
   it('rechecks private-client room policy against live Synapse state', async () => {
+    markRoomAppServiceCaseStarted('private-client-live-policy');
+    markRoomAppServiceCaseStage('private-client-live-policy', 'identities');
     const policyReaderToken =
       roomPrincipalMode === 'appservice'
         ? serviceUserAccessTokens[0]
@@ -1844,6 +1860,7 @@ describeContract(contractDescription, () => {
     expect(readerUserId).toBe(principalUserId);
     expect(new Set([ownerUserId, issuerUserId, readerUserId]).size).toBe(3);
 
+    markRoomAppServiceCaseStage('private-client-live-policy', 'room-setup');
     const roomId = await createRoom(
       'Private client Synapse policy contract',
       actorAccessToken,
@@ -1936,6 +1953,7 @@ describeContract(contractDescription, () => {
       powerLevelsChanged = true;
       await writePowerLevels(actorAccessToken, managerPowerLevels);
 
+      markRoomAppServiceCaseStage('private-client-live-policy', 'baseline');
       const target = {
         roomId,
         calendarId,
@@ -1995,6 +2013,11 @@ describeContract(contractDescription, () => {
       expect(
         await authorizationFactory.canManageCalendars(issuerUserId, roomId),
       ).toBe(true);
+
+      markRoomAppServiceCaseStage(
+        'private-client-live-policy',
+        'credential-rw',
+      );
       expect(await policy.authenticate(record.appId, secret)).toBe(true);
       expect(
         await policy.authorizeDavRequest(record.appId, 'GET', 'resource'),
@@ -2023,6 +2046,10 @@ describeContract(contractDescription, () => {
         locale: 'en',
         timezone: 'UTC',
       };
+      markRoomAppServiceCaseStage(
+        'private-client-live-policy',
+        'issuance-denials',
+      );
       await expect(
         privateClientService.create(readerContext, undefined, {
           target: 'room',
@@ -2050,6 +2077,10 @@ describeContract(contractDescription, () => {
       ).rejects.toBeInstanceOf(ForbiddenException);
       expect(mapFetch).not.toHaveBeenCalled();
 
+      markRoomAppServiceCaseStage(
+        'private-client-live-policy',
+        'unknown-membership',
+      );
       await expect(
         policyMatrixClient.getJoinedRoomMembers(missingRoomId),
       ).rejects.toBeDefined();
@@ -2079,6 +2110,7 @@ describeContract(contractDescription, () => {
           [readerUserId]: 100,
         },
       };
+      markRoomAppServiceCaseStage('private-client-live-policy', 'demotion');
       await writePowerLevels(issuerToken, readOnlyPowerLevels);
       expect(await policy.authenticate(record.appId, secret)).toBe(true);
       expect(
@@ -2094,6 +2126,7 @@ describeContract(contractDescription, () => {
         ),
       ).toBe('r');
 
+      markRoomAppServiceCaseStage('private-client-live-policy', 'leave');
       await leaveMember(issuerToken);
       await waitForRoomMembership(
         policyMatrixClient,
@@ -2108,6 +2141,7 @@ describeContract(contractDescription, () => {
       expect(contractStore.get(record.appId)?.secretVerifier).toBeUndefined();
       expect(contractStore.revocationCount()).toBe(1);
 
+      markRoomAppServiceCaseStage('private-client-live-policy', 'rejoin');
       await inviteAndJoin(issuerUserId, issuerToken);
       expect(await policy.authenticate(record.appId, secret)).toBe(false);
       expect(
@@ -2122,17 +2156,22 @@ describeContract(contractDescription, () => {
       expect(contractStore.get(record.appId)?.state).toBe('revoked');
       expect(contractStore.revocationCount()).toBe(1);
     } finally {
-      if (powerLevelsChanged) {
-        await writePowerLevels(actorAccessToken, originalPowerLevels);
-      }
-      const joinedMembers: string[] = await ownerMatrixClient
-        .getJoinedRoomMembers(roomId)
-        .catch((): string[] => []);
-      if (joinedMembers.includes(issuerUserId)) {
-        await leaveMember(issuerToken);
-      }
-      if (joinedMembers.includes(readerUserId)) {
-        await leaveMember(policyReaderToken);
+      try {
+        if (powerLevelsChanged) {
+          await writePowerLevels(actorAccessToken, originalPowerLevels);
+        }
+        const joinedMembers: string[] = await ownerMatrixClient
+          .getJoinedRoomMembers(roomId)
+          .catch((): string[] => []);
+        if (joinedMembers.includes(issuerUserId)) {
+          await leaveMember(issuerToken);
+        }
+        if (joinedMembers.includes(readerUserId)) {
+          await leaveMember(policyReaderToken);
+        }
+      } catch (error) {
+        markRoomAppServiceCaseStage('private-client-live-policy', 'cleanup');
+        throw error;
       }
     }
   });

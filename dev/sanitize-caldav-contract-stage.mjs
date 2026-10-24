@@ -37,6 +37,7 @@ const ROOM_APPSERVICE_CASES = new Set([
   'unauthorized-write',
   'bot-command-write',
   'bot-command-denial',
+  'private-client-live-policy',
 ]);
 const ROOM_APPSERVICE_CASE_FAILURE_STAGES = new Map([
   [
@@ -62,6 +63,21 @@ const ROOM_APPSERVICE_CASE_FAILURE_STAGES = new Map([
       'no-caldav-request',
       'no-new-openid-proof',
       'logs-secret-free',
+    ]),
+  ],
+  [
+    'private-client-live-policy',
+    new Set([
+      'identities',
+      'room-setup',
+      'baseline',
+      'credential-rw',
+      'issuance-denials',
+      'unknown-membership',
+      'demotion',
+      'leave',
+      'rejoin',
+      'cleanup',
     ]),
   ],
 ]);

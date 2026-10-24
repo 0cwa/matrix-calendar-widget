@@ -67,6 +67,7 @@ const ROOM_CASES = new Set([
   'unauthorized-write',
   'bot-command-write',
   'bot-command-denial',
+  'private-client-live-policy',
 ]);
 const ROOM_FAILURE_CASES = new Map([
   ['room-appservice-exact-binding', 'exact-binding'],
@@ -76,6 +77,10 @@ const ROOM_FAILURE_CASES = new Map([
   ['room-appservice-unauthorized-write', 'unauthorized-write'],
   ['room-appservice-bot-command-write', 'bot-command-write'],
   ['room-appservice-bot-command-denial', 'bot-command-denial'],
+  [
+    'room-appservice-private-client-live-policy',
+    'private-client-live-policy',
+  ],
 ]);
 const ALLOWED_ERROR_NAMES = new Set([
   'AbortError',
@@ -309,6 +314,12 @@ export function formatRoomAppServiceFailureDiagnostic(
     const testCase = ROOM_FAILURE_CASES.get(match[1]);
     if (!testCase) continue;
     const stage = getRoomAppServiceCaseFailureStage(stageContent, testCase);
+    if (testCase === 'private-client-live-policy') {
+      failureLines.push(
+        `room-appservice-test-failure case=${match[1]} phase=${stage ?? 'unavailable'} error-class=${getPrivatePolicyFailureClass(suite)}`,
+      );
+      continue;
+    }
     failureLines.push(
       `room-appservice-test-failure case=${match[1]} stage=${stage ?? 'unavailable'}`,
     );
@@ -328,6 +339,22 @@ export function formatRoomAppServiceFailureDiagnostic(
     );
   }
   return failureLines.join('\n');
+}
+
+function getPrivatePolicyFailureClass(suite) {
+  const assertionFailed = Array.isArray(suite?.assertionResults)
+    ? suite.assertionResults.some(
+        (assertion) =>
+          assertion?.title ===
+            'rechecks private-client room policy against live Synapse state' &&
+          assertion?.status === 'failed',
+      )
+    : false;
+  if (assertionFailed) return 'assertion';
+  if (suite?.testExecError || suite?.failureMessage || suite?.message) {
+    return 'runtime';
+  }
+  return 'unavailable';
 }
 
 export function formatPersonalOpenIdSetupDiagnostic(testReport, stageContent) {
