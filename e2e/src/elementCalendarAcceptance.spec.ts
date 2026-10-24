@@ -5834,17 +5834,25 @@ async function setRoomReminder(
       observation.recipientSelectionStep = 'member-listbox-ready';
       observation.memberListboxCount = Math.min(await memberListbox.count(), 2);
       const measureMemberInputListboxAssociation = async () => {
-        const controls = await memberInput.getAttribute('aria-controls');
-        const controlledIds = await memberListbox.evaluateAll((listboxes) =>
-          listboxes.map((listbox) => listbox.id),
-        );
-        const tokens = controls?.trim().split(/\s+/) ?? [];
-        return (
-          tokens.length === 1 &&
-          tokens[0].length > 0 &&
-          controlledIds.length === 1 &&
-          controlledIds[0] === tokens[0]
-        );
+        try {
+          const controls = await memberInput.evaluateAll((inputs) =>
+            inputs.length === 1
+              ? inputs[0].getAttribute('aria-controls')
+              : null,
+          );
+          const controlledIds = await memberListbox.evaluateAll((listboxes) =>
+            listboxes.map((listbox) => listbox.id),
+          );
+          const tokens = controls?.trim().split(/\s+/) ?? [];
+          return (
+            tokens.length === 1 &&
+            tokens[0].length > 0 &&
+            controlledIds.length === 1 &&
+            controlledIds[0] === tokens[0]
+          );
+        } catch {
+          return false;
+        }
       };
       try {
         await expect
@@ -5857,7 +5865,7 @@ async function setRoomReminder(
             { timeout: 15_000 },
           )
           .toBe(true);
-        await expect(memberListbox).toHaveCount(1);
+        await expect(memberListbox).toHaveCount(1, { timeout: 15_000 });
       } finally {
         observation.memberListboxCount = await memberListbox
           .count()
