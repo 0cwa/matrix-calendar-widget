@@ -200,6 +200,18 @@ export function sameReminderConfigurationSnapshots(expected, actual) {
   );
 }
 
+/** Return whether every captured configuration is still present unchanged. */
+export function preservesReminderConfigurationSnapshots(expected, actual) {
+  if (!Array.isArray(expected) || !Array.isArray(actual)) return false;
+  if (expected.length > actual.length) return false;
+  const actualRows = new Set(
+    actual.map((configuration) => JSON.stringify(configuration)),
+  );
+  return expected.every((configuration) =>
+    actualRows.has(JSON.stringify(configuration)),
+  );
+}
+
 export function sameReminderDeliverySnapshots(expected, actual) {
   const normalize = (rows) => {
     if (!Array.isArray(rows)) return undefined;

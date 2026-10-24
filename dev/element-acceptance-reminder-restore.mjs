@@ -38,7 +38,7 @@ import {
   isPrivateArtifactPath,
   isSafeRestoreTargetPlan,
   parseReminderConfigurationSnapshotOutput,
-  sameReminderConfigurationSnapshots,
+  preservesReminderConfigurationSnapshots,
   sameReminderDeliverySnapshots,
 } from './element-acceptance-reminder-restore-guards.mjs';
 
@@ -1154,14 +1154,14 @@ async function verifyReminderConfiguration(database, requireSnapshot = false) {
       configurations.length !== titles.length ||
       (requireSnapshot && !snapshot) ||
       (snapshot &&
-        !sameReminderConfigurationSnapshots(snapshot, configurations))
+        !preservesReminderConfigurationSnapshots(snapshot, configurations))
     ) {
       throw new StageFailure('reminder-configuration-stored', {
         count: configurations.length,
         snapshotCompared: Boolean(snapshot),
         metadataUnchanged:
           !snapshot ||
-          sameReminderConfigurationSnapshots(snapshot, configurations),
+          preservesReminderConfigurationSnapshots(snapshot, configurations),
       });
     }
     return {

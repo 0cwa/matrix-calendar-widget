@@ -33,6 +33,7 @@ import {
   isPrivateArtifactPath,
   isSafeRestoreTargetPlan,
   parseReminderConfigurationSnapshotOutput,
+  preservesReminderConfigurationSnapshots,
   sameReminderConfigurationSnapshots,
   sameReminderDeliverySnapshots,
 } from './element-acceptance-reminder-restore-guards.mjs';
@@ -171,6 +172,80 @@ test('restore reminder snapshots preserve target, all-day schedule, and revision
         allDaySchedule: { ...parsed[0].allDaySchedule, daysBefore: 6 },
       },
       parsed[1],
+    ]),
+    false,
+  );
+});
+
+test('restart configuration snapshot preserves prior rows when the journey adds one', () => {
+  const original = {
+    roomId: '!fixture:example.test',
+    calendarId: 'fixture-calendar',
+    eventUid: 'initial-event',
+    recurrenceId: null,
+    alarmUid: 'initial-alarm',
+    target: { kind: 'room' },
+    allDaySchedule: null,
+    scheduleEffectiveAt: null,
+    revision: 1,
+  };
+  const added = {
+    ...original,
+    eventUid: 'restart-event',
+    alarmUid: 'restart-alarm',
+    target: { kind: 'users', userIds: ['@alice:example.test'] },
+    allDaySchedule: {
+      daysBefore: 2,
+      localTime: '09:00',
+      timezone: 'Europe/Stockholm',
+    },
+    scheduleEffectiveAt: 1792566000000,
+  };
+  const baseline = parseReminderConfigurationSnapshotOutput(
+    JSON.stringify(original),
+  );
+  const current = parseReminderConfigurationSnapshotOutput(
+    [original, added].map((row) => JSON.stringify(row)).join('\n'),
+  );
+
+  assert.equal(sameReminderConfigurationSnapshots(baseline, current), false);
+  assert.equal(
+    preservesReminderConfigurationSnapshots(baseline, current),
+    true,
+  );
+  assert.equal(
+    preservesReminderConfigurationSnapshots(current, baseline),
+    false,
+  );
+  assert.equal(
+    preservesReminderConfigurationSnapshots(baseline, [
+      { ...current[0], revision: current[0].revision + 1 },
+      current[1],
+    ]),
+    false,
+  );
+  assert.equal(
+    preservesReminderConfigurationSnapshots(baseline, [
+      {
+        ...current[0],
+        target: { kind: 'users', userIds: ['@alice:example.test'] },
+      },
+      current[1],
+    ]),
+    false,
+  );
+  assert.equal(
+    preservesReminderConfigurationSnapshots(baseline, [
+      {
+        ...current[0],
+        allDaySchedule: {
+          daysBefore: 2,
+          localTime: '09:00',
+          timezone: 'Europe/Stockholm',
+        },
+        scheduleEffectiveAt: 1792566000000,
+      },
+      current[1],
     ]),
     false,
   );
