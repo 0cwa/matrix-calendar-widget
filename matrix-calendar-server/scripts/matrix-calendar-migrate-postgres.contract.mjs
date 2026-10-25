@@ -90,7 +90,11 @@ function validateDisposableDatabaseUrl(value) {
   }
 }
 
-function makeChildEnvironment(storeNames, privateClientsEnabled = false) {
+function makeChildEnvironment(
+  storeNames,
+  privateClientsEnabled = false,
+  overrides = {},
+) {
   const environment = { PATH: process.env.PATH };
   for (const storeName of storeNames) {
     const configuration = stores[storeName];
@@ -100,10 +104,15 @@ function makeChildEnvironment(storeNames, privateClientsEnabled = false) {
   if (privateClientsEnabled) {
     environment.MATRIX_CALENDAR_PRIVATE_CLIENTS_ENABLED = 'true';
   }
-  return environment;
+  return { ...environment, ...overrides };
 }
 
-function runCli(storeSelector, storeNames, privateClientsEnabled = false) {
+function runCli(
+  storeSelector,
+  storeNames,
+  privateClientsEnabled = false,
+  overrides = {},
+) {
   const args = [
     toolPath,
     '--runtime-root',
@@ -114,7 +123,7 @@ function runCli(storeSelector, storeNames, privateClientsEnabled = false) {
   const result = spawnSync(process.execPath, args, {
     encoding: 'utf8',
     timeout: 15_000,
-    env: makeChildEnvironment(storeNames, privateClientsEnabled),
+    env: makeChildEnvironment(storeNames, privateClientsEnabled, overrides),
     maxBuffer: 64 * 1024,
   });
 
@@ -199,13 +208,17 @@ async function assertStoreMigration(sql, storeName) {
   assert.equal(state.count, stores[storeName].version);
 }
 
-async function assertNoOpenMigrationConnection(sql) {
+async function assertNoOpenMigrationConnections(sql) {
   const [activity] = await sql`
     SELECT COUNT(*)::int AS count
     FROM pg_stat_activity
     WHERE datname = current_database()
       AND pid <> pg_backend_pid()
-      AND application_name = 'matrix-calendar-bindings'
+      AND application_name IN (
+        'matrix-calendar-reminders',
+        'matrix-calendar-bindings',
+        'matrix-calendar-private-clients'
+      )
   `;
   assert.equal(activity.count, 0);
 }
@@ -224,6 +237,19 @@ async function runContract() {
   try {
     await verifyIsolatedDatabase(sql);
     await resetSchemas(sql);
+
+    const malformedAllStoreUrl = runCli('all', Object.keys(stores), true, {
+      [stores.bindings.url]: 'postgresql://db.example.test/calendar name',
+    });
+    assert.equal(malformedAllStoreUrl.status, 1);
+    assert.equal(malformedAllStoreUrl.signal, null);
+    assertCliText(malformedAllStoreUrl.stdout, '');
+    assertCliText(
+      malformedAllStoreUrl.stderr,
+      'PostgreSQL migration failed for bindings at configuration.',
+    );
+    assert.deepEqual(await readSchemas(sql), []);
+    await assertNoOpenMigrationConnections(sql);
 
     const remindersFirst = runCli('reminders', ['reminders']);
     assert.equal(remindersFirst.status, 0);
@@ -304,7 +330,7 @@ async function runContract() {
       'PostgreSQL migration failed for bindings at migration.',
     );
     assert.equal(futureSchema.stderr.includes(databaseUrl), false);
-    await assertNoOpenMigrationConnection(sql);
+    await assertNoOpenMigrationConnections(sql);
     const bindingState = await readMigrationState(sql, 'bindings');
     assert.equal(bindingState.version, 999999);
     assert.equal(bindingState.count, 2);

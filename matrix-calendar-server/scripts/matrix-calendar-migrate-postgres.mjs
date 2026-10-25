@@ -168,6 +168,16 @@ function hasPostgresHost(databaseUrl) {
   });
 }
 
+function isValidPostgresDatabaseUrl(databaseUrl, databaseUrlSchema) {
+  // Joi's URI rule accepts malformed percent escapes such as `%ZZ`.
+  if (/%(?![0-9a-f]{2})/iu.test(databaseUrl)) return false;
+
+  const { error } = databaseUrlSchema.validate(databaseUrl, {
+    convert: false,
+  });
+  return !error && hasPostgresHost(databaseUrl);
+}
+
 function isValidPort(port) {
   const numericPort = Number(port);
   return numericPort >= 1 && numericPort <= 65_535;
@@ -181,7 +191,6 @@ function readStoreConfiguration(storeName, environment) {
   if (
     typeof databaseUrl !== 'string' ||
     databaseUrl.trim().length === 0 ||
-    !hasPostgresHost(databaseUrl) ||
     !TLS_MODES.has(tlsMode) ||
     (definition.enabledVariable &&
       environment[definition.enabledVariable]?.toLowerCase() !== 'true')
@@ -205,6 +214,24 @@ function loadRuntime(runtimeRoot, stores) {
     const postgres = postgresModule.default ?? postgresModule;
     if (typeof postgres !== 'function') {
       throw new Error();
+    }
+
+    const validationSchema = runtimeRequire(
+      path.join(runtimeRoot, 'lib/src/configuration.js'),
+    ).ValidationSchema;
+    if (typeof validationSchema?.extract !== 'function') {
+      throw new Error();
+    }
+    const databaseUrlSchemas = new Map();
+    for (const storeName of stores) {
+      const definition = STORE_DEFINITIONS[storeName];
+      const databaseUrlSchema = validationSchema.extract(
+        definition.urlVariable,
+      );
+      if (typeof databaseUrlSchema?.validate !== 'function') {
+        throw new Error();
+      }
+      databaseUrlSchemas.set(storeName, databaseUrlSchema);
     }
 
     const tlsModule = runtimeRequire(
@@ -233,6 +260,7 @@ function loadRuntime(runtimeRoot, stores) {
 
     return {
       postgres,
+      databaseUrlSchemas,
       getPostgresDatabaseTlsOptions: tlsModule.getPostgresDatabaseTlsOptions,
       storeConstructors,
     };
@@ -306,13 +334,24 @@ export async function runMigrationCli(
   let runtime;
   try {
     runtime = loadRuntime(arguments_.runtimeRoot, arguments_.stores);
-    configurations = configurations.map((configuration) => ({
-      ...configuration,
-      postgresOptions: buildPostgresOptions(
-        configuration,
-        runtime.getPostgresDatabaseTlsOptions,
-      ),
-    }));
+    configurations = configurations.map((configuration) => {
+      if (
+        !isValidPostgresDatabaseUrl(
+          configuration.databaseUrl,
+          runtime.databaseUrlSchemas.get(configuration.name),
+        )
+      ) {
+        throw new MigrationCliFailure('configuration', configuration.name);
+      }
+
+      return {
+        ...configuration,
+        postgresOptions: buildPostgresOptions(
+          configuration,
+          runtime.getPostgresDatabaseTlsOptions,
+        ),
+      };
+    });
   } catch (error) {
     writeFailure(
       io,

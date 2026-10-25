@@ -23,12 +23,14 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { after, test } from 'node:test';
 import { runMigrationCli } from './matrix-calendar-migrate-postgres.mjs';
 
+const testRequire = createRequire(import.meta.url);
 const temporaryDirectories = [];
 const testDatabaseUrl =
   'postgresql://migration-user:synthetic-secret@db.example.test:5432/test';
@@ -42,6 +44,23 @@ function writeModule(root, relativePath, content) {
 function createFakeRuntime() {
   const root = mkdtempSync(path.join(tmpdir(), 'mcw-migration-cli-'));
   temporaryDirectories.push(root);
+
+  writeModule(
+    root,
+    'node_modules/joi/index.js',
+    `module.exports = require(${JSON.stringify(testRequire.resolve('joi'))});\n`,
+  );
+  writeModule(
+    root,
+    'lib/src/configuration.js',
+    `const Joi = require('joi');
+exports.ValidationSchema = Joi.object({
+  MATRIX_CALENDAR_REMINDER_DATABASE_URL: Joi.string().uri({ scheme: ['postgres', 'postgresql'] }),
+  MATRIX_CALENDAR_BINDING_DATABASE_URL: Joi.string().empty('').uri({ scheme: ['postgres', 'postgresql'] }),
+  MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_URL: Joi.string().empty('').uri({ scheme: ['postgres', 'postgresql'] }),
+});
+`,
+  );
 
   writeModule(
     root,
@@ -235,6 +254,56 @@ test('argument and selected-store preflight failures do not create a pool', asyn
       args: ['--store', 'reminders'],
       environment: {
         ...baseEnvironment(),
+        MATRIX_CALENDAR_REMINDER_DATABASE_URL:
+          'postgresql://db.example.test/calendar name',
+      },
+      message: 'PostgreSQL migration failed for reminders at configuration.',
+    },
+    {
+      args: ['--store', 'reminders'],
+      environment: {
+        ...baseEnvironment(),
+        MATRIX_CALENDAR_REMINDER_DATABASE_URL:
+          'postgresql://db.example.test/db?sslmode=verify full',
+      },
+      message: 'PostgreSQL migration failed for reminders at configuration.',
+    },
+    {
+      args: ['--store', 'reminders'],
+      environment: {
+        ...baseEnvironment(),
+        MATRIX_CALENDAR_REMINDER_DATABASE_URL:
+          'postgresql://user name:password@db.example.test/db',
+      },
+      message: 'PostgreSQL migration failed for reminders at configuration.',
+    },
+    {
+      args: ['--store', 'reminders'],
+      environment: {
+        ...baseEnvironment(),
+        MATRIX_CALENDAR_REMINDER_DATABASE_URL:
+          'postgresql://user%ZZ:password@db.example.test/db',
+      },
+      message: 'PostgreSQL migration failed for reminders at configuration.',
+    },
+    {
+      args: ['--store', 'all'],
+      environment: {
+        ...baseEnvironment(),
+        MATRIX_CALENDAR_BINDING_DATABASE_URL:
+          'postgresql://db.example.test/calendar name',
+        MATRIX_CALENDAR_BINDING_DATABASE_TLS_MODE: 'trusted-private-network',
+        MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_URL: testDatabaseUrl,
+        MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_TLS_MODE:
+          'trusted-private-network',
+        MATRIX_CALENDAR_PRIVATE_CLIENTS_ENABLED: 'true',
+      },
+      message: 'PostgreSQL migration failed for bindings at configuration.',
+    },
+    {
+      args: ['--store', 'reminders'],
+      environment: {
+        ...baseEnvironment(),
         MATRIX_CALENDAR_REMINDER_DATABASE_TLS_MODE: 'prefer',
       },
       message: 'PostgreSQL migration failed for reminders at configuration.',
@@ -257,6 +326,35 @@ test('argument and selected-store preflight failures do not create a pool', asyn
     assert.equal(result.stderr.trim(), message);
     assert.deepEqual(parseLog(logPath), []);
   }
+});
+
+test('valid percent-encoded credentials and IPv6 database URLs are accepted', async () => {
+  const runtimeRoot = createFakeRuntime();
+  const logPath = path.join(runtimeRoot, 'events.jsonl');
+  const databaseUrl =
+    'postgresql://user%40tenant:secret%2Fvalue@[2001:db8::15]:6432/calendar%20name';
+  const result = await runCli(runtimeRoot, logPath, ['--store', 'reminders'], {
+    ...baseEnvironment(),
+    MATRIX_CALENDAR_REMINDER_DATABASE_URL: databaseUrl,
+  });
+
+  assert.equal(result.status, 0);
+  assert.equal(result.stderr, '');
+  assert.equal(
+    result.stdout.trim(),
+    'PostgreSQL migration succeeded for reminders.',
+  );
+  assert.deepEqual(
+    parseLog(logPath).map(({ event, store, applicationName }) =>
+      event === 'pool-open' ? [event, applicationName] : [event, store],
+    ),
+    [
+      ['pool-open', 'matrix-calendar-reminders'],
+      ['migrate', 'reminders'],
+      ['shutdown', 'reminders'],
+      ['pool-end', undefined],
+    ],
+  );
 });
 
 test('selected store migration ignores unrelated database configuration', async () => {
