@@ -1,12 +1,37 @@
 import assert from 'node:assert/strict';
+import { chmodSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { createServer as createHttpServer } from 'node:http';
+import https from 'node:https';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
+import { createPrivateAcceptanceHttpsProxy } from './element-acceptance-private-https-proxy.mjs';
+import { createPrivateAcceptanceTlsFixture } from './element-acceptance-private-tls.mjs';
 import {
   assertAcceptancePrincipalBootstrap,
   createPrincipalOpenIdRequest,
   getAcceptanceReadinessEndpoints,
   readPrivateHttpsServiceDiagnostic,
+  requestPrivateHttpsReadiness,
   resolveAcceptancePrincipalMode,
 } from './element-acceptance-setup.mjs';
+
+function listenLocal(server, port = 0) {
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', () => {
+      server.off('error', reject);
+      resolve(server.address().port);
+    });
+  });
+}
+
+function closeLocal(server) {
+  return new Promise((resolve, reject) => {
+    if (!server?.listening) return resolve();
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
+}
 
 test('default readiness still waits for Element after gateway and widget', () => {
   assert.deepEqual(
@@ -116,6 +141,103 @@ test('private HTTPS diagnostics fail closed for unsafe compose inputs and IDs', 
     { containerState: 'unavailable', containerHealth: 'unavailable' },
   );
   assert.equal(calls, 1);
+});
+
+test('private HTTPS probe separates TCP, TLS trust, and HTTP response stages', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'mcw-private-ready-stage-'));
+  chmodSync(directory, 0o700);
+  const certificateFixture = createPrivateAcceptanceTlsFixture({
+    directory: join(directory, 'trusted'),
+  });
+  const otherCaFixture = createPrivateAcceptanceTlsFixture({
+    directory: join(directory, 'untrusted'),
+  });
+  let responseCount = 0;
+  let backend;
+  let proxy;
+  let closedListener;
+  let stalledServer;
+  try {
+    const proxyPort = 3001;
+    backend = createHttpServer((_request, response) => {
+      responseCount += 1;
+      response.writeHead(403);
+      response.end();
+    });
+    const backendPort = await listenLocal(backend);
+    proxy = createPrivateAcceptanceHttpsProxy({
+      key: readFileSync(certificateFixture.serverKeyPath),
+      cert: readFileSync(certificateFixture.serverCertPath),
+      upstreamHost: '127.0.0.1',
+      upstreamPort: backendPort,
+      listenHost: '127.0.0.1',
+      listenPort: proxyPort,
+    });
+    await listenLocal(proxy, proxyPort);
+    const origin = `https://127.0.0.1:${proxyPort}`;
+
+    const untrusted = await requestPrivateHttpsReadiness(origin, {
+      ca: readFileSync(otherCaFixture.caCertPath),
+      timeoutMs: 2_000,
+    });
+    assert.deepEqual(untrusted, {
+      privateHttpsTcpOutcome: 'connected',
+      privateHttpsTlsOutcome: 'trust-rejected',
+      privateHttpsRequestOutcome: 'not-attempted',
+    });
+
+    const trusted = await requestPrivateHttpsReadiness(origin, {
+      ca: readFileSync(certificateFixture.caCertPath),
+      timeoutMs: 2_000,
+    });
+    assert.deepEqual(trusted, {
+      privateHttpsTcpOutcome: 'connected',
+      privateHttpsTlsOutcome: 'validated',
+      privateHttpsRequestOutcome: 'response',
+      httpStatus: 403,
+    });
+    assert.equal(responseCount, 1);
+
+    stalledServer = https.createServer(
+      {
+        key: readFileSync(certificateFixture.serverKeyPath),
+        cert: readFileSync(certificateFixture.serverCertPath),
+      },
+      () => undefined,
+    );
+    const stalledPort = await listenLocal(stalledServer);
+    const stalled = await requestPrivateHttpsReadiness(
+      `https://127.0.0.1:${stalledPort}`,
+      {
+        ca: readFileSync(certificateFixture.caCertPath),
+        timeoutMs: 200,
+      },
+    );
+    assert.deepEqual(stalled, {
+      privateHttpsTcpOutcome: 'connected',
+      privateHttpsTlsOutcome: 'validated',
+      privateHttpsRequestOutcome: 'timed-out',
+    });
+
+    closedListener = https.createServer();
+    const closedPort = await listenLocal(closedListener);
+    await closeLocal(closedListener);
+    const refused = await requestPrivateHttpsReadiness(
+      `https://127.0.0.1:${closedPort}`,
+      { timeoutMs: 2_000 },
+    );
+    assert.deepEqual(refused, {
+      privateHttpsTcpOutcome: 'refused',
+      privateHttpsTlsOutcome: 'not-attempted',
+      privateHttpsRequestOutcome: 'not-attempted',
+    });
+  } finally {
+    await closeLocal(closedListener);
+    await closeLocal(stalledServer);
+    await closeLocal(proxy);
+    await closeLocal(backend);
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('acceptance principal mode defaults to the legacy appservice path', () => {

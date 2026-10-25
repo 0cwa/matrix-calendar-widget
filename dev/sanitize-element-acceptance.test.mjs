@@ -4045,6 +4045,9 @@ test('emits private HTTPS readiness state with only bounded failure fields', () 
       containerExitCode: 1,
       containerOomKilled: false,
       containerRuntimeErrorPresent: true,
+      privateHttpsTcpOutcome: 'connected',
+      privateHttpsTlsOutcome: 'validated',
+      privateHttpsRequestOutcome: 'timed-out',
     }),
     sourceSha,
   );
@@ -4053,7 +4056,7 @@ test('emits private HTTPS readiness state with only bounded failure fields', () 
     summary,
     [
       `element-acceptance source_sha=${sourceSha}`,
-      'phase=private-gateway-https-ready status=failed container_state=exited container_health=none container_exit_code=1 container_oom_killed=false container_runtime_error_present=true',
+      'phase=private-gateway-https-ready status=failed private_https_tcp=connected private_https_tls=validated private_https_request=timed-out container_state=exited container_health=none container_exit_code=1 container_oom_killed=false container_runtime_error_present=true',
       '',
     ].join('\n'),
   );
@@ -4072,6 +4075,45 @@ test('emits private HTTPS readiness state with only bounded failure fields', () 
     [
       `element-acceptance source_sha=${sourceSha}`,
       'phase=private-gateway-https-ready status=passed http_status=403',
+      '',
+    ].join('\n'),
+  );
+
+  const upstreamResponse = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'private-gateway-https-ready',
+      status: 'failed',
+      httpStatus: 502,
+      privateHttpsTcpOutcome: 'connected',
+      privateHttpsTlsOutcome: 'validated',
+      privateHttpsRequestOutcome: 'response',
+    }),
+    sourceSha,
+  );
+  assert.equal(
+    upstreamResponse,
+    [
+      `element-acceptance source_sha=${sourceSha}`,
+      'phase=private-gateway-https-ready status=failed http_status=502 private_https_tcp=connected private_https_tls=validated private_https_request=response',
+      '',
+    ].join('\n'),
+  );
+
+  const tlsRejected = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'private-gateway-https-ready',
+      status: 'failed',
+      privateHttpsTcpOutcome: 'connected',
+      privateHttpsTlsOutcome: 'trust-rejected',
+      privateHttpsRequestOutcome: 'not-attempted',
+    }),
+    sourceSha,
+  );
+  assert.equal(
+    tlsRejected,
+    [
+      `element-acceptance source_sha=${sourceSha}`,
+      'phase=private-gateway-https-ready status=failed private_https_tcp=connected private_https_tls=trust-rejected private_https_request=not-attempted',
       '',
     ].join('\n'),
   );
@@ -4097,6 +4139,27 @@ test('rejects unsafe or contradictory private HTTPS readiness records', () => {
       containerState: 'running',
       containerHealth: 'none',
       startupText: 'synthetic-private-runtime-detail',
+    },
+    {
+      phase: 'private-gateway-https-ready',
+      status: 'failed',
+      privateHttpsTcpOutcome: 'connected',
+      privateHttpsTlsOutcome: 'password=secret',
+      privateHttpsRequestOutcome: 'not-attempted',
+    },
+    {
+      phase: 'widget-ready',
+      status: 'failed',
+      privateHttpsTcpOutcome: 'refused',
+      privateHttpsTlsOutcome: 'not-attempted',
+      privateHttpsRequestOutcome: 'not-attempted',
+    },
+    {
+      phase: 'private-gateway-https-ready',
+      status: 'failed',
+      privateHttpsTcpOutcome: 'connected',
+      privateHttpsTlsOutcome: 'validated',
+      privateHttpsRequestOutcome: 'response',
     },
   ];
 

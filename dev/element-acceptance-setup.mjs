@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+import https from 'node:https';
 import { dirname, isAbsolute, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -31,6 +32,35 @@ const RADICALE_URL = 'http://127.0.0.1:5232/';
 const ELEMENT_URL = 'http://127.0.0.1:8090';
 const GATEWAY_URL = 'http://127.0.0.1:3000';
 const WIDGET_URL = 'http://127.0.0.1:8080';
+const PRIVATE_HTTPS_READINESS_TIMEOUT_MS = 5_000;
+const PRIVATE_HTTPS_TLS_TRUST_ERROR_CODES = new Set([
+  'CERT_HAS_EXPIRED',
+  'CERT_NOT_YET_VALID',
+  'CERT_REVOKED',
+  'CERT_SIGNATURE_FAILURE',
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'ERR_CERT_AUTHORITY_INVALID',
+  'ERR_SSL_CERTIFICATE_VERIFY_FAILED',
+  'ERR_TLS_CERT_ALTNAME_INVALID',
+  'ERR_TLS_CERT_ALTNAME_MISMATCH',
+  'ERR_TLS_CERT_SIGNATURE_ALGORITHM_UNSUPPORTED',
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+]);
+const PRIVATE_HTTPS_TCP_ERROR_OUTCOMES = new Map([
+  ['ECONNREFUSED', 'refused'],
+  ['ETIMEDOUT', 'timed-out'],
+  ['EHOSTUNREACH', 'unreachable'],
+  ['ENETUNREACH', 'unreachable'],
+]);
+const PRIVATE_HTTPS_REQUEST_ERROR_OUTCOMES = new Map([
+  ['ECONNREFUSED', 'connection-failed'],
+  ['ECONNRESET', 'connection-failed'],
+  ['EHOSTUNREACH', 'connection-failed'],
+  ['ENETUNREACH', 'connection-failed'],
+  ['EPIPE', 'connection-failed'],
+  ['ETIMEDOUT', 'timed-out'],
+]);
 const PHASES = new Set([
   'accounts-ready',
   'service-calendar-ready',
@@ -143,6 +173,124 @@ function safeCredential(value) {
     // eslint-disable-next-line no-control-regex
     !/[\r\n\u0000-\u001f]/u.test(value)
   );
+}
+
+function transportErrorCode(error) {
+  const code = error?.cause?.code ?? error?.code;
+  return typeof code === 'string' ? code.toUpperCase() : '';
+}
+
+function privateHttpsTcpErrorOutcome(error) {
+  const code = transportErrorCode(error);
+  return PRIVATE_HTTPS_TCP_ERROR_OUTCOMES.get(code) ?? 'other-failure';
+}
+
+function privateHttpsTlsErrorOutcome(error) {
+  const code = transportErrorCode(error);
+  if (PRIVATE_HTTPS_TLS_TRUST_ERROR_CODES.has(code)) return 'trust-rejected';
+  return code === 'ETIMEDOUT' ? 'timed-out' : 'handshake-failed';
+}
+
+function privateHttpsRequestErrorOutcome(error) {
+  const code = transportErrorCode(error);
+  return PRIVATE_HTTPS_REQUEST_ERROR_OUTCOMES.get(code) ?? 'other-failure';
+}
+
+export function requestPrivateHttpsReadiness(
+  origin = PRIVATE_ACCEPTANCE_TLS.browserOrigin,
+  { ca, timeoutMs = PRIVATE_HTTPS_READINESS_TIMEOUT_MS } = {},
+) {
+  const observation = {
+    privateHttpsTcpOutcome: 'other-failure',
+    privateHttpsTlsOutcome: 'not-attempted',
+    privateHttpsRequestOutcome: 'not-attempted',
+  };
+  try {
+    const url = new URL('/v1/calendar/context', origin);
+    if (
+      url.protocol !== 'https:' ||
+      url.hostname !== new URL(PRIVATE_ACCEPTANCE_TLS.browserOrigin).hostname ||
+      !Number.isInteger(timeoutMs) ||
+      timeoutMs < 1 ||
+      timeoutMs > 10_000
+    ) {
+      return Promise.resolve(observation);
+    }
+
+    return new Promise((resolveObservation) => {
+      let tcpConnected = false;
+      let tlsValidated = false;
+      let settled = false;
+      let timer;
+      const finish = (httpStatus) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolveObservation({
+          ...observation,
+          ...(Number.isInteger(httpStatus) ? { httpStatus } : {}),
+        });
+      };
+      const options = {
+        method: 'GET',
+        agent: false,
+      };
+      if (ca !== undefined) options.ca = ca;
+
+      let request;
+      try {
+        request = https.request(url, options, (response) => {
+          observation.privateHttpsTcpOutcome = 'connected';
+          observation.privateHttpsTlsOutcome = 'validated';
+          observation.privateHttpsRequestOutcome = 'response';
+          response.resume();
+          finish(response.statusCode);
+        });
+      } catch {
+        finish();
+        return;
+      }
+      request.once('socket', (socket) => {
+        socket.once('connect', () => {
+          tcpConnected = true;
+          observation.privateHttpsTcpOutcome = 'connected';
+        });
+        socket.once('secureConnect', () => {
+          tcpConnected = true;
+          tlsValidated = true;
+          observation.privateHttpsTcpOutcome = 'connected';
+          observation.privateHttpsTlsOutcome = 'validated';
+        });
+      });
+      request.once('error', (error) => {
+        if (!tcpConnected) {
+          observation.privateHttpsTcpOutcome =
+            privateHttpsTcpErrorOutcome(error);
+        } else if (!tlsValidated) {
+          observation.privateHttpsTlsOutcome =
+            privateHttpsTlsErrorOutcome(error);
+        } else {
+          observation.privateHttpsRequestOutcome =
+            privateHttpsRequestErrorOutcome(error);
+        }
+        finish();
+      });
+      timer = setTimeout(() => {
+        if (!tcpConnected) {
+          observation.privateHttpsTcpOutcome = 'timed-out';
+        } else if (!tlsValidated) {
+          observation.privateHttpsTlsOutcome = 'timed-out';
+        } else {
+          observation.privateHttpsRequestOutcome = 'timed-out';
+        }
+        request.destroy();
+        finish();
+      }, timeoutMs);
+      request.end();
+    });
+  } catch {
+    return Promise.resolve(observation);
+  }
 }
 
 function privateUiSettings() {
@@ -1249,17 +1397,28 @@ async function waitForEndpoint(phase, url, expectedStatus) {
   recordStage(phase, 'started');
   const deadline = Date.now() + 120_000;
   let lastStatus;
+  let lastPrivateHttpsObservation;
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(url, {
-        redirect: 'error',
-        signal: AbortSignal.timeout(5_000),
-      });
-      lastStatus = response.status;
-      await response.body?.cancel().catch(() => undefined);
-      if (expectedStatus(response.status)) {
-        recordStage(phase, 'passed', { httpStatus: response.status });
-        return;
+      if (phase === 'private-gateway-https-ready') {
+        lastStatus = undefined;
+        lastPrivateHttpsObservation = await requestPrivateHttpsReadiness(url);
+        lastStatus = lastPrivateHttpsObservation.httpStatus;
+        if (expectedStatus(lastStatus)) {
+          recordStage(phase, 'passed', { httpStatus: lastStatus });
+          return;
+        }
+      } else {
+        const response = await fetch(url, {
+          redirect: 'error',
+          signal: AbortSignal.timeout(5_000),
+        });
+        lastStatus = response.status;
+        await response.body?.cancel().catch(() => undefined);
+        if (expectedStatus(response.status)) {
+          recordStage(phase, 'passed', { httpStatus: response.status });
+          return;
+        }
       }
     } catch {
       // The listener may still be starting. No raw error text is retained.
@@ -1272,16 +1431,22 @@ async function waitForEndpoint(phase, url, expectedStatus) {
       : phase === 'private-gateway-https-ready'
         ? readPrivateHttpsServiceDiagnostic()
         : {};
+  const failureDiagnostic = {
+    ...(phase === 'private-gateway-https-ready'
+      ? lastPrivateHttpsObservation
+      : {}),
+    ...serviceDiagnostic,
+  };
   recordStage(phase, 'failed', {
     ...(Number.isInteger(lastStatus) ? { httpStatus: lastStatus } : {}),
-    ...serviceDiagnostic,
+    ...failureDiagnostic,
   });
   throw new FixtureSetupError(
     phase,
     lastStatus,
     undefined,
     undefined,
-    serviceDiagnostic,
+    failureDiagnostic,
   );
 }
 

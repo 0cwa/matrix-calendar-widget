@@ -945,6 +945,27 @@ const CONTAINER_HEALTH_STATES = new Set([
   'none',
   'unavailable',
 ]);
+const PRIVATE_HTTPS_TCP_OUTCOMES = new Set([
+  'connected',
+  'refused',
+  'timed-out',
+  'unreachable',
+  'other-failure',
+]);
+const PRIVATE_HTTPS_TLS_OUTCOMES = new Set([
+  'validated',
+  'trust-rejected',
+  'handshake-failed',
+  'timed-out',
+  'not-attempted',
+]);
+const PRIVATE_HTTPS_REQUEST_OUTCOMES = new Set([
+  'response',
+  'timed-out',
+  'connection-failed',
+  'other-failure',
+  'not-attempted',
+]);
 const RESTORE_RADICALE_PROBE_OUTCOMES = new Set(['no-response', 'http-status']);
 const RESTORE_RADICALE_CONTAINER_HTTP_OUTCOMES = new Set([
   'unavailable',
@@ -1577,6 +1598,9 @@ const ALLOWED_KEYS = new Set([
   'containerExitCode',
   'containerOomKilled',
   'containerRuntimeErrorPresent',
+  'privateHttpsTcpOutcome',
+  'privateHttpsTlsOutcome',
+  'privateHttpsRequestOutcome',
   'restoreRadicaleProbeOutcome',
   'restoreRadicaleContainerHttpOutcome',
   'restoreRadicaleContainerHttpStatus',
@@ -3675,6 +3699,46 @@ export function sanitizeElementAcceptance(
       throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
+    const privateHttpsObservationFields = [
+      'privateHttpsTcpOutcome',
+      'privateHttpsTlsOutcome',
+      'privateHttpsRequestOutcome',
+    ];
+    const hasPrivateHttpsObservation = privateHttpsObservationFields.some(
+      (key) => Object.hasOwn(record, key),
+    );
+    const hasPrivateHttpsHttpStatus = Object.hasOwn(record, 'httpStatus');
+    if (
+      (record.phase === 'private-gateway-https-ready' &&
+        record.status === 'failed') !== hasPrivateHttpsObservation ||
+      (hasPrivateHttpsObservation &&
+        (record.phase !== 'private-gateway-https-ready' ||
+          record.status !== 'failed' ||
+          !privateHttpsObservationFields.every((key) =>
+            Object.hasOwn(record, key),
+          ) ||
+          !PRIVATE_HTTPS_TCP_OUTCOMES.has(record.privateHttpsTcpOutcome) ||
+          !PRIVATE_HTTPS_TLS_OUTCOMES.has(record.privateHttpsTlsOutcome) ||
+          !PRIVATE_HTTPS_REQUEST_OUTCOMES.has(
+            record.privateHttpsRequestOutcome,
+          ) ||
+          (record.privateHttpsTcpOutcome !== 'connected' &&
+            (record.privateHttpsTlsOutcome !== 'not-attempted' ||
+              record.privateHttpsRequestOutcome !== 'not-attempted' ||
+              hasPrivateHttpsHttpStatus)) ||
+          (record.privateHttpsTcpOutcome === 'connected' &&
+            record.privateHttpsTlsOutcome === 'not-attempted') ||
+          (record.privateHttpsTlsOutcome !== 'validated' &&
+            (record.privateHttpsRequestOutcome !== 'not-attempted' ||
+              hasPrivateHttpsHttpStatus)) ||
+          (record.privateHttpsTlsOutcome === 'validated' &&
+            (record.privateHttpsRequestOutcome === 'not-attempted' ||
+              (record.privateHttpsRequestOutcome === 'response') !==
+                hasPrivateHttpsHttpStatus))))
+    ) {
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+    }
+
     if (
       (Object.hasOwn(record, 'teamRoomMatches') &&
         typeof record.teamRoomMatches !== 'boolean') ||
@@ -4920,6 +4984,13 @@ export function sanitizeElementAcceptance(
     const fields = [`phase=${phase}`, `status=${record.status}`];
     if (Object.hasOwn(record, 'httpStatus')) {
       fields.push(`http_status=${record.httpStatus}`);
+    }
+    if (Object.hasOwn(record, 'privateHttpsTcpOutcome')) {
+      fields.push(
+        `private_https_tcp=${record.privateHttpsTcpOutcome}`,
+        `private_https_tls=${record.privateHttpsTlsOutcome}`,
+        `private_https_request=${record.privateHttpsRequestOutcome}`,
+      );
     }
     if (Object.hasOwn(record, 'teamRoomMatches')) {
       fields.push(`team_room_matches=${record.teamRoomMatches}`);
