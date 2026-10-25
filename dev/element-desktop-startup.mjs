@@ -210,6 +210,61 @@ const FAILURE_CODES = Object.freeze([
   'safe-storage-backend-unconfirmed',
   'probe-internal-error',
 ]);
+export const STARTUP_PHASES = Object.freeze([
+  'preflight',
+  'desktop-launch',
+  'desktop-process-observation',
+  'desktop-connection',
+  'desktop-journey',
+  'cleanup-child-observation',
+  'cleanup-app',
+  'safe-storage-finalization',
+  'record-emission',
+  'outer-catch',
+]);
+export const STARTUP_EXCEPTION_CLASSES = Object.freeze([
+  'error',
+  'type-error',
+  'range-error',
+  'reference-error',
+  'syntax-error',
+  'uri-error',
+  'eval-error',
+  'aggregate-error',
+  'unknown',
+]);
+
+export function startupExceptionDiagnostic(error, phase) {
+  let exceptionClass = 'unknown';
+  try {
+    exceptionClass =
+      error instanceof AggregateError
+        ? 'aggregate-error'
+        : error instanceof TypeError
+          ? 'type-error'
+          : error instanceof RangeError
+            ? 'range-error'
+            : error instanceof ReferenceError
+              ? 'reference-error'
+              : error instanceof SyntaxError
+                ? 'syntax-error'
+                : error instanceof URIError
+                  ? 'uri-error'
+                  : error instanceof EvalError
+                    ? 'eval-error'
+                    : error instanceof Error
+                      ? 'error'
+                      : 'unknown';
+  } catch {
+    // A hostile thrown value must not prevent the bounded record from emitting.
+  }
+  return {
+    failurePhase: STARTUP_PHASES.includes(phase) ? phase : 'outer-catch',
+    failureExceptionClass: STARTUP_EXCEPTION_CLASSES.includes(exceptionClass)
+      ? exceptionClass
+      : 'unknown',
+  };
+}
 
 export function createSafeStorageLogCollector() {
   const streams = new Map([
@@ -581,6 +636,11 @@ const desktopObservation = {
   },
 };
 let failureCode = null;
+let startupPhase = 'preflight';
+let startupFailureDiagnostic = {
+  failurePhase: null,
+  failureExceptionClass: null,
+};
 let rendererDiagnostics = emptyRendererDiagnostics();
 let egressPhaseCounters = {
   beforeApp: emptyEgressCounterObservation(),
@@ -3967,6 +4027,7 @@ function emitRecord(rendererCount = null) {
     phase: 'desktop-startup',
     status: passed ? 'passed' : 'failed',
     failureCode,
+    ...startupFailureDiagnostic,
     sourceSha,
     package: packageInfo,
     runtime,
@@ -3986,6 +4047,7 @@ function emitRecord(rendererCount = null) {
 async function main() {
   let rendererCount = null;
   try {
+    startupPhase = 'preflight';
     checkSource();
     checkRunner();
     checkPackage();
@@ -4010,6 +4072,7 @@ async function main() {
     process.stdout.write(
       '{"phase":"desktop-startup-progress","milestone":"before-app"}\n',
     );
+    startupPhase = 'desktop-launch';
     egressPhaseCounters.beforeApp = emptyEgressCounterObservation(
       (await waitForCounterAcknowledgement('before-app'))
         ? 'observed'
@@ -4059,6 +4122,7 @@ async function main() {
         resolveClose();
       });
     });
+    startupPhase = 'desktop-process-observation';
     const spawnResult = await spawnOutcome;
     if (spawnResult.outcome === 'spawn-error') {
       appLaunchState = 'spawn-error';
@@ -4099,11 +4163,19 @@ async function main() {
         ? 'observed'
         : 'unavailable',
     );
+    startupPhase = 'desktop-connection';
     rendererCount = await connectAndCheckPage();
+    startupPhase = 'desktop-journey';
     await holdForDesktopJourney();
   } catch (error) {
     failureCode =
       error instanceof ProbeFailure ? error.code : 'probe-internal-error';
+    if (!(error instanceof ProbeFailure)) {
+      startupFailureDiagnostic = startupExceptionDiagnostic(
+        error,
+        startupPhase,
+      );
+    }
     if (
       error instanceof ProbeFailure &&
       error.check &&
@@ -4112,6 +4184,7 @@ async function main() {
       status(error.check, 'failed');
     }
   } finally {
+    startupPhase = 'cleanup-child-observation';
     sampleChildBeforeCleanup();
     if (
       checks.desktopProcess === 'passed' &&
@@ -4120,7 +4193,9 @@ async function main() {
       failureCode ??= 'desktop-not-ready';
       status('desktopProcess', 'failed');
     }
+    startupPhase = 'cleanup-app';
     await stopApp();
+    startupPhase = 'safe-storage-finalization';
     if (safeStorageLogCollector) {
       safeStorageObservation = safeStorageLogCollector.finish(appClosed);
       const encryptedBackendSelected =
@@ -4135,6 +4210,7 @@ async function main() {
         failureCode ??= 'safe-storage-backend-unconfirmed';
       }
     }
+    startupPhase = 'record-emission';
     emitRecord(rendererCount);
   }
 }
@@ -4220,12 +4296,20 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       }
     }
   } else {
-    main().catch(() => {
+    main().catch((error) => {
+      if (startupFailureDiagnostic.failurePhase === null) {
+        startupFailureDiagnostic = startupExceptionDiagnostic(
+          error,
+          startupPhase,
+        );
+      }
+      failureCode ??= 'probe-internal-error';
       process.stdout.write(
         `${JSON.stringify({
           phase: 'desktop-startup',
           status: 'failed',
-          failureCode: 'probe-internal-error',
+          failureCode,
+          ...startupFailureDiagnostic,
           sourceSha,
           package: packageInfo,
           runtime,
