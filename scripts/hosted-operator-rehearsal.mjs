@@ -3734,6 +3734,7 @@ function safeReceipt({
   sourceTree,
   workflowSha,
   reminderFixtureSha256,
+  reminderContractSha256,
   lock,
   apiCount,
   markerCounts,
@@ -3750,6 +3751,7 @@ function safeReceipt({
     workflow_sha: workflowSha,
     tooling_sha: workflowSha,
     reminder_fixture_sha256: reminderFixtureSha256,
+    reminder_contract_sha256: reminderContractSha256,
     platform: 'linux/amd64',
     image_lock: imageEvidence(lock),
     api_cases: apiCount,
@@ -3959,11 +3961,16 @@ export function formatSuccessSummary(receipt) {
   )
     ? receipt.reminder_fixture_sha256
     : 'unavailable';
+  const contractSha256 = /^[0-9a-f]{64}$/u.test(
+    receipt.reminder_contract_sha256 ?? '',
+  )
+    ? receipt.reminder_contract_sha256
+    : 'unavailable';
   return [
     '## Hosted Docker operator rehearsal',
     '',
     `- Result: passed for source ${receipt.source_sha} on linux/amd64.`,
-    `- Trusted tooling SHA: ${toolingSha}; reminder fixture SHA-256: ${fixtureSha256}.`,
+    `- Trusted tooling SHA: ${toolingSha}; reminder fixture SHA-256: ${fixtureSha256}; reminder contract SHA-256: ${contractSha256}.`,
     '- Phase: complete; failure phase: none.',
     '- Source-built images: 3 verified IDs; fixture images: 2 immutable digests locked.',
     '- API authorization and CRUD cases: 12/12 passed.',
@@ -4001,6 +4008,7 @@ export function formatFailureDiagnostic({
   workflowSha,
   toolingSha,
   reminderFixtureSha256,
+  reminderContractSha256,
   runId,
   attempt,
   phase,
@@ -4131,6 +4139,7 @@ export function formatFailureDiagnostic({
     workflow_sha: safe(workflowSha, /^[0-9a-f]{40}$/u),
     tooling_sha: safe(toolingSha, /^[0-9a-f]{40}$/u),
     reminder_fixture_sha256: safe(reminderFixtureSha256, /^[0-9a-f]{64}$/u),
+    reminder_contract_sha256: safe(reminderContractSha256, /^[0-9a-f]{64}$/u),
     run_id: safe(runId, /^\d{1,20}$/u),
     attempt: safe(attempt, /^\d{1,4}$/u),
     source_image_ids: safeImageIds,
@@ -4279,6 +4288,7 @@ export function writeFailureDiagnostic(runnerTemp, fields, update = false) {
           'workflow_sha',
           'tooling_sha',
           'reminder_fixture_sha256',
+          'reminder_contract_sha256',
           'failed_phase',
           'failure_class',
           'failure_operation',
@@ -4465,7 +4475,14 @@ async function main() {
     }
     const reminderFixtureCommand = hostedReminderFixtureCommand(toolingRoot);
     const reminderFixturePath = reminderFixtureCommand.args[0];
+    const reminderContractPath = path.join(
+      toolingRoot,
+      'dev/fixtures/room-reminder-configuration-record.json',
+    );
     const reminderFixtureStat = lstatSync(reminderFixturePath, {
+      throwIfNoEntry: false,
+    });
+    const reminderContractStat = lstatSync(reminderContractPath, {
       throwIfNoEntry: false,
     });
     if (
@@ -4473,11 +4490,16 @@ async function main() {
       !reminderFixtureStat ||
       reminderFixtureStat.isSymbolicLink() ||
       !reminderFixtureStat.isFile() ||
-      realpathSync(reminderFixturePath) !== reminderFixturePath
+      realpathSync(reminderFixturePath) !== reminderFixturePath ||
+      !reminderContractStat ||
+      reminderContractStat.isSymbolicLink() ||
+      !reminderContractStat.isFile() ||
+      realpathSync(reminderContractPath) !== reminderContractPath
     ) {
       fail('source-binding', 'tooling-helper-invalid');
     }
     failureIdentity.reminderFixtureSha256 = sha256File(reminderFixturePath);
+    failureIdentity.reminderContractSha256 = sha256File(reminderContractPath);
     for (const helper of [
       'dev/up.sh',
       'dev/element-acceptance-setup.mjs',
@@ -5023,6 +5045,7 @@ async function main() {
       sourceTree: checkoutTree,
       workflowSha,
       reminderFixtureSha256: failureIdentity.reminderFixtureSha256,
+      reminderContractSha256: failureIdentity.reminderContractSha256,
       lock,
       apiCount: API_STAGES.length,
       markerCounts: [0, 1, 2, 3],

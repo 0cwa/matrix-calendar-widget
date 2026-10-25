@@ -2767,7 +2767,7 @@ test('success summaries require cleanup; failure summaries disclose only fixed f
       cleanup_verified: true,
       source_sha: sourceSha,
     }),
-    /Trusted tooling SHA: unavailable; reminder fixture SHA-256: unavailable/u,
+    /Trusted tooling SHA: unavailable; reminder fixture SHA-256: unavailable; reminder contract SHA-256: unavailable/u,
   );
 
   const summary = formatFailureSummary(
@@ -3342,11 +3342,13 @@ test('cleanup inventory diagnostics expose only allowlisted checkpoint identifie
 test('failure provenance binds runtime source separately from trusted tooling and fixture hash', () => {
   const toolingSha = '2'.repeat(40);
   const fixtureSha256 = '3'.repeat(64);
+  const contractSha256 = '4'.repeat(64);
   const diagnostic = formatFailureDiagnostic({
     sourceSha,
     workflowSha: toolingSha,
     toolingSha,
     reminderFixtureSha256: fixtureSha256,
+    reminderContractSha256: contractSha256,
     phase: 'reminder-initial',
     failureClass: 'gate-failed',
     operation: 'reminder-initial-fixture',
@@ -3356,6 +3358,7 @@ test('failure provenance binds runtime source separately from trusted tooling an
   assert.equal(diagnostic.workflow_sha, toolingSha);
   assert.equal(diagnostic.tooling_sha, toolingSha);
   assert.equal(diagnostic.reminder_fixture_sha256, fixtureSha256);
+  assert.equal(diagnostic.reminder_contract_sha256, contractSha256);
 });
 
 test('failure diagnostics keep sanitized recovery failure separate from original failure', (t) => {
@@ -3768,6 +3771,27 @@ test('trusted sparse checkout can load its hosted tooling entry points', (t) => 
     join(toolingRoot, 'dev/local-reminder-fixture.mjs'),
   ]);
   assert.ok(!reminderCommand.args[0].startsWith(join(temporaryRoot, 'source')));
+  const fixtureRun = spawnSync(
+    reminderCommand.executable,
+    reminderCommand.args,
+    {
+      cwd: toolingRoot,
+      encoding: 'utf8',
+      env: { ELEMENT_ACCEPTANCE_REMINDER_FLOW: 'initial' },
+    },
+  );
+  assert.equal(fixtureRun.status, 1);
+  assert.deepEqual(JSON.parse(fixtureRun.stdout), {
+    phase: 'local-reminder-fixture',
+    flow: 'initial',
+    status: 'failed',
+    failurePhase: 'fixture',
+    markerWritten: false,
+    cleanup: {
+      reminderConfiguration: 'not-attempted',
+      event: 'not-attempted',
+    },
+  });
   const fixtureTests = spawnSync(
     process.execPath,
     ['--test', join(toolingRoot, 'dev/local-reminder-fixture.test.mjs')],
