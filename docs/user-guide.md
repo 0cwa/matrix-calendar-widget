@@ -2,7 +2,7 @@
 
 [Documentation](./README.md) · [Room setup and commands](./bot-calendar.md) · [Current feature status](./STATUS.md)
 
-This guide describes the features merged into `main`. Your installation may enable only some of them. The controlled pilot targets the standard Element Web/Desktop side panel; broader client support is still being validated.
+This guide describes the widget and bot workflows. Your installation may enable only some of them, and development features may not be qualified or deployed. The controlled pilot targets the standard Element Web/Desktop side panel; broader client support is still being validated.
 
 ## Open a room calendar
 
@@ -16,7 +16,7 @@ Use the date controls to move through the calendar. Narrow room panels offer lis
 
 Open an event to see its time, title, description, location, and other supported fields. Timed events and all-day events have different calendar semantics. All-day event end dates are exclusive in iCalendar; the UI handles the date range for display.
 
-The view is a bounded projection, not a complete export of the CalDAV store. Some unsupported recurrence or timezone forms may not appear. Diagnostic warnings describe forms the projector recognizes; a warning-free view does not guarantee that every source resource is visible. Ask the operator to inspect or export unsupported source data using authorized tooling, and retain backups before making changes. Conventional private calendar-client credentials are not yet available.
+The view is a bounded projection, not a complete export of the CalDAV store. Some unsupported recurrence or timezone forms may not appear. If an event you expect is missing, ask the operator to check the calendar data with authorized tooling. Retain backups before making changes.
 
 ## Create and edit events
 
@@ -46,7 +46,11 @@ Room-calendar setup is separately controlled. The setup command creates or recon
 
 A calendar alarm records when an event should remind a calendar client. Matrix delivery is a separate setting stored by the gateway. A saved alarm does not automatically send a Matrix message.
 
-On the documented `main` baseline, authorized managers can configure whole-room Matrix reminders for supported relative DISPLAY alarms on timed events with a resolvable timezone, in unencrypted rooms. Imported supported alarms may be relative to the start or end and may include bounded repeats; the alarm editor itself authors a narrower non-repeating subset. The operator must enable reminder configuration and delivery independently. Absolute UTC display alarms remain calendar metadata and are not eligible for Matrix delivery. Selected-member targeting and explicit all-day Matrix schedules are being developed in [PR #384](https://github.com/0cwa/matrix-calendar-widget/pull/384); check [current status](./STATUS.md) before relying on them.
+In builds that include the newer reminder controls, open an event and choose **Reminder settings**. A saved **CalDAV reminder** stays in the event for calendar apps; **Matrix destination** separately chooses **Off**, **Whole room**, or **Selected people** for Matrix pings. For selected people, choose joined room members from the list (up to 50). Choose **Off** to keep the calendar alert while stopping Matrix pings.
+
+For an all-day event, choose the number of **Days before event**, the **Local time**, and a **Time zone (IANA)** for the Matrix reminder. The preview shows when and who will be pinged. Timed Matrix reminders follow the saved CalDAV alert; an all-day reminder needs this separate local schedule. Matrix does not send a reminder whose scheduled time has already passed.
+
+Reminder settings require the operator to enable configuration and delivery separately, and a manager must have permission to change them. Delivery currently requires an unencrypted room and current room permissions. The widget may instead show only whole-room options, or no reminder controls, depending on the installed build and server settings. Some selected-member and all-day support is still in development and has not been qualified for deployment; see [current status](./STATUS.md) before relying on it. Absolute UTC display alarms and unsupported time-zone rules cannot be used for Matrix delivery. A calendar alarm by itself does not send a Matrix message.
 
 Post-success notices about room-calendar event edits are also independent of scheduled reminders. An event save can succeed even if a best-effort notice cannot be delivered.
 
@@ -58,7 +62,11 @@ Anyone who has the link can read every event in that calendar, including sensiti
 
 Unpublishing blocks future requests but cannot retract calendar data already downloaded or cached. Public links remain valid after Matrix membership or manager-power changes until explicitly revoked. Calendar applications choose their own refresh interval, so updates may not appear immediately. Publishing a mixed collection is refused instead of quietly omitting its non-event data.
 
-Private external calendar editing with independently revocable credentials is still planned separately. Do not enter your Matrix password into a CalDAV application for this service.
+## Connect a private calendar app
+
+Private CalDAV app access is optional and disabled by default. Ask the operator whether it has been enabled and qualified for this installation. If **Calendar app access** is available in the toolbar, select one calendar and choose **Create app access**. Enter its displayed CalDAV URL, username, and app password in the calendar app. The password is shown once; save it in the app's credential manager. Each credential expires after 90 days.
+
+The widget lists each credential's status and expiry. To replace one, create a new credential, update the calendar app, then revoke the old credential. Revocation blocks future access, but cannot remove copies already downloaded by the app. A lost one-time password cannot be recovered; create a replacement. Never enter your Matrix password into a CalDAV application. See [private calendar app access](./private-calendar-app-access.md) for the setup details and current limits.
 
 ## When something is unavailable
 
@@ -66,7 +74,7 @@ Private external calendar editing with independently revocable credentials is st
 | ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
 | No configured room calendar               | Ask a moderator about `!calendar setup`, or ask the operator to configure a binding.                                  |
 | Calendar visible, editing unavailable     | Check your room permissions and whether event writes are enabled.                                                     |
-| Event or recurrence missing from the view | Review the diagnostic warning and ask the operator to inspect the canonical source with authorized tooling.           |
+| Event or recurrence missing from the view | Ask the operator to check the calendar data with authorized tooling.                                                  |
 | Save rejected after another client edited | Reload, review the current event, then retry the intended change.                                                     |
 | Alarm saved, no Matrix message arrives    | Check supported alarm type, room encryption, manager permissions, and the separate reminder delivery setting.         |
 | Public feed settings unavailable          | Ask whether public feeds and their public ingress have been configured by the operator.                               |

@@ -1709,6 +1709,7 @@ async function runCase(testCase) {
         )
 
         native_failures = (
+            ("worker_setup", "native_probe_config_missing"),
             ("worker_setup", "invalid_probe_uid"),
             ("worker_setup", "invalid_probe_marker"),
             ("provider_edit", "probe_event_not_loaded"),

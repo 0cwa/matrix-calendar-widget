@@ -36,8 +36,6 @@ PERSONAL_SECRET = os.environ["MCW_PRIVATE_CALDAV_PERSONAL_SECRET"]
 CA_FILE = Path(os.environ["MCW_PRIVATE_CALDAV_CA_FILE"])
 THUNDERBIRD = Path(os.environ["MCW_PRIVATE_CALDAV_NATIVE_THUNDERBIRD_BIN"])
 WORKSPACE = Path(os.environ["MCW_PRIVATE_CALDAV_NATIVE_WORKSPACE"])
-PROBE_EVENT_UID = os.environ["MCW_PRIVATE_CALDAV_NATIVE_PROBE_UID"]
-PROBE_MARKER = os.environ["MCW_PRIVATE_CALDAV_NATIVE_PROBE_MARKER"]
 EXPECTED_VERSION = "158.0.1"
 EVENT_UID = "private-contract-event"
 CREATED_UID = "native-created-contract-event"
@@ -524,6 +522,14 @@ class ContractFailure(RuntimeError):
         self.error_class = error_class
 
 
+def _native_probe_config() -> tuple[str, str]:
+    probe_uid = os.environ.get("MCW_PRIVATE_CALDAV_NATIVE_PROBE_UID")
+    probe_marker = os.environ.get("MCW_PRIVATE_CALDAV_NATIVE_PROBE_MARKER")
+    if probe_uid is None or probe_marker is None:
+        raise ContractFailure("worker_setup", "native_probe_config_missing")
+    return probe_uid, probe_marker
+
+
 def _marionette_error_class(error: Exception) -> str:
     # Only fixed categories escape; exception text and arbitrary type names do not.
     class_name = type(error).__name__
@@ -827,6 +833,7 @@ def _ensure_calendar_tab(marionette: object) -> dict[str, bool]:
 
 
 def run() -> dict[str, object]:
+    probe_event_uid, probe_marker = _native_probe_config()
     try:
         from marionette_driver.marionette import Marionette
     except Exception as error:
@@ -842,9 +849,9 @@ def run() -> dict[str, object]:
         raise ContractFailure("worker_setup", "invalid_binary") from None
     if not re.fullmatch(r"mcwpc~[a-f0-9]{48}", PERSONAL_APP_ID):
         raise ContractFailure("worker_setup", "invalid_app_id")
-    if not re.fullmatch(r"private-native-revoke-[a-f0-9]{32}", PROBE_EVENT_UID):
+    if not re.fullmatch(r"private-native-revoke-[a-f0-9]{32}", probe_event_uid):
         raise ContractFailure("worker_setup", "invalid_probe_uid")
-    if not re.fullmatch(r"private-revoke-marker-[a-f0-9]{32}", PROBE_MARKER):
+    if not re.fullmatch(r"private-revoke-marker-[a-f0-9]{32}", probe_marker):
         raise ContractFailure("worker_setup", "invalid_probe_marker")
     if not _is_local_https_origin(API_ORIGIN):
         raise ContractFailure("worker_setup", "invalid_origin")
@@ -1003,7 +1010,7 @@ def run() -> dict[str, object]:
         load_probe = _async_script(
             marionette,
             LOAD_REVOCATION_PROBE,
-            [PROBE_EVENT_UID],
+            [probe_event_uid],
             "provider_edit",
         )
         _assert_ok(load_probe, "provider_edit")
@@ -1057,7 +1064,7 @@ def run() -> dict[str, object]:
             post_revoke = _post_revoke_async_script(
                 marionette,
                 POST_REVOKE_EDIT,
-                [PROBE_EVENT_UID, PROBE_MARKER],
+                [probe_event_uid, probe_marker],
                 post_revoke_window_handle,
             )
         except ContractFailure as error:

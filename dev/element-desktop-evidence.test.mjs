@@ -17,7 +17,14 @@ import {
   uidProcessObservationFromLifecycle,
   validDesktopSummary,
 } from './element-desktop-evidence.mjs';
-import { summarizeUidLifecycleObservation } from './element-desktop-startup.mjs';
+import {
+  captureOuterStartupFailure,
+  captureStartupFailure,
+  createStartupRecord,
+  runStartupLifecycle,
+  startupExceptionDiagnostic,
+  summarizeUidLifecycleObservation,
+} from './element-desktop-startup.mjs';
 
 const sourceSha = 'a'.repeat(40);
 const checks = Object.fromEntries(
@@ -535,7 +542,9 @@ function stages(overrides = {}) {
 test('Desktop evidence passes with complete verified isolation and cleanup', () => {
   const summary = sanitizeDesktopStages(stages(), sourceSha);
   assert.equal(summary.status, 'passed');
-  assert.equal(summary.schemaVersion, 23);
+  assert.equal(summary.schemaVersion, 24);
+  assert.equal(summary.startupFailurePhase, null);
+  assert.equal(summary.startupFailureExceptionClass, null);
   assert.equal(
     summary.cleanupDiagnostics.stopDiagnostics.initial.census
       .effectiveUidMatchCount,
@@ -630,9 +639,9 @@ test('Desktop evidence passes with complete verified isolation and cleanup', () 
   assert.equal(validDesktopSummary(summary), true);
 });
 
-test('schema 23 exposes only closed cleanup-origin enums and capped counts', () => {
+test('schema 24 exposes only closed cleanup-origin enums and capped counts', () => {
   const summary = sanitizeDesktopStages(stages(), sourceSha);
-  assert.equal(summary.schemaVersion, 23);
+  assert.equal(summary.schemaVersion, 24);
   assert.deepEqual(
     summary.cleanupDiagnostics.cleanupOriginProbe,
     emptyCleanupOriginProbe('not_required', 'no_final_processes'),
@@ -676,6 +685,119 @@ test('schema 23 exposes only closed cleanup-origin enums and capped counts', () 
   assert.deepEqual(
     sanitizeCleanupOriginProbe(JSON.stringify(extraProcessIdentity)),
     emptyCleanupOriginProbe(),
+  );
+});
+
+test('startup failure diagnostics project the producer category and reject raw fields', () => {
+  const failure = new TypeError('private URL and token=synthetic-secret');
+  failure.stack = 'private stack with browser content';
+  const producerDiagnostic = startupExceptionDiagnostic(
+    failure,
+    'desktop-connection',
+  );
+  const failedStartup = stages();
+  failedStartup[1] = {
+    ...failedStartup[1],
+    status: 'failed',
+    failureCode: 'probe-internal-error',
+    ...producerDiagnostic,
+  };
+
+  const summary = sanitizeDesktopStages(failedStartup, sourceSha);
+  assert.equal(summary.failureCode, 'probe-internal-error');
+  assert.equal(summary.startupFailurePhase, 'desktop-connection');
+  assert.equal(summary.startupFailureExceptionClass, 'type-error');
+  assert.doesNotMatch(
+    JSON.stringify(summary),
+    /private URL|private stack|synthetic-secret/u,
+  );
+  assert.equal(validDesktopSummary(summary), true);
+  assert.deepEqual(
+    startupExceptionDiagnostic(
+      new Proxy(
+        {},
+        {
+          getPrototypeOf: () => {
+            throw new Error('private');
+          },
+        },
+      ),
+      'desktop-connection',
+    ),
+    {
+      failurePhase: 'desktop-connection',
+      failureExceptionClass: 'unknown',
+    },
+  );
+
+  const rawClass = globalThis.structuredClone(failedStartup);
+  rawClass[1].failureExceptionClass = 'PrivateWidgetError';
+  assert.throws(() => sanitizeDesktopStages(rawClass, sourceSha));
+  const rawFields = globalThis.structuredClone(failedStartup);
+  rawFields[1].exceptionMessage = 'private URL and token=synthetic-secret';
+  assert.throws(() => sanitizeDesktopStages(rawFields, sourceSha));
+});
+
+test('passing startup records and summaries require null failure diagnostics', () => {
+  const startupRecord = stages();
+  startupRecord[1] = {
+    ...startupRecord[1],
+    failurePhase: 'desktop-connection',
+    failureExceptionClass: 'type-error',
+  };
+  assert.throws(() => sanitizeDesktopStages(startupRecord, sourceSha));
+
+  const explicitNulls = stages();
+  explicitNulls[1] = {
+    ...explicitNulls[1],
+    failurePhase: null,
+    failureExceptionClass: null,
+  };
+  const summary = sanitizeDesktopStages(explicitNulls, sourceSha);
+  assert.equal(summary.status, 'passed');
+  assert.equal(validDesktopSummary(summary), true);
+
+  const contradictorySummary = {
+    ...summary,
+    startupFailurePhase: 'desktop-connection',
+    startupFailureExceptionClass: 'type-error',
+  };
+  assert.equal(validDesktopSummary(contradictorySummary), false);
+});
+
+test('producer lifecycle emits and projects the first failure after async failure and cleanup rejection', async () => {
+  const originalError = new TypeError('private URL and token=synthetic-secret');
+  const cleanupError = new Error('private cleanup stack');
+  let emitted;
+
+  await runStartupLifecycle(
+    async () => {
+      await Promise.resolve();
+      throw originalError;
+    },
+    (error) => captureStartupFailure(error, 'desktop-connection'),
+    async () => {
+      throw cleanupError;
+    },
+  ).catch((error) => {
+    captureOuterStartupFailure(error, 'cleanup-app');
+    emitted = createStartupRecord(null, sourceSha);
+  });
+
+  assert.equal(emitted.phase, 'desktop-startup');
+  assert.equal(emitted.status, 'failed');
+  assert.equal(emitted.failureCode, 'probe-internal-error');
+  assert.equal(emitted.failurePhase, 'desktop-connection');
+  assert.equal(emitted.failureExceptionClass, 'type-error');
+  const sanitized = sanitizeDesktopStages(
+    [{ ...stages()[1], ...emitted }],
+    sourceSha,
+  );
+  assert.equal(sanitized.startupFailurePhase, 'desktop-connection');
+  assert.equal(sanitized.startupFailureExceptionClass, 'type-error');
+  assert.doesNotMatch(
+    JSON.stringify({ emitted, sanitized }),
+    /synthetic-secret|private URL|private cleanup stack/u,
   );
 });
 
