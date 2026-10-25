@@ -730,10 +730,10 @@ test('startup failure diagnostics project the producer category and reject raw f
     },
   );
 
-  const rawClass = structuredClone(failedStartup);
+  const rawClass = globalThis.structuredClone(failedStartup);
   rawClass[1].failureExceptionClass = 'PrivateWidgetError';
   assert.throws(() => sanitizeDesktopStages(rawClass, sourceSha));
-  const rawFields = structuredClone(failedStartup);
+  const rawFields = globalThis.structuredClone(failedStartup);
   rawFields[1].exceptionMessage = 'private URL and token=synthetic-secret';
   assert.throws(() => sanitizeDesktopStages(rawFields, sourceSha));
 });
