@@ -76,6 +76,9 @@ export declare const PRIVATE_UI_CALENDAR_LIST_ENDPOINTS: readonly PrivateUiCalen
 export declare const PRIVATE_UI_CALENDAR_LIST_METHODS: readonly PrivateUiCalendarListMethod[];
 export declare const PRIVATE_UI_CALENDAR_LIST_FAILURE_CATEGORIES: readonly PrivateUiCalendarListFailureCategory[];
 export declare const PRIVATE_UI_CALENDAR_LIST_OBSERVATION_LIMIT: 6;
+export declare function classifyPrivateUiCalendarListNetworkFailure(
+  errorText: unknown,
+): PrivateUiCalendarListFailureCategory;
 export declare function normalizePrivateUiCalendarListTransportObservations(
   observations: unknown,
 ): PrivateUiCalendarListTransportObservation[] | undefined;

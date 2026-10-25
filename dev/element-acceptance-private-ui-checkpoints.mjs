@@ -81,6 +81,36 @@ const testStatuses = new Set([
 ]);
 
 /**
+ * Map a Playwright browser network error to a closed diagnostic category.
+ * The input is never copied into a checkpoint or returned to the caller.
+ *
+ * @param {unknown} errorText
+ * @returns {'blocked' | 'dns' | 'tls' | 'timeout' | 'connection' | 'other'}
+ */
+export function classifyPrivateUiCalendarListNetworkFailure(errorText) {
+  const normalized =
+    typeof errorText === 'string' ? errorText.toUpperCase() : '';
+  if (normalized.includes('ERR_CERT') || normalized.includes('ERR_SSL')) {
+    return 'tls';
+  }
+  if (normalized.includes('ERR_BLOCKED_BY_CLIENT')) return 'blocked';
+  if (normalized.includes('ERR_NAME_NOT_RESOLVED')) return 'dns';
+  if (
+    normalized.includes('ERR_TIMED_OUT') ||
+    normalized.includes('ERR_CONNECTION_TIMED_OUT')
+  ) {
+    return 'timeout';
+  }
+  if (
+    normalized.includes('ERR_CONNECTION') ||
+    normalized.includes('ERR_NETWORK_CHANGED')
+  ) {
+    return 'connection';
+  }
+  return 'other';
+}
+
+/**
  * Return a strict, copied calendar-list transport summary or undefined.
  *
  * @param {unknown} observations

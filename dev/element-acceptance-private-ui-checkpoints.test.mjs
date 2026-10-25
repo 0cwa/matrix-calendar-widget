@@ -4,11 +4,30 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import {
+  classifyPrivateUiCalendarListNetworkFailure,
   createPrivateUiCheckpointJournal,
   PRIVATE_UI_RESULT_PHASE,
 } from './element-acceptance-private-ui-checkpoints.mjs';
 
 const sourceSha = 'b'.repeat(40);
+
+test('classifies connection timeout before the broader connection category', () => {
+  assert.equal(
+    classifyPrivateUiCalendarListNetworkFailure(
+      'net::ERR_CONNECTION_TIMED_OUT',
+    ),
+    'timeout',
+  );
+  assert.equal(
+    classifyPrivateUiCalendarListNetworkFailure('net::ERR_CONNECTION_RESET'),
+    'connection',
+  );
+  assert.equal(
+    classifyPrivateUiCalendarListNetworkFailure('net::ERR_TIMED_OUT'),
+    'timeout',
+  );
+  assert.equal(classifyPrivateUiCalendarListNetworkFailure(undefined), 'other');
+});
 
 function createStageFile() {
   const directory = mkdtempSync(join(tmpdir(), 'private-ui-checkpoint-'));

@@ -70,6 +70,7 @@ import {
 import {
   PRIVATE_UI_CALENDAR_LIST_ENDPOINTS,
   PRIVATE_UI_CALENDAR_LIST_METHODS,
+  classifyPrivateUiCalendarListNetworkFailure,
   createPrivateUiCheckpointJournal,
   type PrivateUiCalendarListEndpoint,
   type PrivateUiCalendarListFailureCategory,
@@ -8539,20 +8540,9 @@ function createPrivateCalendarListRequestObserver(
 function privateCalendarListNetworkFailure(
   request: Request,
 ): PrivateUiCalendarListFailureCategory {
-  const errorText = request.failure()?.errorText?.toUpperCase() ?? '';
-  if (errorText.includes('ERR_CERT') || errorText.includes('ERR_SSL')) {
-    return 'tls';
-  }
-  if (errorText.includes('ERR_BLOCKED_BY_CLIENT')) return 'blocked';
-  if (errorText.includes('ERR_NAME_NOT_RESOLVED')) return 'dns';
-  if (errorText.includes('ERR_TIMED_OUT')) return 'timeout';
-  if (
-    errorText.includes('ERR_CONNECTION') ||
-    errorText.includes('ERR_NETWORK_CHANGED')
-  ) {
-    return 'connection';
-  }
-  return 'other';
+  return classifyPrivateUiCalendarListNetworkFailure(
+    request.failure()?.errorText,
+  );
 }
 
 function waitForPrivateClientResponse(
