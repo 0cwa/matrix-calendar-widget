@@ -2637,6 +2637,72 @@ test('refresh failure fallback records the minimal error when optional diagnosti
   });
 });
 
+test('projects a failed refresh when final route enforcement is not eligible', () => {
+  withTempDirectory((runnerTemp) => {
+    const filePath = join(runnerTemp, 'element-desktop-journey-stage.jsonl');
+    const failurePoint = 'desktop-refresh-widget-frame';
+    const recorded = new Set(DESKTOP_REFRESH_PRIOR_PHASES);
+    initializeDesktopJourneyEvidence({ filePath, runnerTemp });
+    appendDesktopRefreshPrefix(filePath, runnerTemp);
+    appendDesktopRefreshBegin(filePath, runnerTemp);
+    appendDesktopRefreshPoint(filePath, runnerTemp, failurePoint);
+    if (
+      appendDesktopRefreshFailureWithFallback({
+        filePath,
+        runnerTemp,
+        failurePoint,
+        errorClass: 'timeout',
+      })
+    ) {
+      recorded.add('desktop-a-refresh');
+    }
+    assert.equal(recorded.has('desktop-a-refresh'), true);
+    const routeOutcome = desktopRouteEnforcementOutcome({
+      failed: true,
+      recorded,
+      observedHttpRequests: 1,
+      blockedHttpRequests: 0,
+    });
+    assert.equal(routeOutcome, undefined);
+    if (routeOutcome !== undefined) {
+      appendDesktopJourneyOutcome({
+        filePath,
+        runnerTemp,
+        phase: 'web-http-route-enforcement',
+        status: routeOutcome,
+      });
+    }
+
+    appendDesktopPlaywrightResult({
+      filePath,
+      runnerTemp,
+      sourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+      status: 'failed',
+    });
+    appendDesktopChildCompletion({
+      filePath,
+      runnerTemp,
+      sourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+      completion: { outcome: 'exited', exitStatus: 1, timedOut: false },
+    });
+
+    const summary = readDesktopJourneyEvidence({
+      filePath,
+      runnerTemp,
+      expectedSourceSha: DESKTOP_REFRESH_SOURCE_SHA,
+    });
+    assert.equal(summary.status, 'failed');
+    assert.equal(summary.cases['desktop-a-refresh'], 'failed');
+    assert.equal(summary.cases['web-http-route-enforcement'], 'not_run');
+    assert.deepEqual(summary.failureObservation, {
+      kind: 'caught-error',
+      phase: 'desktop-a-refresh',
+      failurePoint,
+      errorClass: 'timeout',
+    });
+  });
+});
+
 test('rejects orphaned, reordered, malformed, or unexecuted Desktop refresh evidence', () => {
   const sourceSha = DESKTOP_REFRESH_SOURCE_SHA;
   const priorRows = DESKTOP_REFRESH_PRIOR_PHASES.flatMap((phase) => [
