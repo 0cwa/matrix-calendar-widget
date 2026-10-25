@@ -157,9 +157,11 @@ export type CalendarEventValidationError =
 
 const DEFAULT_EVENT_DURATION_HOURS = 1;
 const DEFAULT_EVENT_RANGE_SEARCH_HOURS = 48;
+const DEFAULT_EVENT_OFFSET_SAMPLE_HOURS = 48;
 
-// The form stores local date-times without offsets. Defaults must round-trip
-// through those fields to the same instants before they can be offered.
+// The form stores local date-times without offsets. Defaults must resolve to
+// exactly one instant so different CalDAV clients cannot choose different
+// occurrences of a repeated local time.
 function defaultEventTimedRange(
   now: DateTime,
   timezone: string,
@@ -179,22 +181,15 @@ function defaultEventTimedRange(
   ) {
     const start = firstStart.plus({ hours: elapsedHours }).startOf('hour');
     const end = start.plus({ hours: DEFAULT_EVENT_DURATION_HOURS });
-    if (elapsedHours > 0 && start <= now) {
+    if ((elapsedHours > 0 && start <= now) || end <= now) {
       continue;
     }
-    const startFromForm = DateTime.fromISO(formDateTimeValue(start), {
-      zone: timezone,
-    });
-    const endFromForm = DateTime.fromISO(formDateTimeValue(end), {
-      zone: timezone,
-    });
 
     if (
-      startFromForm.isValid &&
-      endFromForm.isValid &&
-      startFromForm.toMillis() === start.toMillis() &&
-      endFromForm.toMillis() === end.toMillis() &&
-      endFromForm > startFromForm
+      formDateTimeResolvesUniquely(start, timezone) &&
+      formDateTimeResolvesUniquely(end, timezone) &&
+      end.toMillis() - start.toMillis() ===
+        DEFAULT_EVENT_DURATION_HOURS * 60 * 60 * 1000
     ) {
       return { start, end };
     }
@@ -207,6 +202,49 @@ function defaultEventTimedRange(
 
 function formDateTimeValue(value: DateTime): string {
   return value.toFormat("yyyy-MM-dd'T'HH:mm");
+}
+
+function formDateTimeResolvesUniquely(
+  candidate: DateTime,
+  timezone: string,
+): boolean {
+  if (!candidate.isValid) {
+    return false;
+  }
+
+  const local = formDateTimeValue(candidate);
+  const wallTime = DateTime.fromISO(local, { zone: 'UTC' });
+  if (!wallTime.isValid) {
+    return false;
+  }
+
+  const possibleOffsets = new Set<number>();
+  for (
+    let offsetSampleHours = -DEFAULT_EVENT_OFFSET_SAMPLE_HOURS;
+    offsetSampleHours <= DEFAULT_EVENT_OFFSET_SAMPLE_HOURS;
+    offsetSampleHours += 1
+  ) {
+    possibleOffsets.add(
+      candidate.zone.offset(
+        candidate.toMillis() + offsetSampleHours * 60 * 60 * 1000,
+      ),
+    );
+  }
+
+  const possibleInstants = new Set<number>();
+  for (const offset of possibleOffsets) {
+    const instant = DateTime.fromMillis(
+      wallTime.toMillis() - offset * 60 * 1000,
+      { zone: timezone },
+    );
+    if (instant.isValid && formDateTimeValue(instant) === local) {
+      possibleInstants.add(instant.toMillis());
+    }
+  }
+
+  return (
+    possibleInstants.size === 1 && possibleInstants.has(candidate.toMillis())
+  );
 }
 
 export function createCalendarEventFormValues(

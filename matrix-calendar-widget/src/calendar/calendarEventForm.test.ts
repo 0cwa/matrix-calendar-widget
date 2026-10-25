@@ -15,7 +15,7 @@
  */
 
 import { Calendar, CalendarEvent } from '@matrix-calendar-widget/calendar';
-import { DateTime } from 'luxon';
+import { DateTime, Settings } from 'luxon';
 import {
   calendarEventInputFromForm,
   calendarEventOccurrenceTextOperationsFromForm,
@@ -35,6 +35,19 @@ const calendar: Calendar = {
   name: 'Team calendar',
   timezone: 'Europe/Stockholm',
 };
+
+function withLuxonNow<T>(now: number, callback: () => T): T {
+  const previousNow = Settings.now;
+  Settings.now = () => now;
+  Settings.resetCaches();
+
+  try {
+    return callback();
+  } finally {
+    Settings.now = previousNow;
+    Settings.resetCaches();
+  }
+}
 
 describe('calendar event form adapter', () => {
   it('tracks occurrence text source presence separately from equal values', () => {
@@ -369,13 +382,28 @@ describe('calendar event form adapter', () => {
       advanced: true,
     },
   ])('creates a valid one-hour default for $name', (scenario) => {
-    const now = DateTime.fromISO(scenario.now, { zone: 'UTC' });
-    const values = createCalendarEventFormValues(
-      { ...calendar, timezone: scenario.timezone },
-      now,
+    const ambientClocks = [
+      '2026-01-15T12:00:00Z',
+      '2026-07-15T12:00:00Z',
+      '2026-10-25T00:11:00Z',
+      '2026-10-25T01:11:00Z',
+    ];
+    const valuesByAmbientClock = ambientClocks.map((ambientClock) =>
+      withLuxonNow(Date.parse(ambientClock), () => {
+        const now = DateTime.fromISO(scenario.now, { zone: 'UTC' });
+        return createCalendarEventFormValues(
+          { ...calendar, timezone: scenario.timezone },
+          now,
+        );
+      }),
     );
+    const values = valuesByAmbientClock[0]!;
+    const now = DateTime.fromISO(scenario.now, { zone: 'UTC' });
     const form = { ...values, title: 'DST event' };
 
+    expect(valuesByAmbientClock.map(({ start, end }) => [start, end])).toEqual(
+      ambientClocks.map(() => [scenario.start, scenario.end]),
+    );
     expect(values.start).toBe(scenario.start);
     expect(values.end).toBe(scenario.end);
     expect(validateCalendarEventForm(form)).toBeUndefined();
@@ -409,6 +437,7 @@ describe('calendar event form adapter', () => {
     expect(parsedStart.toMillis()).toBe(Date.parse(scenario.startInstant));
     expect(parsedEnd.toMillis()).toBe(Date.parse(scenario.endInstant));
     expect(parsedEnd.diff(parsedStart, 'hours').hours).toBe(1);
+    expect(parsedEnd.toMillis()).toBeGreaterThan(now.toMillis());
     expect(parsedStart.toMillis() > now.toMillis()).toBe(scenario.advanced);
   });
 
