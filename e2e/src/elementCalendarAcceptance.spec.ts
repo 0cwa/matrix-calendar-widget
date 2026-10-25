@@ -113,6 +113,7 @@ import {
 import {
   ROOM_READINESS_SAMPLE_TIMEOUT_MS,
   collectRoomReadinessTimeline,
+  createRoomNavigationReadinessObservation,
   roomContextObservationForPhase,
   unavailableRoomReadinessTimeline,
   type RoomReadinessSnapshot,
@@ -880,6 +881,17 @@ type MatrixChatPageTypeBucket =
   | 'other-page'
   | 'missing'
   | 'unavailable';
+type RoomNavigationReadinessSnapshot = {
+  firstSyncComplete: boolean | null;
+  ready: boolean | null;
+  pageType: MatrixChatPageTypeBucket;
+  currentRoomMatches: boolean | null;
+  matrixSyncState: MatrixSyncState;
+};
+type RoomNavigationReadinessObservation = {
+  beforeNavigation: RoomNavigationReadinessSnapshot;
+  afterRoute: RoomNavigationReadinessSnapshot;
+};
 
 type MemberARoomObservation = {
   matrixUserMatches: boolean;
@@ -897,6 +909,7 @@ type MemberARoomObservation = {
   roomViewRendererPresent: boolean | null;
   matrixChatStateAvailable: boolean;
   matrixChatViewBucket: MatrixChatViewBucket;
+  matrixChatFirstSyncComplete: boolean | null;
   matrixChatReady: boolean | null;
   matrixChatPageTypeBucket: MatrixChatPageTypeBucket;
   matrixChatCurrentRoomMatches: boolean | null;
@@ -942,6 +955,7 @@ type MemberARoomResult = {
   navigationCompleted: boolean;
   observation?: MemberARoomObservation;
   roomReadinessTimeline?: RoomReadinessTimeline;
+  roomNavigationReadiness?: RoomNavigationReadinessObservation;
   failureCode?: MemberARoomFailureCode;
 };
 
@@ -7859,7 +7873,13 @@ async function openMemberARoomWithDiagnostics(
   } = {},
 ): Promise<MemberARoomResult> {
   const element = new ElementWebPage(page);
+  const beforeNavigation = options.captureRoomReadinessTimeline
+    ? await observeMemberARoomReadinessSnapshot(page, roomId).catch(
+        () => undefined,
+      )
+    : undefined;
   let navigationCompleted = false;
+  let afterRoute: RoomReadinessSnapshot | undefined;
   try {
     if (options.useNormalRoomSelection) {
       await element.navigateToRoomOrInvitation(roomName);
@@ -7869,6 +7889,12 @@ async function openMemberARoomWithDiagnostics(
       await page.goto(roomUrl.href, { timeout: 20_000 });
     }
     navigationCompleted = true;
+    if (options.captureRoomReadinessTimeline) {
+      afterRoute = await observeMemberARoomReadinessSnapshot(
+        page,
+        roomId,
+      ).catch(() => undefined);
+    }
   } catch {
     // The failure summary records only whether this bounded navigation ended.
   }
@@ -7922,6 +7948,14 @@ async function openMemberARoomWithDiagnostics(
     navigationCompleted,
     observation,
     roomReadinessTimeline,
+    ...(options.captureRoomReadinessTimeline
+      ? {
+          roomNavigationReadiness: createRoomNavigationReadinessObservation(
+            beforeNavigation,
+            afterRoute,
+          ),
+        }
+      : {}),
     failureCode: getMemberARoomFailureCode(navigationCompleted, observation),
   };
 }
@@ -7942,14 +7976,40 @@ async function observeMemberARoomReadinessSnapshot(
       ]);
       let currentRoomMatches: boolean | null = null;
       let matrixSyncState: RoomReadinessSnapshot['matrixSyncState'] = 'UNKNOWN';
+      let matrixChatFirstSyncComplete: boolean | null = null;
+      let matrixChatReady: boolean | null = null;
+      let matrixChatPageTypeBucket: MatrixChatPageTypeBucket = 'unavailable';
       try {
         const matrixChat = (
-          window as Window & { matrixChat?: { state?: unknown } }
+          window as Window & {
+            matrixChat?: { firstSyncComplete?: unknown; state?: unknown };
+          }
         ).matrixChat;
+        matrixChatFirstSyncComplete =
+          typeof matrixChat?.firstSyncComplete === 'boolean'
+            ? matrixChat.firstSyncComplete
+            : null;
         const state = matrixChat?.state;
         if (state !== null && typeof state === 'object') {
-          const currentRoomId = (state as { currentRoomId?: unknown })
-            .currentRoomId;
+          const matrixChatState = state as {
+            ready?: unknown;
+            page_type?: unknown;
+            currentRoomId?: unknown;
+          };
+          matrixChatReady =
+            typeof matrixChatState.ready === 'boolean'
+              ? matrixChatState.ready
+              : null;
+          matrixChatPageTypeBucket =
+            matrixChatState.page_type === undefined ||
+            matrixChatState.page_type === null
+              ? 'missing'
+              : typeof matrixChatState.page_type === 'string'
+                ? matrixChatState.page_type === 'room_view'
+                  ? 'room-view'
+                  : 'other-page'
+                : 'unavailable';
+          const currentRoomId = matrixChatState.currentRoomId;
           if (typeof currentRoomId === 'string' || currentRoomId === null) {
             currentRoomMatches = currentRoomId === expectedRoomId;
           }
@@ -7983,6 +8043,9 @@ async function observeMemberARoomReadinessSnapshot(
           roomHeader.querySelector('[role="heading"]') !== null,
         currentRoomMatches,
         matrixSyncState,
+        matrixChatFirstSyncComplete,
+        matrixChatReady,
+        matrixChatPageTypeBucket,
       };
     },
     expectedRoomId,
@@ -7998,6 +8061,7 @@ type RoomRenderStateObservation = Pick<
   | 'roomViewRendererPresent'
   | 'matrixChatStateAvailable'
   | 'matrixChatViewBucket'
+  | 'matrixChatFirstSyncComplete'
   | 'matrixChatReady'
   | 'matrixChatPageTypeBucket'
   | 'matrixChatCurrentRoomMatches'
@@ -8019,6 +8083,7 @@ function unavailableRoomRenderState(): RoomRenderStateObservation {
     roomViewRendererPresent: null,
     matrixChatStateAvailable: false,
     matrixChatViewBucket: 'unavailable',
+    matrixChatFirstSyncComplete: null,
     matrixChatReady: null,
     matrixChatPageTypeBucket: 'unavailable',
     matrixChatCurrentRoomMatches: null,
@@ -8045,12 +8110,17 @@ async function observeRoomRenderState(
       currentRoomId?: unknown;
     };
     let matrixChatState: MatrixChatState | undefined;
+    let matrixChatFirstSyncComplete: boolean | null = null;
     try {
       const matrixChat = (
         window as Window & {
-          matrixChat?: { state?: unknown };
+          matrixChat?: { firstSyncComplete?: unknown; state?: unknown };
         }
       ).matrixChat;
+      matrixChatFirstSyncComplete =
+        typeof matrixChat?.firstSyncComplete === 'boolean'
+          ? matrixChat.firstSyncComplete
+          : null;
       if (
         matrixChat?.state !== null &&
         typeof matrixChat?.state === 'object' &&
@@ -8130,6 +8200,7 @@ async function observeRoomRenderState(
       roomViewRendererPresent,
       matrixChatStateAvailable,
       matrixChatViewBucket,
+      matrixChatFirstSyncComplete,
       matrixChatReady,
       matrixChatPageTypeBucket,
       matrixChatCurrentRoomMatches,
