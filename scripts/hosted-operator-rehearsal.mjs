@@ -310,6 +310,17 @@ const CLEANUP_EQUALITY_CHECKPOINTS = new Set([
   'network-plan',
   'final-inventory-baseline',
 ]);
+const CLEANUP_MISMATCH_CATEGORIES = new Set([
+  'identity',
+  'image',
+  'labels',
+  'configuration',
+  'runtime-state',
+  'mounts',
+  'host-config',
+  'network-settings',
+  'unknown',
+]);
 const PRIMARY_SERVICE_ROLES = Object.freeze([
   'synapse',
   'radicale',
@@ -1776,6 +1787,14 @@ class RehearsalFailure extends Error {
     )
       ? diagnostic.cleanupCheckpoint
       : undefined;
+    this.cleanupServiceRole = SERVICES.includes(diagnostic.cleanupServiceRole)
+      ? diagnostic.cleanupServiceRole
+      : undefined;
+    this.cleanupMismatchCategory = CLEANUP_MISMATCH_CATEGORIES.has(
+      diagnostic.cleanupMismatchCategory,
+    )
+      ? diagnostic.cleanupMismatchCategory
+      : undefined;
     this.startupStage = SAFE_STARTUP_STAGES.has(diagnostic.startupStage)
       ? diagnostic.startupStage
       : 'unknown';
@@ -2173,6 +2192,60 @@ function stableContainer(value) {
   };
 }
 
+function containerCleanupMismatch(actual, expected) {
+  const actualLabels = actual?.Config?.Labels ?? {};
+  const expectedLabels = expected?.Config?.Labels ?? {};
+  const expectedRole = expectedLabels[SERVICE_LABEL];
+  const actualRole = actualLabels[SERVICE_LABEL];
+  const serviceRole = SERVICES.includes(expectedRole)
+    ? expectedRole
+    : SERVICES.includes(actualRole)
+      ? actualRole
+      : 'unknown';
+  const groups = [
+    [
+      'identity',
+      { id: actual?.Id, name: actual?.Name },
+      { id: expected?.Id, name: expected?.Name },
+    ],
+    [
+      'image',
+      { image: actual?.Image, configured: actual?.Config?.Image },
+      { image: expected?.Image, configured: expected?.Config?.Image },
+    ],
+    ['labels', actualLabels, expectedLabels],
+    [
+      'configuration',
+      {
+        env: actual?.Config?.Env,
+        command: actual?.Config?.Cmd,
+        entrypoint: actual?.Config?.Entrypoint,
+        workingDirectory: actual?.Config?.WorkingDir,
+        user: actual?.Config?.User,
+      },
+      {
+        env: expected?.Config?.Env,
+        command: expected?.Config?.Cmd,
+        entrypoint: expected?.Config?.Entrypoint,
+        workingDirectory: expected?.Config?.WorkingDir,
+        user: expected?.Config?.User,
+      },
+    ],
+    ['runtime-state', actual?.State, expected?.State],
+    ['mounts', actual?.Mounts, expected?.Mounts],
+    ['host-config', actual?.HostConfig, expected?.HostConfig],
+    ['network-settings', actual?.NetworkSettings, expected?.NetworkSettings],
+  ];
+  const mismatch = groups.find(
+    ([, actualGroup, expectedGroup]) =>
+      JSON.stringify(actualGroup) !== JSON.stringify(expectedGroup),
+  );
+  return {
+    cleanupServiceRole: serviceRole,
+    cleanupMismatchCategory: mismatch?.[0] ?? 'unknown',
+  };
+}
+
 function stableNetwork(value) {
   return {
     Id: value.Id,
@@ -2271,6 +2344,26 @@ function projectForeignInventoryChange(value) {
     }
   }
   return result;
+}
+
+function projectCleanupMismatch(
+  failureCode,
+  cleanupCheckpoint,
+  serviceRole,
+  mismatchCategory,
+) {
+  if (
+    failureCode !== 'inventory-postcondition-failed' ||
+    cleanupCheckpoint !== 'container-plan'
+  ) {
+    return { service_role: 'not-applicable', category: 'not-applicable' };
+  }
+  return {
+    service_role: SERVICES.includes(serviceRole) ? serviceRole : 'unknown',
+    category: CLEANUP_MISMATCH_CATEGORIES.has(mismatchCategory)
+      ? mismatchCategory
+      : 'unknown',
+  };
 }
 
 function notApplicableForeignVolumeIdentityChange() {
@@ -3544,7 +3637,12 @@ function currentIdentity(resource, kind, runId, project) {
 
 function assertInventoryEqual(actual, expected, stage, cleanupCheckpoint) {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-    fail(stage, 'inventory-postcondition-failed', { cleanupCheckpoint });
+    fail(stage, 'inventory-postcondition-failed', {
+      cleanupCheckpoint,
+      ...(cleanupCheckpoint === 'container-plan'
+        ? containerCleanupMismatch(actual, expected)
+        : {}),
+    });
   }
 }
 
@@ -4021,6 +4119,8 @@ export function formatFailureDiagnostic({
   cleanupAttempted,
   failureCode,
   cleanupCheckpoint,
+  cleanupServiceRole,
+  cleanupMismatchCategory,
   recoveryFailure,
   serviceInventory,
   serviceRunId,
@@ -4074,6 +4174,12 @@ export function formatFailureDiagnostic({
         ? cleanupCheckpoint
         : 'unknown'
       : 'not-applicable';
+  const safeCleanupMismatch = projectCleanupMismatch(
+    failureCode,
+    cleanupCheckpoint,
+    cleanupServiceRole,
+    cleanupMismatchCategory,
+  );
   const safeRecoveryFailure = recoveryFailure
     ? {
         phase: SAFE_PHASES.has(recoveryFailure.phase)
@@ -4089,11 +4195,21 @@ export function formatFailureDiagnostic({
               ? recoveryFailure.cleanupCheckpoint
               : 'unknown'
             : 'not-applicable',
+        cleanup_mismatch: projectCleanupMismatch(
+          recoveryFailure.failureCode,
+          recoveryFailure.cleanupCheckpoint,
+          recoveryFailure.cleanupServiceRole,
+          recoveryFailure.cleanupMismatchCategory,
+        ),
       }
     : {
         phase: 'not-run',
         failure_check: 'not-applicable',
         cleanup_checkpoint: 'not-applicable',
+        cleanup_mismatch: {
+          service_role: 'not-applicable',
+          category: 'not-applicable',
+        },
       };
   const safeListenerScope = {
     callsite: ['primary', 'paired-restore'].includes(listenerScope?.site)
@@ -4117,7 +4233,7 @@ export function formatFailureDiagnostic({
   );
 
   return {
-    schema_version: 13,
+    schema_version: 14,
     result: 'failed',
     phase: 'hosted-docker-operator-v5',
     failed_phase: SAFE_PHASES.has(phase) ? phase : 'runner',
@@ -4127,6 +4243,7 @@ export function formatFailureDiagnostic({
     failure_operation: safeOperation,
     failure_check: safeFailureCheck,
     cleanup_checkpoint: safeCleanupCheckpoint,
+    cleanup_mismatch: safeCleanupMismatch,
     recovery_failure: safeRecoveryFailure,
     service_roles: projectPrimaryServiceInventory(serviceInventory, {
       runId: serviceRunId,
@@ -4279,6 +4396,10 @@ export function writeFailureDiagnostic(runnerTemp, fields, update = false) {
             phase: 'not-run',
             failure_check: 'not-applicable',
             cleanup_checkpoint: 'not-applicable',
+            cleanup_mismatch: {
+              service_role: 'not-applicable',
+              category: 'not-applicable',
+            },
           }) && diagnostic.recovery_failure?.phase !== 'not-run';
       if (
         ![
@@ -4297,6 +4418,8 @@ export function writeFailureDiagnostic(runnerTemp, fields, update = false) {
           'startup_stage',
           'child_exit_code',
         ].every((key) => previous?.[key] === diagnostic[key]) ||
+        JSON.stringify(previous?.cleanup_mismatch) !==
+          JSON.stringify(diagnostic.cleanup_mismatch) ||
         JSON.stringify(previous?.service_roles) !==
           JSON.stringify(diagnostic.service_roles) ||
         JSON.stringify(previous?.listener_scope) !==
@@ -5147,6 +5270,14 @@ async function main() {
       failureCode: error instanceof RehearsalFailure ? error.code : 'unknown',
       cleanupCheckpoint:
         error instanceof RehearsalFailure ? error.cleanupCheckpoint : undefined,
+      cleanupServiceRole:
+        error instanceof RehearsalFailure
+          ? error.cleanupServiceRole
+          : undefined,
+      cleanupMismatchCategory:
+        error instanceof RehearsalFailure
+          ? error.cleanupMismatchCategory
+          : undefined,
       foreignInventoryChange:
         error instanceof RehearsalFailure
           ? error.foreignInventoryChange
@@ -5220,6 +5351,14 @@ async function main() {
           cleanupCheckpoint:
             cleanupError instanceof RehearsalFailure
               ? cleanupError.cleanupCheckpoint
+              : undefined,
+          cleanupServiceRole:
+            cleanupError instanceof RehearsalFailure
+              ? cleanupError.cleanupServiceRole
+              : undefined,
+          cleanupMismatchCategory:
+            cleanupError instanceof RehearsalFailure
+              ? cleanupError.cleanupMismatchCategory
               : undefined,
         };
         if (
