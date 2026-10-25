@@ -11058,21 +11058,32 @@ if (process.env.ELEMENT_ACCEPTANCE_PRIVATE_UI === 'true') {
         const calendarPicker = dialogA.getByRole('combobox', {
           name: 'Calendar',
         });
-        await checkpoint.run('private-ui-calendar-select', async () => {
-          await calendarPicker.click();
-          const targetCalendarOption = frameA.getByRole('option', {
-            name: 'Synthetic team calendar',
-            exact: true,
-          });
-          await expect(targetCalendarOption).toHaveCount(1);
-          expect(
-            await selectPrivateAcceptanceCalendar(
+        await checkpoint.run('private-ui-calendar-picker-open', () =>
+          calendarPicker.click(),
+        );
+        const targetCalendarOption = await checkpoint.run(
+          'private-ui-calendar-option-unique',
+          async () => {
+            const targetCalendarOption = frameA.getByRole('option', {
+              name: 'Synthetic team calendar',
+              exact: true,
+            });
+            await expect(targetCalendarOption).toHaveCount(1);
+            return targetCalendarOption;
+          },
+        );
+        const calendarSelectionSucceeded = await checkpoint.run(
+          'private-ui-calendar-selection',
+          () =>
+            selectPrivateAcceptanceCalendar(
               pageA,
               calendarPicker,
               targetCalendarOption,
             ),
-          ).toBe(true);
-        });
+        );
+        await checkpoint.run('private-ui-calendar-selection-complete', () =>
+          expect(calendarSelectionSucceeded).toBe(true),
+        );
 
         let publicFeedMutationCount = 0;
         pageA.on('request', (request) => {

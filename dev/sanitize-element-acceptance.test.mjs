@@ -1092,6 +1092,98 @@ test('sanitizes source-bound private UI checkpoints and preserves timeout status
   );
 });
 
+test('sanitizes the private calendar selection substeps as closed checkpoints', () => {
+  const phases = [
+    'private-ui-calendar-picker-open',
+    'private-ui-calendar-option-unique',
+    'private-ui-calendar-selection',
+    'private-ui-calendar-selection-complete',
+  ];
+  const records = [
+    ...phases.flatMap((phase) => [
+      { phase, status: 'started', sourceSha, profile: 'normal-bot' },
+      { phase, status: 'passed', sourceSha, profile: 'normal-bot' },
+    ]),
+    {
+      phase: 'private-ui-test-result',
+      status: 'passed',
+      sourceSha,
+      profile: 'normal-bot',
+      testStatus: 'passed',
+      lastEnteredPhase: phases[3],
+      lastCompletedPhase: phases[3],
+      failurePhase: null,
+    },
+  ];
+  const summary = sanitizeElementAcceptance(
+    records.map((record) => JSON.stringify(record)).join('\n'),
+    sourceSha,
+    { privateUiEnabled: true, profile: 'normal-bot' },
+  );
+
+  for (const phase of phases) {
+    assert.match(summary, new RegExp(`phase=${phase} status=passed`, 'u'));
+  }
+  assert.match(
+    summary,
+    /phase=private-ui-test-result status=passed profile=normal-bot test_status=passed last_entered=private-ui-calendar-selection-complete last_completed=private-ui-calendar-selection-complete failure_phase=none/u,
+  );
+  assert.doesNotMatch(summary, /Synthetic team calendar|password|https?:\/\//u);
+
+  const failedRecords = [
+    ...phases.slice(0, 2).flatMap((phase) => [
+      { phase, status: 'started', sourceSha, profile: 'normal-bot' },
+      { phase, status: 'passed', sourceSha, profile: 'normal-bot' },
+    ]),
+    {
+      phase: phases[2],
+      status: 'started',
+      sourceSha,
+      profile: 'normal-bot',
+    },
+    {
+      phase: phases[2],
+      status: 'failed',
+      sourceSha,
+      profile: 'normal-bot',
+    },
+    {
+      phase: 'private-ui-test-result',
+      status: 'failed',
+      sourceSha,
+      profile: 'normal-bot',
+      testStatus: 'failed',
+      lastEnteredPhase: phases[2],
+      lastCompletedPhase: phases[1],
+      failurePhase: phases[2],
+    },
+  ];
+  const failedSummary = sanitizeElementAcceptance(
+    failedRecords.map((record) => JSON.stringify(record)).join('\n'),
+    sourceSha,
+    { privateUiEnabled: true, profile: 'normal-bot' },
+  );
+  assert.match(
+    failedSummary,
+    /phase=private-ui-test-result status=failed profile=normal-bot test_status=failed last_entered=private-ui-calendar-selection last_completed=private-ui-calendar-option-unique failure_phase=private-ui-calendar-selection/u,
+  );
+
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify({
+          phase: 'private-ui-calendar-selection-unknown',
+          status: 'started',
+          sourceSha,
+          profile: 'normal-bot',
+        }),
+        sourceSha,
+        { privateUiEnabled: true, profile: 'normal-bot' },
+      ),
+    /invalid element acceptance summary/u,
+  );
+});
+
 test('rejects private checkpoints unless their source, profile, schema, and mode match', () => {
   const base = {
     phase: 'private-ui-dav-create',

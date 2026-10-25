@@ -88,6 +88,94 @@ test('writes the entered checkpoint before the operation and stores only closed 
   }
 });
 
+test('records the private calendar picker substeps and attributes failures to one stage', async () => {
+  const { directory, stageFile } = createStageFile();
+  try {
+    const selectionPhases = [
+      'private-ui-calendar-picker-open',
+      'private-ui-calendar-option-unique',
+      'private-ui-calendar-selection',
+      'private-ui-calendar-selection-complete',
+    ];
+    const journal = createPrivateUiCheckpointJournal({
+      stageFile,
+      sourceSha,
+      profile: 'normal-bot',
+    });
+
+    for (const phase of selectionPhases) {
+      await journal.run(phase, () => {
+        const latest = JSON.parse(
+          readFileSync(stageFile, 'utf8').trim().split('\n').at(-1),
+        );
+        assert.equal(latest.phase, phase);
+        assert.equal(latest.status, 'started');
+      });
+    }
+    journal.finish('passed');
+
+    const records = readFileSync(stageFile, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(
+      records.slice(0, -1).map(({ phase, status }) => [phase, status]),
+      selectionPhases.flatMap((phase) => [
+        [phase, 'started'],
+        [phase, 'passed'],
+      ]),
+    );
+    assert.deepEqual(
+      {
+        status: records.at(-1).status,
+        testStatus: records.at(-1).testStatus,
+        lastEnteredPhase: records.at(-1).lastEnteredPhase,
+        lastCompletedPhase: records.at(-1).lastCompletedPhase,
+        failurePhase: records.at(-1).failurePhase,
+      },
+      {
+        status: 'passed',
+        testStatus: 'passed',
+        lastEnteredPhase: selectionPhases.at(-1),
+        lastCompletedPhase: selectionPhases.at(-1),
+        failurePhase: null,
+      },
+    );
+
+    const failureStageFile = join(directory, 'selection-failure.jsonl');
+    const failureJournal = createPrivateUiCheckpointJournal({
+      stageFile: failureStageFile,
+      sourceSha,
+      profile: 'normal-bot',
+    });
+    await failureJournal.run(selectionPhases[0], () => undefined);
+    await assert.rejects(
+      failureJournal.run(selectionPhases[1], () => {
+        throw new Error('synthetic-selector-failure');
+      }),
+    );
+    failureJournal.finish('failed');
+
+    const failureRecords = readFileSync(failureStageFile, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    assert.equal(failureRecords.at(-1).lastEnteredPhase, selectionPhases[1]);
+    assert.equal(failureRecords.at(-1).lastCompletedPhase, selectionPhases[0]);
+    assert.equal(failureRecords.at(-1).failurePhase, selectionPhases[1]);
+    assert.doesNotMatch(
+      readFileSync(failureStageFile, 'utf8'),
+      /synthetic-selector-failure/u,
+    );
+    await assert.rejects(
+      failureJournal.run('private-ui-calendar-select', () => undefined),
+      { message: 'Private acceptance checkpoint is invalid' },
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('checkpoints successful cleanup before test finalization', async () => {
   const { directory, stageFile } = createStageFile();
   try {
