@@ -98,7 +98,10 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             .github/workflows/release-image-archive.yml
+            dev/fixtures/room-reminder-configuration-record.json
             dev/element-acceptance-api-probe.mjs
+            dev/local-reminder-fixture.mjs
+            dev/local-reminder-fixture.test.mjs
             scripts/hosted-operator-rehearsal.mjs
             scripts/release-image-archive.mjs
           sparse-checkout-cone-mode: false
@@ -257,7 +260,9 @@ jobs:
         env:
           OPERATOR_REHEARSAL_ENABLED: 'true'
           MATRIX_CALENDAR_HOSTED_SHARED_DOCKER_REHEARSAL: 'true'
-        run: node tooling/scripts/hosted-operator-rehearsal.mjs
+        run: |
+          node --test tooling/dev/local-reminder-fixture.test.mjs
+          node tooling/scripts/hosted-operator-rehearsal.mjs
 
       - name: Upload the sanitized operator rehearsal failure summary
         if: ${{ failure() && inputs.operator_rehearsal && steps.operator_rehearsal.outcome == 'failure' }}

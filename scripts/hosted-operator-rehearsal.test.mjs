@@ -46,6 +46,7 @@ import {
   hashExtractedGitTree,
   HOSTED_INHERITED_IMAGE_TMPFS,
   HOSTED_REMINDER_FIXTURE_FAILURE_PHASES,
+  hostedReminderFixtureCommand,
   isLocalProfileHostedContext,
   listenerScopeDelta,
   LOCAL_MICROSANDBOX_MANIFEST_EXAMPLE_WITH_PLACEHOLDERS,
@@ -835,7 +836,7 @@ test('failure artifact carries only the closed gateway smoke classification', ()
     gatewayNetworkSmoke,
   });
 
-  assert.equal(diagnostic.schema_version, 12);
+  assert.equal(diagnostic.schema_version, 14);
   assert.equal(diagnostic.failed_phase, 'compose-run-gateway-smoke');
   assert.equal(diagnostic.failure_operation, 'gateway-network-smoke');
   assert.equal(diagnostic.failure_check, 'network-smoke');
@@ -1024,7 +1025,7 @@ test('failure artifact projects only the API CRUD probe enum fields', () => {
     failureCode: 'api-probe-process-failed',
     apiCrudProbe,
   });
-  assert.equal(diagnostic.schema_version, 12);
+  assert.equal(diagnostic.schema_version, 14);
   assert.equal(diagnostic.failure_check, 'api-contract');
   assert.deepEqual(diagnostic.api_crud_probe, apiCrudProbe);
 
@@ -1127,7 +1128,7 @@ test('reminder child failures retain only the finite fixture outcome and validat
         childExitCode: error.childExitCode,
         reminderFixture: error.reminderFixture,
       });
-      assert.equal(diagnostic.schema_version, 12);
+      assert.equal(diagnostic.schema_version, 14);
       assert.equal(diagnostic.failure_check, 'reminder-fixture');
       assert.equal(diagnostic.child_exit_code, 1);
       assert.deepEqual(diagnostic.reminder_fixture, error.reminderFixture);
@@ -2095,7 +2096,7 @@ test('foreign volume deltas stay gated and report bounded direction and owned mo
     failureCode: failure.code,
     foreignInventoryChange: failure.foreignInventoryChange,
   });
-  assert.equal(diagnostic.schema_version, 12);
+  assert.equal(diagnostic.schema_version, 14);
   assert.equal(diagnostic.cleanup_attempted, false);
   assert.equal(diagnostic.owned_cleanup_verified, false);
   const serialized = JSON.stringify(diagnostic);
@@ -2431,7 +2432,13 @@ else if (args[0] === 'network' && args[1] === 'ls') output = Object.keys(state.n
 else if (args[0] === 'volume' && args[1] === 'ls') output = Object.keys(state.volumes).sort().join('\\n');
 else if (args[0] === 'volume' && args[1] === 'inspect') output = JSON.stringify(args.slice(2).map((name) => state.volumes[name]));
 else if (args[0] === 'network' && args[1] === 'inspect') output = JSON.stringify(args.slice(2).map((id) => state.networks[id]));
-else if (args[0] === 'inspect') output = JSON.stringify(args.slice(1).map(inspect));
+else if (args[0] === 'inspect') {
+  const inspectedContainer = state.containers[args[1]];
+  if (state.healthLogDrift && inspectedContainer?.State?.Health?.Log?.[0]) {
+    inspectedContainer.State.Health.Log[0].Output = 'changed health log';
+  }
+  output = JSON.stringify(args.slice(1).map(inspect));
+}
 else if (args[0] === 'container' && args[1] === 'stop') {
   const id = args.at(-1);
   state.containers[id].State.Running = false;
@@ -2514,7 +2521,10 @@ process.stdout.write(output);
       OOMKilled: false,
       Dead: false,
       ExitCode: 0,
-      Health: null,
+      Health: {
+        Status: 'healthy',
+        Log: [{ Output: 'initial health log' }],
+      },
     },
     Mounts: [mount],
     HostConfig: {
@@ -2563,7 +2573,7 @@ process.stdout.write(output);
       OOMKilled: value.State.OOMKilled,
       Dead: value.State.Dead,
       ExitCode: value.State.ExitCode,
-      Health: null,
+      Health: value.State.Health ? { Status: value.State.Health.Status } : null,
     },
     Mounts: value.Mounts,
     HostConfig: {
@@ -2630,7 +2640,7 @@ process.stdout.write(output);
     taskDir,
   };
 
-  function runCleanup(foreignAttached) {
+  function runCleanup(foreignAttached, healthLogDrift = false) {
     const attachments = { [containerId]: ownedAttachment };
     const containers = { [containerId]: container };
     if (foreignAttached) {
@@ -2653,6 +2663,7 @@ process.stdout.write(output);
         images: { [imageId]: image },
         networks: { [networkId]: network(attachments) },
         volumes: { [volumeName]: volume },
+        healthLogDrift,
         calls: [],
       }),
       { mode: 0o600 },
@@ -2684,6 +2695,76 @@ process.stdout.write(output);
   );
   assert.ok(removeContainer >= 0 && removeContainer < removeVolume);
   assert.ok(removeVolume < removeNetwork);
+
+  const healthLogDrift = runCleanup(false, true);
+  const healthLogDriftCleaned = removeOwnedResources({
+    plan: healthLogDrift.plan,
+    context,
+    baseline,
+    runId,
+    project,
+    prefix: 'success',
+  });
+  assert.deepEqual(healthLogDriftCleaned, baseline);
+
+  const configurationDrift = runCleanup(false);
+  const driftedState = JSON.parse(
+    readFileSync(configurationDrift.callsPath, 'utf8'),
+  );
+  driftedState.containers[containerId].Config.Env = [
+    'SYNTHETIC_PRIVATE_VALUE=must-not-be-projected',
+  ];
+  writeFileSync(configurationDrift.callsPath, JSON.stringify(driftedState), {
+    mode: 0o600,
+  });
+  let configurationFailure;
+  assert.throws(
+    () =>
+      removeOwnedResources({
+        plan: configurationDrift.plan,
+        context,
+        baseline,
+        runId,
+        project,
+        prefix: 'success',
+      }),
+    (error) => {
+      configurationFailure = error;
+      assert.equal(error.stage, 'success-cleanup');
+      assert.equal(error.code, 'inventory-postcondition-failed');
+      assert.equal(error.cleanupCheckpoint, 'container-plan');
+      assert.equal(error.cleanupServiceRole, 'radicale');
+      assert.equal(error.cleanupMismatchCategory, 'configuration');
+      assert.doesNotMatch(
+        JSON.stringify(error),
+        /SYNTHETIC_PRIVATE_VALUE|must-not-be-projected/u,
+      );
+      return true;
+    },
+  );
+  const configurationDiagnostic = formatFailureDiagnostic({
+    sourceSha,
+    workflowSha: '2'.repeat(40),
+    runId,
+    attempt: '1',
+    phase: configurationFailure.stage,
+    failureClass: 'gate-failed',
+    operation: failureOperationForStage(configurationFailure.stage),
+    failureCode: configurationFailure.code,
+    cleanupCheckpoint: configurationFailure.cleanupCheckpoint,
+    cleanupServiceRole: configurationFailure.cleanupServiceRole,
+    cleanupMismatchCategory: configurationFailure.cleanupMismatchCategory,
+    cleanupStatus: 'unverified',
+    cleanupAttempted: true,
+  });
+  assert.deepEqual(configurationDiagnostic.cleanup_mismatch, {
+    service_role: 'radicale',
+    category: 'configuration',
+  });
+  assert.doesNotMatch(
+    JSON.stringify(configurationDiagnostic),
+    /SYNTHETIC_PRIVATE_VALUE|must-not-be-projected/u,
+  );
 
   const mismatchedPlan = runCleanup(false);
   const privateVolumeName = `${project}_private-inventory-value`;
@@ -2760,6 +2841,14 @@ test('success summaries require cleanup; failure summaries disclose only fixed f
     }),
     /Exact owned-resource cleanup: passed/u,
   );
+  assert.match(
+    formatSuccessSummary({
+      result: 'passed',
+      cleanup_verified: true,
+      source_sha: sourceSha,
+    }),
+    /Trusted tooling SHA: unavailable; reminder fixture SHA-256: unavailable; reminder contract SHA-256: unavailable/u,
+  );
 
   const summary = formatFailureSummary(
     sourceSha,
@@ -2805,7 +2894,7 @@ test('failure diagnostic writes fixed identity and cleanup fields outside task d
     );
     assert.equal(statSync(file).mode & 0o777, 0o600);
     const initial = JSON.parse(readFileSync(file, 'utf8'));
-    assert.equal(initial.schema_version, 12);
+    assert.equal(initial.schema_version, 14);
     assert.equal(initial.failed_phase, 'fixture-setup');
     assert.equal(initial.failure_class, 'gate-failed');
     assert.equal(initial.failure_operation, 'gate');
@@ -2884,6 +2973,10 @@ test('failure diagnostic writes fixed identity and cleanup fields outside task d
       phase: 'not-run',
       failure_check: 'not-applicable',
       cleanup_checkpoint: 'not-applicable',
+      cleanup_mismatch: {
+        service_role: 'not-applicable',
+        category: 'not-applicable',
+      },
     });
 
     assert.equal(
@@ -3306,6 +3399,31 @@ test('cleanup inventory diagnostics expose only allowlisted checkpoint identifie
   });
   assert.equal(expected.failure_check, 'cleanup-inventory');
   assert.equal(expected.cleanup_checkpoint, 'owned-volumes-after-containers');
+  assert.deepEqual(expected.cleanup_mismatch, {
+    service_role: 'not-applicable',
+    category: 'not-applicable',
+  });
+
+  const containerMismatch = formatFailureDiagnostic({
+    ...fields,
+    cleanupCheckpoint: 'container-plan',
+    cleanupServiceRole: 'radicale',
+    cleanupMismatchCategory: 'configuration',
+  });
+  assert.deepEqual(containerMismatch.cleanup_mismatch, {
+    service_role: 'radicale',
+    category: 'configuration',
+  });
+  const hostileMismatch = formatFailureDiagnostic({
+    ...fields,
+    cleanupCheckpoint: 'container-plan',
+    cleanupServiceRole: 'private service name',
+    cleanupMismatchCategory: 'token=private-value',
+  });
+  assert.deepEqual(hostileMismatch.cleanup_mismatch, {
+    service_role: 'unknown',
+    category: 'unknown',
+  });
 
   const privateInventory = {
     containers: [{ Id: 'private-container-id' }],
@@ -3328,6 +3446,39 @@ test('cleanup inventory diagnostics expose only allowlisted checkpoint identifie
     }).cleanup_checkpoint,
     'not-applicable',
   );
+  assert.deepEqual(
+    formatFailureDiagnostic({
+      ...fields,
+      phase: 'service-inventory',
+      failureCode: 'service-state-mismatch',
+      cleanupCheckpoint: 'container-plan',
+      cleanupServiceRole: 'radicale',
+      cleanupMismatchCategory: 'configuration',
+    }).cleanup_mismatch,
+    { service_role: 'not-applicable', category: 'not-applicable' },
+  );
+});
+
+test('failure provenance binds runtime source separately from trusted tooling and fixture hash', () => {
+  const toolingSha = '2'.repeat(40);
+  const fixtureSha256 = '3'.repeat(64);
+  const contractSha256 = '4'.repeat(64);
+  const diagnostic = formatFailureDiagnostic({
+    sourceSha,
+    workflowSha: toolingSha,
+    toolingSha,
+    reminderFixtureSha256: fixtureSha256,
+    reminderContractSha256: contractSha256,
+    phase: 'reminder-initial',
+    failureClass: 'gate-failed',
+    operation: 'reminder-initial-fixture',
+    failureCode: 'reminder-fixture-failed',
+  });
+  assert.equal(diagnostic.source_sha, sourceSha);
+  assert.equal(diagnostic.workflow_sha, toolingSha);
+  assert.equal(diagnostic.tooling_sha, toolingSha);
+  assert.equal(diagnostic.reminder_fixture_sha256, fixtureSha256);
+  assert.equal(diagnostic.reminder_contract_sha256, contractSha256);
 });
 
 test('failure diagnostics keep sanitized recovery failure separate from original failure', (t) => {
@@ -3350,6 +3501,10 @@ test('failure diagnostics keep sanitized recovery failure separate from original
     phase: 'failure-cleanup',
     failure_check: 'cleanup-inventory',
     cleanup_checkpoint: 'owned-volumes-after-containers',
+    cleanup_mismatch: {
+      service_role: 'not-applicable',
+      category: 'not-applicable',
+    },
   });
 
   const hostile = formatFailureDiagnostic({
@@ -3365,6 +3520,10 @@ test('failure diagnostics keep sanitized recovery failure separate from original
     phase: 'runner',
     failure_check: 'unknown',
     cleanup_checkpoint: 'not-applicable',
+    cleanup_mismatch: {
+      service_role: 'not-applicable',
+      category: 'not-applicable',
+    },
   });
   assert.doesNotMatch(
     JSON.stringify(hostile),
@@ -3713,6 +3872,13 @@ test('trusted sparse checkout can load its hosted tooling entry points', (t) => 
     sparsePaths.push(line.trim());
   }
   assert.ok(sparsePaths.includes('dev/element-acceptance-api-probe.mjs'));
+  assert.ok(sparsePaths.includes('dev/local-reminder-fixture.mjs'));
+  assert.ok(sparsePaths.includes('dev/local-reminder-fixture.test.mjs'));
+  assert.ok(
+    sparsePaths.includes(
+      'dev/fixtures/room-reminder-configuration-record.json',
+    ),
+  );
 
   const workspaceRoot = fileURLToPath(new URL('../', import.meta.url));
   const temporaryRoot = mkdtempSync(join(tmpdir(), 'mcw-tooling-sparse-'));
@@ -3726,6 +3892,40 @@ test('trusted sparse checkout can load its hosted tooling entry points', (t) => 
     mkdirSync(dirname(destinationPath), { recursive: true });
     copyFileSync(sourcePath, destinationPath);
   }
+
+  const reminderCommand = hostedReminderFixtureCommand(toolingRoot);
+  assert.equal(reminderCommand.executable, process.execPath);
+  assert.deepEqual(reminderCommand.args, [
+    join(toolingRoot, 'dev/local-reminder-fixture.mjs'),
+  ]);
+  assert.ok(!reminderCommand.args[0].startsWith(join(temporaryRoot, 'source')));
+  const fixtureRun = spawnSync(
+    reminderCommand.executable,
+    reminderCommand.args,
+    {
+      cwd: toolingRoot,
+      encoding: 'utf8',
+      env: { ELEMENT_ACCEPTANCE_REMINDER_FLOW: 'initial' },
+    },
+  );
+  assert.equal(fixtureRun.status, 1);
+  assert.deepEqual(JSON.parse(fixtureRun.stdout), {
+    phase: 'local-reminder-fixture',
+    flow: 'initial',
+    status: 'failed',
+    failurePhase: 'fixture',
+    markerWritten: false,
+    cleanup: {
+      reminderConfiguration: 'not-attempted',
+      event: 'not-attempted',
+    },
+  });
+  const fixtureTests = spawnSync(
+    process.execPath,
+    ['--test', join(toolingRoot, 'dev/local-reminder-fixture.test.mjs')],
+    { cwd: toolingRoot, encoding: 'utf8' },
+  );
+  assert.equal(fixtureTests.status, 0, fixtureTests.stderr);
 
   assert.ok(sparsePaths.includes('scripts/release-image-archive.mjs'));
 

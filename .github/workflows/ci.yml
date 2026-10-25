@@ -50,7 +50,9 @@ jobs:
         run: node --test scripts/release-image-archive.test.mjs
 
       - name: Test hosted Docker operator rehearsal guards
-        run: node --test scripts/hosted-operator-rehearsal.test.mjs
+        run: |
+          node --test scripts/hosted-operator-rehearsal.test.mjs
+          node --test dev/local-reminder-fixture.test.mjs
 
       - name: Test selected-pilot sidecar contract (synthetic, no host)
         run: node --test scripts/validate-pilot-sidecar.test.mjs

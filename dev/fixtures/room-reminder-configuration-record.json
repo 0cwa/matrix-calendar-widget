@@ -1,0 +1,10 @@
+{
+  "eventUid": "team-planning@example.test",
+  "recurrenceId": null,
+  "alarmUid": "master-alarm@example.test",
+  "target": {
+    "kind": "room"
+  },
+  "allDaySchedule": null,
+  "revision": 1
+}

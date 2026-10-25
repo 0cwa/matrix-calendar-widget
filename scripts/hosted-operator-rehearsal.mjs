@@ -310,6 +310,17 @@ const CLEANUP_EQUALITY_CHECKPOINTS = new Set([
   'network-plan',
   'final-inventory-baseline',
 ]);
+const CLEANUP_MISMATCH_CATEGORIES = new Set([
+  'identity',
+  'image',
+  'labels',
+  'configuration',
+  'runtime-state',
+  'mounts',
+  'host-config',
+  'network-settings',
+  'unknown',
+]);
 const PRIMARY_SERVICE_ROLES = Object.freeze([
   'synapse',
   'radicale',
@@ -1776,6 +1787,14 @@ class RehearsalFailure extends Error {
     )
       ? diagnostic.cleanupCheckpoint
       : undefined;
+    this.cleanupServiceRole = SERVICES.includes(diagnostic.cleanupServiceRole)
+      ? diagnostic.cleanupServiceRole
+      : undefined;
+    this.cleanupMismatchCategory = CLEANUP_MISMATCH_CATEGORIES.has(
+      diagnostic.cleanupMismatchCategory,
+    )
+      ? diagnostic.cleanupMismatchCategory
+      : undefined;
     this.startupStage = SAFE_STARTUP_STAGES.has(diagnostic.startupStage)
       ? diagnostic.startupStage
       : 'unknown';
@@ -2173,6 +2192,60 @@ function stableContainer(value) {
   };
 }
 
+function containerCleanupMismatch(actual, expected) {
+  const actualLabels = actual?.Config?.Labels ?? {};
+  const expectedLabels = expected?.Config?.Labels ?? {};
+  const expectedRole = expectedLabels[SERVICE_LABEL];
+  const actualRole = actualLabels[SERVICE_LABEL];
+  const serviceRole = SERVICES.includes(expectedRole)
+    ? expectedRole
+    : SERVICES.includes(actualRole)
+      ? actualRole
+      : 'unknown';
+  const groups = [
+    [
+      'identity',
+      { id: actual?.Id, name: actual?.Name },
+      { id: expected?.Id, name: expected?.Name },
+    ],
+    [
+      'image',
+      { image: actual?.Image, configured: actual?.Config?.Image },
+      { image: expected?.Image, configured: expected?.Config?.Image },
+    ],
+    ['labels', actualLabels, expectedLabels],
+    [
+      'configuration',
+      {
+        env: actual?.Config?.Env,
+        command: actual?.Config?.Cmd,
+        entrypoint: actual?.Config?.Entrypoint,
+        workingDirectory: actual?.Config?.WorkingDir,
+        user: actual?.Config?.User,
+      },
+      {
+        env: expected?.Config?.Env,
+        command: expected?.Config?.Cmd,
+        entrypoint: expected?.Config?.Entrypoint,
+        workingDirectory: expected?.Config?.WorkingDir,
+        user: expected?.Config?.User,
+      },
+    ],
+    ['runtime-state', actual?.State, expected?.State],
+    ['mounts', actual?.Mounts, expected?.Mounts],
+    ['host-config', actual?.HostConfig, expected?.HostConfig],
+    ['network-settings', actual?.NetworkSettings, expected?.NetworkSettings],
+  ];
+  const mismatch = groups.find(
+    ([, actualGroup, expectedGroup]) =>
+      JSON.stringify(actualGroup) !== JSON.stringify(expectedGroup),
+  );
+  return {
+    cleanupServiceRole: serviceRole,
+    cleanupMismatchCategory: mismatch?.[0] ?? 'unknown',
+  };
+}
+
 function stableNetwork(value) {
   return {
     Id: value.Id,
@@ -2271,6 +2344,26 @@ function projectForeignInventoryChange(value) {
     }
   }
   return result;
+}
+
+function projectCleanupMismatch(
+  failureCode,
+  cleanupCheckpoint,
+  serviceRole,
+  mismatchCategory,
+) {
+  if (
+    failureCode !== 'inventory-postcondition-failed' ||
+    cleanupCheckpoint !== 'container-plan'
+  ) {
+    return { service_role: 'not-applicable', category: 'not-applicable' };
+  }
+  return {
+    service_role: SERVICES.includes(serviceRole) ? serviceRole : 'unknown',
+    category: CLEANUP_MISMATCH_CATEGORIES.has(mismatchCategory)
+      ? mismatchCategory
+      : 'unknown',
+  };
 }
 
 function notApplicableForeignVolumeIdentityChange() {
@@ -3544,7 +3637,12 @@ function currentIdentity(resource, kind, runId, project) {
 
 function assertInventoryEqual(actual, expected, stage, cleanupCheckpoint) {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-    fail(stage, 'inventory-postcondition-failed', { cleanupCheckpoint });
+    fail(stage, 'inventory-postcondition-failed', {
+      cleanupCheckpoint,
+      ...(cleanupCheckpoint === 'container-plan'
+        ? containerCleanupMismatch(actual, expected)
+        : {}),
+    });
   }
 }
 
@@ -3722,10 +3820,19 @@ function assertStageSummary(pathName, expected) {
   }
 }
 
+export function hostedReminderFixtureCommand(toolingRoot) {
+  return {
+    executable: process.execPath,
+    args: [path.resolve(toolingRoot, 'dev/local-reminder-fixture.mjs')],
+  };
+}
+
 function safeReceipt({
   sourceSha,
   sourceTree,
   workflowSha,
+  reminderFixtureSha256,
+  reminderContractSha256,
   lock,
   apiCount,
   markerCounts,
@@ -3740,6 +3847,9 @@ function safeReceipt({
     source_sha: sourceSha,
     source_tree: sourceTree,
     workflow_sha: workflowSha,
+    tooling_sha: workflowSha,
+    reminder_fixture_sha256: reminderFixtureSha256,
+    reminder_contract_sha256: reminderContractSha256,
     platform: 'linux/amd64',
     image_lock: imageEvidence(lock),
     api_cases: apiCount,
@@ -3941,10 +4051,24 @@ export function formatSuccessSummary(receipt) {
   ) {
     throw new RehearsalFailure('receipt-publish', 'cleanup-not-verified');
   }
+  const toolingSha = /^[0-9a-f]{40}$/u.test(receipt.tooling_sha ?? '')
+    ? receipt.tooling_sha
+    : 'unavailable';
+  const fixtureSha256 = /^[0-9a-f]{64}$/u.test(
+    receipt.reminder_fixture_sha256 ?? '',
+  )
+    ? receipt.reminder_fixture_sha256
+    : 'unavailable';
+  const contractSha256 = /^[0-9a-f]{64}$/u.test(
+    receipt.reminder_contract_sha256 ?? '',
+  )
+    ? receipt.reminder_contract_sha256
+    : 'unavailable';
   return [
     '## Hosted Docker operator rehearsal',
     '',
     `- Result: passed for source ${receipt.source_sha} on linux/amd64.`,
+    `- Trusted tooling SHA: ${toolingSha}; reminder fixture SHA-256: ${fixtureSha256}; reminder contract SHA-256: ${contractSha256}.`,
     '- Phase: complete; failure phase: none.',
     '- Source-built images: 3 verified IDs; fixture images: 2 immutable digests locked.',
     '- API authorization and CRUD cases: 12/12 passed.',
@@ -3980,6 +4104,9 @@ export function formatFailureSummary(sourceSha, phase, cleanup) {
 export function formatFailureDiagnostic({
   sourceSha,
   workflowSha,
+  toolingSha,
+  reminderFixtureSha256,
+  reminderContractSha256,
   runId,
   attempt,
   phase,
@@ -3992,6 +4119,8 @@ export function formatFailureDiagnostic({
   cleanupAttempted,
   failureCode,
   cleanupCheckpoint,
+  cleanupServiceRole,
+  cleanupMismatchCategory,
   recoveryFailure,
   serviceInventory,
   serviceRunId,
@@ -4045,6 +4174,12 @@ export function formatFailureDiagnostic({
         ? cleanupCheckpoint
         : 'unknown'
       : 'not-applicable';
+  const safeCleanupMismatch = projectCleanupMismatch(
+    failureCode,
+    cleanupCheckpoint,
+    cleanupServiceRole,
+    cleanupMismatchCategory,
+  );
   const safeRecoveryFailure = recoveryFailure
     ? {
         phase: SAFE_PHASES.has(recoveryFailure.phase)
@@ -4060,11 +4195,21 @@ export function formatFailureDiagnostic({
               ? recoveryFailure.cleanupCheckpoint
               : 'unknown'
             : 'not-applicable',
+        cleanup_mismatch: projectCleanupMismatch(
+          recoveryFailure.failureCode,
+          recoveryFailure.cleanupCheckpoint,
+          recoveryFailure.cleanupServiceRole,
+          recoveryFailure.cleanupMismatchCategory,
+        ),
       }
     : {
         phase: 'not-run',
         failure_check: 'not-applicable',
         cleanup_checkpoint: 'not-applicable',
+        cleanup_mismatch: {
+          service_role: 'not-applicable',
+          category: 'not-applicable',
+        },
       };
   const safeListenerScope = {
     callsite: ['primary', 'paired-restore'].includes(listenerScope?.site)
@@ -4088,7 +4233,7 @@ export function formatFailureDiagnostic({
   );
 
   return {
-    schema_version: 12,
+    schema_version: 14,
     result: 'failed',
     phase: 'hosted-docker-operator-v5',
     failed_phase: SAFE_PHASES.has(phase) ? phase : 'runner',
@@ -4098,6 +4243,7 @@ export function formatFailureDiagnostic({
     failure_operation: safeOperation,
     failure_check: safeFailureCheck,
     cleanup_checkpoint: safeCleanupCheckpoint,
+    cleanup_mismatch: safeCleanupMismatch,
     recovery_failure: safeRecoveryFailure,
     service_roles: projectPrimaryServiceInventory(serviceInventory, {
       runId: serviceRunId,
@@ -4108,6 +4254,9 @@ export function formatFailureDiagnostic({
     child_exit_code: safeChildExitCode,
     source_sha: safe(sourceSha, /^[0-9a-f]{40}$/u),
     workflow_sha: safe(workflowSha, /^[0-9a-f]{40}$/u),
+    tooling_sha: safe(toolingSha, /^[0-9a-f]{40}$/u),
+    reminder_fixture_sha256: safe(reminderFixtureSha256, /^[0-9a-f]{64}$/u),
+    reminder_contract_sha256: safe(reminderContractSha256, /^[0-9a-f]{64}$/u),
     run_id: safe(runId, /^\d{1,20}$/u),
     attempt: safe(attempt, /^\d{1,4}$/u),
     source_image_ids: safeImageIds,
@@ -4247,6 +4396,10 @@ export function writeFailureDiagnostic(runnerTemp, fields, update = false) {
             phase: 'not-run',
             failure_check: 'not-applicable',
             cleanup_checkpoint: 'not-applicable',
+            cleanup_mismatch: {
+              service_role: 'not-applicable',
+              category: 'not-applicable',
+            },
           }) && diagnostic.recovery_failure?.phase !== 'not-run';
       if (
         ![
@@ -4254,6 +4407,9 @@ export function writeFailureDiagnostic(runnerTemp, fields, update = false) {
           'attempt',
           'source_sha',
           'workflow_sha',
+          'tooling_sha',
+          'reminder_fixture_sha256',
+          'reminder_contract_sha256',
           'failed_phase',
           'failure_class',
           'failure_operation',
@@ -4262,6 +4418,8 @@ export function writeFailureDiagnostic(runnerTemp, fields, update = false) {
           'startup_stage',
           'child_exit_code',
         ].every((key) => previous?.[key] === diagnostic[key]) ||
+        JSON.stringify(previous?.cleanup_mismatch) !==
+          JSON.stringify(diagnostic.cleanup_mismatch) ||
         JSON.stringify(previous?.service_roles) !==
           JSON.stringify(diagnostic.service_roles) ||
         JSON.stringify(previous?.listener_scope) !==
@@ -4384,7 +4542,13 @@ async function main() {
         .digest('hex')
         .slice(0, 16);
     }
-    Object.assign(failureIdentity, { sourceSha, workflowSha, runId, attempt });
+    Object.assign(failureIdentity, {
+      sourceSha,
+      workflowSha,
+      toolingSha: workflowSha,
+      runId,
+      attempt,
+    });
     const project = `mcw-p0-${id}`;
     diagnosticRunId = id;
     diagnosticProject = project;
@@ -4432,12 +4596,38 @@ async function main() {
         fail('source-binding', 'source-not-dispatch-ancestor');
       }
     }
+    const reminderFixtureCommand = hostedReminderFixtureCommand(toolingRoot);
+    const reminderFixturePath = reminderFixtureCommand.args[0];
+    const reminderContractPath = path.join(
+      toolingRoot,
+      'dev/fixtures/room-reminder-configuration-record.json',
+    );
+    const reminderFixtureStat = lstatSync(reminderFixturePath, {
+      throwIfNoEntry: false,
+    });
+    const reminderContractStat = lstatSync(reminderContractPath, {
+      throwIfNoEntry: false,
+    });
+    if (
+      realpathSync(toolingRoot) !== toolingRoot ||
+      !reminderFixtureStat ||
+      reminderFixtureStat.isSymbolicLink() ||
+      !reminderFixtureStat.isFile() ||
+      realpathSync(reminderFixturePath) !== reminderFixturePath ||
+      !reminderContractStat ||
+      reminderContractStat.isSymbolicLink() ||
+      !reminderContractStat.isFile() ||
+      realpathSync(reminderContractPath) !== reminderContractPath
+    ) {
+      fail('source-binding', 'tooling-helper-invalid');
+    }
+    failureIdentity.reminderFixtureSha256 = sha256File(reminderFixturePath);
+    failureIdentity.reminderContractSha256 = sha256File(reminderContractPath);
     for (const helper of [
       'dev/up.sh',
       'dev/element-acceptance-setup.mjs',
       'dev/element-acceptance-overrides.mjs',
       'dev/element-acceptance-api-probe.mjs',
-      'dev/local-reminder-fixture.mjs',
       'dev/element-acceptance-reminder-restore.mjs',
       'dev/element-acceptance-local-prebuilt.compose.yaml',
       'dev/validate-element-acceptance-compose.mjs',
@@ -4851,8 +5041,8 @@ async function main() {
     markers = assertReminderResult(
       runFixtureTask(
         'reminder-initial-fixture',
-        process.execPath,
-        [path.join(sourceRoot, 'dev/local-reminder-fixture.mjs')],
+        reminderFixtureCommand.executable,
+        [...reminderFixtureCommand.args],
         {
           ELEMENT_ACCEPTANCE_REMINDER_FIXTURE: '1',
           ELEMENT_ACCEPTANCE_REMINDER_FLOW: 'initial',
@@ -4880,8 +5070,8 @@ async function main() {
     markers = assertReminderResult(
       runFixtureTask(
         'reminder-restart-fixture',
-        process.execPath,
-        [path.join(sourceRoot, 'dev/local-reminder-fixture.mjs')],
+        reminderFixtureCommand.executable,
+        [...reminderFixtureCommand.args],
         {
           ELEMENT_ACCEPTANCE_REMINDER_FIXTURE: '1',
           ELEMENT_ACCEPTANCE_REMINDER_FLOW: 'restart',
@@ -4943,8 +5133,8 @@ async function main() {
     markers = assertReminderResult(
       runFixtureTask(
         'reminder-restore-fixture',
-        process.execPath,
-        [path.join(sourceRoot, 'dev/local-reminder-fixture.mjs')],
+        reminderFixtureCommand.executable,
+        [...reminderFixtureCommand.args],
         {
           ELEMENT_ACCEPTANCE_REMINDER_FIXTURE: '1',
           ELEMENT_ACCEPTANCE_REMINDER_FLOW: 'restore',
@@ -4977,6 +5167,8 @@ async function main() {
       sourceSha,
       sourceTree: checkoutTree,
       workflowSha,
+      reminderFixtureSha256: failureIdentity.reminderFixtureSha256,
+      reminderContractSha256: failureIdentity.reminderContractSha256,
       lock,
       apiCount: API_STAGES.length,
       markerCounts: [0, 1, 2, 3],
@@ -5078,6 +5270,14 @@ async function main() {
       failureCode: error instanceof RehearsalFailure ? error.code : 'unknown',
       cleanupCheckpoint:
         error instanceof RehearsalFailure ? error.cleanupCheckpoint : undefined,
+      cleanupServiceRole:
+        error instanceof RehearsalFailure
+          ? error.cleanupServiceRole
+          : undefined,
+      cleanupMismatchCategory:
+        error instanceof RehearsalFailure
+          ? error.cleanupMismatchCategory
+          : undefined,
       foreignInventoryChange:
         error instanceof RehearsalFailure
           ? error.foreignInventoryChange
@@ -5151,6 +5351,14 @@ async function main() {
           cleanupCheckpoint:
             cleanupError instanceof RehearsalFailure
               ? cleanupError.cleanupCheckpoint
+              : undefined,
+          cleanupServiceRole:
+            cleanupError instanceof RehearsalFailure
+              ? cleanupError.cleanupServiceRole
+              : undefined,
+          cleanupMismatchCategory:
+            cleanupError instanceof RehearsalFailure
+              ? cleanupError.cleanupMismatchCategory
               : undefined,
         };
         if (

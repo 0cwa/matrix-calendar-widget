@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import {
+  isRoomReminderConfigurationRecord,
   runLocalReminderFixture,
   writeMarkerTitles,
 } from './local-reminder-fixture.mjs';
@@ -23,9 +24,18 @@ const SERVICE_TOKEN = 'private-service-access-token';
 const OPENID_TOKEN = 'private-openid-assertion';
 const ETAG = '"strong-current-etag"';
 const TITLE = 'Reminder acceptance 12345678-1234-1234-1234-123456789abc';
+const ROOM_REMINDER_CONFIGURATION_RECORD_FIXTURE = JSON.parse(
+  readFileSync(
+    new URL(
+      './fixtures/room-reminder-configuration-record.json',
+      import.meta.url,
+    ),
+    'utf8',
+  ),
+);
 const FOREIGN_CONFIG = {
+  ...ROOM_REMINDER_CONFIGURATION_RECORD_FIXTURE,
   eventUid: 'foreign-event-uid',
-  recurrenceId: null,
   alarmUid: 'foreign-alarm-uid',
 };
 
@@ -75,10 +85,12 @@ function createClient({
   managerPower = 100,
   alarmMinutes = 1,
   configWriteStatus = 200,
+  configWriteResponseOverride,
   configDeleteStatus = 200,
   eventDeleteStatus = 200,
   eventCreateResponseLost = false,
   configWriteResponseLost = false,
+  configReadbackRows,
   foreignEventOnReadback = false,
   eventHost = 'radicale:5232',
   contextUserId = MEMBER_ID,
@@ -222,16 +234,16 @@ function createClient({
         return jsonResponse({ code: 'not-permitted' }, configWriteStatus);
       }
       configRows.push({
+        ...ROOM_REMINDER_CONFIGURATION_RECORD_FIXTURE,
         eventUid: createdEvent.uid,
-        recurrenceId: null,
         alarmUid: 'synthetic-alarm-uid',
       });
       if (configWriteResponseLost) throw new Error('synthetic lost response');
-      return jsonResponse(configRows.at(-1));
+      return jsonResponse(configWriteResponseOverride ?? configRows.at(-1));
     }
     if (url.pathname.endsWith('/reminders') && method === 'GET') {
       return jsonResponse({
-        items: configReadbackValid ? configRows : [],
+        items: configReadbackValid ? (configReadbackRows ?? configRows) : [],
       });
     }
     if (url.pathname.endsWith('/reminders') && method === 'DELETE') {
@@ -305,6 +317,40 @@ function createClient({
     },
   };
 }
+
+test('validates the exact six-field room reminder record returned by the server', () => {
+  assert.equal(
+    isRoomReminderConfigurationRecord(
+      ROOM_REMINDER_CONFIGURATION_RECORD_FIXTURE,
+    ),
+    true,
+  );
+  for (const malformed of [
+    Object.fromEntries(
+      Object.entries(ROOM_REMINDER_CONFIGURATION_RECORD_FIXTURE).filter(
+        ([key]) => key !== 'revision',
+      ),
+    ),
+    {
+      ...ROOM_REMINDER_CONFIGURATION_RECORD_FIXTURE,
+      unexpected: 'field',
+    },
+    {
+      ...ROOM_REMINDER_CONFIGURATION_RECORD_FIXTURE,
+      revision: 0,
+    },
+    {
+      ...ROOM_REMINDER_CONFIGURATION_RECORD_FIXTURE,
+      target: { kind: 'room', userIds: [] },
+    },
+    {
+      ...ROOM_REMINDER_CONFIGURATION_RECORD_FIXTURE,
+      allDaySchedule: { daysBefore: -1, localTime: '09:00', timezone: 'UTC' },
+    },
+  ]) {
+    assert.equal(isRoomReminderConfigurationRecord(malformed), false);
+  }
+});
 
 function execute(files, client, uuid = '12345678-1234-1234-1234-123456789abc') {
   return runLocalReminderFixture({
@@ -510,6 +556,39 @@ test('requires the exact room configuration to read back before writing a marker
     );
   } finally {
     files.cleanup();
+  }
+});
+
+test('rejects the former truncated DTO at upsert and list readback', async (t) => {
+  const truncated = {
+    eventUid: 'local-reminder-12345678-1234-1234-1234-123456789abc',
+    recurrenceId: null,
+    alarmUid: 'synthetic-alarm-uid',
+  };
+  for (const [name, options, expectedPhase] of [
+    [
+      'upsert response',
+      { configWriteResponseOverride: truncated },
+      'reminder-config-write',
+    ],
+    [
+      'paged readback row',
+      { configReadbackRows: [truncated] },
+      'reminder-config-readback',
+    ],
+  ]) {
+    await t.test(name, async () => {
+      const files = fixtureFiles();
+      const client = createClient(options);
+      try {
+        const result = await execute(files, client);
+        assert.equal(result.status, 'failed');
+        assert.equal(result.failurePhase, expectedPhase);
+        assert.equal(result.markerWritten, false);
+      } finally {
+        files.cleanup();
+      }
+    });
   }
 });
 

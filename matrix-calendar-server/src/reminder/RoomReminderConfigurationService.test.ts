@@ -39,6 +39,15 @@ const serviceIdentity: RoomCalendarPrincipalIdentity = Object.freeze({
   userId: '@calendar-service:example.test',
 });
 const alarmUid = 'master-alarm@example.test';
+const reminderConfigurationRecordFixture = JSON.parse(
+  fs.readFileSync(
+    path.resolve(
+      __dirname,
+      '../../../dev/fixtures/room-reminder-configuration-record.json',
+    ),
+    'utf8',
+  ),
+);
 const icalendar = fs
   .readFileSync(
     path.resolve(
@@ -479,14 +488,7 @@ describe('RoomReminderConfigurationService', () => {
         revision: 1,
       },
     );
-    expect(result).toEqual({
-      eventUid: 'team-planning@example.test',
-      recurrenceId: null,
-      alarmUid,
-      target: { kind: 'room' },
-      allDaySchedule: null,
-      revision: 1,
-    });
+    expect(result).toEqual(reminderConfigurationRecordFixture);
     expect(JSON.stringify(result)).not.toContain('private');
     expect(
       JSON.stringify(compareAndUpsertConfiguration.mock.calls),
