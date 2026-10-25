@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import importlib.util
 import json
 import os
@@ -184,6 +186,22 @@ class PrivateClientThunderbirdWorkerTests(unittest.TestCase):
         value = json.loads(completed.stdout)
         self.assertIsInstance(value, dict)
         return value
+
+    def test_native_run_fails_closed_when_probe_config_is_missing(self) -> None:
+        output = io.StringIO()
+        with patch.dict(os.environ, {}, clear=True):
+            with contextlib.redirect_stdout(output):
+                result = self.worker.main()
+
+        self.assertEqual(result, 1)
+        self.assertEqual(
+            json.loads(output.getvalue()),
+            {
+                "failure_class": "native_probe_config_missing",
+                "failure_stage": "worker_setup",
+                "status": "failed",
+            },
+        )
 
     def test_refresh_waits_for_cache_load_before_edit_script_runs(self) -> None:
         value = self.run_script_scenario("delayed_load")
