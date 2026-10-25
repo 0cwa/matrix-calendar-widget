@@ -95,6 +95,10 @@ test('both fixture jobs select one strict process-wide principal mode', () => {
     /case "\$PRINCIPAL_MODE" in[\s\S]*?appservice\)[\s\S]*?bot-account\)[\s\S]*?\*\)/u,
   );
   assert.match(runner, /ROOM_CALENDAR_PRINCIPAL_MODE=\$PRINCIPAL_MODE/u);
+  assert.match(
+    runner,
+    /node dev\/element-reminder-all-day-readback\.test\.mjs/u,
+  );
   assert.match(runner, /node --test dev\/element-acceptance-setup\.test\.mjs/u);
   assert.match(
     runner,
