@@ -49,7 +49,8 @@ path for this state, so validate a candidate against an isolated restore.
 disabled and no reminder-store schema migration runs. If configured, the
 server applies numbered migrations at startup to the separate
 `matrix_calendar` schema ([store implementation](../matrix-calendar-server/src/reminder/PostgresRoomReminderStore.ts),
-[startup wiring](../matrix-calendar-server/src/app.module.ts)). The current merged reminder implementation contains migration version 1. It creates
+[startup wiring](../matrix-calendar-server/src/app.module.ts)). The current
+source supports reminder migration version 4. Its schema includes
 `schema_migrations`, `room_reminder_configurations`, `reminder_deliveries`,
 and their indexes. It stores identifiers and delivery state, not event titles
 or bodies. Record the exact before/after schema versions for every release
@@ -64,6 +65,14 @@ Binding and reminder stores may share an application-owned database, but
 neither substitutes for the other. Record both schema versions and include
 both in recovery. If they use different databases, the single-database backup
 coordinator requires a separate operator procedure for the second database.
+
+**Optional private-client PostgreSQL.** The independently gated private
+CalDAV-client store uses `MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_URL` and the
+`matrix_calendar_private_clients` schema. Its current source supports migration
+version 2. The server uses this store only when
+`MATRIX_CALENDAR_PRIVATE_CLIENTS_ENABLED=true` and the database URL is
+configured. Back up and record this schema separately when it uses a different
+database.
 
 **Public share tokens and signing key.** Public calendar feeds store native
 share metadata inside Radicale `/data`; the gateway's dedicated signing key
@@ -93,6 +102,47 @@ transactionally. Startup fails when the database or migration cannot be used. It
 also rejects a database whose recorded migration version is newer than the
 server supports. Do not hand-edit `schema_migrations`, run copied DDL, or treat
 startup migration failure as permission to downgrade the database.
+
+### Run PostgreSQL migrations without starting the Matrix application
+
+The server image contains the compiled PostgreSQL stores and their shared TLS
+helper under `/app/lib/src`, with Postgres.js under `/app/node_modules`. A
+standalone tool can load those existing modules while bypassing Nest and Matrix
+startup. Use the tool from the same reviewed source as the server image, mount
+the tool file read-only, and invoke Node as the container entrypoint so the
+server command does not run:
+
+```bash
+docker run --rm \
+  --network '<database-network>' \
+  --entrypoint node \
+  --mount type=bind,src='/absolute/path/matrix-calendar-migrate-postgres.mjs',dst=/tool/matrix-calendar-migrate-postgres.mjs,readonly \
+  --env MATRIX_CALENDAR_REMINDER_DATABASE_URL \
+  --env MATRIX_CALENDAR_REMINDER_DATABASE_TLS_MODE \
+  '<exact-server-image>' \
+  /tool/matrix-calendar-migrate-postgres.mjs \
+  --runtime-root /app --store reminders
+```
+
+Supply the selected store's URL and TLS mode through the operator's secret
+mechanism. Do not put database URLs in command arguments or logs. Select one or
+more stores explicitly with repeated `--store` options: `reminders`,
+`bindings`, or `private-clients`. `--store all` deliberately selects all three
+and requires a configured URL for each. Private clients also require
+`MATRIX_CALENDAR_PRIVATE_CLIENTS_ENABLED=true`. The command validates all
+selected URLs, TLS modes, selectors, and the private-client gate before opening
+any PostgreSQL pool; it does not inspect unrelated store configuration. Each
+selected store is migrated sequentially and its pool is closed on success or
+failure. The command reports only the selected store and failed stage, never
+the URL or driver exception.
+
+Run it only after confirming the target database and role, quiescing writers,
+and taking the separately coordinated PostgreSQL backup described above. The
+tool uses the same canonical store adapters as server startup, including their
+transaction locks and future-schema rejection. A successful result applies
+database schema migrations only; it does not start Matrix, migrate Matrix room
+state, migrate Radicale data, enable a feature gate, or provide a downgrade.
+The regular server startup continues to run its configured migrations.
 
 ADR044 adds reminder-store migrations 2, 3, and 4. Version 2 adds a Matrix target
 with a whole-room default, a nullable all-day schedule, and a configuration

@@ -12,7 +12,7 @@ This page records the container behavior currently present in the repository at 
 - [etke and Matrix Docker Ansible deployment](#etke-and-matrix-docker-ansible-deployment)
 - [Operator-run Compose sidecar example](#operator-run-compose-sidecar-example)
 - [Public calendar feed ingress and recovery](#public-calendar-feed-ingress-and-recovery)
-- [Optional reminder PostgreSQL database](#optional-reminder-postgresql-database)
+- [Optional application PostgreSQL stores](#optional-application-postgresql-stores)
 
 ## Build contracts
 
@@ -626,7 +626,7 @@ no-store responses. These source controls do not establish a target's proxy,
 client-cache behavior, or recovery readiness. One publication-management
 writer is required; locks are process-local.
 
-## Optional reminder PostgreSQL database
+## Optional application PostgreSQL stores
 
 The binding store from moderator setup is independently configured through
 `MATRIX_CALENDAR_BINDING_DATABASE_URL` and
@@ -645,6 +645,13 @@ Provide the URL through the operator's secret mechanism; do not reuse Synapse's
 database, schema, role, or credentials. The application does not create the
 database or role.
 
+Private CalDAV clients use the separately gated store in
+`matrix_calendar_private_clients`; it is active only when
+`MATRIX_CALENDAR_PRIVATE_CLIENTS_ENABLED=true` and its database URL is
+configured. Each store has its own URL and TLS-mode settings, and may share an
+application-owned PostgreSQL database. When they use different databases,
+back up and restore each one separately.
+
 Connections require verified TLS by default. Use a certificate whose DNS name
 or IP subject alternative name matches the configured endpoint; the driver uses
 Node.js's system trust store. This Compose example exposes no custom CA setting.
@@ -655,6 +662,16 @@ operator-controlled isolated database network. It disables TLS explicitly and
 must not be used across an untrusted network. The CI localhost PostgreSQL
 contract sets this exception only for its disposable test database. No
 production database TLS connection or etke host deployment has been validated.
+Binding and private-client stores use the corresponding
+`MATRIX_CALENDAR_BINDING_DATABASE_TLS_MODE` and
+`MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_TLS_MODE` settings, with the same
+verified-TLS default and explicit `trusted-private-network` exception.
+
+For a one-shot migration without launching Nest or Matrix, the server image's
+compiled store adapters are available under `/app/lib/src`. The tool is a
+read-only mounted script that runs with Node from the exact reviewed server
+image; its selector, environment requirements, and operating steps are in the
+[upgrade and migration runbook](./upgrade-migration.md#run-postgresql-migrations-without-starting-the-matrix-application).
 
 ### First initialization with file-backed secrets
 

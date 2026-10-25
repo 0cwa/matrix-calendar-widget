@@ -74,6 +74,11 @@ Tracked in [#382](https://github.com/0cwa/matrix-calendar-widget/issues/382):
 
 ## Repository maintainability
 
+- [ ] Complete #418's startup-independent PostgreSQL migration CLI. The tool
+      selects reminder, binding, and private-client stores explicitly and
+      reuses the compiled canonical migrators. Preflight/lifecycle tests and an
+      isolated PostgreSQL process contract are in place; close the item after
+      that real-database CI contract passes. See the [upgrade runbook](./upgrade-migration.md#run-postgresql-migrations-without-starting-the-matrix-application).
 - [x] Gate Desktop final route-policy evidence on successful recording of every
       earlier journey phase; preserve an eligible route-policy failure as a
       failed outcome. Issue #409.

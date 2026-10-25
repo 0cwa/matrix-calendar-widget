@@ -59,7 +59,7 @@
     "docs:test": "node --test scripts/check-docs.test.mjs",
     "translate": "yarn workspaces run translate",
     "e2e": "yarn workspace e2e e2e",
-    "ci": "yarn docs:test && yarn docs:check && yarn prettier:check && yarn depcheck && yarn lint && yarn tsc && yarn workspace @matrix-calendar-widget/ical-timezones build && yarn workspace @matrix-calendar-widget/calendar build && yarn test:all && yarn build",
+    "ci": "yarn docs:test && yarn docs:check && yarn prettier:check && yarn depcheck && yarn lint && yarn tsc && yarn workspace @matrix-calendar-widget/ical-timezones build && yarn workspace @matrix-calendar-widget/calendar build && yarn test:all && yarn workspace @matrix-calendar-widget/server test:migrate-postgres-cli && yarn build",
     "dev:services:up": "bash dev/up.sh",
     "dev:services:down": "docker compose -f dev/compose.yaml down",
     "dev:services:reset": "docker compose -f dev/compose.yaml down -v --remove-orphans"
