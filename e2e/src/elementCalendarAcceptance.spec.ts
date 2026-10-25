@@ -10569,8 +10569,6 @@ function requirePrivateUiCheckpointJournal<T>(journal: T | undefined): T {
 
 if (process.env.ELEMENT_ACCEPTANCE_PRIVATE_UI === 'true') {
   test.describe('private calendar app acceptance', () => {
-    test.use({ trace: 'off', video: 'off', screenshot: 'off' });
-
     let privateUiJournal:
       | ReturnType<typeof createPrivateUiCheckpointJournal>
       | undefined;
