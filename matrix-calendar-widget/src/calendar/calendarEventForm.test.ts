@@ -18,9 +18,11 @@ import {
   Calendar,
   CalendarEvent,
   calendarLocalDateTimeToUnixMillis,
+  calendarUnixMillisToLocalDateTime,
   isCalendarLocalDateTimeUnambiguous,
 } from '@matrix-calendar-widget/calendar';
-import { DateTime } from 'luxon';
+import { DateTime, IANAZone, Settings } from 'luxon';
+import { vi } from 'vitest';
 import {
   planReminderAllDayEvent,
   planReminderAllDaySchedule,
@@ -45,6 +47,19 @@ const calendar: Calendar = {
   name: 'Team calendar',
   timezone: 'Europe/Stockholm',
 };
+
+function withLuxonNow<T>(now: number, callback: () => T): T {
+  const previousNow = Settings.now;
+  Settings.now = () => now;
+  Settings.resetCaches();
+
+  try {
+    return callback();
+  } finally {
+    Settings.now = previousNow;
+    Settings.resetCaches();
+  }
+}
 
 describe('calendar event form adapter', () => {
   it('tracks occurrence text source presence separately from equal values', () => {
@@ -379,47 +394,159 @@ describe('calendar event form adapter', () => {
       advanced: true,
     },
   ])('creates a valid one-hour default for $name', (scenario) => {
-    const now = DateTime.fromISO(scenario.now, { zone: 'UTC' });
-    const values = createCalendarEventFormValues(
-      { ...calendar, timezone: scenario.timezone },
-      now,
+    const ambientClocks = [
+      '2026-01-15T12:00:00Z',
+      '2026-07-15T12:00:00Z',
+      '2026-10-25T00:11:00Z',
+      '2026-10-25T01:11:00Z',
+    ];
+    const valuesByAmbientClock = ambientClocks.map((ambientClock) =>
+      withLuxonNow(Date.parse(ambientClock), () => {
+        const now = DateTime.fromISO(scenario.now, { zone: 'UTC' });
+        return createCalendarEventFormValues(
+          { ...calendar, timezone: scenario.timezone },
+          now,
+        );
+      }),
     );
+    const values = valuesByAmbientClock[0]!;
+    const now = DateTime.fromISO(scenario.now, { zone: 'UTC' });
     const form = { ...values, title: 'DST event' };
 
+    expect(valuesByAmbientClock.map(({ start, end }) => [start, end])).toEqual(
+      ambientClocks.map(() => [scenario.start, scenario.end]),
+    );
     expect(values.start).toBe(scenario.start);
     expect(values.end).toBe(scenario.end);
     expect(validateCalendarEventForm(form)).toBeUndefined();
-    expect(calendarEventInputFromForm(form, 'dst@example.test').timing).toEqual(
-      {
-        type: 'timed',
-        start: {
-          type: 'zoned',
-          local: scenario.start,
-          timezone: scenario.timezone,
-        },
-        end: {
-          type: 'zoned',
-          local: scenario.end,
-          timezone: scenario.timezone,
-        },
+    const submittedTiming = calendarEventInputFromForm(
+      form,
+      'dst@example.test',
+    ).timing;
+    expect(submittedTiming).toEqual({
+      type: 'timed',
+      start: {
+        type: 'zoned',
+        local: scenario.start,
+        timezone: scenario.timezone,
       },
+      end: {
+        type: 'zoned',
+        local: scenario.end,
+        timezone: scenario.timezone,
+      },
+    });
+    if (submittedTiming.type !== 'timed') {
+      throw new Error('Expected a timed event submission');
+    }
+
+    const nowMillis = now.toMillis();
+    const nowWallMillis = DateTime.fromISO(scenario.nowLocal, {
+      zone: 'UTC',
+    }).toMillis();
+    const startMillis = calendarLocalDateTimeToUnixMillis(
+      submittedTiming.start.local,
+      scenario.timezone,
+    );
+    const endMillis = calendarLocalDateTimeToUnixMillis(
+      submittedTiming.end.local,
+      scenario.timezone,
     );
 
-    const parsedStart = DateTime.fromISO(values.start, {
-      zone: scenario.timezone,
-    });
-    const parsedEnd = DateTime.fromISO(values.end, {
-      zone: scenario.timezone,
-    });
-    const nowInTimezone = now.setZone(scenario.timezone);
-    expect(nowInTimezone.toFormat("yyyy-MM-dd'T'HH:mm")).toBe(
-      scenario.nowLocal,
+    expect(
+      calendarUnixMillisToLocalDateTime(nowMillis, scenario.timezone).slice(
+        0,
+        16,
+      ),
+    ).toBe(scenario.nowLocal);
+    expect((nowWallMillis - nowMillis) / 60_000).toBe(
+      scenario.nowOffsetMinutes,
     );
-    expect(nowInTimezone.offset).toBe(scenario.nowOffsetMinutes);
-    expect(parsedStart.toMillis()).toBe(Date.parse(scenario.startInstant));
-    expect(parsedEnd.toMillis()).toBe(Date.parse(scenario.endInstant));
-    expect(parsedEnd.diff(parsedStart, 'hours').hours).toBe(1);
-    expect(parsedStart.toMillis() > now.toMillis()).toBe(scenario.advanced);
+    expect(
+      isCalendarLocalDateTimeUnambiguous(values.start, scenario.timezone),
+    ).toBe(true);
+    expect(
+      isCalendarLocalDateTimeUnambiguous(values.end, scenario.timezone),
+    ).toBe(true);
+    expect(startMillis).toBe(Date.parse(scenario.startInstant));
+    expect(endMillis).toBe(Date.parse(scenario.endInstant));
+    expect(endMillis - startMillis).toBe(60 * 60 * 1000);
+    expect(endMillis).toBeGreaterThan(nowMillis);
+    expect(startMillis > nowMillis).toBe(scenario.advanced);
+  });
+
+  it('uses bundled timezone rules when browser offsets disagree', () => {
+    const rollbackInstant = Date.parse('2026-10-25T01:00:00Z');
+    const originalOffset = IANAZone.prototype.offset;
+    const browserTimezoneOffset = vi
+      .spyOn(IANAZone.prototype, 'offset')
+      .mockImplementation(function (this: IANAZone, timestamp: number) {
+        const browserOffset = originalOffset.call(this, timestamp);
+        return this.name === 'Europe/Stockholm' && timestamp >= rollbackInstant
+          ? browserOffset + 60
+          : browserOffset;
+      });
+
+    try {
+      withLuxonNow(Date.parse('2026-10-25T00:11:00Z'), () => {
+        const values = createCalendarEventFormValues(
+          calendar,
+          DateTime.fromISO('2026-10-25T00:11:00Z', { zone: 'UTC' }),
+        );
+        const form = { ...values, title: 'Bundled timezone event' };
+        const timing = calendarEventInputFromForm(
+          form,
+          'bundled-timezone@example.test',
+        ).timing;
+
+        expect([values.start, values.end]).toEqual([
+          '2026-10-25T03:00',
+          '2026-10-25T04:00',
+        ]);
+        expect(validateCalendarEventForm(form)).toBeUndefined();
+        expect(timing).toEqual({
+          type: 'timed',
+          start: {
+            type: 'zoned',
+            local: '2026-10-25T03:00',
+            timezone: 'Europe/Stockholm',
+          },
+          end: {
+            type: 'zoned',
+            local: '2026-10-25T04:00',
+            timezone: 'Europe/Stockholm',
+          },
+        });
+        if (timing.type !== 'timed') {
+          throw new Error('Expected a timed event submission');
+        }
+        expect(
+          DateTime.fromISO(timing.start.local, {
+            zone: 'Europe/Stockholm',
+          }).toMillis(),
+        ).not.toBe(
+          calendarLocalDateTimeToUnixMillis(
+            timing.start.local,
+            'Europe/Stockholm',
+          ),
+        );
+        expect(
+          calendarLocalDateTimeToUnixMillis(
+            timing.start.local,
+            'Europe/Stockholm',
+          ),
+        ).toBe(Date.parse('2026-10-25T02:00:00Z'));
+        expect(
+          calendarLocalDateTimeToUnixMillis(
+            timing.end.local,
+            'Europe/Stockholm',
+          ),
+        ).toBe(Date.parse('2026-10-25T03:00:00Z'));
+      });
+    } finally {
+      browserTimezoneOffset.mockRestore();
+      Settings.resetCaches();
+    }
   });
 
   it.each([

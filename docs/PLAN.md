@@ -32,11 +32,11 @@ This is the milestone and follow-up index. The [roadmap](./ROADMAP.md) owns prio
 
 **Implemented:** bounded RRULE/RDATE/EXDATE projection and authoring, PERIOD operations, named/floating/all-day time semantics, selected-occurrence timing and text, revision metadata, safe conference/URI attachment operations, and supported display-alarm metadata.
 
-New-event form defaults retain the rounded one-elapsed-hour range when its
-local fields round-trip to the same instants. If a DST transition makes those
-offsetless fields ambiguous, the suggestion advances to a future representable
-local-hour interval. Existing event timing and serialization remain unchanged
-(#410).
+New-event form defaults retain the rounded one-elapsed-hour range when both
+offsetless local fields identify unique instants under the bundled timezone
+rules. If a DST transition makes an endpoint ambiguous or unrepresentable, the
+suggestion advances to the next safe local-hour interval. Existing event timing
+and serialization remain unchanged (#410).
 
 **Open:** arbitrary rule parts, general recurrence splitting and occurrence-property edits, attendee/email authoring, broader attachment/alarm/conference forms, and mainstream-client interoperability in [#6](https://github.com/0cwa/matrix-calendar-widget/issues/6). Following edits remain timing-only, finite, and limited to 128 supported members; monthly ordinal rules are excluded. Unsupported source forms may be omitted from the widget projection while the original CalDAV data is retained.
 
