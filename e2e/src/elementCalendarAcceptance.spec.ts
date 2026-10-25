@@ -11115,10 +11115,14 @@ if (process.env.ELEMENT_ACCEPTANCE_PRIVATE_UI === 'true') {
         const targetCalendarOption = await checkpoint.run(
           'private-ui-calendar-option-unique',
           async () => {
-            const targetCalendarOption = frameA.getByRole('option', {
-              name: 'Synthetic team calendar',
-              exact: true,
-            });
+            const calendarListbox = frameA
+              .getByRole('listbox')
+              .filter({ visible: true });
+            await expect(calendarListbox).toHaveCount(1);
+            const targetCalendarValue = `matrix-calendar-target://room/${encodeURIComponent(fixture.calendarId)}`;
+            const targetCalendarOption = calendarListbox.locator(
+              `[role="option"][data-value="${targetCalendarValue}"]`,
+            );
             await expect(targetCalendarOption).toHaveCount(1);
             return targetCalendarOption;
           },
