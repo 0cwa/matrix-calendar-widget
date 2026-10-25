@@ -286,6 +286,7 @@ function buildPostgresOptions(configuration, getPostgresDatabaseTlsOptions) {
       max: definition.maxConnections,
       connect_timeout: 5,
       idle_timeout: 20,
+      onnotice: () => undefined,
       connection,
     };
   } catch {

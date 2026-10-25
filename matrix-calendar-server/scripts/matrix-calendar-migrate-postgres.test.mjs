@@ -68,7 +68,13 @@ exports.ValidationSchema = Joi.object({
     `const fs = require('node:fs');
 const log = (record) => fs.appendFileSync(process.env.MCW_MIGRATION_TEST_LOG, JSON.stringify(record) + '\\n');
 module.exports = (databaseUrl, options) => {
-  log({ event: 'pool-open', applicationName: options.connection.application_name, options });
+  log({
+    event: 'pool-open',
+    applicationName: options.connection.application_name,
+    onnoticeType: typeof options.onnotice,
+    onnoticeReturnType: typeof options.onnotice?.({}),
+    options,
+  });
   return { end: async () => log({ event: 'pool-end', applicationName: options.connection.application_name }) };
 };
 `,
@@ -402,6 +408,8 @@ test('selected store migration ignores unrelated database configuration', async 
   assert.equal(poolOptions.max, 5);
   assert.equal(poolOptions.connect_timeout, 5);
   assert.equal(poolOptions.idle_timeout, 20);
+  assert.equal(parseLog(logPath)[0].onnoticeType, 'function');
+  assert.equal(parseLog(logPath)[0].onnoticeReturnType, 'undefined');
   assert.deepEqual(poolOptions.connection, {
     application_name: 'matrix-calendar-reminders',
   });
