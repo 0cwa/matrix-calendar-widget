@@ -14,6 +14,12 @@
  * limitations under the License.
  */
 
+import {
+  calendarLocalDateTimeToUnixMillis,
+  calendarUnixMillisToLocalDateTime,
+  isCalendarLocalDateTimeUnambiguous,
+} from '@matrix-calendar-widget/calendar';
+
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 const REMINDER_START_LEAD_MS = 150_000;
@@ -21,14 +27,11 @@ const REMINDER_EVENT_DURATION_MS = HOUR_MS;
 const REMINDER_EVENT_RANGE_SEARCH_MS = 48 * HOUR_MS;
 const REMINDER_ALL_DAY_EXPECTED_DAYS_BEFORE = 1;
 
-const formatters = new Map();
-
 export function reminderFixtureLocalDateTimeInput(epochMilliseconds, timeZone) {
-  const formatter = formatterFor(timeZone);
-  const parts = formatter.formatToParts(new Date(epochMilliseconds));
-  const part = (type) =>
-    parts.find((candidate) => candidate.type === type)?.value ?? '';
-  return `${part('year')}-${part('month')}-${part('day')}T${part('hour')}:${part('minute')}`;
+  return calendarUnixMillisToLocalDateTime(epochMilliseconds, timeZone).slice(
+    0,
+    16,
+  );
 }
 
 export function reminderFixtureLocalDateTimeToUnixMillis(
@@ -170,55 +173,18 @@ function uniqueFormInstant(localDateTime, timeZone) {
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/u.test(localDateTime)) {
     return undefined;
   }
-  const wallMilliseconds = Date.parse(`${localDateTime}:00Z`);
-  if (!Number.isFinite(wallMilliseconds)) return undefined;
-
-  const offsets = new Set();
-  for (let offsetHours = -48; offsetHours <= 48; offsetHours += 6) {
-    const sample = wallMilliseconds + offsetHours * HOUR_MS;
-    offsets.add(localWallMilliseconds(sample, timeZone) - sample);
+  try {
+    if (!isCalendarLocalDateTimeUnambiguous(localDateTime, timeZone)) {
+      return undefined;
+    }
+    const instant = calendarLocalDateTimeToUnixMillis(localDateTime, timeZone);
+    return reminderFixtureLocalDateTimeInput(instant, timeZone) ===
+      localDateTime
+      ? instant
+      : undefined;
+  } catch {
+    return undefined;
   }
-
-  const matches = [...offsets]
-    .map((offset) => wallMilliseconds - offset)
-    .filter(
-      (candidate) =>
-        reminderFixtureLocalDateTimeInput(candidate, timeZone) ===
-        localDateTime,
-    );
-  return matches.length === 1 ? matches[0] : undefined;
-}
-
-function localWallMilliseconds(epochMilliseconds, timeZone) {
-  const parts = formatterFor(timeZone).formatToParts(
-    new Date(epochMilliseconds),
-  );
-  const part = (type) =>
-    Number(parts.find((candidate) => candidate.type === type)?.value);
-  return Date.UTC(
-    part('year'),
-    part('month') - 1,
-    part('day'),
-    part('hour'),
-    part('minute'),
-  );
-}
-
-function formatterFor(timeZone) {
-  let formatter = formatters.get(timeZone);
-  if (!formatter) {
-    formatter = new Intl.DateTimeFormat('en-CA', {
-      timeZone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      hourCycle: 'h23',
-    });
-    formatters.set(timeZone, formatter);
-  }
-  return formatter;
 }
 
 function addCalendarDays(date, days) {
