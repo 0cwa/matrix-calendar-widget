@@ -75,6 +75,8 @@ const PHASES = new Set([
   'widget-a-runtime-observed',
   'widget-a-iframe-ready',
   'widget-a-approved',
+  'widget-b-open',
+  'widget-b-events-response',
   'widget-b-approved',
   'outsider-widget-approved',
   'browser-test-suite',

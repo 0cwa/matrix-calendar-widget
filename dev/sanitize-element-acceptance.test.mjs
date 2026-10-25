@@ -3846,6 +3846,74 @@ test('emits bounded widget, gateway, and OpenID observations only', () => {
   );
 });
 
+test('separates member-B widget opening from its events response in the summary', () => {
+  const successfulSummary = sanitizeElementAcceptance(
+    [
+      { phase: 'widget-b-open', status: 'passed' },
+      { phase: 'widget-b-events-response', status: 'passed', httpStatus: 200 },
+      { phase: 'widget-b-approved', status: 'passed' },
+    ]
+      .map((record) => JSON.stringify(record))
+      .join('\n'),
+    sourceSha,
+  );
+
+  assert.equal(
+    successfulSummary,
+    [
+      `element-acceptance source_sha=${sourceSha}`,
+      'phase=widget-b-open status=passed',
+      'phase=widget-b-events-response status=passed http_status=200',
+      'phase=widget-b-approved status=passed',
+      '',
+    ].join('\n'),
+  );
+
+  const openFailureSummary = sanitizeElementAcceptance(
+    JSON.stringify({ phase: 'widget-b-open', status: 'failed' }),
+    sourceSha,
+  );
+  assert.match(openFailureSummary, /phase=widget-b-open status=failed/u);
+  assert.doesNotMatch(openFailureSummary, /widget-b-events-response/u);
+
+  const responseWaitFailureSummary = sanitizeElementAcceptance(
+    JSON.stringify({ phase: 'widget-b-events-response', status: 'failed' }),
+    sourceSha,
+  );
+  assert.match(
+    responseWaitFailureSummary,
+    /phase=widget-b-events-response status=failed/u,
+  );
+
+  const responseStatusFailureSummary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'widget-b-events-response',
+      status: 'failed',
+      httpStatus: 503,
+    }),
+    sourceSha,
+  );
+  assert.match(
+    responseStatusFailureSummary,
+    /phase=widget-b-events-response status=failed http_status=503/u,
+  );
+});
+
+test('rejects unexpected member-B widget stage fields', () => {
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        JSON.stringify({
+          phase: 'widget-b-events-response',
+          status: 'failed',
+          errorMessage: 'synthetic untrusted detail',
+        }),
+        sourceSha,
+      ),
+    { message: 'invalid element acceptance summary' },
+  );
+});
+
 test('emits only allowlisted Widget API OpenID states and match booleans', () => {
   const summary = sanitizeElementAcceptance(
     JSON.stringify(

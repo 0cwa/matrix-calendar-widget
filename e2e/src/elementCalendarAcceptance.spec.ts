@@ -782,6 +782,8 @@ type Phase =
   | 'widget-a-runtime-observed'
   | 'widget-a-iframe-ready'
   | 'widget-a-approved'
+  | 'widget-b-open'
+  | 'widget-b-events-response'
   | 'widget-b-approved'
   | 'outsider-widget-approved'
   | 'gateway-backed-read'
@@ -1444,6 +1446,73 @@ let pendingPinnedControlObservation: PinnedControlObservation | undefined;
 
 test.afterEach(async ({}, testInfo) => {
   finishActiveReminderFlowDiagnostic(testInfo.status);
+});
+
+type SettledGatewayResponse =
+  | { kind: 'response'; response: Response }
+  | { kind: 'rejected'; error: unknown };
+
+function settleGatewayResponse(
+  response: Promise<Response>,
+): Promise<SettledGatewayResponse> {
+  return response.then(
+    (value) => ({ kind: 'response', response: value }),
+    (error: unknown) => ({ kind: 'rejected', error }),
+  );
+}
+
+function requireGatewayResponse(result: SettledGatewayResponse): Response {
+  if (result.kind === 'rejected') throw result.error;
+  return result.response;
+}
+
+test('settles a late member-B response rejection after widget opening fails', async () => {
+  const successfulResponse = {} as Response;
+  expect(
+    requireGatewayResponse(
+      await settleGatewayResponse(Promise.resolve(successfulResponse)),
+    ),
+  ).toBe(successfulResponse);
+
+  let rejectResponse: (reason: unknown) => void = () => {
+    throw new Error('response waiter was not initialized');
+  };
+  const responseWaiter = new Promise<Response>((_resolve, reject) => {
+    rejectResponse = reject;
+  });
+  const settledResponse = settleGatewayResponse(responseWaiter);
+  const unhandledRejections: unknown[] = [];
+  const recordUnhandledRejection = (reason: unknown) => {
+    unhandledRejections.push(reason);
+  };
+  const openFailure = new Error('synthetic widget-open failure');
+  process.on('unhandledRejection', recordUnhandledRejection);
+
+  try {
+    await expect(
+      (async () => {
+        await Promise.reject(openFailure);
+        return requireGatewayResponse(await settledResponse);
+      })(),
+    ).rejects.toBe(openFailure);
+
+    const responseWaiterFailure = new Error(
+      'synthetic late response-waiter rejection',
+    );
+    rejectResponse(responseWaiterFailure);
+    const responseResult = await settledResponse;
+    expect(responseResult).toEqual({
+      kind: 'rejected',
+      error: responseWaiterFailure,
+    });
+    await expect(
+      Promise.resolve(responseResult).then(requireGatewayResponse),
+    ).rejects.toBe(responseWaiterFailure);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(unhandledRejections).toEqual([]);
+  } finally {
+    process.off('unhandledRejection', recordUnhandledRejection);
+  }
 });
 
 const memberAHomeserverHttpFailures = new WeakMap<
@@ -2667,17 +2736,22 @@ test('Element Web members share events and enforce room authorization', async ({
       fixture.teamRoomId,
     );
     record(activePhase, 'passed');
-    activePhase = 'widget-b-approved';
-    const memberBRead = waitForGatewayResponse(
-      pageB,
-      'GET',
-      '/v1/calendar/events',
+    activePhase = 'widget-b-events-response';
+    const memberBRead = settleGatewayResponse(
+      waitForGatewayResponse(pageB, 'GET', '/v1/calendar/events'),
     );
+    activePhase = 'widget-b-open';
     const frameB = await openCalendarWidget(elementB, pageB, {
       expectWidgetWarning: true,
     });
-    const memberBReadResult = await memberBRead;
-    expect(memberBReadResult.status()).toBe(200);
+    record(activePhase, 'passed');
+    activePhase = 'widget-b-events-response';
+    const memberBReadResult = requireGatewayResponse(await memberBRead);
+    failureHttpStatus = memberBReadResult.status();
+    expect(failureHttpStatus).toBe(200);
+    record(activePhase, 'passed', failureHttpStatus);
+    failureHttpStatus = undefined;
+    activePhase = 'widget-b-approved';
     record(activePhase, 'passed');
 
     activePhase = 'shared-visibility';
