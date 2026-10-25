@@ -3722,10 +3722,18 @@ function assertStageSummary(pathName, expected) {
   }
 }
 
+export function hostedReminderFixtureCommand(toolingRoot) {
+  return {
+    executable: process.execPath,
+    args: [path.resolve(toolingRoot, 'dev/local-reminder-fixture.mjs')],
+  };
+}
+
 function safeReceipt({
   sourceSha,
   sourceTree,
   workflowSha,
+  reminderFixtureSha256,
   lock,
   apiCount,
   markerCounts,
@@ -3740,6 +3748,8 @@ function safeReceipt({
     source_sha: sourceSha,
     source_tree: sourceTree,
     workflow_sha: workflowSha,
+    tooling_sha: workflowSha,
+    reminder_fixture_sha256: reminderFixtureSha256,
     platform: 'linux/amd64',
     image_lock: imageEvidence(lock),
     api_cases: apiCount,
@@ -3941,10 +3951,19 @@ export function formatSuccessSummary(receipt) {
   ) {
     throw new RehearsalFailure('receipt-publish', 'cleanup-not-verified');
   }
+  const toolingSha = /^[0-9a-f]{40}$/u.test(receipt.tooling_sha ?? '')
+    ? receipt.tooling_sha
+    : 'unavailable';
+  const fixtureSha256 = /^[0-9a-f]{64}$/u.test(
+    receipt.reminder_fixture_sha256 ?? '',
+  )
+    ? receipt.reminder_fixture_sha256
+    : 'unavailable';
   return [
     '## Hosted Docker operator rehearsal',
     '',
     `- Result: passed for source ${receipt.source_sha} on linux/amd64.`,
+    `- Trusted tooling SHA: ${toolingSha}; reminder fixture SHA-256: ${fixtureSha256}.`,
     '- Phase: complete; failure phase: none.',
     '- Source-built images: 3 verified IDs; fixture images: 2 immutable digests locked.',
     '- API authorization and CRUD cases: 12/12 passed.',
@@ -3980,6 +3999,8 @@ export function formatFailureSummary(sourceSha, phase, cleanup) {
 export function formatFailureDiagnostic({
   sourceSha,
   workflowSha,
+  toolingSha,
+  reminderFixtureSha256,
   runId,
   attempt,
   phase,
@@ -4088,7 +4109,7 @@ export function formatFailureDiagnostic({
   );
 
   return {
-    schema_version: 12,
+    schema_version: 13,
     result: 'failed',
     phase: 'hosted-docker-operator-v5',
     failed_phase: SAFE_PHASES.has(phase) ? phase : 'runner',
@@ -4108,6 +4129,8 @@ export function formatFailureDiagnostic({
     child_exit_code: safeChildExitCode,
     source_sha: safe(sourceSha, /^[0-9a-f]{40}$/u),
     workflow_sha: safe(workflowSha, /^[0-9a-f]{40}$/u),
+    tooling_sha: safe(toolingSha, /^[0-9a-f]{40}$/u),
+    reminder_fixture_sha256: safe(reminderFixtureSha256, /^[0-9a-f]{64}$/u),
     run_id: safe(runId, /^\d{1,20}$/u),
     attempt: safe(attempt, /^\d{1,4}$/u),
     source_image_ids: safeImageIds,
@@ -4254,6 +4277,8 @@ export function writeFailureDiagnostic(runnerTemp, fields, update = false) {
           'attempt',
           'source_sha',
           'workflow_sha',
+          'tooling_sha',
+          'reminder_fixture_sha256',
           'failed_phase',
           'failure_class',
           'failure_operation',
@@ -4384,7 +4409,13 @@ async function main() {
         .digest('hex')
         .slice(0, 16);
     }
-    Object.assign(failureIdentity, { sourceSha, workflowSha, runId, attempt });
+    Object.assign(failureIdentity, {
+      sourceSha,
+      workflowSha,
+      toolingSha: workflowSha,
+      runId,
+      attempt,
+    });
     const project = `mcw-p0-${id}`;
     diagnosticRunId = id;
     diagnosticProject = project;
@@ -4432,12 +4463,26 @@ async function main() {
         fail('source-binding', 'source-not-dispatch-ancestor');
       }
     }
+    const reminderFixtureCommand = hostedReminderFixtureCommand(toolingRoot);
+    const reminderFixturePath = reminderFixtureCommand.args[0];
+    const reminderFixtureStat = lstatSync(reminderFixturePath, {
+      throwIfNoEntry: false,
+    });
+    if (
+      realpathSync(toolingRoot) !== toolingRoot ||
+      !reminderFixtureStat ||
+      reminderFixtureStat.isSymbolicLink() ||
+      !reminderFixtureStat.isFile() ||
+      realpathSync(reminderFixturePath) !== reminderFixturePath
+    ) {
+      fail('source-binding', 'tooling-helper-invalid');
+    }
+    failureIdentity.reminderFixtureSha256 = sha256File(reminderFixturePath);
     for (const helper of [
       'dev/up.sh',
       'dev/element-acceptance-setup.mjs',
       'dev/element-acceptance-overrides.mjs',
       'dev/element-acceptance-api-probe.mjs',
-      'dev/local-reminder-fixture.mjs',
       'dev/element-acceptance-reminder-restore.mjs',
       'dev/element-acceptance-local-prebuilt.compose.yaml',
       'dev/validate-element-acceptance-compose.mjs',
@@ -4851,8 +4896,8 @@ async function main() {
     markers = assertReminderResult(
       runFixtureTask(
         'reminder-initial-fixture',
-        process.execPath,
-        [path.join(sourceRoot, 'dev/local-reminder-fixture.mjs')],
+        reminderFixtureCommand.executable,
+        [...reminderFixtureCommand.args],
         {
           ELEMENT_ACCEPTANCE_REMINDER_FIXTURE: '1',
           ELEMENT_ACCEPTANCE_REMINDER_FLOW: 'initial',
@@ -4880,8 +4925,8 @@ async function main() {
     markers = assertReminderResult(
       runFixtureTask(
         'reminder-restart-fixture',
-        process.execPath,
-        [path.join(sourceRoot, 'dev/local-reminder-fixture.mjs')],
+        reminderFixtureCommand.executable,
+        [...reminderFixtureCommand.args],
         {
           ELEMENT_ACCEPTANCE_REMINDER_FIXTURE: '1',
           ELEMENT_ACCEPTANCE_REMINDER_FLOW: 'restart',
@@ -4943,8 +4988,8 @@ async function main() {
     markers = assertReminderResult(
       runFixtureTask(
         'reminder-restore-fixture',
-        process.execPath,
-        [path.join(sourceRoot, 'dev/local-reminder-fixture.mjs')],
+        reminderFixtureCommand.executable,
+        [...reminderFixtureCommand.args],
         {
           ELEMENT_ACCEPTANCE_REMINDER_FIXTURE: '1',
           ELEMENT_ACCEPTANCE_REMINDER_FLOW: 'restore',
@@ -4977,6 +5022,7 @@ async function main() {
       sourceSha,
       sourceTree: checkoutTree,
       workflowSha,
+      reminderFixtureSha256: failureIdentity.reminderFixtureSha256,
       lock,
       apiCount: API_STAGES.length,
       markerCounts: [0, 1, 2, 3],

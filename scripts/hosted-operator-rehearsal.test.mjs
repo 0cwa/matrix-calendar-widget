@@ -46,6 +46,7 @@ import {
   hashExtractedGitTree,
   HOSTED_INHERITED_IMAGE_TMPFS,
   HOSTED_REMINDER_FIXTURE_FAILURE_PHASES,
+  hostedReminderFixtureCommand,
   isLocalProfileHostedContext,
   listenerScopeDelta,
   LOCAL_MICROSANDBOX_MANIFEST_EXAMPLE_WITH_PLACEHOLDERS,
@@ -835,7 +836,7 @@ test('failure artifact carries only the closed gateway smoke classification', ()
     gatewayNetworkSmoke,
   });
 
-  assert.equal(diagnostic.schema_version, 12);
+  assert.equal(diagnostic.schema_version, 13);
   assert.equal(diagnostic.failed_phase, 'compose-run-gateway-smoke');
   assert.equal(diagnostic.failure_operation, 'gateway-network-smoke');
   assert.equal(diagnostic.failure_check, 'network-smoke');
@@ -1024,7 +1025,7 @@ test('failure artifact projects only the API CRUD probe enum fields', () => {
     failureCode: 'api-probe-process-failed',
     apiCrudProbe,
   });
-  assert.equal(diagnostic.schema_version, 12);
+  assert.equal(diagnostic.schema_version, 13);
   assert.equal(diagnostic.failure_check, 'api-contract');
   assert.deepEqual(diagnostic.api_crud_probe, apiCrudProbe);
 
@@ -1127,7 +1128,7 @@ test('reminder child failures retain only the finite fixture outcome and validat
         childExitCode: error.childExitCode,
         reminderFixture: error.reminderFixture,
       });
-      assert.equal(diagnostic.schema_version, 12);
+      assert.equal(diagnostic.schema_version, 13);
       assert.equal(diagnostic.failure_check, 'reminder-fixture');
       assert.equal(diagnostic.child_exit_code, 1);
       assert.deepEqual(diagnostic.reminder_fixture, error.reminderFixture);
@@ -2095,7 +2096,7 @@ test('foreign volume deltas stay gated and report bounded direction and owned mo
     failureCode: failure.code,
     foreignInventoryChange: failure.foreignInventoryChange,
   });
-  assert.equal(diagnostic.schema_version, 12);
+  assert.equal(diagnostic.schema_version, 13);
   assert.equal(diagnostic.cleanup_attempted, false);
   assert.equal(diagnostic.owned_cleanup_verified, false);
   const serialized = JSON.stringify(diagnostic);
@@ -2760,6 +2761,14 @@ test('success summaries require cleanup; failure summaries disclose only fixed f
     }),
     /Exact owned-resource cleanup: passed/u,
   );
+  assert.match(
+    formatSuccessSummary({
+      result: 'passed',
+      cleanup_verified: true,
+      source_sha: sourceSha,
+    }),
+    /Trusted tooling SHA: unavailable; reminder fixture SHA-256: unavailable/u,
+  );
 
   const summary = formatFailureSummary(
     sourceSha,
@@ -2805,7 +2814,7 @@ test('failure diagnostic writes fixed identity and cleanup fields outside task d
     );
     assert.equal(statSync(file).mode & 0o777, 0o600);
     const initial = JSON.parse(readFileSync(file, 'utf8'));
-    assert.equal(initial.schema_version, 12);
+    assert.equal(initial.schema_version, 13);
     assert.equal(initial.failed_phase, 'fixture-setup');
     assert.equal(initial.failure_class, 'gate-failed');
     assert.equal(initial.failure_operation, 'gate');
@@ -3330,6 +3339,25 @@ test('cleanup inventory diagnostics expose only allowlisted checkpoint identifie
   );
 });
 
+test('failure provenance binds runtime source separately from trusted tooling and fixture hash', () => {
+  const toolingSha = '2'.repeat(40);
+  const fixtureSha256 = '3'.repeat(64);
+  const diagnostic = formatFailureDiagnostic({
+    sourceSha,
+    workflowSha: toolingSha,
+    toolingSha,
+    reminderFixtureSha256: fixtureSha256,
+    phase: 'reminder-initial',
+    failureClass: 'gate-failed',
+    operation: 'reminder-initial-fixture',
+    failureCode: 'reminder-fixture-failed',
+  });
+  assert.equal(diagnostic.source_sha, sourceSha);
+  assert.equal(diagnostic.workflow_sha, toolingSha);
+  assert.equal(diagnostic.tooling_sha, toolingSha);
+  assert.equal(diagnostic.reminder_fixture_sha256, fixtureSha256);
+});
+
 test('failure diagnostics keep sanitized recovery failure separate from original failure', (t) => {
   const recoveryFailure = {
     phase: 'failure-cleanup',
@@ -3713,6 +3741,13 @@ test('trusted sparse checkout can load its hosted tooling entry points', (t) => 
     sparsePaths.push(line.trim());
   }
   assert.ok(sparsePaths.includes('dev/element-acceptance-api-probe.mjs'));
+  assert.ok(sparsePaths.includes('dev/local-reminder-fixture.mjs'));
+  assert.ok(sparsePaths.includes('dev/local-reminder-fixture.test.mjs'));
+  assert.ok(
+    sparsePaths.includes(
+      'dev/fixtures/room-reminder-configuration-record.json',
+    ),
+  );
 
   const workspaceRoot = fileURLToPath(new URL('../', import.meta.url));
   const temporaryRoot = mkdtempSync(join(tmpdir(), 'mcw-tooling-sparse-'));
@@ -3726,6 +3761,19 @@ test('trusted sparse checkout can load its hosted tooling entry points', (t) => 
     mkdirSync(dirname(destinationPath), { recursive: true });
     copyFileSync(sourcePath, destinationPath);
   }
+
+  const reminderCommand = hostedReminderFixtureCommand(toolingRoot);
+  assert.equal(reminderCommand.executable, process.execPath);
+  assert.deepEqual(reminderCommand.args, [
+    join(toolingRoot, 'dev/local-reminder-fixture.mjs'),
+  ]);
+  assert.ok(!reminderCommand.args[0].startsWith(join(temporaryRoot, 'source')));
+  const fixtureTests = spawnSync(
+    process.execPath,
+    ['--test', join(toolingRoot, 'dev/local-reminder-fixture.test.mjs')],
+    { cwd: toolingRoot, encoding: 'utf8' },
+  );
+  assert.equal(fixtureTests.status, 0, fixtureTests.stderr);
 
   assert.ok(sparsePaths.includes('scripts/release-image-archive.mjs'));
 
