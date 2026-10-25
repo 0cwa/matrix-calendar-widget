@@ -2153,7 +2153,23 @@ function foreignListenerIdentities(lines) {
     .sort();
 }
 
-function stableContainer(value) {
+function stableMountRecords(value) {
+  if (!Array.isArray(value)) return value;
+  const records = value.map((record) => {
+    const canonical = canonicalLocalJson(record);
+    return { canonical, record: JSON.parse(canonical) };
+  });
+  records.sort((left, right) =>
+    left.canonical < right.canonical
+      ? -1
+      : left.canonical > right.canonical
+        ? 1
+        : 0,
+  );
+  return records.map(({ record }) => record);
+}
+
+export function stableContainer(value) {
   const state = value.State ?? {};
   const health = state.Health;
   return {
@@ -2179,7 +2195,7 @@ function stableContainer(value) {
       ExitCode: state.ExitCode,
       Health: health ? { Status: health.Status } : null,
     },
-    Mounts: value.Mounts,
+    Mounts: stableMountRecords(value.Mounts),
     HostConfig: {
       NetworkMode: value.HostConfig?.NetworkMode,
       PortBindings: value.HostConfig?.PortBindings,
