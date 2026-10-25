@@ -130,6 +130,7 @@ runs:
       run: |
         yarn workspace @matrix-calendar-widget/ical-timezones build
         yarn workspace @matrix-calendar-widget/calendar build
+        node --test dev/element-acceptance-reminder-timing.test.mjs
         yarn workspace @matrix-calendar-widget/server build
         node --test dev/element-acceptance-caldav-report-probe.test.mjs
         yarn workspace @matrix-calendar-widget/widget build

@@ -100,6 +100,17 @@ test('both fixture jobs select one strict process-wide principal mode', () => {
     runner,
     /node --test dev\/element-acceptance-caldav-report-probe\.test\.mjs/u,
   );
+  assert.match(
+    runner,
+    /node --test dev\/element-acceptance-reminder-timing\.test\.mjs/u,
+  );
+  assert.ok(
+    runner.indexOf('yarn workspace @matrix-calendar-widget/calendar build') <
+      runner.indexOf(
+        'node --test dev/element-acceptance-reminder-timing.test.mjs',
+      ),
+    'the reminder timing test runs after its compiled calendar imports exist',
+  );
   assert.ok(
     runner.indexOf('yarn workspace @matrix-calendar-widget/server build') <
       runner.indexOf(
