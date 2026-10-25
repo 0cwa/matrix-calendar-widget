@@ -49,6 +49,7 @@ services:
     read_only: true
     networks:
       - private-client-callback
+      - private-https-ingress
 
   radicale:
     networks:
@@ -59,3 +60,9 @@ networks:
   default: {}
   private-client-callback:
     internal: true
+  # Docker Engine reports show published ports may be omitted for services
+  # attached only to an internal network. Keep this bridge proxy-only; it adds
+  # outbound egress for the fixture TLS bridge, while gateway and Radicale stay
+  # on the internal callback network and do not join this ingress bridge.
+  private-https-ingress:
+    internal: false

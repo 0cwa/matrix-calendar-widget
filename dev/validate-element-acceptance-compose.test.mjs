@@ -139,6 +139,7 @@ test('private callback bridge uses a dedicated internal network', () => {
   model.networks = {
     default: {},
     'private-client-callback': { internal: true },
+    'private-https-ingress': {},
   };
   for (const name of ['gateway', 'radicale']) {
     model.services[name].networks = {
@@ -151,7 +152,10 @@ test('private callback bridge uses a dedicated internal network', () => {
   }
   model.services['private-gateway-https'] = {
     ports: [port(3443, 3001)],
-    networks: { 'private-client-callback': {} },
+    networks: {
+      'private-client-callback': {},
+      'private-https-ingress': {},
+    },
   };
   assert.equal(hasPrivateClientCallbackNetwork(model), true);
 
@@ -168,6 +172,32 @@ test('private callback bridge uses a dedicated internal network', () => {
   const bridgeOnDefault = structuredClone(model);
   bridgeOnDefault.services['private-gateway-https'].networks.default = {};
   assert.equal(hasPrivateClientCallbackNetwork(bridgeOnDefault), false);
+
+  const internalIngress = structuredClone(model);
+  internalIngress.networks['private-https-ingress'].internal = true;
+  assert.equal(hasPrivateClientCallbackNetwork(internalIngress), false);
+
+  const externalIngress = structuredClone(model);
+  externalIngress.networks['private-https-ingress'].external = true;
+  assert.equal(hasPrivateClientCallbackNetwork(externalIngress), false);
+
+  const gatewayOnIngress = structuredClone(model);
+  gatewayOnIngress.services.gateway.networks['private-https-ingress'] = {};
+  assert.equal(hasPrivateClientCallbackNetwork(gatewayOnIngress), false);
+
+  const radicaleOnIngress = structuredClone(model);
+  radicaleOnIngress.services.radicale.networks['private-https-ingress'] = {};
+  assert.equal(hasPrivateClientCallbackNetwork(radicaleOnIngress), false);
+
+  const widgetOnIngress = structuredClone(model);
+  widgetOnIngress.services.widget.networks['private-https-ingress'] = {};
+  assert.equal(hasPrivateClientCallbackNetwork(widgetOnIngress), false);
+
+  const bridgeWithoutIngress = structuredClone(model);
+  delete bridgeWithoutIngress.services['private-gateway-https'].networks[
+    'private-https-ingress'
+  ];
+  assert.equal(hasPrivateClientCallbackNetwork(bridgeWithoutIngress), false);
 });
 
 test('acceptance gateways use the same finite rate budget across restart and restore', () => {

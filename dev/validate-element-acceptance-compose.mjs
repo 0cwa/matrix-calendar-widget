@@ -70,6 +70,7 @@ export function hasPrivateClientCallbackNetwork(model) {
 
   const networks = model?.networks;
   const callbackNetwork = networks?.['private-client-callback'];
+  const ingressNetwork = networks?.['private-https-ingress'];
   const expectedMembers = new Set([
     'gateway',
     'private-gateway-https',
@@ -80,7 +81,12 @@ export function hasPrivateClientCallbackNetwork(model) {
     typeof networks !== 'object' ||
     !callbackNetwork ||
     typeof callbackNetwork !== 'object' ||
-    callbackNetwork.internal !== true
+    callbackNetwork.internal !== true ||
+    !ingressNetwork ||
+    typeof ingressNetwork !== 'object' ||
+    (ingressNetwork.internal !== undefined &&
+      ingressNetwork.internal !== false) ||
+    ingressNetwork.external === true
   ) {
     return false;
   }
@@ -98,7 +104,16 @@ export function hasPrivateClientCallbackNetwork(model) {
       serviceNetworks,
       'private-client-callback',
     );
-    if (expectedMembers.has(name) !== hasCallbackNetwork) return false;
+    const hasIngressNetwork = Object.hasOwn(
+      serviceNetworks,
+      'private-https-ingress',
+    );
+    if (
+      expectedMembers.has(name) !== hasCallbackNetwork ||
+      (name === 'private-gateway-https') !== hasIngressNetwork
+    ) {
+      return false;
+    }
   }
 
   const bridgeNetworks = services['private-gateway-https'].networks;
@@ -106,8 +121,9 @@ export function hasPrivateClientCallbackNetwork(model) {
     bridgeNetworks &&
     typeof bridgeNetworks === 'object' &&
     !Array.isArray(bridgeNetworks) &&
-    Object.keys(bridgeNetworks).length === 1 &&
-    Object.hasOwn(bridgeNetworks, 'private-client-callback')
+    Object.keys(bridgeNetworks).length === 2 &&
+    Object.hasOwn(bridgeNetworks, 'private-client-callback') &&
+    Object.hasOwn(bridgeNetworks, 'private-https-ingress')
   );
 }
 
