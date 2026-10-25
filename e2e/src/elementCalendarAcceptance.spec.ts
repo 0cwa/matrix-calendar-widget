@@ -34,8 +34,10 @@ import {
   realpathSync,
   writeFileSync,
 } from 'node:fs';
+import type { ClientRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import { arch, platform, release, tmpdir } from 'node:os';
-import { dirname, isAbsolute, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import {
   extractElementBundleFrames,
@@ -65,6 +67,16 @@ import {
   buildOrdinaryPerformanceSeedEnvironment,
   raceCalendarReadyOrIdentityPrompt,
 } from '../../dev/element-acceptance-performance.mjs';
+import {
+  PRIVATE_UI_CALENDAR_LIST_ENDPOINTS,
+  PRIVATE_UI_CALENDAR_LIST_METHODS,
+  classifyPrivateUiCalendarListNetworkFailure,
+  createPrivateUiCheckpointJournal,
+  type PrivateUiCalendarListEndpoint,
+  type PrivateUiCalendarListFailureCategory,
+  type PrivateUiCalendarListMethod,
+  type PrivateUiCalendarListTransportObservation,
+} from '../../dev/element-acceptance-private-ui-checkpoints.mjs';
 import { classifyG6KeyboardFocusTarget } from '../../dev/element-g6-keyboard-focus.mjs';
 import {
   beginG6ResourceCreate,
@@ -679,6 +691,7 @@ type G6CalDavResult = {
 };
 
 const ELEMENT_WEB_CONFIGURED_TAG = 'v1.12.30';
+const PRIVATE_ACCEPTANCE_GATEWAY_ORIGIN = 'https://127.0.0.1:3001';
 const G6_POSTSAVE_EVENT_COUNT_CAP = 100;
 
 const REMINDER_START_LEAD_MS = 150_000;
@@ -8398,6 +8411,483 @@ function waitForGatewayResponse(
   );
 }
 
+type PrivateCalendarListRequestObserver = {
+  dispose: () => void;
+  recordSnapshot: (
+    record: (observations: PrivateUiCalendarListTransportObservation[]) => void,
+  ) => void;
+};
+
+function createPrivateCalendarListRequestObserver(
+  page: Page,
+  expectedRoomId: string,
+): PrivateCalendarListRequestObserver {
+  const observations = new Map<
+    string,
+    PrivateUiCalendarListTransportObservation
+  >();
+  let snapshotRecorded = false;
+
+  // These are the read routes in GatewayCalendarRepository's initial list.
+  // Request origin and room ID are only matched and never retained.
+  const identifyRequest = (
+    request: Request,
+  ):
+    | {
+        endpoint: PrivateUiCalendarListEndpoint;
+        method: PrivateUiCalendarListMethod;
+        key: string;
+      }
+    | undefined => {
+    try {
+      const url = new URL(request.url());
+      const method = request.method();
+      if (
+        url.origin !== PRIVATE_ACCEPTANCE_GATEWAY_ORIGIN ||
+        url.searchParams.get('roomId') !== expectedRoomId ||
+        (method !== 'GET' && method !== 'OPTIONS')
+      ) {
+        return undefined;
+      }
+
+      let endpoint: PrivateUiCalendarListEndpoint | undefined;
+      if (url.pathname === '/v1/calendar/context') {
+        endpoint = 'room-context';
+      } else if (url.pathname === '/v1/calendar/calendars') {
+        const target = url.searchParams.get('target');
+        if (target === 'personal') endpoint = 'personal-list';
+        if (target === 'room') endpoint = 'room-list';
+      }
+      if (!endpoint || !PRIVATE_UI_CALENDAR_LIST_ENDPOINTS.includes(endpoint)) {
+        return undefined;
+      }
+      return { endpoint, method, key: `${endpoint}:${method}` };
+    } catch {
+      return undefined;
+    }
+  };
+
+  const onRequest = (request: Request) => {
+    const match = identifyRequest(request);
+    if (!match) return;
+    observations.set(match.key, {
+      endpoint: match.endpoint,
+      method: match.method,
+      outcome: 'pending',
+    });
+  };
+
+  const onResponse = (response: Response) => {
+    const match = identifyRequest(response.request());
+    const previous = match ? observations.get(match.key) : undefined;
+    if (!match || !previous) return;
+    observations.set(match.key, {
+      endpoint: previous.endpoint,
+      method: previous.method,
+      outcome: 'response',
+      httpStatus: response.status(),
+    });
+  };
+
+  const onRequestFailed = (request: Request) => {
+    const match = identifyRequest(request);
+    const previous = match ? observations.get(match.key) : undefined;
+    if (!match || !previous) return;
+    observations.set(match.key, {
+      endpoint: previous.endpoint,
+      method: previous.method,
+      outcome: 'network-failure',
+      networkFailure: privateCalendarListNetworkFailure(request),
+    });
+  };
+
+  page.on('request', onRequest);
+  page.on('response', onResponse);
+  page.on('requestfailed', onRequestFailed);
+
+  const dispose = () => {
+    page.off('request', onRequest);
+    page.off('response', onResponse);
+    page.off('requestfailed', onRequestFailed);
+  };
+  const snapshot = () =>
+    [...observations.values()].sort((left, right) => {
+      const endpointOrder =
+        PRIVATE_UI_CALENDAR_LIST_ENDPOINTS.indexOf(left.endpoint) -
+        PRIVATE_UI_CALENDAR_LIST_ENDPOINTS.indexOf(right.endpoint);
+      return (
+        endpointOrder ||
+        PRIVATE_UI_CALENDAR_LIST_METHODS.indexOf(left.method) -
+          PRIVATE_UI_CALENDAR_LIST_METHODS.indexOf(right.method)
+      );
+    });
+
+  return {
+    recordSnapshot: (record) => {
+      if (snapshotRecorded) return;
+      snapshotRecorded = true;
+      try {
+        record(snapshot());
+      } catch {
+        // Bounded request diagnostics never mask an acceptance failure.
+      }
+      dispose();
+    },
+    dispose,
+  };
+}
+
+function privateCalendarListNetworkFailure(
+  request: Request,
+): PrivateUiCalendarListFailureCategory {
+  return classifyPrivateUiCalendarListNetworkFailure(
+    request.failure()?.errorText,
+  );
+}
+
+function waitForPrivateClientResponse(
+  page: Page,
+  method: 'GET' | 'POST' | 'DELETE',
+): Promise<Response> {
+  return page.waitForResponse(
+    (response) => {
+      try {
+        const url = new URL(response.url());
+        return (
+          url.origin === new URL(fixture.gatewayUrl).origin &&
+          (method === 'DELETE'
+            ? /^\/v1\/calendar\/private-clients\/mcwpc~[a-f0-9]{48}$/u.test(
+                url.pathname,
+              )
+            : url.pathname === '/v1/calendar/private-clients') &&
+          response.request().method() === method
+        );
+      } catch {
+        return false;
+      }
+    },
+    { timeout: 30_000 },
+  );
+}
+
+async function requestPrivateClientListStatus(
+  page: Page,
+  gatewayUrl: string,
+  roomId: string,
+  calendarId: string,
+): Promise<number> {
+  return page.evaluate(
+    async ({ gatewayUrl, roomId, calendarId }) => {
+      type OpenIdCredentials = {
+        access_token?: unknown;
+        matrix_server_name?: unknown;
+      };
+      type MatrixClient = {
+        getOpenIdToken?: () => Promise<OpenIdCredentials>;
+      };
+      type MatrixClientWindow = Window & {
+        mxMatrixClientPeg?: { get?: () => MatrixClient };
+      };
+
+      try {
+        const matrixClient = (
+          window as MatrixClientWindow
+        ).mxMatrixClientPeg?.get?.();
+        if (!matrixClient?.getOpenIdToken) return 0;
+        const credentials = await matrixClient.getOpenIdToken();
+        if (
+          typeof credentials.access_token !== 'string' ||
+          typeof credentials.matrix_server_name !== 'string'
+        ) {
+          return 0;
+        }
+        const query = new URLSearchParams({
+          target: 'room',
+          roomId,
+          calendarId,
+        });
+        const response = await fetch(
+          `${gatewayUrl}/v1/calendar/private-clients?${query.toString()}`,
+          {
+            headers: {
+              Authorization: `MX-Identity ${btoa(
+                JSON.stringify({
+                  matrix_server_name: credentials.matrix_server_name,
+                  access_token: credentials.access_token,
+                }),
+              )}`,
+            },
+          },
+        );
+        await response.body?.cancel();
+        return response.status;
+      } catch {
+        return 0;
+      }
+    },
+    { gatewayUrl, roomId, calendarId },
+  );
+}
+
+type PrivateDavRequestResult = Readonly<{
+  status: number;
+  bodyBytes: number;
+  etag?: string;
+  expectedTextPresent?: boolean;
+}>;
+
+function requestPrivateDav({
+  url,
+  username,
+  password,
+  caCertificate,
+  method,
+  headers = {},
+  body = '',
+  expectedText,
+}: {
+  url: URL;
+  username: string;
+  password: string;
+  caCertificate: Buffer;
+  method: string;
+  headers?: Record<string, string>;
+  body?: string;
+  expectedText?: string;
+}): Promise<PrivateDavRequestResult> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const fail = () => {
+      if (settled) return;
+      settled = true;
+      reject(new Error('Private CalDAV acceptance request failed'));
+    };
+    const authorization = `Basic ${Buffer.from(
+      `${username}:${password}`,
+      'utf8',
+    ).toString('base64')}`;
+    let request: ClientRequest;
+    try {
+      request = httpsRequest(
+        url,
+        {
+          method,
+          headers: {
+            accept: '*/*',
+            authorization,
+            connection: 'close',
+            ...headers,
+          },
+          ca: caCertificate,
+          agent: false,
+          timeout: 15_000,
+        },
+        (response) => {
+          const chunks: Buffer[] = [];
+          let bodyBytes = 0;
+          response.on('data', (chunk: Buffer) => {
+            bodyBytes += chunk.byteLength;
+            if (bodyBytes > 1_000_000) {
+              request.destroy();
+              fail();
+              return;
+            }
+            chunks.push(Buffer.from(chunk));
+          });
+          response.once('error', fail);
+          response.once('end', () => {
+            if (settled) return;
+            const responseBody = Buffer.concat(chunks);
+            const etag = response.headers.etag;
+            settled = true;
+            resolve({
+              status: response.statusCode ?? 0,
+              bodyBytes,
+              ...(typeof etag === 'string' ? { etag } : {}),
+              ...(expectedText === undefined
+                ? {}
+                : {
+                    expectedTextPresent: responseBody.includes(
+                      Buffer.from(expectedText, 'utf8'),
+                    ),
+                  }),
+            });
+          });
+        },
+      );
+    } catch {
+      fail();
+      return;
+    }
+    request.once('error', fail);
+    request.once('timeout', () => request.destroy());
+    request.end(body);
+  });
+}
+
+async function privateSetupDetailsAbsent(dialog: Locator): Promise<boolean> {
+  const counts = await Promise.all(
+    ['CalDAV URL', 'Username', 'App password'].map((name) =>
+      dialog.getByRole('textbox', { name, exact: true }).count(),
+    ),
+  );
+  return counts.every((count) => count === 0);
+}
+
+function privateTlsDirectoryMatchesRunnerTemp(): boolean {
+  const runnerTemp = process.env.RUNNER_TEMP;
+  const tlsDirectory = process.env.ELEMENT_ACCEPTANCE_PRIVATE_TLS_DIR;
+  return (
+    typeof runnerTemp === 'string' &&
+    typeof tlsDirectory === 'string' &&
+    isAbsolute(runnerTemp) &&
+    isAbsolute(tlsDirectory) &&
+    resolve(tlsDirectory).startsWith(`${resolve(runnerTemp)}${sep}`)
+  );
+}
+
+function readPrivateAcceptanceCaCertificate(): Buffer {
+  const tlsDirectory = process.env.ELEMENT_ACCEPTANCE_PRIVATE_TLS_DIR;
+  if (typeof tlsDirectory !== 'string' || !isAbsolute(tlsDirectory)) {
+    throw new Error('Private acceptance CA certificate is unavailable');
+  }
+  try {
+    return readFileSync(join(tlsDirectory, 'ca.pem'));
+  } catch {
+    throw new Error('Private acceptance CA certificate is unavailable');
+  }
+}
+
+async function selectPrivateAcceptanceCalendar(
+  page: Page,
+  calendarPicker: Locator,
+  targetCalendarOption: Locator,
+): Promise<boolean> {
+  const alreadySelected =
+    (await targetCalendarOption.getAttribute('aria-selected')) === 'true';
+  if (alreadySelected) {
+    await calendarPicker.press('Escape');
+    return true;
+  }
+
+  const selectedListResponse = waitForPrivateClientResponse(page, 'GET');
+  await targetCalendarOption.click();
+  return (await selectedListResponse).status() === 200;
+}
+
+function privateCredentialsMatchGateway(
+  username: string,
+  password: string,
+  credentialUrl: URL,
+): boolean {
+  return [
+    /^mcwpc~[a-f0-9]{48}$/u.test(username),
+    /^[A-Za-z0-9_-]{43}$/u.test(password),
+    credentialUrl.origin === PRIVATE_ACCEPTANCE_GATEWAY_ORIGIN,
+    credentialUrl.pathname === `/${username}/calendar/`,
+    credentialUrl.username === '',
+    credentialUrl.password === '',
+    credentialUrl.search === '',
+    credentialUrl.hash === '',
+  ].every(Boolean);
+}
+
+function parsePrivateCredentialUrl(credentialUrlText: string): URL {
+  try {
+    return new URL(credentialUrlText);
+  } catch {
+    throw new Error('Private app credentials were not rendered');
+  }
+}
+
+function privateDavLifecycleSucceeded(
+  principalDiscovery: PrivateDavRequestResult,
+  collectionDiscovery: PrivateDavRequestResult,
+  createdResource: PrivateDavRequestResult,
+  readCreatedResource: PrivateDavRequestResult,
+  updatedResource: PrivateDavRequestResult,
+  readUpdatedResource: PrivateDavRequestResult,
+  deletedResource: PrivateDavRequestResult,
+): boolean {
+  return (
+    principalDiscovery.status === 207 &&
+    collectionDiscovery.status === 207 &&
+    privateDavWriteSucceeded(createdResource) &&
+    readCreatedResource.status === 200 &&
+    readCreatedResource.expectedTextPresent === true &&
+    isStrongPrivateDavEtag(readCreatedResource.etag) &&
+    privateDavWriteSucceeded(updatedResource) &&
+    readUpdatedResource.status === 200 &&
+    readUpdatedResource.expectedTextPresent === true &&
+    isStrongPrivateDavEtag(readUpdatedResource.etag) &&
+    privateDavWriteSucceeded(deletedResource)
+  );
+}
+
+function privateDavWriteSucceeded(result: PrivateDavRequestResult): boolean {
+  return result.status >= 200 && result.status < 300;
+}
+
+function isStrongPrivateDavEtag(etag: string | undefined): etag is string {
+  return typeof etag === 'string' && /^"[\x21\x23-\x7e]{1,200}"$/u.test(etag);
+}
+
+function privateDavEtagOrEmpty(etag: string | undefined): string {
+  return isStrongPrivateDavEtag(etag) ? etag : '';
+}
+
+function privateDavReadSucceeded(result: PrivateDavRequestResult): boolean {
+  return result.status === 200 && result.expectedTextPresent === true;
+}
+
+function privateDavReadEtagOrEmpty(result: PrivateDavRequestResult): string {
+  return privateDavReadSucceeded(result)
+    ? privateDavEtagOrEmpty(result.etag)
+    : '';
+}
+
+async function bestEffortDeleteOwnedPrivateDavResource(
+  requestBase: {
+    username: string;
+    password: string;
+    caCertificate: Buffer;
+  },
+  url: URL,
+  expectedUid: string,
+): Promise<void> {
+  try {
+    const existingResource = await requestPrivateDav({
+      ...requestBase,
+      url,
+      method: 'GET',
+      expectedText: `UID:${expectedUid}`,
+    });
+    if (existingResource.status === 404) return;
+    if (
+      existingResource.status !== 200 ||
+      existingResource.expectedTextPresent !== true ||
+      !isStrongPrivateDavEtag(existingResource.etag)
+    ) {
+      return;
+    }
+
+    await requestPrivateDav({
+      ...requestBase,
+      url,
+      method: 'DELETE',
+      headers: { 'if-match': existingResource.etag },
+    });
+  } catch {
+    // Best-effort cleanup must not replace the primary acceptance result.
+  }
+}
+
+function revokedPrivateDavCredentialDenied(
+  result: PrivateDavRequestResult,
+): boolean {
+  return result.status === 401 && result.bodyBytes === 0;
+}
+
 function observeReminderWidgetContextResponse(
   page: Page,
   roomId: string,
@@ -10211,4 +10701,549 @@ function recordRuntimeVersions(chromiumVersion: string) {
     })}\n`,
     { encoding: 'utf8', mode: 0o600 },
   );
+}
+
+function requirePrivateUiCheckpointJournal<T>(journal: T | undefined): T {
+  if (journal === undefined) {
+    throw new Error('Private acceptance checkpoints are unavailable');
+  }
+  return journal;
+}
+
+if (process.env.ELEMENT_ACCEPTANCE_PRIVATE_UI === 'true') {
+  test.describe('private calendar app acceptance', () => {
+    let privateUiJournal:
+      | ReturnType<typeof createPrivateUiCheckpointJournal>
+      | undefined;
+
+    test.beforeEach(() => {
+      const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
+      const sourceSha = process.env.ELEMENT_ACCEPTANCE_SOURCE_SHA;
+      if (process.env.ROOM_CALENDAR_PRINCIPAL_MODE !== 'bot-account') {
+        throw new Error('Private acceptance requires the normal bot profile');
+      }
+      if (!stageFile || !sourceSha) {
+        throw new Error('Private acceptance checkpoints are unavailable');
+      }
+      privateUiJournal = createPrivateUiCheckpointJournal({
+        stageFile,
+        sourceSha,
+        profile: 'normal-bot',
+      });
+    });
+
+    test.afterEach(async ({}, testInfo) => {
+      privateUiJournal?.finish(testInfo.status);
+      privateUiJournal = undefined;
+    });
+
+    test('Element Web manages private app access and revokes CalDAV authorization', async ({
+      browser,
+    }) => {
+      test.setTimeout(360_000);
+      const checkpoint = requirePrivateUiCheckpointJournal(privateUiJournal);
+      const caCertificate = await checkpoint.run(
+        'private-ui-fixture-ready',
+        () => {
+          fixture = readFixture();
+          const privateGatewayOriginMatches =
+            new URL(fixture.gatewayUrl).origin ===
+            PRIVATE_ACCEPTANCE_GATEWAY_ORIGIN;
+          expect(privateGatewayOriginMatches).toBe(true);
+          expect(privateTlsDirectoryMatchesRunnerTemp()).toBe(true);
+          return readPrivateAcceptanceCaCertificate();
+        },
+      );
+
+      const allowedOrigins = new Set([
+        new URL(fixture.elementUrl).origin,
+        new URL(fixture.homeserverUrl).origin,
+        new URL(fixture.gatewayUrl).origin,
+        new URL(fixture.widgetUrl).origin,
+        'http://localhost:8008',
+      ]);
+      const contexts: BrowserContext[] = [];
+      let blockedExternalRequests = 0;
+      let calendarListRequestObserver:
+        | PrivateCalendarListRequestObserver
+        | undefined;
+      const makeContext = async () => {
+        const context = await browser.newContext({
+          locale: 'en-US',
+          timezoneId: 'Europe/Stockholm',
+          viewport: { width: 1440, height: 900 },
+        });
+        contexts.push(context);
+        await context.route('**/*', async (route) => {
+          let origin: string;
+          try {
+            origin = new URL(route.request().url()).origin;
+          } catch {
+            blockedExternalRequests += 1;
+            await route.abort('blockedbyclient');
+            return;
+          }
+          if (!allowedOrigins.has(origin)) {
+            blockedExternalRequests += 1;
+            await route.abort('blockedbyclient');
+            return;
+          }
+          await route.continue();
+        });
+        return context;
+      };
+
+      try {
+        const { contextA, pageA } = await checkpoint.run(
+          'private-ui-member-a-auth',
+          async () => {
+            const contextA = await makeContext();
+            const pageA = await authenticateInElement(
+              contextA,
+              fixture.users.memberA,
+            );
+            return { contextA, pageA };
+          },
+        );
+        const teamRoomA = await checkpoint.run('private-ui-member-a-room', () =>
+          openFixtureRoom(pageA, fixture.roomName, fixture.teamRoomId),
+        );
+        calendarListRequestObserver = createPrivateCalendarListRequestObserver(
+          pageA,
+          fixture.teamRoomId,
+        );
+        const frameA = await checkpoint.run(
+          'private-ui-member-a-widget-ready',
+          () =>
+            openCalendarWidget(teamRoomA, pageA, {
+              expectWidgetWarning: false,
+            }),
+        );
+        const privateClientButtonA = frameA.getByRole('button', {
+          name: 'Calendar app access',
+          exact: true,
+        });
+        await checkpoint.run('private-ui-access-button-visible', () =>
+          expect(privateClientButtonA).toBeVisible(),
+        );
+        await checkpoint.run('private-ui-access-button-enabled', () =>
+          expect(privateClientButtonA).toBeEnabled(),
+        );
+        calendarListRequestObserver.recordSnapshot((observations) =>
+          checkpoint.recordCalendarListTransport(observations),
+        );
+        const initialListResponse = waitForPrivateClientResponse(pageA, 'GET');
+        await checkpoint.run('private-ui-access-button-click', () =>
+          privateClientButtonA.click(),
+        );
+        const dialogA = frameA.getByRole('dialog').last();
+        await checkpoint.run('private-ui-dialog-visible', () =>
+          expect(dialogA).toBeVisible(),
+        );
+        await checkpoint.run('private-ui-initial-list', async () => {
+          const response = await initialListResponse;
+          expect(response.status()).toBe(200);
+        });
+
+        const calendarPicker = dialogA.getByRole('combobox', {
+          name: 'Calendar',
+        });
+        await checkpoint.run('private-ui-calendar-select', async () => {
+          await calendarPicker.click();
+          const targetCalendarOption = frameA.getByRole('option', {
+            name: 'Synthetic team calendar',
+            exact: true,
+          });
+          await expect(targetCalendarOption).toHaveCount(1);
+          expect(
+            await selectPrivateAcceptanceCalendar(
+              pageA,
+              calendarPicker,
+              targetCalendarOption,
+            ),
+          ).toBe(true);
+        });
+
+        let publicFeedMutationCount = 0;
+        pageA.on('request', (request) => {
+          try {
+            const url = new URL(request.url());
+            if (
+              url.origin === PRIVATE_ACCEPTANCE_GATEWAY_ORIGIN &&
+              url.pathname === '/v1/calendar-feeds/publication' &&
+              ['PUT', 'DELETE'].includes(request.method())
+            ) {
+              publicFeedMutationCount += 1;
+            }
+          } catch {
+            // Keep only the mutation count; never retain the request URL.
+          }
+        });
+
+        const { credentialUrlText, credentialUrl, username, password } =
+          await checkpoint.run(
+            'private-ui-credential-issue-reveal',
+            async () => {
+              const createResponse = waitForPrivateClientResponse(
+                pageA,
+                'POST',
+              );
+              await dialogA
+                .getByRole('button', {
+                  name: 'Create app access',
+                  exact: true,
+                })
+                .click();
+              expect((await createResponse).status()).toBe(201);
+
+              const credentialUrlText = await dialogA
+                .getByRole('textbox', { name: 'CalDAV URL', exact: true })
+                .inputValue();
+              const credentialUrl =
+                parsePrivateCredentialUrl(credentialUrlText);
+              const username = await dialogA
+                .getByRole('textbox', { name: 'Username', exact: true })
+                .inputValue();
+              const password = await dialogA
+                .getByRole('textbox', { name: 'App password', exact: true })
+                .inputValue();
+              expect(
+                privateCredentialsMatchGateway(
+                  username,
+                  password,
+                  credentialUrl,
+                ),
+              ).toBe(true);
+              return { credentialUrlText, credentialUrl, username, password };
+            },
+          );
+        await checkpoint.run('private-ui-no-publication', () => {
+          expect(publicFeedMutationCount).toBe(0);
+        });
+
+        await checkpoint.run('private-ui-credential-hide', async () => {
+          await expect(
+            dialogA.getByText('Status: Active', { exact: true }),
+          ).toBeVisible();
+          await dialogA
+            .getByRole('button', { name: 'Hide setup details', exact: true })
+            .click();
+          expect(await privateSetupDetailsAbsent(dialogA)).toBe(true);
+        });
+
+        await checkpoint.run('private-ui-storage-check', async () => {
+          const browserStorage = JSON.stringify(await contextA.storageState());
+          const appCredentialWasPersisted =
+            browserStorage.includes(username) ||
+            browserStorage.includes(password) ||
+            browserStorage.includes(credentialUrlText);
+          expect(appCredentialWasPersisted).toBe(false);
+        });
+
+        const reopenedDialogA = await checkpoint.run(
+          'private-ui-list-reopen',
+          async () => {
+            await dialogA
+              .getByRole('button', { name: 'Close', exact: true })
+              .click();
+            const listedAfterReopen = waitForPrivateClientResponse(
+              pageA,
+              'GET',
+            );
+            await privateClientButtonA.click();
+            const dialog = frameA.getByRole('dialog').last();
+            expect((await listedAfterReopen).status()).toBe(200);
+            expect(await privateSetupDetailsAbsent(dialog)).toBe(true);
+            await expect(
+              dialog.getByText('Status: Active', { exact: true }),
+            ).toBeVisible();
+            return dialog;
+          },
+        );
+
+        const principalUrl = new URL('../', credentialUrl);
+        const collectionUrl = new URL(credentialUrl.href);
+        const eventResourceId = randomUUID();
+        const resourceUrl = new URL(
+          `private-ui-${eventResourceId}.ics`,
+          collectionUrl,
+        );
+        const eventUid = `private-ui-${eventResourceId}@acceptance.invalid`;
+        const timeValue = (value: Date) =>
+          value
+            .toISOString()
+            .replace(/[-:]/gu, '')
+            .replace(/\.\d{3}Z$/u, 'Z');
+        const eventStart = new Date(Date.now() + 5 * 60_000);
+        const eventEnd = new Date(eventStart.getTime() + 30 * 60_000);
+        const originalSummary = 'Private UI acceptance original';
+        const updatedSummary = 'Private UI acceptance updated';
+        const makeIcs = (summary: string) =>
+          [
+            'BEGIN:VCALENDAR',
+            'VERSION:2.0',
+            'PRODID:-//Matrix Calendar Widget//Private Acceptance//EN',
+            'BEGIN:VEVENT',
+            `UID:${eventUid}`,
+            `DTSTAMP:${timeValue(new Date())}`,
+            `DTSTART:${timeValue(eventStart)}`,
+            `DTEND:${timeValue(eventEnd)}`,
+            `SUMMARY:${summary}`,
+            'END:VEVENT',
+            'END:VCALENDAR',
+            '',
+          ].join('\r\n');
+        const discoveryBody = [
+          '<?xml version="1.0" encoding="utf-8"?>',
+          '<d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>',
+        ].join('');
+        const requestBase = {
+          username,
+          password,
+          caCertificate,
+        };
+        try {
+          const principalDiscovery = await checkpoint.run(
+            'private-ui-dav-principal-discovery',
+            async () => {
+              const result = await requestPrivateDav({
+                ...requestBase,
+                url: principalUrl,
+                method: 'PROPFIND',
+                headers: { depth: '0', 'content-type': 'application/xml' },
+                body: discoveryBody,
+              });
+              expect(result.status).toBe(207);
+              return result;
+            },
+          );
+          const collectionDiscovery = await checkpoint.run(
+            'private-ui-dav-collection-discovery',
+            async () => {
+              const result = await requestPrivateDav({
+                ...requestBase,
+                url: collectionUrl,
+                method: 'PROPFIND',
+                headers: { depth: '1', 'content-type': 'application/xml' },
+                body: discoveryBody,
+              });
+              expect(result.status).toBe(207);
+              return result;
+            },
+          );
+          const createdResource = await checkpoint.run(
+            'private-ui-dav-create',
+            async () => {
+              const result = await requestPrivateDav({
+                ...requestBase,
+                url: resourceUrl,
+                method: 'PUT',
+                headers: {
+                  'content-type': 'text/calendar; charset=utf-8',
+                  'if-none-match': '*',
+                },
+                body: makeIcs(originalSummary),
+              });
+              expect(privateDavWriteSucceeded(result)).toBe(true);
+              return result;
+            },
+          );
+          const readCreatedResource = await checkpoint.run(
+            'private-ui-dav-read-created',
+            async () => {
+              const result = await requestPrivateDav({
+                ...requestBase,
+                url: resourceUrl,
+                method: 'GET',
+                expectedText: `SUMMARY:${originalSummary}`,
+              });
+              expect(privateDavReadSucceeded(result)).toBe(true);
+              expect(isStrongPrivateDavEtag(result.etag)).toBe(true);
+              return result;
+            },
+          );
+          const updatedResource = await checkpoint.run(
+            'private-ui-dav-update',
+            async () => {
+              const result = await requestPrivateDav({
+                ...requestBase,
+                url: resourceUrl,
+                method: 'PUT',
+                headers: {
+                  'content-type': 'text/calendar; charset=utf-8',
+                  'if-match': privateDavReadEtagOrEmpty(readCreatedResource),
+                },
+                body: makeIcs(updatedSummary),
+              });
+              expect(privateDavWriteSucceeded(result)).toBe(true);
+              return result;
+            },
+          );
+          const readUpdatedResource = await checkpoint.run(
+            'private-ui-dav-read-updated',
+            async () => {
+              const result = await requestPrivateDav({
+                ...requestBase,
+                url: resourceUrl,
+                method: 'GET',
+                expectedText: `SUMMARY:${updatedSummary}`,
+              });
+              expect(privateDavReadSucceeded(result)).toBe(true);
+              expect(isStrongPrivateDavEtag(result.etag)).toBe(true);
+              return result;
+            },
+          );
+          const deletedResource = await checkpoint.run(
+            'private-ui-dav-delete',
+            async () => {
+              const result = await requestPrivateDav({
+                ...requestBase,
+                url: resourceUrl,
+                method: 'DELETE',
+                headers: {
+                  'if-match': privateDavReadEtagOrEmpty(readUpdatedResource),
+                },
+              });
+              expect(privateDavWriteSucceeded(result)).toBe(true);
+              return result;
+            },
+          );
+          expect(
+            privateDavLifecycleSucceeded(
+              principalDiscovery,
+              collectionDiscovery,
+              createdResource,
+              readCreatedResource,
+              updatedResource,
+              readUpdatedResource,
+              deletedResource,
+            ),
+          ).toBe(true);
+        } finally {
+          // This only deletes this random resource after verifying its UID and
+          // current strong ETag. Cleanup failure never masks the test failure.
+          await checkpoint.cleanup('private-ui-dav-cleanup', () =>
+            bestEffortDeleteOwnedPrivateDavResource(
+              requestBase,
+              resourceUrl,
+              eventUid,
+            ),
+          );
+        }
+
+        const memberBPage = await checkpoint.run(
+          'private-ui-member-b-auth',
+          async () => {
+            const memberBContext = await makeContext();
+            return authenticateInElement(memberBContext, fixture.users.memberB);
+          },
+        );
+        const memberBRoom = await checkpoint.run(
+          'private-ui-member-b-room',
+          () =>
+            openFixtureRoom(memberBPage, fixture.roomName, fixture.teamRoomId),
+        );
+        const memberBFrame = await checkpoint.run(
+          'private-ui-member-b-widget-ready',
+          () =>
+            openCalendarWidget(memberBRoom, memberBPage, {
+              expectWidgetWarning: true,
+            }),
+        );
+        await checkpoint.run('private-ui-member-b-deny', async () => {
+          const memberBDialogList = waitForPrivateClientResponse(
+            memberBPage,
+            'GET',
+          );
+          await memberBFrame
+            .getByRole('button', {
+              name: 'Calendar app access',
+              exact: true,
+            })
+            .click();
+          const memberBDialog = memberBFrame.getByRole('dialog').last();
+          expect((await memberBDialogList).status()).toBe(403);
+          await expect(
+            memberBDialog.getByRole('button', {
+              name: 'Create app access',
+              exact: true,
+            }),
+          ).toHaveCount(0);
+        });
+
+        const outsiderPage = await checkpoint.run(
+          'private-ui-outsider-auth',
+          async () => {
+            const outsiderContext = await makeContext();
+            return authenticateInElement(
+              outsiderContext,
+              fixture.users.outsider,
+            );
+          },
+        );
+        const outsiderRoom = await checkpoint.run(
+          'private-ui-outsider-room',
+          () =>
+            openFixtureRoom(
+              outsiderPage,
+              fixture.outsiderRoomName,
+              fixture.outsiderRoomId,
+            ),
+        );
+        await checkpoint.run('private-ui-outsider-widget-ready', () =>
+          openCalendarWidget(outsiderRoom, outsiderPage, {
+            expectWidgetWarning: false,
+            waitForCalendar: false,
+          }),
+        );
+        await checkpoint.run('private-ui-outsider-deny', async () => {
+          const outsiderPrivateClientStatus =
+            await requestPrivateClientListStatus(
+              outsiderPage,
+              fixture.gatewayUrl,
+              fixture.teamRoomId,
+              fixture.calendarId,
+            );
+          expect(outsiderPrivateClientStatus).toBe(403);
+        });
+
+        await checkpoint.run('private-ui-revoke', async () => {
+          const revokeResponse = waitForPrivateClientResponse(pageA, 'DELETE');
+          await reopenedDialogA
+            .getByRole('button', { name: 'Revoke', exact: true })
+            .click();
+          await reopenedDialogA
+            .getByRole('button', { name: 'Revoke access', exact: true })
+            .click();
+          expect((await revokeResponse).status()).toBe(200);
+          await expect(
+            reopenedDialogA.getByText('Status: Revoked', { exact: true }),
+          ).toBeVisible();
+        });
+
+        await checkpoint.run('private-ui-dav-deny-after-revoke', async () => {
+          const davAfterRevoke = await requestPrivateDav({
+            ...requestBase,
+            url: resourceUrl,
+            method: 'GET',
+          });
+          expect(revokedPrivateDavCredentialDenied(davAfterRevoke)).toBe(true);
+        });
+        await checkpoint.run('private-ui-egress-check', async () => {
+          expect(blockedExternalRequests).toBe(0);
+          expect(publicFeedMutationCount).toBe(0);
+        });
+      } finally {
+        calendarListRequestObserver?.recordSnapshot((observations) =>
+          checkpoint.recordCalendarListTransport(observations),
+        );
+        calendarListRequestObserver?.dispose();
+        await checkpoint.cleanup('private-ui-context-cleanup', async () => {
+          await Promise.all(
+            contexts.map((context) => context.close().catch(() => undefined)),
+          );
+        });
+      }
+    });
+  });
 }

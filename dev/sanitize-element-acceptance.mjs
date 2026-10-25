@@ -7,6 +7,12 @@ import {
   loadRuntimeDependencyAllowlist,
 } from './element-acceptance-diagnostics.mjs';
 import { formatPerformanceEvidence } from './element-acceptance-performance-evidence.mjs';
+import {
+  PRIVATE_UI_CALENDAR_LIST_TRANSPORT_PHASE,
+  PRIVATE_UI_CHECKPOINT_PHASES,
+  PRIVATE_UI_RESULT_PHASE,
+  normalizePrivateUiCalendarListTransportObservations,
+} from './element-acceptance-private-ui-checkpoints.mjs';
 import { ROOM_RENDER_DIAGNOSTIC_FIELDS } from './element-room-context-observation.mjs';
 import { isReminderDeliverySnapshot } from './reminder-delivery-snapshot.mjs';
 
@@ -839,6 +845,15 @@ const PINNED_WIDGET_PANEL_PHASES = new Set([
   'widget-a-extension-row',
 ]);
 const STATUSES = new Set(['started', 'passed', 'failed', 'unavailable']);
+const PRIVATE_UI_PHASES = new Set(PRIVATE_UI_CHECKPOINT_PHASES);
+const PRIVATE_UI_TEST_STATUSES = new Set([
+  'passed',
+  'failed',
+  'timedOut',
+  'skipped',
+  'interrupted',
+  'unknown',
+]);
 const SUMMARY_FAILURE_CATEGORIES = new Set([
   'invalid-source-sha',
   'invalid-stage-json',
@@ -3231,7 +3246,11 @@ export function formatSanitizerFailureSummary(error, sourceSha) {
   ].join('\n');
 }
 
-export function sanitizeElementAcceptance(input, sourceSha) {
+export function sanitizeElementAcceptance(
+  input,
+  sourceSha,
+  { privateUiEnabled = false, profile = null } = {},
+) {
   if (typeof sourceSha !== 'string' || !/^[a-f0-9]{40}$/i.test(sourceSha)) {
     throw new SummaryValidationError('invalid-source-sha', 'unknown');
   }
@@ -3261,6 +3280,126 @@ export function sanitizeElementAcceptance(input, sourceSha) {
       throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
     rejectionCategory = 'invalid-stage-record';
+    const privateUiCheckpoint =
+      record !== null &&
+      typeof record === 'object' &&
+      !Array.isArray(record) &&
+      PRIVATE_UI_PHASES.has(record.phase);
+    const privateUiResult =
+      record !== null &&
+      typeof record === 'object' &&
+      !Array.isArray(record) &&
+      record.phase === PRIVATE_UI_RESULT_PHASE;
+    const privateUiCalendarListTransport =
+      record !== null &&
+      typeof record === 'object' &&
+      !Array.isArray(record) &&
+      record.phase === PRIVATE_UI_CALENDAR_LIST_TRANSPORT_PHASE;
+    if (
+      privateUiCheckpoint ||
+      privateUiResult ||
+      privateUiCalendarListTransport
+    ) {
+      const exactKeys = (keys) =>
+        Object.keys(record).length === keys.length &&
+        keys.every((key) => Object.hasOwn(record, key));
+      const sourceAndProfileMatch =
+        privateUiEnabled === true &&
+        profile === 'normal-bot' &&
+        record.sourceSha === sourceSha.toLowerCase() &&
+        record.profile === 'normal-bot';
+      if (
+        !sourceAndProfileMatch ||
+        (!privateUiCalendarListTransport && !STATUSES.has(record.status)) ||
+        (privateUiCalendarListTransport && record.status !== 'observed') ||
+        (privateUiCheckpoint &&
+          (!exactKeys(['phase', 'status', 'sourceSha', 'profile']) ||
+            !['started', 'passed', 'failed'].includes(record.status)))
+      ) {
+        throw new SummaryValidationError(rejectionCategory, 'unknown');
+      }
+
+      if (privateUiCheckpoint) {
+        const previousStatus = phases.get(record.phase)?.status;
+        if (
+          (record.status === 'started' && previousStatus !== undefined) ||
+          (record.status !== 'started' && previousStatus !== 'started')
+        ) {
+          throw new SummaryValidationError(rejectionCategory, 'unknown');
+        }
+        phases.set(record.phase, record);
+        continue;
+      }
+
+      if (privateUiCalendarListTransport) {
+        const observations =
+          normalizePrivateUiCalendarListTransportObservations(
+            record.observations,
+          );
+        if (
+          !exactKeys([
+            'phase',
+            'status',
+            'sourceSha',
+            'profile',
+            'observations',
+          ]) ||
+          observations === undefined ||
+          phases.has(record.phase) ||
+          phases.has(PRIVATE_UI_RESULT_PHASE)
+        ) {
+          throw new SummaryValidationError(rejectionCategory, 'unknown');
+        }
+        phases.set(record.phase, record);
+        continue;
+      }
+
+      if (
+        !exactKeys([
+          'phase',
+          'status',
+          'sourceSha',
+          'profile',
+          'testStatus',
+          'lastEnteredPhase',
+          'lastCompletedPhase',
+          'failurePhase',
+        ]) ||
+        !PRIVATE_UI_TEST_STATUSES.has(record.testStatus) ||
+        ![null, ...PRIVATE_UI_CHECKPOINT_PHASES].includes(
+          record.lastEnteredPhase,
+        ) ||
+        ![null, ...PRIVATE_UI_CHECKPOINT_PHASES].includes(
+          record.lastCompletedPhase,
+        ) ||
+        ![null, ...PRIVATE_UI_CHECKPOINT_PHASES].includes(record.failurePhase)
+      ) {
+        throw new SummaryValidationError(rejectionCategory, 'unknown');
+      }
+      const expectedResultStatus =
+        record.testStatus === 'passed'
+          ? 'passed'
+          : record.testStatus === 'skipped'
+            ? 'unavailable'
+            : 'failed';
+      if (
+        record.status !== expectedResultStatus ||
+        (record.testStatus === 'passed' && record.failurePhase !== null) ||
+        (record.testStatus !== 'passed' &&
+          record.lastEnteredPhase !== null &&
+          record.failurePhase === null) ||
+        (record.lastEnteredPhase !== null &&
+          !phases.has(record.lastEnteredPhase)) ||
+        (record.lastCompletedPhase !== null &&
+          !phases.has(record.lastCompletedPhase)) ||
+        phases.has(PRIVATE_UI_RESULT_PHASE)
+      ) {
+        throw new SummaryValidationError(rejectionCategory, 'unknown');
+      }
+      phases.set(record.phase, record);
+      continue;
+    }
+
     rejectedPhase =
       record !== null &&
       typeof record === 'object' &&
@@ -4429,6 +4568,51 @@ export function sanitizeElementAcceptance(input, sourceSha) {
 
   const lines = [`element-acceptance source_sha=${sourceSha.toLowerCase()}`];
   for (const [phase, record] of phases) {
+    if (PRIVATE_UI_PHASES.has(phase)) {
+      lines.push(`phase=${phase} status=${record.status} profile=normal-bot`);
+      continue;
+    }
+    if (phase === PRIVATE_UI_CALENDAR_LIST_TRANSPORT_PHASE) {
+      if (record.observations.length === 0) {
+        lines.push(
+          `phase=${phase} status=observed profile=normal-bot observation_count=0`,
+        );
+        continue;
+      }
+      for (const observation of record.observations) {
+        lines.push(
+          [
+            `phase=${phase}`,
+            'status=observed',
+            'profile=normal-bot',
+            `endpoint=${observation.endpoint}`,
+            `method=${observation.method}`,
+            `outcome=${observation.outcome}`,
+            ...(observation.httpStatus === undefined
+              ? []
+              : [`http_status=${observation.httpStatus}`]),
+            ...(observation.networkFailure === undefined
+              ? []
+              : [`network_failure=${observation.networkFailure}`]),
+          ].join(' '),
+        );
+      }
+      continue;
+    }
+    if (phase === PRIVATE_UI_RESULT_PHASE) {
+      lines.push(
+        [
+          `phase=${phase}`,
+          `status=${record.status}`,
+          'profile=normal-bot',
+          `test_status=${record.testStatus}`,
+          `last_entered=${record.lastEnteredPhase ?? 'none'}`,
+          `last_completed=${record.lastCompletedPhase ?? 'none'}`,
+          `failure_phase=${record.failurePhase ?? 'none'}`,
+        ].join(' '),
+      );
+      continue;
+    }
     if (phase === 'widget-a-runtime-observed') {
       const fields = [
         `phase=${phase}`,
@@ -5078,15 +5262,47 @@ export function sanitizeElementAcceptance(input, sourceSha) {
   return `${lines.join('\n')}\n`;
 }
 
+export function summarizeElementAcceptanceFile(
+  stageFile,
+  sourceSha,
+  options = {},
+) {
+  try {
+    const input = stageFile ? readFileSync(stageFile, 'utf8') : '';
+    return {
+      available: true,
+      summary: sanitizeElementAcceptance(input, sourceSha, options),
+    };
+  } catch (error) {
+    return {
+      available: false,
+      summary: formatSanitizerFailureSummary(error, sourceSha),
+    };
+  }
+}
+
 function main() {
   const stageFile =
     process.argv[2] ?? process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
   const sourceSha =
     process.argv[3] ?? process.env.ELEMENT_ACCEPTANCE_SOURCE_SHA;
-  const input = stageFile ? readFileSync(stageFile, 'utf8') : '';
-  const summary = sanitizeElementAcceptance(input, sourceSha);
+  const privateUiEnabled = process.env.ELEMENT_ACCEPTANCE_PRIVATE_UI === 'true';
+  const profile =
+    process.env.ROOM_CALENDAR_PRINCIPAL_MODE === 'bot-account'
+      ? 'normal-bot'
+      : null;
+  const result = summarizeElementAcceptanceFile(stageFile, sourceSha, {
+    privateUiEnabled,
+    profile,
+  });
+  const summary = result.summary;
 
   process.stdout.write(summary);
+  if (!result.available) {
+    process.stderr.write('Element acceptance summary unavailable.\n');
+    process.exitCode = 1;
+    return;
+  }
 
   const summaryFile = process.env.ELEMENT_ACCEPTANCE_SUMMARY_FILE;
   if (summaryFile) writeFileSync(summaryFile, summary, { mode: 0o600 });

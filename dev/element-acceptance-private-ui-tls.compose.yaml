@@ -1,0 +1,13 @@
+# The Radicale callback client uses only this public CA file from the private
+# test certificate directory; no runtime UID assumption or directory access.
+services:
+  radicale:
+    environment:
+      SSL_CERT_FILE: /run/mcw-private-ui-ca.pem
+      RADICALE_PRIVATE_CLIENT_CALLBACK_ORIGIN: ${RADICALE_PRIVATE_CLIENT_CALLBACK_ORIGIN:-}
+      RADICALE_PRIVATE_CLIENT_CALLBACK_KEY: ${RADICALE_PRIVATE_CLIENT_CALLBACK_KEY:-}
+    volumes:
+      - type: bind
+        source: ${ELEMENT_ACCEPTANCE_PRIVATE_TLS_DIR:?}/ca.pem
+        target: /run/mcw-private-ui-ca.pem
+        read_only: true
