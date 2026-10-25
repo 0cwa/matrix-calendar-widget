@@ -18,9 +18,15 @@ import {
 } from './element-acceptance-private-ui-checkpoints.mjs';
 import {
   PRIVATE_UI_ROOM_READINESS_FIELDS,
-  ROOM_RENDER_DIAGNOSTIC_FIELDS,
   normalizePrivateUiRoomReadinessObservation,
+  isRoomNavigationReadinessObservation,
+  ROOM_RENDER_DIAGNOSTIC_FIELDS,
 } from './element-room-context-observation.mjs';
+import {
+  formatReminderFlowDiagnosticRecord,
+  isReminderFlowDiagnosticRecord,
+  REMINDER_FLOW_DIAGNOSTIC_PHASE,
+} from './element-reminder-flow-diagnostics.mjs';
 import { isReminderDeliverySnapshot } from './reminder-delivery-snapshot.mjs';
 
 const RUNTIME_DEPENDENCIES = loadRuntimeDependencyAllowlist(
@@ -1551,6 +1557,7 @@ const ALLOWED_KEYS = new Set([
   'matrixUserMatches',
   'matrixSyncState',
   'roomReadinessTimeline',
+  'roomNavigationReadiness',
   'matrixRoomKnown',
   'matrixRoomJoined',
   'roomNavigationCompleted',
@@ -1561,6 +1568,7 @@ const ALLOWED_KEYS = new Set([
   'outerRenderBucket',
   ...OUTER_RENDERER_PRESENCE_FIELDS,
   ...MATRIX_CHAT_STATE_FIELDS,
+  'matrixChatFirstSyncComplete',
   'roomRenderStateAvailable',
   ...ROOM_RENDER_STATE_FIELDS,
   ...REMINDER_ROOM_LAYOUT_FIELDS,
@@ -1761,6 +1769,18 @@ function appendRoomReadinessTimelineSummary(fields, timeline) {
         )
         .join(';') || 'none'
     }`,
+  );
+}
+
+function appendRoomNavigationReadinessSummary(fields, observation) {
+  const booleanBucket = (value) => (value === null ? 'unknown' : String(value));
+  const formatSnapshot = (snapshot) =>
+    `first_sync_complete=${booleanBucket(snapshot.firstSyncComplete)}:ready=${booleanBucket(snapshot.ready)}:page_type=${snapshot.pageType}:room_matches=${booleanBucket(snapshot.currentRoomMatches)}:sync=${snapshot.matrixSyncState}`;
+  fields.push(
+    `room_navigation_before=${formatSnapshot(observation.beforeNavigation)}`,
+  );
+  fields.push(
+    `room_navigation_after_route=${formatSnapshot(observation.afterRoute)}`,
   );
 }
 
@@ -3297,6 +3317,7 @@ export function sanitizeElementAcceptance(
   }
 
   const phases = new Map();
+  const reminderFlowDiagnostics = new Map();
   let rejectedPhase = 'unknown';
   let rejectionCategory = 'invalid-stage-record';
   let performanceTerminalStatus;
@@ -3321,6 +3342,22 @@ export function sanitizeElementAcceptance(
       throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
     rejectionCategory = 'invalid-stage-record';
+    if (
+      record !== null &&
+      typeof record === 'object' &&
+      !Array.isArray(record) &&
+      record.phase === REMINDER_FLOW_DIAGNOSTIC_PHASE
+    ) {
+      rejectedPhase = REMINDER_FLOW_DIAGNOSTIC_PHASE;
+      if (
+        !isReminderFlowDiagnosticRecord(record) ||
+        reminderFlowDiagnostics.has(record.flow)
+      ) {
+        throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+      }
+      reminderFlowDiagnostics.set(record.flow, record);
+      continue;
+    }
     const privateUiCheckpoint =
       record !== null &&
       typeof record === 'object' &&
@@ -4604,6 +4641,9 @@ export function sanitizeElementAcceptance(
       MATRIX_CHAT_PAGE_TYPE_BUCKETS.has(record.matrixChatPageTypeBucket) &&
       (record.matrixChatCurrentRoomMatches === null ||
         typeof record.matrixChatCurrentRoomMatches === 'boolean') &&
+      (!Object.hasOwn(record, 'matrixChatFirstSyncComplete') ||
+        record.matrixChatFirstSyncComplete === null ||
+        typeof record.matrixChatFirstSyncComplete === 'boolean') &&
       (record.matrixChatStateAvailable ||
         (record.matrixChatViewBucket === 'unavailable' &&
           record.matrixChatReady === null &&
@@ -4632,6 +4672,10 @@ export function sanitizeElementAcceptance(
     const hasRoomReadinessTimeline = Object.hasOwn(
       record,
       'roomReadinessTimeline',
+    );
+    const hasRoomNavigationReadiness = Object.hasOwn(
+      record,
+      'roomNavigationReadiness',
     );
     const roomFailureCodes = new Set([
       'element-room-navigation-failed',
@@ -4698,6 +4742,11 @@ export function sanitizeElementAcceptance(
           !validRoomReadinessTimeline(record.roomReadinessTimeline))) ||
       (record.phase === 'g6-member-b-room-context' &&
         !hasRoomReadinessTimeline) ||
+      (hasRoomNavigationReadiness &&
+        (record.phase !== 'g6-member-b-room-context' ||
+          !isRoomNavigationReadinessObservation(
+            record.roomNavigationReadiness,
+          ))) ||
       (ROOM_CONTEXT_PHASES.has(record.phase) &&
         !hasRoomObservation &&
         (record.status !== 'failed' ||
@@ -5208,6 +5257,11 @@ export function sanitizeElementAcceptance(
           `matrix_chat_state_available=${record.matrixChatStateAvailable}`,
         );
         fields.push(`matrix_chat_view_bucket=${record.matrixChatViewBucket}`);
+        if (Object.hasOwn(record, 'matrixChatFirstSyncComplete')) {
+          fields.push(
+            `matrix_chat_first_sync_complete=${record.matrixChatFirstSyncComplete === null ? 'unknown' : record.matrixChatFirstSyncComplete}`,
+          );
+        }
         fields.push(
           `matrix_chat_ready=${record.matrixChatReady === null ? 'unavailable' : record.matrixChatReady}`,
         );
@@ -5248,6 +5302,12 @@ export function sanitizeElementAcceptance(
         }
       }
       if (phase === 'g6-member-b-room-context') {
+        if (Object.hasOwn(record, 'roomNavigationReadiness')) {
+          appendRoomNavigationReadinessSummary(
+            fields,
+            record.roomNavigationReadiness,
+          );
+        }
         appendRoomReadinessTimelineSummary(
           fields,
           record.roomReadinessTimeline,
@@ -5461,6 +5521,10 @@ export function sanitizeElementAcceptance(
       fields.push(`details_tab_focus=${observations.join(',') || 'none'}`);
     }
     lines.push(fields.join(' '));
+  }
+  for (const flow of ['initial', 'restart', 'restore']) {
+    const record = reminderFlowDiagnostics.get(flow);
+    if (record) lines.push(formatReminderFlowDiagnosticRecord(record));
   }
   return `${lines.join('\n')}\n`;
 }

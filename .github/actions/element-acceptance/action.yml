@@ -112,6 +112,7 @@ runs:
         node --test dev/element-acceptance-private-calendar-selection.test.mjs
         node --test dev/element-acceptance-private-ui-checkpoints.test.mjs
         node dev/sanitize-element-acceptance.test.mjs
+        node dev/element-reminder-all-day-readback.test.mjs
         node dev/element-desktop-egress-policy.test.mjs
         node dev/element-desktop-evidence.test.mjs
         node --test dev/element-desktop-startup.test.mjs
@@ -132,6 +133,7 @@ runs:
       run: |
         yarn workspace @matrix-calendar-widget/ical-timezones build
         yarn workspace @matrix-calendar-widget/calendar build
+        node --test dev/element-acceptance-reminder-timing.test.mjs
         yarn workspace @matrix-calendar-widget/server build
         node --test dev/element-acceptance-caldav-report-probe.test.mjs
         yarn workspace @matrix-calendar-widget/widget build

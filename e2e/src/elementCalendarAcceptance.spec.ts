@@ -82,7 +82,7 @@ import {
   planReminderAllDayEvent,
   planReminderAllDaySchedule,
   planReminderTimedEvent,
-  reminderFixtureLocalDateTimeInput,
+  reminderFixtureAllDayExpectedScheduleMatches,
   reminderFixtureLocalDateTimeToUnixMillis,
 } from '../../dev/element-acceptance-reminder-timing.mjs';
 import { classifyG6KeyboardFocusTarget } from '../../dev/element-g6-keyboard-focus.mjs';
@@ -99,10 +99,23 @@ import {
   summarizeG6ResourceOwnership,
   type G6ResourceOwnership,
 } from '../../dev/element-g6-resource-ownership.mjs';
+import { readReminderAllDayScheduleFields } from '../../dev/element-reminder-all-day-readback.mjs';
+import {
+  buildReminderFlowDiagnosticRecord,
+  completeReminderFlowDiagnosticStage,
+  createReminderFlowDiagnosticState,
+  enterReminderFlowDiagnosticStage,
+  failReminderFlowDiagnostic,
+  type ReminderFlowDiagnosticRecord,
+  type ReminderFlowDiagnosticStage,
+  type ReminderFlowDiagnosticState,
+  type ReminderFlowTestStatus,
+} from '../../dev/element-reminder-flow-diagnostics.mjs';
 import {
   ROOM_READINESS_SAMPLE_TIMEOUT_MS,
   collectRoomReadinessTimeline,
-  roomContextObservationForPhase,
+  createMemberRoomContextRecord,
+  createRoomNavigationReadinessObservation,
   unavailableRoomReadinessTimeline,
   type RoomReadinessSnapshot,
   type RoomReadinessTimeline,
@@ -869,6 +882,17 @@ type MatrixChatPageTypeBucket =
   | 'other-page'
   | 'missing'
   | 'unavailable';
+type RoomNavigationReadinessSnapshot = {
+  firstSyncComplete: boolean | null;
+  ready: boolean | null;
+  pageType: MatrixChatPageTypeBucket;
+  currentRoomMatches: boolean | null;
+  matrixSyncState: MatrixSyncState;
+};
+type RoomNavigationReadinessObservation = {
+  beforeNavigation: RoomNavigationReadinessSnapshot;
+  afterRoute: RoomNavigationReadinessSnapshot;
+};
 
 type MemberARoomObservation = {
   matrixUserMatches: boolean;
@@ -886,6 +910,7 @@ type MemberARoomObservation = {
   roomViewRendererPresent: boolean | null;
   matrixChatStateAvailable: boolean;
   matrixChatViewBucket: MatrixChatViewBucket;
+  matrixChatFirstSyncComplete: boolean | null;
   matrixChatReady: boolean | null;
   matrixChatPageTypeBucket: MatrixChatPageTypeBucket;
   matrixChatCurrentRoomMatches: boolean | null;
@@ -931,6 +956,7 @@ type MemberARoomResult = {
   navigationCompleted: boolean;
   observation?: MemberARoomObservation;
   roomReadinessTimeline?: RoomReadinessTimeline;
+  roomNavigationReadiness?: RoomNavigationReadinessObservation;
   failureCode?: MemberARoomFailureCode;
 };
 
@@ -1422,7 +1448,13 @@ let fixture: Fixture;
 
 let activePhase: Phase = 'member-a-authenticated';
 let activeReminderFailureRecorded = false;
+let activeReminderFlowDiagnostic: ReminderFlowDiagnosticState | undefined;
 let pendingPinnedControlObservation: PinnedControlObservation | undefined;
+
+test.afterEach(async ({}, testInfo) => {
+  finishActiveReminderFlowDiagnostic(testInfo.status);
+});
+
 const memberAHomeserverHttpFailures = new WeakMap<
   Page,
   HomeserverHttpFailures
@@ -3523,24 +3555,33 @@ test('Element Web delivers room-timed and selected-member all-day reminders acro
   browser,
 }) => {
   test.setTimeout(360_000);
-  fixture = readFixture();
+  activeReminderFlowDiagnostic = undefined;
   activeReminderFailureRecorded = false;
   let flow: ReminderFlow;
   let eventTitles: string[];
   try {
     flow = readReminderFlow();
+    activeReminderFlowDiagnostic = createReminderFlowDiagnosticState(flow);
+    enterActiveReminderFlowStage('fixture');
+    fixture = readFixture();
     eventTitles = readReminderEventTitles();
-  } catch {
+    completeActiveReminderFlowStage('fixture');
+  } catch (error) {
+    failActiveReminderFlow(error);
     record('reminder-ui-readback', 'failed', undefined, 0);
     throw new Error('Reminder acceptance fixture state is unavailable');
   }
   const expectedPriorCount =
     flow === 'initial' ? 0 : flow === 'restart' ? 1 : 2;
   if (eventTitles.length !== expectedPriorCount) {
+    failActiveReminderFlow(
+      new Error('Reminder acceptance fixture state is inconsistent'),
+    );
     record('reminder-ui-readback', 'failed', undefined, eventTitles.length);
     throw new Error('Reminder acceptance fixture state is inconsistent');
   }
 
+  enterActiveReminderFlowStage('room-context');
   const allowedOrigins = new Set([
     new URL(fixture.elementUrl).origin,
     new URL(fixture.homeserverUrl).origin,
@@ -3631,12 +3672,14 @@ test('Element Web delivers room-timed and selected-member all-day reminders acro
       canManageReminders,
     });
     failureHttpStatus = undefined;
+    completeActiveReminderFlowStage('room-context');
 
     const priorReminderReadbackReferences = new Map<
       string,
       ReminderReadbackReference
     >();
     if (eventTitles.length > 0 && flow !== 'initial') {
+      enterActiveReminderFlowStage('prior-state');
       activePhase =
         flow === 'restart'
           ? 'reminder-restart-prior-state'
@@ -3664,6 +3707,7 @@ test('Element Web delivers room-timed and selected-member all-day reminders acro
       record(activePhase, 'passed', timeline.httpStatus, eventTitles.length, {
         allMarkersOnce: true,
       });
+      completeActiveReminderFlowStage('prior-state');
       for (const [index, title] of eventTitles.entries()) {
         const deliveredAt = timeline.markerTimestamps[index];
         if (deliveredAt !== null && deliveredAt !== undefined) {
@@ -3673,11 +3717,13 @@ test('Element Web delivers room-timed and selected-member all-day reminders acro
     }
 
     if (eventTitles.length > 0) {
+      enterActiveReminderFlowStage('prior-state-ui-readback');
       activePhase = 'reminder-ui-readback';
       const existingReadback = await readBackReminderMarkers(
         frame,
         eventTitles,
         priorReminderReadbackReferences,
+        captureReminderFlowReadbackError,
       );
       if (
         !existingReadback.relativeAlarmReadback ||
@@ -3700,8 +3746,10 @@ test('Element Web delivers room-timed and selected-member all-day reminders acro
         targetSettingsReadback: existingReadback.targetSettingsReadback,
         allDayScheduleReadback: existingReadback.allDayScheduleReadback,
       });
+      completeActiveReminderFlowStage('prior-state-ui-readback');
     }
 
+    enterActiveReminderFlowStage('marker-creation');
     const markerTitle = `Reminder acceptance ${randomUUID()}`;
     const markerPlan = reminderPlanForMarkerIndex(eventTitles.length);
     const createdReminder = await createAndConfigureReminder(
@@ -3721,11 +3769,14 @@ test('Element Web delivers room-timed and selected-member all-day reminders acro
         ? { expectedAllDayEventDate: createdReminder.allDayEventDate }
         : {}),
     });
+    completeActiveReminderFlowStage('marker-creation');
+    enterActiveReminderFlowStage('marker-ui-readback');
     activePhase = 'reminder-ui-readback';
     const allReadback = await readBackReminderMarkers(
       frame,
       eventTitles,
       reminderReadbackReferences,
+      captureReminderFlowReadbackError,
     );
     if (
       !allReadback.relativeAlarmReadback ||
@@ -3748,7 +3799,9 @@ test('Element Web delivers room-timed and selected-member all-day reminders acro
       targetSettingsReadback: allReadback.targetSettingsReadback,
       allDayScheduleReadback: allReadback.allDayScheduleReadback,
     });
+    completeActiveReminderFlowStage('marker-ui-readback');
 
+    enterActiveReminderFlowStage('delivery');
     if (flow === 'initial') {
       await verifyPublicFeedBrowserLifecycle(frame, page, markerTitle);
     }
@@ -3855,7 +3908,11 @@ test('Element Web delivers room-timed and selected-member all-day reminders acro
       throw new Error('Reminder browser attempted an unapproved request');
     }
     record(activePhase, 'passed', undefined, blockedRequests);
-  } catch {
+    completeActiveReminderFlowStage('delivery');
+    enterActiveReminderFlowStage('complete');
+    completeActiveReminderFlowStage('complete');
+  } catch (error) {
+    failActiveReminderFlow(error);
     if (!failureAlreadyRecorded && !activeReminderFailureRecorded) {
       record(activePhase, 'failed', failureHttpStatus);
     }
@@ -5662,6 +5719,7 @@ async function readBackRelativeAlarm(
     alarmUiEditorClosed: false,
     alarmUiDetailsClosed: false,
   },
+  onReadbackError?: (error: unknown) => void,
 ): Promise<boolean> {
   try {
     observation.alarmUiRelativeAlarmReadback = false;
@@ -5775,7 +5833,8 @@ async function readBackRelativeAlarm(
       observation.alarmUiRelativeTriggerReadback &&
       observation.alarmUiOffsetReadback;
     return observation.alarmUiRelativeAlarmReadback;
-  } catch {
+  } catch (error) {
+    onReadbackError?.(error);
     return false;
   }
 }
@@ -6768,20 +6827,13 @@ async function setRoomReminder(
         )
         .isVisible()
         .catch(() => false));
-    const savedDaysBefore = Number(
-      await details
-        .getByRole('spinbutton', { name: 'Days before event' })
-        .inputValue()
-        .catch(() => ''),
+    const savedScheduleFields = await readReminderAllDayScheduleFields(
+      details,
+      effectivePlan.allDay,
     );
-    const savedLocalTime = await details
-      .getByLabel('Local time')
-      .inputValue()
-      .catch(() => '');
-    const savedTimezone = await details
-      .getByRole('textbox', { name: 'Time zone (IANA)' })
-      .inputValue()
-      .catch(() => '');
+    const savedDaysBefore = savedScheduleFields.daysBefore;
+    const savedLocalTime = savedScheduleFields.localTime;
+    const savedTimezone = savedScheduleFields.timezone;
     const savedScheduleDate = effectivePlan.allDayEventDate
       ? addCalendarDays(effectivePlan.allDayEventDate, -savedDaysBefore)
       : undefined;
@@ -6842,6 +6894,7 @@ async function readBackReminderMarkers(
     string,
     ReminderReadbackReference
   > = new Map(),
+  onReadbackError?: (error: unknown) => void,
 ): Promise<{
   count: number;
   relativeAlarmReadback: boolean;
@@ -6862,8 +6915,13 @@ async function readBackReminderMarkers(
         : { expectedAlarmLeadMinutes: plan.caldavAlarmLeadMinutes }),
     };
     relativeAlarmReadback =
-      (await readBackRelativeAlarm(frame, title, readbackReference)) &&
-      relativeAlarmReadback;
+      (await readBackRelativeAlarm(
+        frame,
+        title,
+        readbackReference,
+        undefined,
+        onReadbackError,
+      )) && relativeAlarmReadback;
     const settings = await readBackMatrixReminder(
       frame,
       title,
@@ -6950,20 +7008,11 @@ async function readBackMatrixReminder(
     )
     .isVisible()
     .catch(() => false);
-  const daysBefore = Number(
-    await details
-      .getByRole('spinbutton', { name: 'Days before event' })
-      .inputValue()
-      .catch(() => ''),
+  const scheduleFields = await readReminderAllDayScheduleFields(
+    details,
+    plan.allDay,
   );
-  const localTime = await details
-    .getByLabel('Local time')
-    .inputValue()
-    .catch(() => '');
-  const timezone = await details
-    .getByRole('textbox', { name: 'Time zone (IANA)' })
-    .inputValue()
-    .catch(() => '');
+  const { daysBefore, localTime, timezone } = scheduleFields;
   const scheduleDate = eventStartDate
     ? addCalendarDays(eventStartDate, -daysBefore)
     : undefined;
@@ -6974,26 +7023,19 @@ async function readBackMatrixReminder(
           timezone,
         )
       : undefined;
-  const expectedScheduleLocalDateTime =
-    readbackReference?.expectedDueAt !== undefined
-      ? reminderFixtureLocalDateTimeInput(
-          readbackReference.expectedDueAt,
-          timezone,
-        )
-      : undefined;
-  const expectedDaysBefore =
-    eventStartDate && expectedScheduleLocalDateTime
-      ? (Date.parse(`${eventStartDate}T00:00:00Z`) -
-          Date.parse(
-            `${expectedScheduleLocalDateTime.slice(0, 10)}T00:00:00Z`,
-          )) /
-        (24 * 60 * 60_000)
-      : undefined;
+  const expectedScheduleMatches = reminderFixtureAllDayExpectedScheduleMatches({
+    allDay: plan.allDay,
+    expectedDueAt: readbackReference?.expectedDueAt,
+    eventStartDate,
+    daysBefore,
+    localTime,
+    timeZone: timezone,
+  });
   const deliveryMatchesDue =
     scheduleDueAt !== undefined &&
     (readbackReference?.expectedDueAt !== undefined
       ? scheduleDueAt === readbackReference.expectedDueAt &&
-        expectedScheduleLocalDateTime?.slice(11, 16) === localTime
+        expectedScheduleMatches
       : readbackReference?.deliveredAt !== undefined &&
         readbackReference.deliveredAt >= scheduleDueAt &&
         readbackReference.deliveredAt - scheduleDueAt <=
@@ -7007,7 +7049,7 @@ async function readBackMatrixReminder(
       Number.isSafeInteger(daysBefore) &&
       /^\d{2}:\d{2}$/u.test(localTime) &&
       timezone === plan.allDayTimezone &&
-      (expectedDaysBefore === undefined || daysBefore === expectedDaysBefore) &&
+      expectedScheduleMatches &&
       deliveryMatchesDue
     : true;
   await details
@@ -7849,7 +7891,13 @@ async function openMemberARoomWithDiagnostics(
   } = {},
 ): Promise<MemberARoomResult> {
   const element = new ElementWebPage(page);
+  const beforeNavigation = options.captureRoomReadinessTimeline
+    ? await observeMemberARoomReadinessSnapshot(page, roomId).catch(
+        () => undefined,
+      )
+    : undefined;
   let navigationCompleted = false;
+  let afterRoute: RoomReadinessSnapshot | undefined;
   try {
     if (options.useNormalRoomSelection) {
       await element.navigateToRoomOrInvitation(roomName);
@@ -7859,6 +7907,12 @@ async function openMemberARoomWithDiagnostics(
       await page.goto(roomUrl.href, { timeout: 20_000 });
     }
     navigationCompleted = true;
+    if (options.captureRoomReadinessTimeline) {
+      afterRoute = await observeMemberARoomReadinessSnapshot(
+        page,
+        roomId,
+      ).catch(() => undefined);
+    }
   } catch {
     // The failure summary records only whether this bounded navigation ended.
   }
@@ -7912,6 +7966,14 @@ async function openMemberARoomWithDiagnostics(
     navigationCompleted,
     observation,
     roomReadinessTimeline,
+    ...(options.captureRoomReadinessTimeline
+      ? {
+          roomNavigationReadiness: createRoomNavigationReadinessObservation(
+            beforeNavigation,
+            afterRoute,
+          ),
+        }
+      : {}),
     failureCode: getMemberARoomFailureCode(navigationCompleted, observation),
   };
 }
@@ -7932,14 +7994,40 @@ async function observeMemberARoomReadinessSnapshot(
       ]);
       let currentRoomMatches: boolean | null = null;
       let matrixSyncState: RoomReadinessSnapshot['matrixSyncState'] = 'UNKNOWN';
+      let matrixChatFirstSyncComplete: boolean | null = null;
+      let matrixChatReady: boolean | null = null;
+      let matrixChatPageTypeBucket: MatrixChatPageTypeBucket = 'unavailable';
       try {
         const matrixChat = (
-          window as Window & { matrixChat?: { state?: unknown } }
+          window as Window & {
+            matrixChat?: { firstSyncComplete?: unknown; state?: unknown };
+          }
         ).matrixChat;
+        matrixChatFirstSyncComplete =
+          typeof matrixChat?.firstSyncComplete === 'boolean'
+            ? matrixChat.firstSyncComplete
+            : null;
         const state = matrixChat?.state;
         if (state !== null && typeof state === 'object') {
-          const currentRoomId = (state as { currentRoomId?: unknown })
-            .currentRoomId;
+          const matrixChatState = state as {
+            ready?: unknown;
+            page_type?: unknown;
+            currentRoomId?: unknown;
+          };
+          matrixChatReady =
+            typeof matrixChatState.ready === 'boolean'
+              ? matrixChatState.ready
+              : null;
+          matrixChatPageTypeBucket =
+            matrixChatState.page_type === undefined ||
+            matrixChatState.page_type === null
+              ? 'missing'
+              : typeof matrixChatState.page_type === 'string'
+                ? matrixChatState.page_type === 'room_view'
+                  ? 'room-view'
+                  : 'other-page'
+                : 'unavailable';
+          const currentRoomId = matrixChatState.currentRoomId;
           if (typeof currentRoomId === 'string' || currentRoomId === null) {
             currentRoomMatches = currentRoomId === expectedRoomId;
           }
@@ -7973,6 +8061,9 @@ async function observeMemberARoomReadinessSnapshot(
           roomHeader.querySelector('[role="heading"]') !== null,
         currentRoomMatches,
         matrixSyncState,
+        matrixChatFirstSyncComplete,
+        matrixChatReady,
+        matrixChatPageTypeBucket,
       };
     },
     expectedRoomId,
@@ -7988,6 +8079,7 @@ type RoomRenderStateObservation = Pick<
   | 'roomViewRendererPresent'
   | 'matrixChatStateAvailable'
   | 'matrixChatViewBucket'
+  | 'matrixChatFirstSyncComplete'
   | 'matrixChatReady'
   | 'matrixChatPageTypeBucket'
   | 'matrixChatCurrentRoomMatches'
@@ -8009,6 +8101,7 @@ function unavailableRoomRenderState(): RoomRenderStateObservation {
     roomViewRendererPresent: null,
     matrixChatStateAvailable: false,
     matrixChatViewBucket: 'unavailable',
+    matrixChatFirstSyncComplete: null,
     matrixChatReady: null,
     matrixChatPageTypeBucket: 'unavailable',
     matrixChatCurrentRoomMatches: null,
@@ -8035,12 +8128,17 @@ async function observeRoomRenderState(
       currentRoomId?: unknown;
     };
     let matrixChatState: MatrixChatState | undefined;
+    let matrixChatFirstSyncComplete: boolean | null = null;
     try {
       const matrixChat = (
         window as Window & {
-          matrixChat?: { state?: unknown };
+          matrixChat?: { firstSyncComplete?: unknown; state?: unknown };
         }
       ).matrixChat;
+      matrixChatFirstSyncComplete =
+        typeof matrixChat?.firstSyncComplete === 'boolean'
+          ? matrixChat.firstSyncComplete
+          : null;
       if (
         matrixChat?.state !== null &&
         typeof matrixChat?.state === 'object' &&
@@ -8120,6 +8218,7 @@ async function observeRoomRenderState(
       roomViewRendererPresent,
       matrixChatStateAvailable,
       matrixChatViewBucket,
+      matrixChatFirstSyncComplete,
       matrixChatReady,
       matrixChatPageTypeBucket,
       matrixChatCurrentRoomMatches,
@@ -10770,6 +10869,64 @@ function record(
   );
 }
 
+function enterActiveReminderFlowStage(
+  stage: ReminderFlowDiagnosticStage,
+): void {
+  const state = activeReminderFlowDiagnostic;
+  if (state) enterReminderFlowDiagnosticStage(state, stage);
+}
+
+function completeActiveReminderFlowStage(
+  stage: ReminderFlowDiagnosticStage,
+): void {
+  const state = activeReminderFlowDiagnostic;
+  if (state) completeReminderFlowDiagnosticStage(state, stage);
+}
+
+function failActiveReminderFlow(error: unknown): void {
+  const state = activeReminderFlowDiagnostic;
+  if (state) failReminderFlowDiagnostic(state, error);
+}
+
+function finishActiveReminderFlowDiagnostic(status: string | undefined): void {
+  const state = activeReminderFlowDiagnostic;
+  activeReminderFlowDiagnostic = undefined;
+  if (!state) return;
+
+  const knownStatuses = new Set<ReminderFlowTestStatus>([
+    'passed',
+    'failed',
+    'timedOut',
+    'skipped',
+    'interrupted',
+    'unknown',
+  ]);
+  const testStatus = knownStatuses.has(status as ReminderFlowTestStatus)
+    ? (status as ReminderFlowTestStatus)
+    : 'unknown';
+  if (testStatus !== 'passed' && testStatus !== 'skipped') {
+    failReminderFlowDiagnostic(state, undefined);
+  }
+  recordReminderFlowDiagnostic(
+    buildReminderFlowDiagnosticRecord(state, testStatus),
+  );
+}
+
+function captureReminderFlowReadbackError(error: unknown): void {
+  failActiveReminderFlow(error);
+}
+
+function recordReminderFlowDiagnostic(
+  diagnostic: ReminderFlowDiagnosticRecord,
+): void {
+  const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
+  if (!stageFile) throw new Error('Element acceptance fixture unavailable');
+  appendFileSync(stageFile, `${JSON.stringify(diagnostic)}\n`, {
+    encoding: 'utf8',
+    mode: 0o600,
+  });
+}
+
 function recordPerformancePilot(
   status: 'started' | 'passed' | 'failed',
   performanceReport: PerformanceReportData,
@@ -10864,31 +11021,11 @@ function recordMemberARoomObservation(
 ) {
   const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
   if (!stageFile) throw new Error('Element acceptance fixture unavailable');
-  const observation = result.observation
-    ? roomContextObservationForPhase(
-        {
-          ...result.observation,
-          ...(result.roomReadinessTimeline
-            ? { roomReadinessTimeline: result.roomReadinessTimeline }
-            : {}),
-        },
-        phase,
-      )
-    : result.roomReadinessTimeline
-      ? roomContextObservationForPhase(
-          { roomReadinessTimeline: result.roomReadinessTimeline },
-          phase,
-        )
-      : undefined;
   appendFileSync(
     stageFile,
-    `${JSON.stringify({
-      phase,
-      status: result.failureCode ? 'failed' : 'passed',
-      ...(result.failureCode ? { failureCode: result.failureCode } : {}),
-      ...(observation ?? {}),
-      ...(reminderWidgetContext ?? {}),
-    })}\n`,
+    `${JSON.stringify(
+      createMemberRoomContextRecord(result, phase, reminderWidgetContext),
+    )}\n`,
     { encoding: 'utf8', mode: 0o600 },
   );
 }

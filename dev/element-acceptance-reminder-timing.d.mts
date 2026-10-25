@@ -52,6 +52,15 @@ export function reminderFixtureLocalDateTimeToUnixMillis(
   timeZone: string,
 ): number | undefined;
 
+export function reminderFixtureAllDayExpectedScheduleMatches(input: {
+  allDay: boolean;
+  expectedDueAt?: number;
+  eventStartDate?: string;
+  daysBefore: number;
+  localTime: string;
+  timeZone: string;
+}): boolean;
+
 export function planReminderTimedEvent(
   nowMilliseconds: number,
   timeZone: string,

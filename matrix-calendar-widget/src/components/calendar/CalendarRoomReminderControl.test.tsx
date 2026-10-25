@@ -227,6 +227,11 @@ describe('<CalendarRoomReminderControl />', () => {
     ).toBeInTheDocument();
     expect(screen.getByLabelText('Matrix destination')).toBeInTheDocument();
     expect(
+      screen.queryByLabelText('Days before event'),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Local time')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Time zone (IANA)')).not.toBeInTheDocument();
+    expect(
       screen.getByText(
         'This alarm fires at an exact UTC time, so Matrix cannot follow the event if it moves.',
       ),
