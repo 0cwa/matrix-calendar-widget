@@ -706,7 +706,7 @@ Restore PostgreSQL into an isolated staging database before restoring or
 starting the sidecar against it. The production server requires verified TLS
 by default; configure the staging endpoint and its certificate according to
 the deployment's normal secret and CA handling. Do not reuse Synapse's database,
-role, schema, or credentials. See [Docker deployment notes](./deployment-docker.md#optional-reminder-postgresql-database)
+role, schema, or credentials. See [Docker deployment notes](./deployment-docker.md#optional-application-postgresql-stores)
 for the database configuration boundary.
 
 ## Explicit exclusions

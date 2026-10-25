@@ -170,6 +170,9 @@ jobs:
       - name: Test server Jest report sanitizer
         run: node --test dev/sanitize-server-test-report.test.mjs
 
+      - name: Test PostgreSQL migration CLI argument and lifecycle guards
+        run: yarn workspace @matrix-calendar-widget/server test:migrate-postgres-cli
+
       - name: Test server
         run: |
           report="$RUNNER_TEMP/server-test-results.json"
@@ -220,6 +223,7 @@ jobs:
           docker exec "$container_id" psql --username reminder_bootstrap --dbname postgres --set ON_ERROR_STOP=1 --command "CREATE DATABASE matrix_calendar_binding_test OWNER matrix_calendar_app;"
           docker exec "$container_id" psql --username reminder_bootstrap --dbname postgres --set ON_ERROR_STOP=1 --command "CREATE DATABASE matrix_calendar_coexistence_test OWNER matrix_calendar_app;"
           docker exec "$container_id" psql --username reminder_bootstrap --dbname postgres --set ON_ERROR_STOP=1 --command "CREATE DATABASE matrix_calendar_private_clients_test OWNER matrix_calendar_app;"
+          docker exec "$container_id" psql --username reminder_bootstrap --dbname postgres --set ON_ERROR_STOP=1 --command "CREATE DATABASE matrix_calendar_migration_tool_test OWNER matrix_calendar_app;"
 
       - name: Test PostgreSQL reminder store
         env:
@@ -268,6 +272,11 @@ jobs:
 
       - name: Build server
         run: yarn workspace @matrix-calendar-widget/server build
+
+      - name: Test compiled PostgreSQL migration CLI against an isolated database
+        env:
+          MATRIX_CALENDAR_MIGRATION_TOOL_TEST_DATABASE_URL: postgresql://matrix_calendar_app:matrix_calendar_test_password@localhost:5432/matrix_calendar_migration_tool_test
+        run: yarn workspace @matrix-calendar-widget/server test:postgres-migration-cli-contract
 
       - name: Validate sidecar Compose defaults and opt-in configuration
         run: |

@@ -232,7 +232,7 @@ the configured capability; do not substitute Synapse credentials.
 
 Capture and restore every configured database alongside the matching CalDAV
 recovery point. If the URLs point to different databases, both need coverage.
-See [database deployment](./deployment-docker.md#optional-reminder-postgresql-database)
+See [database deployment](./deployment-docker.md#optional-application-postgresql-stores)
 and [upgrade behavior](./upgrade-migration.md#data-stores-and-migration-behavior).
 
 ## Request and response limits
