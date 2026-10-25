@@ -47,7 +47,7 @@ function roomClientListResponseMatches(
  *
  * @param {{
  *   page: import('@playwright/test').Page,
- *   calendarPicker: import('@playwright/test').Locator,
+ *   calendarListbox: import('@playwright/test').Locator,
  *   targetCalendarOption: import('@playwright/test').Locator,
  *   gatewayUrl: string,
  *   calendarId: string,
@@ -58,7 +58,7 @@ function roomClientListResponseMatches(
  */
 export async function selectPrivateAcceptanceCalendar({
   page,
-  calendarPicker,
+  calendarListbox,
   targetCalendarOption,
   gatewayUrl,
   calendarId,
@@ -79,7 +79,8 @@ export async function selectPrivateAcceptanceCalendar({
       (await targetCalendarOption.getAttribute('aria-selected')) === 'true';
     observation.branch = alreadySelected ? 'already-selected' : 'changed';
     if (alreadySelected) {
-      await calendarPicker.press('Escape');
+      await targetCalendarOption.press('Escape');
+      await calendarListbox.waitFor({ state: 'hidden' });
       result = true;
     } else {
       const expectedOrigin = new URL(gatewayUrl).origin;

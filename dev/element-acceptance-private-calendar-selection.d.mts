@@ -8,7 +8,7 @@ export type PrivateCalendarSelectionObservation = Readonly<{
 
 export declare function selectPrivateAcceptanceCalendar(options: {
   page: Page;
-  calendarPicker: Locator;
+  calendarListbox: Locator;
   targetCalendarOption: Locator;
   gatewayUrl: string;
   calendarId: string;

@@ -82,11 +82,12 @@ test('already-selected branch closes without waiting for a list request', async 
         throw new Error('No request should be awaited');
       },
     },
-    calendarPicker: {
-      press: async (key) => calls.push(`press:${key}`),
+    calendarListbox: {
+      waitFor: async ({ state }) => calls.push(`listbox:${state}`),
     },
     targetCalendarOption: {
       getAttribute: async () => 'true',
+      press: async (key) => calls.push(`option-press:${key}`),
       click: async () => calls.push('click'),
     },
     recordObservation: (value) => {
@@ -95,7 +96,43 @@ test('already-selected branch closes without waiting for a list request', async 
   });
 
   assert.equal(result, true);
-  assert.deepEqual(calls, ['press:Escape']);
+  assert.deepEqual(calls, ['option-press:Escape', 'listbox:hidden']);
+  assert.deepEqual(observation, {
+    branch: 'already-selected',
+    clickCompleted: false,
+    httpStatus: null,
+  });
+});
+
+test('already-selected branch fails when the picker does not close', async () => {
+  const closeFailure = new Error('synthetic picker close failure');
+  let observation;
+
+  await assert.rejects(
+    selectPrivateAcceptanceCalendar({
+      ...expected,
+      page: {
+        waitForResponse: () => {
+          throw new Error('No request should be awaited');
+        },
+      },
+      calendarListbox: {
+        waitFor: async ({ state }) => {
+          assert.equal(state, 'hidden');
+          throw closeFailure;
+        },
+      },
+      targetCalendarOption: {
+        getAttribute: async () => 'true',
+        press: async (key) => assert.equal(key, 'Escape'),
+      },
+      recordObservation: (value) => {
+        observation = value;
+      },
+    }),
+    (error) => error === closeFailure,
+  );
+
   assert.deepEqual(observation, {
     branch: 'already-selected',
     clickCompleted: false,
@@ -112,7 +149,9 @@ test('changed selection waits for the exact room-target list request', async () 
   const resultPromise = selectPrivateAcceptanceCalendar({
     ...expected,
     page: harness.page,
-    calendarPicker: { press: async () => calls.push('press') },
+    calendarListbox: {
+      waitFor: async ({ state }) => calls.push(`listbox:${state}`),
+    },
     targetCalendarOption: {
       getAttribute: async () => 'false',
       click: async () => {
@@ -152,7 +191,7 @@ test('changed selection ignores another target or request route', async () => {
     selectPrivateAcceptanceCalendar({
       ...expected,
       page: harness.page,
-      calendarPicker: { press: async () => undefined },
+      calendarListbox: { waitFor: async () => undefined },
       targetCalendarOption: {
         getAttribute: async () => 'false',
         click: async () => harness.deliver(),
@@ -205,7 +244,7 @@ test('changed selection preserves a non-200 response status and fails closed', a
   const result = await selectPrivateAcceptanceCalendar({
     ...expected,
     page: harness.page,
-    calendarPicker: { press: async () => undefined },
+    calendarListbox: { waitFor: async () => undefined },
     targetCalendarOption: {
       getAttribute: async () => 'false',
       click: async () => harness.deliver(),
@@ -239,7 +278,7 @@ test('an unknown response status cannot pass or replace the selection failure', 
         selectPrivateAcceptanceCalendar({
           ...expected,
           page: harness.page,
-          calendarPicker: { press: async () => undefined },
+          calendarListbox: { waitFor: async () => undefined },
           targetCalendarOption: {
             getAttribute: async () => 'false',
             click: async () => harness.deliver(),
@@ -291,7 +330,7 @@ test('waiter rejection after click failure preserves the first failure', async (
       selectPrivateAcceptanceCalendar({
         ...expected,
         page: { waitForResponse: () => pendingResponse },
-        calendarPicker: { press: async () => undefined },
+        calendarListbox: { waitFor: async () => undefined },
         targetCalendarOption: {
           getAttribute: async () => 'false',
           click: async () => {

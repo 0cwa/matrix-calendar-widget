@@ -11096,7 +11096,7 @@ if (process.env.ELEMENT_ACCEPTANCE_PRIVATE_UI === 'true') {
         await checkpoint.run('private-ui-calendar-picker-open', () =>
           calendarPicker.click(),
         );
-        const targetCalendarOption = await checkpoint.run(
+        const { calendarListbox, targetCalendarOption } = await checkpoint.run(
           'private-ui-calendar-option-unique',
           async () => {
             const calendarListbox = frameA
@@ -11108,7 +11108,7 @@ if (process.env.ELEMENT_ACCEPTANCE_PRIVATE_UI === 'true') {
               `[role="option"][data-value="${targetCalendarValue}"]`,
             );
             await expect(targetCalendarOption).toHaveCount(1);
-            return targetCalendarOption;
+            return { calendarListbox, targetCalendarOption };
           },
         );
         const calendarSelectionSucceeded = await checkpoint.run(
@@ -11116,7 +11116,7 @@ if (process.env.ELEMENT_ACCEPTANCE_PRIVATE_UI === 'true') {
           () =>
             selectPrivateAcceptanceCalendar({
               page: pageA,
-              calendarPicker,
+              calendarListbox,
               targetCalendarOption,
               gatewayUrl: fixture.gatewayUrl,
               calendarId: fixture.calendarId,

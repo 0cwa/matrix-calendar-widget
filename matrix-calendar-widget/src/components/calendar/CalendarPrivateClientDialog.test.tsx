@@ -133,6 +133,50 @@ describe('<CalendarPrivateClientDialog />', () => {
     expect(roomCalendarOption).toHaveAttribute('data-value', roomCalendar.id);
   });
 
+  it('closes an already-selected room calendar picker with Escape', async () => {
+    const roomCalendar: Calendar = {
+      id: 'matrix-calendar-target://room/element-acceptance',
+      name: 'Room calendar',
+      readOnly: false,
+      operatorManaged: true,
+    };
+    const listClients = vi.fn().mockResolvedValue([]);
+    const repository = Object.assign(
+      new InMemoryCalendarRepository({ calendars: [roomCalendar] }),
+      {
+        listPrivateCalendarClients: listClients,
+        createPrivateCalendarClient: vi.fn(),
+        revokePrivateCalendarClient: vi.fn(),
+      },
+    );
+
+    render(<ControlledDialog calendars={[roomCalendar]} />, {
+      wrapper: createWrapper(repository),
+    });
+    expect(
+      await screen.findByText(/No calendar app access has been created/),
+    ).toBeInTheDocument();
+
+    const calendarPicker = screen.getByRole('combobox', { name: 'Calendar' });
+    fireEvent.mouseDown(calendarPicker);
+    const targetOption = await screen.findByRole('option', {
+      name: 'Room calendar',
+      exact: true,
+    });
+    expect(targetOption).toHaveAttribute('aria-selected', 'true');
+
+    targetOption.focus();
+    expect(targetOption).toHaveFocus();
+    fireEvent.keyDown(targetOption, { key: 'Escape', code: 'Escape' });
+
+    await waitFor(() =>
+      expect(screen.queryByRole('listbox')).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(calendarPicker).toHaveTextContent('Room calendar');
+    expect(listClients).toHaveBeenCalledTimes(1);
+  });
+
   it('shows one-time credentials only after creation and clears them on calendar switch and close', async () => {
     const firstSecret = 'first-one-time-secret-value';
     const secondSecret = 'second-one-time-secret-value';
