@@ -46,6 +46,8 @@ export const PRIVATE_UI_CHECKPOINT_PHASES = Object.freeze([
 export const PRIVATE_UI_RESULT_PHASE = 'private-ui-test-result';
 export const PRIVATE_UI_CALENDAR_LIST_TRANSPORT_PHASE =
   'private-ui-calendar-list-transport';
+export const PRIVATE_UI_CALENDAR_SELECTION_DIAGNOSTIC_PHASE =
+  'private-ui-calendar-selection-diagnostic';
 export const PRIVATE_UI_ROOM_READINESS_PHASE = 'private-ui-room-readiness';
 export const PRIVATE_UI_CALENDAR_LIST_ENDPOINTS = Object.freeze([
   'personal-list',
@@ -76,6 +78,11 @@ const calendarListMethods = new Set(PRIVATE_UI_CALENDAR_LIST_METHODS);
 const calendarListFailureCategories = new Set(
   PRIVATE_UI_CALENDAR_LIST_FAILURE_CATEGORIES,
 );
+const calendarSelectionBranches = new Set([
+  'unavailable',
+  'already-selected',
+  'changed',
+]);
 const testStatuses = new Set([
   'passed',
   'failed',
@@ -199,6 +206,50 @@ export function normalizePrivateUiCalendarListTransportObservations(
 }
 
 /**
+ * Return a strict, copied summary of private calendar selection progress.
+ *
+ * @param {unknown} observation
+ * @returns {{ branch: string, clickCompleted: boolean, httpStatus: number | null } | undefined}
+ */
+export function normalizePrivateUiCalendarSelectionObservation(observation) {
+  if (
+    observation === null ||
+    typeof observation !== 'object' ||
+    Array.isArray(observation) ||
+    Object.keys(observation).length !== 3 ||
+    !Object.hasOwn(observation, 'branch') ||
+    !Object.hasOwn(observation, 'clickCompleted') ||
+    !Object.hasOwn(observation, 'httpStatus') ||
+    !calendarSelectionBranches.has(observation.branch) ||
+    typeof observation.clickCompleted !== 'boolean' ||
+    (observation.httpStatus !== null &&
+      (!Number.isInteger(observation.httpStatus) ||
+        observation.httpStatus < 100 ||
+        observation.httpStatus > 599))
+  ) {
+    return undefined;
+  }
+
+  if (
+    (observation.branch === 'unavailable' &&
+      (observation.clickCompleted || observation.httpStatus !== null)) ||
+    (observation.branch === 'already-selected' &&
+      (observation.clickCompleted || observation.httpStatus !== null)) ||
+    (observation.branch === 'changed' &&
+      !observation.clickCompleted &&
+      observation.httpStatus !== null)
+  ) {
+    return undefined;
+  }
+
+  return {
+    branch: observation.branch,
+    clickCompleted: observation.clickCompleted,
+    httpStatus: observation.httpStatus,
+  };
+}
+
+/**
  * Create a source-bound journal for the opt-in private acceptance test.
  * Records contain only closed phase names and fixed status/profile values.
  *
@@ -227,6 +278,7 @@ export function createPrivateUiCheckpointJournal({
   let cleanupFailed = false;
   let finished = false;
   let calendarListTransportRecorded = false;
+  let calendarSelectionObservationRecorded = false;
   let roomReadinessRecorded = false;
 
   const writeRecord = (record) => {
@@ -370,6 +422,38 @@ export function createPrivateUiCheckpointJournal({
         observations: sanitizedObservations,
       });
       calendarListTransportRecorded = true;
+    },
+
+    /**
+     * Store only the fixed selection branch, click completion, and response
+     * status while the private calendar selection checkpoint is active.
+     *
+     * @param {unknown} observation
+     */
+    recordCalendarSelectionObservation(observation) {
+      if (finished) {
+        throw new Error('Private acceptance checkpoints are complete');
+      }
+      if (
+        calendarSelectionObservationRecorded ||
+        activePhase !== 'private-ui-calendar-selection'
+      ) {
+        throw new Error('Private acceptance checkpoint is invalid');
+      }
+      const normalizedObservation =
+        normalizePrivateUiCalendarSelectionObservation(observation);
+      if (normalizedObservation === undefined) {
+        throw new Error('Private acceptance checkpoint is invalid');
+      }
+
+      writeRecord({
+        phase: PRIVATE_UI_CALENDAR_SELECTION_DIAGNOSTIC_PHASE,
+        status: 'observed',
+        observation: normalizedObservation,
+        sourceSha: boundSourceSha,
+        profile: 'normal-bot',
+      });
+      calendarSelectionObservationRecorded = true;
     },
 
     /**

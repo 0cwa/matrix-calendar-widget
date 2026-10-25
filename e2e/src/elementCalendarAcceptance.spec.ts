@@ -67,6 +67,7 @@ import {
   buildOrdinaryPerformanceSeedEnvironment,
   raceCalendarReadyOrIdentityPrompt,
 } from '../../dev/element-acceptance-performance.mjs';
+import { selectPrivateAcceptanceCalendar } from '../../dev/element-acceptance-private-calendar-selection.mjs';
 import {
   PRIVATE_UI_CALENDAR_LIST_ENDPOINTS,
   PRIVATE_UI_CALENDAR_LIST_METHODS,
@@ -8985,23 +8986,6 @@ function readPrivateAcceptanceCaCertificate(): Buffer {
   }
 }
 
-async function selectPrivateAcceptanceCalendar(
-  page: Page,
-  calendarPicker: Locator,
-  targetCalendarOption: Locator,
-): Promise<boolean> {
-  const alreadySelected =
-    (await targetCalendarOption.getAttribute('aria-selected')) === 'true';
-  if (alreadySelected) {
-    await calendarPicker.press('Escape');
-    return true;
-  }
-
-  const selectedListResponse = waitForPrivateClientResponse(page, 'GET');
-  await targetCalendarOption.click();
-  return (await selectedListResponse).status() === 200;
-}
-
 function privateCredentialsMatchGateway(
   username: string,
   password: string,
@@ -11130,11 +11114,16 @@ if (process.env.ELEMENT_ACCEPTANCE_PRIVATE_UI === 'true') {
         const calendarSelectionSucceeded = await checkpoint.run(
           'private-ui-calendar-selection',
           () =>
-            selectPrivateAcceptanceCalendar(
-              pageA,
+            selectPrivateAcceptanceCalendar({
+              page: pageA,
               calendarPicker,
               targetCalendarOption,
-            ),
+              gatewayUrl: fixture.gatewayUrl,
+              calendarId: fixture.calendarId,
+              roomId: fixture.teamRoomId,
+              recordObservation: (observation) =>
+                checkpoint.recordCalendarSelectionObservation(observation),
+            }),
         );
         await checkpoint.run('private-ui-calendar-selection-complete', () =>
           expect(calendarSelectionSucceeded).toBe(true),

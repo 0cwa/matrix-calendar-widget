@@ -9,10 +9,12 @@ import {
 import { formatPerformanceEvidence } from './element-acceptance-performance-evidence.mjs';
 import {
   PRIVATE_UI_CALENDAR_LIST_TRANSPORT_PHASE,
+  PRIVATE_UI_CALENDAR_SELECTION_DIAGNOSTIC_PHASE,
   PRIVATE_UI_CHECKPOINT_PHASES,
   PRIVATE_UI_RESULT_PHASE,
   PRIVATE_UI_ROOM_READINESS_PHASE,
   normalizePrivateUiCalendarListTransportObservations,
+  normalizePrivateUiCalendarSelectionObservation,
 } from './element-acceptance-private-ui-checkpoints.mjs';
 import {
   PRIVATE_UI_ROOM_READINESS_FIELDS,
@@ -3334,6 +3336,11 @@ export function sanitizeElementAcceptance(
       typeof record === 'object' &&
       !Array.isArray(record) &&
       record.phase === PRIVATE_UI_CALENDAR_LIST_TRANSPORT_PHASE;
+    const privateUiCalendarSelectionDiagnostic =
+      record !== null &&
+      typeof record === 'object' &&
+      !Array.isArray(record) &&
+      record.phase === PRIVATE_UI_CALENDAR_SELECTION_DIAGNOSTIC_PHASE;
     const privateUiRoomReadiness =
       record !== null &&
       typeof record === 'object' &&
@@ -3343,6 +3350,7 @@ export function sanitizeElementAcceptance(
       privateUiCheckpoint ||
       privateUiResult ||
       privateUiCalendarListTransport ||
+      privateUiCalendarSelectionDiagnostic ||
       privateUiRoomReadiness
     ) {
       const exactKeys = (keys) =>
@@ -3356,9 +3364,12 @@ export function sanitizeElementAcceptance(
       if (
         !sourceAndProfileMatch ||
         (!privateUiCalendarListTransport &&
+          !privateUiCalendarSelectionDiagnostic &&
           !privateUiRoomReadiness &&
           !STATUSES.has(record.status)) ||
-        ((privateUiCalendarListTransport || privateUiRoomReadiness) &&
+        ((privateUiCalendarListTransport ||
+          privateUiCalendarSelectionDiagnostic ||
+          privateUiRoomReadiness) &&
           record.status !== 'observed') ||
         (privateUiCheckpoint &&
           (!exactKeys(['phase', 'status', 'sourceSha', 'profile']) ||
@@ -3399,6 +3410,29 @@ export function sanitizeElementAcceptance(
           throw new SummaryValidationError(rejectionCategory, 'unknown');
         }
         phases.set(record.phase, record);
+        continue;
+      }
+
+      if (privateUiCalendarSelectionDiagnostic) {
+        const observation = normalizePrivateUiCalendarSelectionObservation(
+          record.observation,
+        );
+        if (
+          !exactKeys([
+            'phase',
+            'status',
+            'observation',
+            'sourceSha',
+            'profile',
+          ]) ||
+          observation === undefined ||
+          phases.get('private-ui-calendar-selection')?.status !== 'started' ||
+          phases.has(record.phase) ||
+          phases.has(PRIVATE_UI_RESULT_PHASE)
+        ) {
+          throw new SummaryValidationError(rejectionCategory, 'unknown');
+        }
+        phases.set(record.phase, { ...record, observation });
         continue;
       }
 
@@ -4724,6 +4758,20 @@ export function sanitizeElementAcceptance(
           ].join(' '),
         );
       }
+      continue;
+    }
+    if (phase === PRIVATE_UI_CALENDAR_SELECTION_DIAGNOSTIC_PHASE) {
+      const observation = record.observation;
+      lines.push(
+        [
+          `phase=${phase}`,
+          'status=observed',
+          'profile=normal-bot',
+          `branch=${observation.branch}`,
+          `click_completed=${observation.clickCompleted}`,
+          `http_status=${observation.httpStatus ?? 'unavailable'}`,
+        ].join(' '),
+      );
       continue;
     }
     if (phase === PRIVATE_UI_ROOM_READINESS_PHASE) {

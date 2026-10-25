@@ -1220,11 +1220,47 @@ test('sanitizes the private calendar selection substeps as closed checkpoints', 
     'private-ui-calendar-selection',
     'private-ui-calendar-selection-complete',
   ];
+  const selectionDiagnostic = {
+    phase: 'private-ui-calendar-selection-diagnostic',
+    status: 'observed',
+    sourceSha,
+    profile: 'normal-bot',
+    observation: {
+      branch: 'changed',
+      clickCompleted: true,
+      httpStatus: 200,
+    },
+  };
   const records = [
-    ...phases.flatMap((phase) => [
+    ...phases.slice(0, 2).flatMap((phase) => [
       { phase, status: 'started', sourceSha, profile: 'normal-bot' },
       { phase, status: 'passed', sourceSha, profile: 'normal-bot' },
     ]),
+    {
+      phase: phases[2],
+      status: 'started',
+      sourceSha,
+      profile: 'normal-bot',
+    },
+    selectionDiagnostic,
+    {
+      phase: phases[2],
+      status: 'passed',
+      sourceSha,
+      profile: 'normal-bot',
+    },
+    {
+      phase: phases[3],
+      status: 'started',
+      sourceSha,
+      profile: 'normal-bot',
+    },
+    {
+      phase: phases[3],
+      status: 'passed',
+      sourceSha,
+      profile: 'normal-bot',
+    },
     {
       phase: 'private-ui-test-result',
       status: 'passed',
@@ -1247,6 +1283,10 @@ test('sanitizes the private calendar selection substeps as closed checkpoints', 
   }
   assert.match(
     summary,
+    /phase=private-ui-calendar-selection-diagnostic status=observed profile=normal-bot branch=changed click_completed=true http_status=200/u,
+  );
+  assert.match(
+    summary,
     /phase=private-ui-test-result status=passed profile=normal-bot test_status=passed last_entered=private-ui-calendar-selection-complete last_completed=private-ui-calendar-selection-complete failure_phase=none/u,
   );
   assert.doesNotMatch(summary, /Synthetic team calendar|password|https?:\/\//u);
@@ -1261,6 +1301,14 @@ test('sanitizes the private calendar selection substeps as closed checkpoints', 
       status: 'started',
       sourceSha,
       profile: 'normal-bot',
+    },
+    {
+      ...selectionDiagnostic,
+      observation: {
+        branch: 'changed',
+        clickCompleted: true,
+        httpStatus: 403,
+      },
     },
     {
       phase: phases[2],
@@ -1288,6 +1336,71 @@ test('sanitizes the private calendar selection substeps as closed checkpoints', 
     failedSummary,
     /phase=private-ui-test-result status=failed profile=normal-bot test_status=failed last_entered=private-ui-calendar-selection last_completed=private-ui-calendar-option-unique failure_phase=private-ui-calendar-selection/u,
   );
+  assert.match(
+    failedSummary,
+    /phase=private-ui-calendar-selection-diagnostic status=observed profile=normal-bot branch=changed click_completed=true http_status=403/u,
+  );
+
+  const selectedSummary = sanitizeElementAcceptance(
+    [
+      {
+        phase: phases[2],
+        status: 'started',
+        sourceSha,
+        profile: 'normal-bot',
+      },
+      {
+        ...selectionDiagnostic,
+        observation: {
+          branch: 'already-selected',
+          clickCompleted: false,
+          httpStatus: null,
+        },
+      },
+    ]
+      .map((record) => JSON.stringify(record))
+      .join('\n'),
+    sourceSha,
+    { privateUiEnabled: true, profile: 'normal-bot' },
+  );
+  assert.match(
+    selectedSummary,
+    /phase=private-ui-calendar-selection-diagnostic status=observed profile=normal-bot branch=already-selected click_completed=false http_status=unavailable/u,
+  );
+
+  for (const invalidRecords of [
+    [selectionDiagnostic],
+    [
+      { phase: phases[2], status: 'started', sourceSha, profile: 'normal-bot' },
+      { phase: phases[2], status: 'passed', sourceSha, profile: 'normal-bot' },
+      selectionDiagnostic,
+    ],
+    [
+      { phase: phases[2], status: 'started', sourceSha, profile: 'normal-bot' },
+      { ...selectionDiagnostic, rawUrl: 'https://private.invalid/secret' },
+    ],
+    [
+      { phase: phases[2], status: 'started', sourceSha, profile: 'normal-bot' },
+      {
+        ...selectionDiagnostic,
+        observation: {
+          branch: 'unknown',
+          clickCompleted: true,
+          httpStatus: 200,
+        },
+      },
+    ],
+  ]) {
+    assert.throws(
+      () =>
+        sanitizeElementAcceptance(
+          invalidRecords.map((record) => JSON.stringify(record)).join('\n'),
+          sourceSha,
+          { privateUiEnabled: true, profile: 'normal-bot' },
+        ),
+      /invalid element acceptance summary/u,
+    );
+  }
 
   assert.throws(
     () =>

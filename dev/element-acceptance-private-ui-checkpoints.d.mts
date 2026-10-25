@@ -72,9 +72,16 @@ export type PrivateUiCalendarListTransportObservation =
       networkFailure: PrivateUiCalendarListFailureCategory;
     }>;
 
+export type PrivateUiCalendarSelectionObservation = Readonly<{
+  branch: 'unavailable' | 'already-selected' | 'changed';
+  clickCompleted: boolean;
+  httpStatus: number | null;
+}>;
+
 export declare const PRIVATE_UI_CHECKPOINT_PHASES: readonly PrivateUiCheckpointPhase[];
 export declare const PRIVATE_UI_RESULT_PHASE: 'private-ui-test-result';
 export declare const PRIVATE_UI_CALENDAR_LIST_TRANSPORT_PHASE: 'private-ui-calendar-list-transport';
+export declare const PRIVATE_UI_CALENDAR_SELECTION_DIAGNOSTIC_PHASE: 'private-ui-calendar-selection-diagnostic';
 export declare const PRIVATE_UI_ROOM_READINESS_PHASE: 'private-ui-room-readiness';
 export declare const PRIVATE_UI_CALENDAR_LIST_ENDPOINTS: readonly PrivateUiCalendarListEndpoint[];
 export declare const PRIVATE_UI_CALENDAR_LIST_METHODS: readonly PrivateUiCalendarListMethod[];
@@ -86,6 +93,9 @@ export declare function classifyPrivateUiCalendarListNetworkFailure(
 export declare function normalizePrivateUiCalendarListTransportObservations(
   observations: unknown,
 ): PrivateUiCalendarListTransportObservation[] | undefined;
+export declare function normalizePrivateUiCalendarSelectionObservation(
+  observation: unknown,
+): PrivateUiCalendarSelectionObservation | undefined;
 
 export interface PrivateUiCheckpointJournal {
   run<T>(
@@ -98,6 +108,9 @@ export interface PrivateUiCheckpointJournal {
   ): Promise<T | undefined>;
   recordCalendarListTransport(
     observations: readonly PrivateUiCalendarListTransportObservation[],
+  ): void;
+  recordCalendarSelectionObservation(
+    observation: PrivateUiCalendarSelectionObservation,
   ): void;
   recordRoomReadinessObservation(
     observation: unknown,

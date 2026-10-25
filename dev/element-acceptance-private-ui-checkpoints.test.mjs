@@ -6,6 +6,7 @@ import test from 'node:test';
 import {
   classifyPrivateUiCalendarListNetworkFailure,
   createPrivateUiCheckpointJournal,
+  normalizePrivateUiCalendarSelectionObservation,
   PRIVATE_UI_RESULT_PHASE,
   PRIVATE_UI_ROOM_READINESS_PHASE,
 } from './element-acceptance-private-ui-checkpoints.mjs';
@@ -172,6 +173,108 @@ test('records the private calendar picker substeps and attributes failures to on
       failureJournal.run('private-ui-calendar-select', () => undefined),
       { message: 'Private acceptance checkpoint is invalid' },
     );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('records only the finite private calendar selection branch and response status', async () => {
+  assert.deepEqual(
+    normalizePrivateUiCalendarSelectionObservation({
+      branch: 'already-selected',
+      clickCompleted: false,
+      httpStatus: null,
+    }),
+    {
+      branch: 'already-selected',
+      clickCompleted: false,
+      httpStatus: null,
+    },
+  );
+  assert.deepEqual(
+    normalizePrivateUiCalendarSelectionObservation({
+      branch: 'changed',
+      clickCompleted: true,
+      httpStatus: 403,
+    }),
+    { branch: 'changed', clickCompleted: true, httpStatus: 403 },
+  );
+  for (const observation of [
+    { branch: 'unknown', clickCompleted: false, httpStatus: null },
+    { branch: 'changed', clickCompleted: false, httpStatus: 200 },
+    { branch: 'already-selected', clickCompleted: true, httpStatus: null },
+    { branch: 'changed', clickCompleted: true, httpStatus: '200' },
+    {
+      branch: 'changed',
+      clickCompleted: true,
+      httpStatus: 200,
+      url: 'https://private.invalid/secret',
+    },
+  ]) {
+    assert.equal(
+      normalizePrivateUiCalendarSelectionObservation(observation),
+      undefined,
+    );
+  }
+
+  const { directory, stageFile } = createStageFile();
+  try {
+    const journal = createPrivateUiCheckpointJournal({
+      stageFile,
+      sourceSha,
+      profile: 'normal-bot',
+    });
+    await assert.rejects(
+      journal.run('private-ui-calendar-selection', async () => {
+        journal.recordCalendarSelectionObservation({
+          branch: 'changed',
+          clickCompleted: true,
+          httpStatus: 200,
+        });
+        throw new Error('synthetic primary selection failure');
+      }),
+      /synthetic primary selection failure/u,
+    );
+    journal.finish('failed');
+
+    const receipt = readFileSync(stageFile, 'utf8');
+    const records = receipt
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(
+      records.find(
+        (record) => record.phase === 'private-ui-calendar-selection-diagnostic',
+      ),
+      {
+        phase: 'private-ui-calendar-selection-diagnostic',
+        status: 'observed',
+        observation: {
+          branch: 'changed',
+          clickCompleted: true,
+          httpStatus: 200,
+        },
+        sourceSha,
+        profile: 'normal-bot',
+      },
+    );
+    assert.equal(records.at(-1).failurePhase, 'private-ui-calendar-selection');
+    assert.doesNotMatch(
+      receipt,
+      /https?:\/\/|token|password|synthetic primary/u,
+    );
+
+    const immutableReceipt = receipt;
+    assert.throws(
+      () =>
+        journal.recordCalendarSelectionObservation({
+          branch: 'changed',
+          clickCompleted: true,
+          httpStatus: 200,
+        }),
+      { message: 'Private acceptance checkpoints are complete' },
+    );
+    assert.equal(readFileSync(stageFile, 'utf8'), immutableReceipt);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

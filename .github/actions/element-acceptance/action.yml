@@ -109,6 +109,8 @@ runs:
       run: |
         node --test dev/element-acceptance-overrides.test.mjs
         node dev/element-acceptance-diagnostics.test.mjs
+        node --test dev/element-acceptance-private-calendar-selection.test.mjs
+        node --test dev/element-acceptance-private-ui-checkpoints.test.mjs
         node dev/sanitize-element-acceptance.test.mjs
         node dev/element-desktop-egress-policy.test.mjs
         node dev/element-desktop-evidence.test.mjs
