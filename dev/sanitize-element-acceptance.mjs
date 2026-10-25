@@ -8,8 +8,10 @@ import {
 } from './element-acceptance-diagnostics.mjs';
 import { formatPerformanceEvidence } from './element-acceptance-performance-evidence.mjs';
 import {
+  PRIVATE_UI_CALENDAR_LIST_TRANSPORT_PHASE,
   PRIVATE_UI_CHECKPOINT_PHASES,
   PRIVATE_UI_RESULT_PHASE,
+  normalizePrivateUiCalendarListTransportObservations,
 } from './element-acceptance-private-ui-checkpoints.mjs';
 import { ROOM_RENDER_DIAGNOSTIC_FIELDS } from './element-room-context-observation.mjs';
 import { isReminderDeliverySnapshot } from './reminder-delivery-snapshot.mjs';
@@ -3288,7 +3290,16 @@ export function sanitizeElementAcceptance(
       typeof record === 'object' &&
       !Array.isArray(record) &&
       record.phase === PRIVATE_UI_RESULT_PHASE;
-    if (privateUiCheckpoint || privateUiResult) {
+    const privateUiCalendarListTransport =
+      record !== null &&
+      typeof record === 'object' &&
+      !Array.isArray(record) &&
+      record.phase === PRIVATE_UI_CALENDAR_LIST_TRANSPORT_PHASE;
+    if (
+      privateUiCheckpoint ||
+      privateUiResult ||
+      privateUiCalendarListTransport
+    ) {
       const exactKeys = (keys) =>
         Object.keys(record).length === keys.length &&
         keys.every((key) => Object.hasOwn(record, key));
@@ -3299,7 +3310,8 @@ export function sanitizeElementAcceptance(
         record.profile === 'normal-bot';
       if (
         !sourceAndProfileMatch ||
-        !STATUSES.has(record.status) ||
+        (!privateUiCalendarListTransport && !STATUSES.has(record.status)) ||
+        (privateUiCalendarListTransport && record.status !== 'observed') ||
         (privateUiCheckpoint &&
           (!exactKeys(['phase', 'status', 'sourceSha', 'profile']) ||
             !['started', 'passed', 'failed'].includes(record.status)))
@@ -3312,6 +3324,29 @@ export function sanitizeElementAcceptance(
         if (
           (record.status === 'started' && previousStatus !== undefined) ||
           (record.status !== 'started' && previousStatus !== 'started')
+        ) {
+          throw new SummaryValidationError(rejectionCategory, 'unknown');
+        }
+        phases.set(record.phase, record);
+        continue;
+      }
+
+      if (privateUiCalendarListTransport) {
+        const observations =
+          normalizePrivateUiCalendarListTransportObservations(
+            record.observations,
+          );
+        if (
+          !exactKeys([
+            'phase',
+            'status',
+            'sourceSha',
+            'profile',
+            'observations',
+          ]) ||
+          observations === undefined ||
+          phases.has(record.phase) ||
+          phases.has(PRIVATE_UI_RESULT_PHASE)
         ) {
           throw new SummaryValidationError(rejectionCategory, 'unknown');
         }
@@ -4535,6 +4570,33 @@ export function sanitizeElementAcceptance(
   for (const [phase, record] of phases) {
     if (PRIVATE_UI_PHASES.has(phase)) {
       lines.push(`phase=${phase} status=${record.status} profile=normal-bot`);
+      continue;
+    }
+    if (phase === PRIVATE_UI_CALENDAR_LIST_TRANSPORT_PHASE) {
+      if (record.observations.length === 0) {
+        lines.push(
+          `phase=${phase} status=observed profile=normal-bot observation_count=0`,
+        );
+        continue;
+      }
+      for (const observation of record.observations) {
+        lines.push(
+          [
+            `phase=${phase}`,
+            'status=observed',
+            'profile=normal-bot',
+            `endpoint=${observation.endpoint}`,
+            `method=${observation.method}`,
+            `outcome=${observation.outcome}`,
+            ...(observation.httpStatus === undefined
+              ? []
+              : [`http_status=${observation.httpStatus}`]),
+            ...(observation.networkFailure === undefined
+              ? []
+              : [`network_failure=${observation.networkFailure}`]),
+          ].join(' '),
+        );
+      }
       continue;
     }
     if (phase === PRIVATE_UI_RESULT_PHASE) {

@@ -270,6 +270,150 @@ test('preserves failed and timed-out test status without retaining operation err
   }
 });
 
+test('records only bounded calendar-list transport observations before finalization', () => {
+  const { directory, stageFile } = createStageFile();
+  try {
+    const journal = createPrivateUiCheckpointJournal({
+      stageFile,
+      sourceSha,
+      profile: 'normal-bot',
+    });
+    journal.recordCalendarListTransport([
+      {
+        endpoint: 'personal-list',
+        method: 'OPTIONS',
+        outcome: 'response',
+        httpStatus: 204,
+      },
+      {
+        endpoint: 'room-context',
+        method: 'GET',
+        outcome: 'network-failure',
+        networkFailure: 'tls',
+      },
+      {
+        endpoint: 'room-list',
+        method: 'GET',
+        outcome: 'pending',
+      },
+    ]);
+    assert.throws(() => journal.recordCalendarListTransport([]), {
+      message: 'Private acceptance checkpoint is invalid',
+    });
+    journal.finish('failed');
+
+    const records = readFileSync(stageFile, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(records[0], {
+      phase: 'private-ui-calendar-list-transport',
+      status: 'observed',
+      observations: [
+        {
+          endpoint: 'personal-list',
+          method: 'OPTIONS',
+          outcome: 'response',
+          httpStatus: 204,
+        },
+        {
+          endpoint: 'room-context',
+          method: 'GET',
+          outcome: 'network-failure',
+          networkFailure: 'tls',
+        },
+        {
+          endpoint: 'room-list',
+          method: 'GET',
+          outcome: 'pending',
+        },
+      ],
+      sourceSha,
+      profile: 'normal-bot',
+    });
+    assert.doesNotMatch(
+      readFileSync(stageFile, 'utf8'),
+      /https?:\/\/|token|password/u,
+    );
+
+    const immutableReceipt = readFileSync(stageFile, 'utf8');
+    assert.throws(
+      () => journal.recordCalendarListTransport([]),
+      /Private acceptance checkpoints are complete/u,
+    );
+    assert.equal(readFileSync(stageFile, 'utf8'), immutableReceipt);
+
+    const passedStageFile = join(directory, 'passed.jsonl');
+    const passingJournal = createPrivateUiCheckpointJournal({
+      stageFile: passedStageFile,
+      sourceSha,
+      profile: 'normal-bot',
+    });
+    passingJournal.recordCalendarListTransport([]);
+    passingJournal.finish('passed');
+    const passedRecords = readFileSync(passedStageFile, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    assert.equal(passedRecords.at(-1).status, 'passed');
+    assert.equal(passedRecords.at(-1).testStatus, 'passed');
+    assert.equal(passedRecords.at(-1).failurePhase, null);
+    const passedReceipt = readFileSync(passedStageFile, 'utf8');
+    assert.throws(
+      () => passingJournal.recordCalendarListTransport([]),
+      /Private acceptance checkpoints are complete/u,
+    );
+    assert.equal(readFileSync(passedStageFile, 'utf8'), passedReceipt);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('rejects raw, duplicate, excessive, or invalid calendar-list observations', () => {
+  const { directory, stageFile } = createStageFile();
+  try {
+    const journal = createPrivateUiCheckpointJournal({
+      stageFile,
+      sourceSha,
+      profile: 'normal-bot',
+    });
+    const response = {
+      endpoint: 'room-list',
+      method: 'GET',
+      outcome: 'response',
+      httpStatus: 200,
+    };
+    const invalidObservations = [
+      [{ ...response, requestUrl: 'https://private.invalid/path' }],
+      [{ ...response, endpoint: 'private-sentinel-endpoint' }],
+      [{ ...response, httpStatus: 999 }],
+      [
+        {
+          endpoint: 'room-context',
+          method: 'GET',
+          outcome: 'network-failure',
+          networkFailure: 'private-sentinel-error-text',
+        },
+      ],
+      [response, response],
+      Array.from({ length: 7 }, (_, index) => ({
+        ...response,
+        endpoint: ['personal-list', 'room-context', 'room-list'][index % 3],
+        method: index < 3 ? 'GET' : 'OPTIONS',
+      })),
+    ];
+
+    for (const observations of invalidObservations) {
+      assert.throws(() => journal.recordCalendarListTransport(observations), {
+        message: 'Private acceptance checkpoint is invalid',
+      });
+    }
+    assert.throws(() => readFileSync(stageFile, 'utf8'), { code: 'ENOENT' });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('rejects unrecognized phase and profile values without echoing them', async () => {
   const { directory, stageFile } = createStageFile();
   try {

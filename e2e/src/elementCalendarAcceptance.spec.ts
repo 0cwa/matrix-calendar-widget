@@ -67,7 +67,15 @@ import {
   buildOrdinaryPerformanceSeedEnvironment,
   raceCalendarReadyOrIdentityPrompt,
 } from '../../dev/element-acceptance-performance.mjs';
-import { createPrivateUiCheckpointJournal } from '../../dev/element-acceptance-private-ui-checkpoints.mjs';
+import {
+  PRIVATE_UI_CALENDAR_LIST_ENDPOINTS,
+  PRIVATE_UI_CALENDAR_LIST_METHODS,
+  createPrivateUiCheckpointJournal,
+  type PrivateUiCalendarListEndpoint,
+  type PrivateUiCalendarListFailureCategory,
+  type PrivateUiCalendarListMethod,
+  type PrivateUiCalendarListTransportObservation,
+} from '../../dev/element-acceptance-private-ui-checkpoints.mjs';
 import { classifyG6KeyboardFocusTarget } from '../../dev/element-g6-keyboard-focus.mjs';
 import {
   beginG6ResourceCreate,
@@ -8402,6 +8410,151 @@ function waitForGatewayResponse(
   );
 }
 
+type PrivateCalendarListRequestObserver = {
+  dispose: () => void;
+  recordSnapshot: (
+    record: (observations: PrivateUiCalendarListTransportObservation[]) => void,
+  ) => void;
+};
+
+function createPrivateCalendarListRequestObserver(
+  page: Page,
+  expectedRoomId: string,
+): PrivateCalendarListRequestObserver {
+  const observations = new Map<
+    string,
+    PrivateUiCalendarListTransportObservation
+  >();
+  let snapshotRecorded = false;
+
+  // These are the read routes in GatewayCalendarRepository's initial list.
+  // Request origin and room ID are only matched and never retained.
+  const identifyRequest = (
+    request: Request,
+  ):
+    | {
+        endpoint: PrivateUiCalendarListEndpoint;
+        method: PrivateUiCalendarListMethod;
+        key: string;
+      }
+    | undefined => {
+    try {
+      const url = new URL(request.url());
+      const method = request.method();
+      if (
+        url.origin !== PRIVATE_ACCEPTANCE_GATEWAY_ORIGIN ||
+        url.searchParams.get('roomId') !== expectedRoomId ||
+        (method !== 'GET' && method !== 'OPTIONS')
+      ) {
+        return undefined;
+      }
+
+      let endpoint: PrivateUiCalendarListEndpoint | undefined;
+      if (url.pathname === '/v1/calendar/context') {
+        endpoint = 'room-context';
+      } else if (url.pathname === '/v1/calendar/calendars') {
+        const target = url.searchParams.get('target');
+        if (target === 'personal') endpoint = 'personal-list';
+        if (target === 'room') endpoint = 'room-list';
+      }
+      if (!endpoint || !PRIVATE_UI_CALENDAR_LIST_ENDPOINTS.includes(endpoint)) {
+        return undefined;
+      }
+      return { endpoint, method, key: `${endpoint}:${method}` };
+    } catch {
+      return undefined;
+    }
+  };
+
+  const onRequest = (request: Request) => {
+    const match = identifyRequest(request);
+    if (!match) return;
+    observations.set(match.key, {
+      endpoint: match.endpoint,
+      method: match.method,
+      outcome: 'pending',
+    });
+  };
+
+  const onResponse = (response: Response) => {
+    const match = identifyRequest(response.request());
+    const previous = match ? observations.get(match.key) : undefined;
+    if (!match || !previous) return;
+    observations.set(match.key, {
+      endpoint: previous.endpoint,
+      method: previous.method,
+      outcome: 'response',
+      httpStatus: response.status(),
+    });
+  };
+
+  const onRequestFailed = (request: Request) => {
+    const match = identifyRequest(request);
+    const previous = match ? observations.get(match.key) : undefined;
+    if (!match || !previous) return;
+    observations.set(match.key, {
+      endpoint: previous.endpoint,
+      method: previous.method,
+      outcome: 'network-failure',
+      networkFailure: privateCalendarListNetworkFailure(request),
+    });
+  };
+
+  page.on('request', onRequest);
+  page.on('response', onResponse);
+  page.on('requestfailed', onRequestFailed);
+
+  const dispose = () => {
+    page.off('request', onRequest);
+    page.off('response', onResponse);
+    page.off('requestfailed', onRequestFailed);
+  };
+  const snapshot = () =>
+    [...observations.values()].sort((left, right) => {
+      const endpointOrder =
+        PRIVATE_UI_CALENDAR_LIST_ENDPOINTS.indexOf(left.endpoint) -
+        PRIVATE_UI_CALENDAR_LIST_ENDPOINTS.indexOf(right.endpoint);
+      return (
+        endpointOrder ||
+        PRIVATE_UI_CALENDAR_LIST_METHODS.indexOf(left.method) -
+          PRIVATE_UI_CALENDAR_LIST_METHODS.indexOf(right.method)
+      );
+    });
+
+  return {
+    recordSnapshot: (record) => {
+      if (snapshotRecorded) return;
+      snapshotRecorded = true;
+      try {
+        record(snapshot());
+      } catch {
+        // Bounded request diagnostics never mask an acceptance failure.
+      }
+      dispose();
+    },
+    dispose,
+  };
+}
+
+function privateCalendarListNetworkFailure(
+  request: Request,
+): PrivateUiCalendarListFailureCategory {
+  const errorText = request.failure()?.errorText?.toUpperCase() ?? '';
+  if (errorText.includes('ERR_CERT') || errorText.includes('ERR_SSL')) {
+    return 'tls';
+  }
+  if (errorText.includes('ERR_BLOCKED_BY_CLIENT')) return 'blocked';
+  if (errorText.includes('ERR_NAME_NOT_RESOLVED')) return 'dns';
+  if (errorText.includes('ERR_TIMED_OUT')) return 'timeout';
+  if (
+    errorText.includes('ERR_CONNECTION') ||
+    errorText.includes('ERR_NETWORK_CHANGED')
+  ) {
+    return 'connection';
+  }
+  return 'other';
+}
+
 function waitForPrivateClientResponse(
   page: Page,
   method: 'GET' | 'POST' | 'DELETE',
@@ -10621,6 +10774,9 @@ if (process.env.ELEMENT_ACCEPTANCE_PRIVATE_UI === 'true') {
       ]);
       const contexts: BrowserContext[] = [];
       let blockedExternalRequests = 0;
+      let calendarListRequestObserver:
+        | PrivateCalendarListRequestObserver
+        | undefined;
       const makeContext = async () => {
         const context = await browser.newContext({
           locale: 'en-US',
@@ -10662,6 +10818,10 @@ if (process.env.ELEMENT_ACCEPTANCE_PRIVATE_UI === 'true') {
         const teamRoomA = await checkpoint.run('private-ui-member-a-room', () =>
           openFixtureRoom(pageA, fixture.roomName, fixture.teamRoomId),
         );
+        calendarListRequestObserver = createPrivateCalendarListRequestObserver(
+          pageA,
+          fixture.teamRoomId,
+        );
         const frameA = await checkpoint.run(
           'private-ui-member-a-widget-ready',
           () =>
@@ -10673,16 +10833,22 @@ if (process.env.ELEMENT_ACCEPTANCE_PRIVATE_UI === 'true') {
           name: 'Calendar app access',
           exact: true,
         });
+        await checkpoint.run('private-ui-access-button-visible', () =>
+          expect(privateClientButtonA).toBeVisible(),
+        );
+        await checkpoint.run('private-ui-access-button-enabled', () =>
+          expect(privateClientButtonA).toBeEnabled(),
+        );
+        calendarListRequestObserver.recordSnapshot((observations) =>
+          checkpoint.recordCalendarListTransport(observations),
+        );
         const initialListResponse = waitForPrivateClientResponse(pageA, 'GET');
-        const dialogA = await checkpoint.run(
-          'private-ui-dialog-open',
-          async () => {
-            await expect(privateClientButtonA).toBeVisible();
-            await privateClientButtonA.click();
-            const dialog = frameA.getByRole('dialog').last();
-            await expect(dialog).toBeVisible();
-            return dialog;
-          },
+        await checkpoint.run('private-ui-access-button-click', () =>
+          privateClientButtonA.click(),
+        );
+        const dialogA = frameA.getByRole('dialog').last();
+        await checkpoint.run('private-ui-dialog-visible', () =>
+          expect(dialogA).toBeVisible(),
         );
         await checkpoint.run('private-ui-initial-list', async () => {
           const response = await initialListResponse;
@@ -11078,6 +11244,10 @@ if (process.env.ELEMENT_ACCEPTANCE_PRIVATE_UI === 'true') {
           expect(publicFeedMutationCount).toBe(0);
         });
       } finally {
+        calendarListRequestObserver?.recordSnapshot((observations) =>
+          checkpoint.recordCalendarListTransport(observations),
+        );
+        calendarListRequestObserver?.dispose();
         await checkpoint.cleanup('private-ui-context-cleanup', async () => {
           await Promise.all(
             contexts.map((context) => context.close().catch(() => undefined)),

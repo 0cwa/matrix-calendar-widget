@@ -1131,6 +1131,148 @@ test('rejects private checkpoints unless their source, profile, schema, and mode
   );
 });
 
+test('sanitizes bounded private calendar-list transport evidence and rejects raw fields', () => {
+  const records = [
+    {
+      phase: 'private-ui-calendar-list-transport',
+      status: 'observed',
+      sourceSha,
+      profile: 'normal-bot',
+      observations: [
+        {
+          endpoint: 'room-context',
+          method: 'OPTIONS',
+          outcome: 'response',
+          httpStatus: 204,
+        },
+        {
+          endpoint: 'room-list',
+          method: 'GET',
+          outcome: 'network-failure',
+          networkFailure: 'tls',
+        },
+      ],
+    },
+    {
+      phase: 'private-ui-access-button-visible',
+      status: 'started',
+      sourceSha,
+      profile: 'normal-bot',
+    },
+    {
+      phase: 'private-ui-access-button-visible',
+      status: 'passed',
+      sourceSha,
+      profile: 'normal-bot',
+    },
+    {
+      phase: 'private-ui-access-button-enabled',
+      status: 'started',
+      sourceSha,
+      profile: 'normal-bot',
+    },
+    {
+      phase: 'private-ui-access-button-enabled',
+      status: 'failed',
+      sourceSha,
+      profile: 'normal-bot',
+    },
+    {
+      phase: 'private-ui-test-result',
+      status: 'failed',
+      sourceSha,
+      profile: 'normal-bot',
+      testStatus: 'failed',
+      lastEnteredPhase: 'private-ui-access-button-enabled',
+      lastCompletedPhase: 'private-ui-access-button-visible',
+      failurePhase: 'private-ui-access-button-enabled',
+    },
+  ];
+  const summary = sanitizeElementAcceptance(
+    records.map((record) => JSON.stringify(record)).join('\n'),
+    sourceSha,
+    { privateUiEnabled: true, profile: 'normal-bot' },
+  );
+
+  assert.match(
+    summary,
+    /phase=private-ui-calendar-list-transport status=observed profile=normal-bot endpoint=room-context method=OPTIONS outcome=response http_status=204/u,
+  );
+  assert.match(
+    summary,
+    /phase=private-ui-calendar-list-transport status=observed profile=normal-bot endpoint=room-list method=GET outcome=network-failure network_failure=tls/u,
+  );
+  assert.match(
+    summary,
+    /phase=private-ui-test-result status=failed profile=normal-bot test_status=failed last_entered=private-ui-access-button-enabled last_completed=private-ui-access-button-visible failure_phase=private-ui-access-button-enabled/u,
+  );
+  assert.doesNotMatch(summary, /https?:\/\/|token|password|errorText/u);
+
+  const noRequestsSummary = sanitizeElementAcceptance(
+    JSON.stringify({ ...records[0], observations: [] }),
+    sourceSha,
+    { privateUiEnabled: true, profile: 'normal-bot' },
+  );
+  assert.match(
+    noRequestsSummary,
+    /phase=private-ui-calendar-list-transport status=observed profile=normal-bot observation_count=0/u,
+  );
+
+  const invalidRecords = [
+    {
+      ...records[0],
+      observations: [
+        {
+          ...records[0].observations[0],
+          requestUrl: 'https://private.invalid',
+        },
+      ],
+    },
+    {
+      ...records[0],
+      observations: [
+        { ...records[0].observations[0], endpoint: 'private-sentinel-route' },
+      ],
+    },
+    {
+      ...records[0],
+      observations: [
+        {
+          endpoint: 'room-list',
+          method: 'GET',
+          outcome: 'network-failure',
+          networkFailure: 'private-sentinel-error-text',
+        },
+      ],
+    },
+    {
+      ...records[0],
+      observations: [{ ...records[0].observations[0], httpStatus: 700 }],
+    },
+  ];
+  for (const record of invalidRecords) {
+    assert.throws(
+      () =>
+        sanitizeElementAcceptance(JSON.stringify(record), sourceSha, {
+          privateUiEnabled: true,
+          profile: 'normal-bot',
+        }),
+      /invalid element acceptance summary/u,
+    );
+  }
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        [...records.slice(1), records[0]]
+          .map((record) => JSON.stringify(record))
+          .join('\n'),
+        sourceSha,
+        { privateUiEnabled: true, profile: 'normal-bot' },
+      ),
+    /invalid element acceptance summary/u,
+  );
+});
+
 test('reports a missing stage file without echoing its path or private values', () => {
   const directory = mkdtempSync(join(tmpdir(), 'private-ui-summary-'));
   const missingStageFile = join(directory, 'private-sentinel-stage.jsonl');

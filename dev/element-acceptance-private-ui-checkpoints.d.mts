@@ -3,7 +3,10 @@ export type PrivateUiCheckpointPhase =
   | 'private-ui-member-a-auth'
   | 'private-ui-member-a-room'
   | 'private-ui-member-a-widget-ready'
-  | 'private-ui-dialog-open'
+  | 'private-ui-access-button-visible'
+  | 'private-ui-access-button-enabled'
+  | 'private-ui-access-button-click'
+  | 'private-ui-dialog-visible'
   | 'private-ui-initial-list'
   | 'private-ui-calendar-select'
   | 'private-ui-credential-issue-reveal'
@@ -35,8 +38,47 @@ export type PrivateUiCleanupPhase =
   | 'private-ui-dav-cleanup'
   | 'private-ui-context-cleanup';
 
+export type PrivateUiCalendarListEndpoint =
+  | 'personal-list'
+  | 'room-context'
+  | 'room-list';
+export type PrivateUiCalendarListMethod = 'GET' | 'OPTIONS';
+export type PrivateUiCalendarListFailureCategory =
+  | 'blocked'
+  | 'dns'
+  | 'tls'
+  | 'timeout'
+  | 'connection'
+  | 'other';
+export type PrivateUiCalendarListTransportObservation =
+  | Readonly<{
+      endpoint: PrivateUiCalendarListEndpoint;
+      method: PrivateUiCalendarListMethod;
+      outcome: 'pending';
+    }>
+  | Readonly<{
+      endpoint: PrivateUiCalendarListEndpoint;
+      method: PrivateUiCalendarListMethod;
+      outcome: 'response';
+      httpStatus: number;
+    }>
+  | Readonly<{
+      endpoint: PrivateUiCalendarListEndpoint;
+      method: PrivateUiCalendarListMethod;
+      outcome: 'network-failure';
+      networkFailure: PrivateUiCalendarListFailureCategory;
+    }>;
+
 export declare const PRIVATE_UI_CHECKPOINT_PHASES: readonly PrivateUiCheckpointPhase[];
 export declare const PRIVATE_UI_RESULT_PHASE: 'private-ui-test-result';
+export declare const PRIVATE_UI_CALENDAR_LIST_TRANSPORT_PHASE: 'private-ui-calendar-list-transport';
+export declare const PRIVATE_UI_CALENDAR_LIST_ENDPOINTS: readonly PrivateUiCalendarListEndpoint[];
+export declare const PRIVATE_UI_CALENDAR_LIST_METHODS: readonly PrivateUiCalendarListMethod[];
+export declare const PRIVATE_UI_CALENDAR_LIST_FAILURE_CATEGORIES: readonly PrivateUiCalendarListFailureCategory[];
+export declare const PRIVATE_UI_CALENDAR_LIST_OBSERVATION_LIMIT: 6;
+export declare function normalizePrivateUiCalendarListTransportObservations(
+  observations: unknown,
+): PrivateUiCalendarListTransportObservation[] | undefined;
 
 export interface PrivateUiCheckpointJournal {
   run<T>(
@@ -47,6 +89,9 @@ export interface PrivateUiCheckpointJournal {
     phase: PrivateUiCleanupPhase,
     operation: () => Promise<T> | T,
   ): Promise<T | undefined>;
+  recordCalendarListTransport(
+    observations: readonly PrivateUiCalendarListTransportObservation[],
+  ): void;
   finish(testStatus: string | undefined): void;
 }
 
