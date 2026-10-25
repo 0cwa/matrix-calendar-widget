@@ -32,6 +32,10 @@ import {
   inspectStoppedContainerState,
   isPrivateArtifactPath,
   isSafeRestoreTargetPlan,
+  parseReminderConfigurationSnapshotOutput,
+  preservesReminderConfigurationSnapshots,
+  sameReminderConfigurationSnapshots,
+  sameReminderDeliverySnapshots,
 } from './element-acceptance-reminder-restore-guards.mjs';
 import {
   formatFailureMarker,
@@ -109,6 +113,214 @@ const safePlan = {
   restoreDatabase: 'matrix_calendar_restored',
   restoreDatabaseExists: false,
 };
+
+test('restore reminder snapshots preserve target, all-day schedule, and revision', () => {
+  const source = [
+    {
+      roomId: '!fixture:example.test',
+      calendarId: 'fixture-calendar',
+      eventUid: 'all-day-event',
+      recurrenceId: null,
+      alarmUid: 'all-day-alarm',
+      target: {
+        kind: 'users',
+        userIds: ['@alice:example.test', '@bob:example.test'],
+      },
+      allDaySchedule: {
+        daysBefore: 7,
+        localTime: '09:00',
+        timezone: 'Europe/Stockholm',
+      },
+      scheduleEffectiveAt: 1792566000000,
+      revision: 3,
+    },
+    {
+      roomId: '!fixture:example.test',
+      calendarId: 'fixture-calendar',
+      eventUid: 'timed-event',
+      recurrenceId: null,
+      alarmUid: 'timed-alarm',
+      target: { kind: 'room' },
+      allDaySchedule: null,
+      scheduleEffectiveAt: null,
+      revision: 1,
+    },
+  ];
+  const parsed = parseReminderConfigurationSnapshotOutput(
+    source.map((row) => JSON.stringify(row)).join('\n'),
+  );
+
+  assert.equal(sameReminderConfigurationSnapshots(source, parsed), true);
+  assert.equal(
+    sameReminderConfigurationSnapshots(source, [
+      { ...parsed[0], target: { kind: 'room' } },
+      parsed[1],
+    ]),
+    false,
+  );
+  assert.equal(
+    sameReminderConfigurationSnapshots(source, [
+      { ...parsed[0], revision: parsed[0].revision + 1 },
+      parsed[1],
+    ]),
+    false,
+  );
+  assert.equal(
+    sameReminderConfigurationSnapshots(source, [
+      {
+        ...parsed[0],
+        allDaySchedule: { ...parsed[0].allDaySchedule, daysBefore: 6 },
+      },
+      parsed[1],
+    ]),
+    false,
+  );
+});
+
+test('restart configuration snapshot preserves prior rows when the journey adds one', () => {
+  const original = {
+    roomId: '!fixture:example.test',
+    calendarId: 'fixture-calendar',
+    eventUid: 'initial-event',
+    recurrenceId: null,
+    alarmUid: 'initial-alarm',
+    target: { kind: 'room' },
+    allDaySchedule: null,
+    scheduleEffectiveAt: null,
+    revision: 1,
+  };
+  const added = {
+    ...original,
+    eventUid: 'restart-event',
+    alarmUid: 'restart-alarm',
+    target: { kind: 'users', userIds: ['@alice:example.test'] },
+    allDaySchedule: {
+      daysBefore: 2,
+      localTime: '09:00',
+      timezone: 'Europe/Stockholm',
+    },
+    scheduleEffectiveAt: 1792566000000,
+  };
+  const baseline = parseReminderConfigurationSnapshotOutput(
+    JSON.stringify(original),
+  );
+  const current = parseReminderConfigurationSnapshotOutput(
+    [original, added].map((row) => JSON.stringify(row)).join('\n'),
+  );
+
+  assert.equal(sameReminderConfigurationSnapshots(baseline, current), false);
+  assert.equal(
+    preservesReminderConfigurationSnapshots(baseline, current),
+    true,
+  );
+  assert.equal(
+    preservesReminderConfigurationSnapshots(current, baseline),
+    false,
+  );
+  assert.equal(
+    preservesReminderConfigurationSnapshots(baseline, [
+      { ...current[0], revision: current[0].revision + 1 },
+      current[1],
+    ]),
+    false,
+  );
+  assert.equal(
+    preservesReminderConfigurationSnapshots(baseline, [
+      {
+        ...current[0],
+        target: { kind: 'users', userIds: ['@alice:example.test'] },
+      },
+      current[1],
+    ]),
+    false,
+  );
+  assert.equal(
+    preservesReminderConfigurationSnapshots(baseline, [
+      {
+        ...current[0],
+        allDaySchedule: {
+          daysBefore: 2,
+          localTime: '09:00',
+          timezone: 'Europe/Stockholm',
+        },
+        scheduleEffectiveAt: 1792566000000,
+      },
+      current[1],
+    ]),
+    false,
+  );
+});
+
+test('restore reminder snapshots fail closed on unknown or invalid metadata', () => {
+  const valid = {
+    roomId: '!fixture:example.test',
+    calendarId: 'fixture-calendar',
+    eventUid: 'all-day-event',
+    recurrenceId: null,
+    alarmUid: 'all-day-alarm',
+    target: { kind: 'users', userIds: ['@alice:example.test'] },
+    allDaySchedule: {
+      daysBefore: 7,
+      localTime: '09:00',
+      timezone: 'Europe/Stockholm',
+    },
+    scheduleEffectiveAt: 1792566000000,
+    revision: 2,
+  };
+  for (const invalid of [
+    { ...valid, futureField: true },
+    { ...valid, target: { kind: 'room', userIds: [] } },
+    {
+      ...valid,
+      target: {
+        kind: 'users',
+        userIds: ['@alice:example.test', '@alice:example.test'],
+      },
+    },
+    {
+      ...valid,
+      allDaySchedule: { ...valid.allDaySchedule, timezone: 'Not/AZone' },
+    },
+    { ...valid, revision: 0 },
+    { ...valid, scheduleEffectiveAt: null },
+  ]) {
+    assert.throws(
+      () => parseReminderConfigurationSnapshotOutput(JSON.stringify(invalid)),
+      TypeError,
+    );
+  }
+});
+
+test('restore delivery snapshots retain stable keys and terminal skip reasons', () => {
+  const sent = {
+    deliveryKey: 'a'.repeat(64),
+    attemptCount: 1,
+    state: 'sent',
+    skipReason: null,
+  };
+  const skipped = {
+    deliveryKey: 'b'.repeat(64),
+    attemptCount: 2,
+    state: 'skipped',
+    skipReason: 'no-current-recipients',
+  };
+
+  assert.equal(
+    sameReminderDeliverySnapshots([sent, skipped], [skipped, sent]),
+    true,
+  );
+  assert.equal(
+    sameReminderDeliverySnapshots(
+      [sent, skipped],
+      [sent, { ...skipped, state: 'sent', skipReason: null }],
+    ),
+    false,
+  );
+  assert.equal(
+    sameReminderDeliverySnapshots([sent], [{ ...sent, futureField: true }]),
+    false,
+  );
+});
 
 test('restore target plan uses distinct, absent destinations', () => {
   assert.equal(isSafeRestoreTargetPlan(safePlan), true);

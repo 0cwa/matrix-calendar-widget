@@ -4,14 +4,26 @@ inputs:
   principal-mode:
     description: Process-wide room principal mode for this isolated acceptance run.
     required: true
+  private-ui:
+    description: Run the opt-in private calendar app UI and CalDAV lifecycle.
+    required: false
+    default: 'false'
 runs:
   using: composite
   steps:
     - name: Mask synthetic service credentials and prepare private files
       env:
         PRINCIPAL_MODE: ${{ inputs.principal-mode }}
+        PRIVATE_UI: ${{ inputs.private-ui }}
       shell: bash
       run: |
+        if [[ "$PRIVATE_UI" == true ]]; then
+          if [[ ! -f "$GITHUB_ENV" || -L "$GITHUB_ENV" || ! -O "$GITHUB_ENV" ]]; then
+            echo 'The private acceptance environment file is not a runner-owned regular file.' >&2
+            exit 1
+          fi
+          chmod 0600 -- "$GITHUB_ENV"
+        fi
         case "$PRINCIPAL_MODE" in
           appservice)
             if [[ -z "${MATRIX_APPLICATION_SERVICE_TOKEN:-}" || ${#MATRIX_APPLICATION_SERVICE_TOKEN} -gt 4096 || "${MATRIX_CALENDAR_DEV_APPSERVICE_REGISTRATION:-enabled}" != enabled ]]; then
@@ -30,6 +42,17 @@ runs:
             ;;
           *)
             echo 'The acceptance principal mode is invalid.' >&2
+            exit 1
+            ;;
+        esac
+        case "$PRIVATE_UI" in
+          true)
+            echo 'ELEMENT_ACCEPTANCE_PRIVATE_UI=true' >> "$GITHUB_ENV"
+            ;;
+          false)
+            ;;
+          *)
+            echo 'The private UI acceptance input must be true or false.' >&2
             exit 1
             ;;
         esac
@@ -66,6 +89,17 @@ runs:
         chmod 0600 "$RUNNER_TEMP/element-acceptance-reminder-events.json"
         chmod 0600 "$RUNNER_TEMP/element-acceptance-performance-events.json"
 
+    - name: Prepare opt-in private UI TLS profile
+      if: ${{ inputs.private-ui == 'true' }}
+      shell: bash
+      run: |
+        if [[ ! -f "$GITHUB_ENV" || -L "$GITHUB_ENV" || ! -O "$GITHUB_ENV" ]]; then
+          echo 'The private acceptance environment file is not a runner-owned regular file.' >&2
+          exit 1
+        fi
+        chmod 0600 -- "$GITHUB_ENV"
+        node dev/element-acceptance-private-ui-prepare.mjs
+
     - name: Install dependencies
       shell: bash
       run: yarn install --frozen-lockfile
@@ -76,6 +110,7 @@ runs:
         node --test dev/element-acceptance-overrides.test.mjs
         node dev/element-acceptance-diagnostics.test.mjs
         node dev/sanitize-element-acceptance.test.mjs
+        node dev/element-reminder-all-day-readback.test.mjs
         node dev/element-desktop-egress-policy.test.mjs
         node dev/element-desktop-evidence.test.mjs
         node --test dev/element-desktop-startup.test.mjs
@@ -88,6 +123,7 @@ runs:
         node --test dev/element-acceptance-workflow.test.mjs
         node --test dev/element-acceptance-action-summary.test.mjs
         node --test dev/element-acceptance-setup.test.mjs
+        node --test dev/element-acceptance-private-ui-prepare.test.mjs
         node --test dev/validate-element-acceptance-compose.test.mjs
 
     - name: Build calendar, server, and widget outputs
@@ -95,6 +131,7 @@ runs:
       run: |
         yarn workspace @matrix-calendar-widget/ical-timezones build
         yarn workspace @matrix-calendar-widget/calendar build
+        node --test dev/element-acceptance-reminder-timing.test.mjs
         yarn workspace @matrix-calendar-widget/server build
         node --test dev/element-acceptance-caldav-report-probe.test.mjs
         yarn workspace @matrix-calendar-widget/widget build
@@ -150,6 +187,9 @@ runs:
       shell: bash
       run: |
         compose=(docker compose -p "$COMPOSE_PROJECT_NAME" --env-file "$ELEMENT_ACCEPTANCE_SERVER_ENV_FILE" -f dev/compose.yaml -f dev/element-acceptance.compose.yaml)
+        if [[ "${ELEMENT_ACCEPTANCE_PRIVATE_UI:-false}" == true ]]; then
+          compose+=(-f dev/element-acceptance-reminder.compose.yaml --env-file "$ELEMENT_ACCEPTANCE_PRIVATE_UI_ENV_FILE" -f dev/element-acceptance-private-ui-tls.compose.yaml -f dev/element-acceptance-private-ui.compose.yaml)
+        fi
         if ! "${compose[@]}" config --quiet >/dev/null 2>&1; then
           printf '%s\n' '{"phase":"runtime-ready","status":"failed"}' >> "$ELEMENT_ACCEPTANCE_STAGE_FILE"
           echo 'Synthetic Element stack configuration is invalid.' >&2
@@ -160,12 +200,26 @@ runs:
           echo 'Synthetic service ports must bind to loopback.' >&2
           exit 1
         fi
-        if ! "${compose[@]}" up --no-build -d gateway widget element > "$RUNNER_TEMP/element-acceptance-compose-up.log" 2>&1; then
+        services=(gateway widget element)
+        if [[ "${ELEMENT_ACCEPTANCE_PRIVATE_UI:-false}" == true ]]; then
+          services+=(postgres private-gateway-https)
+        fi
+        if ! "${compose[@]}" up --no-build -d "${services[@]}" > "$RUNNER_TEMP/element-acceptance-compose-up.log" 2>&1; then
           printf '%s\n' '{"phase":"runtime-ready","status":"failed"}' >> "$ELEMENT_ACCEPTANCE_STAGE_FILE"
           echo 'Synthetic Element stack startup failed.' >&2
           exit 1
         fi
         node dev/element-acceptance-setup.mjs wait
+
+    - name: Run the opt-in private app UI and CalDAV lifecycle
+      if: ${{ inputs.private-ui == 'true' }}
+      shell: bash
+      run: |
+        umask 077
+        if ! yarn workspace e2e playwright test --config playwright.element-acceptance.config.ts --grep "Element Web manages private app access and revokes CalDAV authorization" > "$RUNNER_TEMP/element-acceptance-private-ui-playwright.log" 2>&1; then
+          echo 'Private calendar app UI and CalDAV acceptance failed; see the sanitized phase result.' >&2
+          exit 1
+        fi
 
     - name: Measure the real Element Web ordinary 0-and-25-event profiles
       shell: bash
@@ -186,7 +240,11 @@ runs:
       run: |
         journey_started_at_ms="$(date +%s%3N)"
         printf '%s\n' '{"phase":"browser-test-suite","status":"started"}' >> "$ELEMENT_ACCEPTANCE_STAGE_FILE"
-        if ! yarn workspace e2e playwright test --config playwright.element-acceptance.config.ts --grep "Element Web members share events and enforce room authorization" > "$RUNNER_TEMP/element-acceptance-playwright.log" 2>&1; then
+        playwright_env=()
+        if [[ "${ELEMENT_ACCEPTANCE_PRIVATE_UI:-false}" == true ]]; then
+          playwright_env+=("NODE_EXTRA_CA_CERTS=$ELEMENT_ACCEPTANCE_PRIVATE_TLS_DIR/ca.pem")
+        fi
+        if ! env "${playwright_env[@]}" yarn workspace e2e playwright test --config playwright.element-acceptance.config.ts --grep "Element Web members share events and enforce room authorization" > "$RUNNER_TEMP/element-acceptance-playwright.log" 2>&1; then
           journey_outcome=failure
         else
           journey_outcome=success
@@ -205,6 +263,7 @@ runs:
 
     - name: Run the packaged Element Desktop shared-calendar journey
       id: desktop_journey
+      if: ${{ inputs.private-ui != 'true' }}
       shell: bash
       run: node dev/element-desktop-journey-runner.mjs journey
 
@@ -228,7 +287,7 @@ runs:
       id: reminder_initial
       shell: bash
       run: |
-        if ! ELEMENT_ACCEPTANCE_REMINDER_FLOW=initial yarn workspace e2e playwright test --config playwright.element-acceptance.config.ts --grep "Element Web delivers a relative room reminder" > "$RUNNER_TEMP/element-acceptance-playwright.log" 2>&1; then
+        if ! ELEMENT_ACCEPTANCE_REMINDER_FLOW=initial yarn workspace e2e playwright test --config playwright.element-acceptance.config.ts --grep "Element Web delivers room-timed and selected-member all-day reminders across restart and restore" > "$RUNNER_TEMP/element-acceptance-playwright.log" 2>&1; then
           echo 'Initial reminder delivery failed; see sanitized phase summary.' >&2
           exit 1
         fi
@@ -240,7 +299,7 @@ runs:
       shell: bash
       run: |
         node dev/element-acceptance-reminder-restore.mjs restart
-        if ! ELEMENT_ACCEPTANCE_REMINDER_FLOW=restart yarn workspace e2e playwright test --config playwright.element-acceptance.config.ts --grep "Element Web delivers a relative room reminder" > "$RUNNER_TEMP/element-acceptance-playwright.log" 2>&1; then
+        if ! ELEMENT_ACCEPTANCE_REMINDER_FLOW=restart yarn workspace e2e playwright test --config playwright.element-acceptance.config.ts --grep "Element Web delivers room-timed and selected-member all-day reminders across restart and restore" > "$RUNNER_TEMP/element-acceptance-playwright.log" 2>&1; then
           echo 'Post-restart reminder delivery failed; see sanitized phase summary.' >&2
           exit 1
         fi
@@ -253,7 +312,7 @@ runs:
       shell: bash
       run: |
         node dev/element-acceptance-reminder-restore.mjs restore
-        if ! ELEMENT_ACCEPTANCE_REMINDER_FLOW=restore yarn workspace e2e playwright test --config playwright.element-acceptance.config.ts --grep "Element Web delivers a relative room reminder" > "$RUNNER_TEMP/element-acceptance-playwright.log" 2>&1; then
+        if ! ELEMENT_ACCEPTANCE_REMINDER_FLOW=restore yarn workspace e2e playwright test --config playwright.element-acceptance.config.ts --grep "Element Web delivers room-timed and selected-member all-day reminders across restart and restore" > "$RUNNER_TEMP/element-acceptance-playwright.log" 2>&1; then
           echo 'Post-restore reminder delivery failed; see sanitized phase summary.' >&2
           exit 1
         fi
@@ -280,14 +339,14 @@ runs:
 
     - name: Emit finite Desktop journey summary
       id: desktop_journey_summary
-      if: always()
+      if: ${{ always() && steps.desktop_journey.outcome != 'skipped' }}
       shell: bash
       run: |
         node dev/element-desktop-journey.mjs summary \
           > "$RUNNER_TEMP/element-desktop-journey-safe-summary.txt"
 
     - name: Retain finite Desktop journey summary
-      if: always()
+      if: ${{ always() && steps.desktop_journey.outcome != 'skipped' }}
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: ${{ inputs.principal-mode == 'appservice' && 'element-desktop-journey-summary' || 'element-desktop-journey-normal-bot-summary' }}
@@ -329,7 +388,11 @@ runs:
         if [[ -n "${COMPOSE_PROJECT_NAME:-}" ]]; then
           compose_cleanup_status=passed
           if [[ -f "${ELEMENT_ACCEPTANCE_SERVER_ENV_FILE:-}" ]]; then
-            if ! docker compose -p "$COMPOSE_PROJECT_NAME" --env-file "$ELEMENT_ACCEPTANCE_SERVER_ENV_FILE" -f dev/compose.yaml -f dev/element-acceptance.compose.yaml -f dev/element-acceptance-reminder.compose.yaml down --volumes --remove-orphans >/dev/null 2>&1; then
+            compose=(docker compose -p "$COMPOSE_PROJECT_NAME" --env-file "$ELEMENT_ACCEPTANCE_SERVER_ENV_FILE" -f dev/compose.yaml -f dev/element-acceptance.compose.yaml -f dev/element-acceptance-reminder.compose.yaml)
+            if [[ "${ELEMENT_ACCEPTANCE_PRIVATE_UI:-false}" == true && -f "${ELEMENT_ACCEPTANCE_PRIVATE_UI_ENV_FILE:-}" ]]; then
+              compose+=(--env-file "$ELEMENT_ACCEPTANCE_PRIVATE_UI_ENV_FILE" -f dev/element-acceptance-private-ui-tls.compose.yaml -f dev/element-acceptance-private-ui.compose.yaml)
+            fi
+            if ! "${compose[@]}" down --volumes --remove-orphans >/dev/null 2>&1; then
               compose_cleanup_status=failed
             fi
           else
@@ -349,6 +412,9 @@ runs:
           "$RUNNER_TEMP/element-acceptance-playwright-output"; then
           private_cleanup_status=failed
         fi
+        if ! rm -rf "$RUNNER_TEMP/element-acceptance-private-ui"; then
+          private_cleanup_status=failed
+        fi
         if ! rm -f \
           "$RUNNER_TEMP/element-acceptance-stage.jsonl" \
           "$RUNNER_TEMP/element-acceptance-desktop-credentials.json" \
@@ -364,7 +430,8 @@ runs:
           "$RUNNER_TEMP/element-acceptance-dev-up.log" \
           "$RUNNER_TEMP/element-acceptance-compose-up.log" \
           "$RUNNER_TEMP/element-acceptance-image-smoke.log" \
-          "$RUNNER_TEMP/element-acceptance-playwright.log"; then
+          "$RUNNER_TEMP/element-acceptance-playwright.log" \
+          "$RUNNER_TEMP/element-acceptance-private-ui-playwright.log"; then
           private_cleanup_status=failed
         fi
         {

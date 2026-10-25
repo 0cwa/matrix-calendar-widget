@@ -1,0 +1,61 @@
+# Opt-in test transport only: TLS terminates on a loopback-published bridge
+# that forwards to the existing gateway. Gateway code remains authoritative
+# for Matrix, callback-signature, and private CalDAV credential checks.
+services:
+  gateway:
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - default
+      - private-client-callback
+    environment:
+      MATRIX_CALENDAR_PUBLIC_FEED_ORIGIN: ${MATRIX_CALENDAR_PRIVATE_CLIENT_ORIGIN:-}
+      MATRIX_CALENDAR_PRIVATE_CLIENTS_ENABLED: ${MATRIX_CALENDAR_PRIVATE_CLIENTS_ENABLED:-false}
+      MATRIX_CALENDAR_PRIVATE_CLIENT_ORIGIN: ${MATRIX_CALENDAR_PRIVATE_CLIENT_ORIGIN:-}
+      MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_URL: ${MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_URL:-}
+      MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_TLS_MODE: ${MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_TLS_MODE:-trusted-private-network}
+      MATRIX_CALENDAR_PRIVATE_CLIENT_EPOCH_KEY: ${MATRIX_CALENDAR_PRIVATE_CLIENT_EPOCH_KEY:-}
+      MATRIX_CALENDAR_PRIVATE_CLIENT_CALLBACK_KEY: ${MATRIX_CALENDAR_PRIVATE_CLIENT_CALLBACK_KEY:-}
+
+  widget:
+    environment:
+      REACT_APP_API_BASE_URL: ${MATRIX_CALENDAR_PRIVATE_CLIENT_ORIGIN:-http://127.0.0.1:3000}
+
+  private-gateway-https:
+    image: matrix-calendar-widget/server:element-acceptance
+    depends_on:
+      gateway:
+        condition: service_started
+    entrypoint: ['node']
+    command: ['/tmp/element-acceptance-private-https-proxy.mjs', 'serve']
+    user: '0:0'
+    environment:
+      ELEMENT_ACCEPTANCE_PRIVATE_TLS_MOUNT: /run/mcw-private-ui-tls
+    ports:
+      - target: 3443
+        published: '3001'
+        host_ip: 127.0.0.1
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: ./element-acceptance-private-https-proxy.mjs
+        target: /tmp/element-acceptance-private-https-proxy.mjs
+        read_only: true
+      - type: bind
+        source: ${ELEMENT_ACCEPTANCE_PRIVATE_TLS_DIR:?}
+        target: /run/mcw-private-ui-tls
+        read_only: true
+    read_only: true
+    networks:
+      - private-client-callback
+
+  radicale:
+    networks:
+      - default
+      - private-client-callback
+
+networks:
+  default: {}
+  private-client-callback:
+    internal: true

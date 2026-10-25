@@ -12,6 +12,9 @@ FROM runtime-base AS image-base
 
 COPY --chown=radicale:radicale config /etc/radicale/config
 COPY --chown=radicale:radicale src/matrix_calendar_radicale_auth /opt/radicale-auth/src/matrix_calendar_radicale_auth
+COPY --chown=radicale:radicale \
+    src/matrix_calendar_private_client_callback.py \
+    /opt/radicale-auth/src/matrix_calendar_private_client_callback.py
 
 ENV PYTHONPATH=/opt/radicale-auth/src
 USER radicale

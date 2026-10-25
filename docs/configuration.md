@@ -20,6 +20,7 @@ credentials in a `REACT_APP_*` variable or widget URL.
 - [Server connections and widget URL](#server-connections-and-widget-url)
 - [Room calendars and capability gates](#room-calendars-and-capability-gates)
 - [Public calendar subscriptions](#public-calendar-subscriptions)
+- [Private external CalDAV clients](#private-external-caldav-clients)
 - [Application PostgreSQL stores](#application-postgresql-stores)
 - [Request and response limits](#request-and-response-limits)
 - [Matrix runtime and storage](#matrix-runtime-and-storage)
@@ -180,18 +181,49 @@ store. See [ADR045](./adrs/adr045-public-calendar-feeds.md),
 [backup and recovery](./backup-recovery.md), and the
 [public-feed deployment notes](./deployment-docker.md#public-calendar-feed-ingress-and-recovery).
 
+## Private external CalDAV clients
+
+This default-off capability is still in development and is not ready to enable
+on a deployment. The server contracts and staged widget work do not yet qualify
+an actual desktop calendar application or a live Matrix installation. Follow
+[ADR046](./adrs/adr046-private-caldav-clients.md) for the current lifecycle,
+security boundary, and validation gates.
+
+Private clients use the existing public API origin for the scoped root DAV
+route. Configure that origin to route `/<appID>/calendar/` to the calendar
+gateway; keep Radicale and its native `/.sharing/` and `/.token/` endpoints
+private. The capability stays disabled unless explicitly enabled with all
+required settings:
+
+| Setting                                            | Requirement                                                                                                                                                    |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MATRIX_CALENDAR_PRIVATE_CLIENTS_ENABLED`          | Default `false`. Keep disabled until actual desktop-client, widget UI, combined public-feed, and deployment acceptance gates pass.                             |
+| `MATRIX_CALENDAR_PRIVATE_CLIENT_ORIGIN`            | Existing externally reachable HTTPS API origin routing the private root DAV path. Origin only: no path, query, or fragment.                                    |
+| `MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_URL`      | App-owned PostgreSQL URL for credential metadata and tombstones; separate schema from the reminder and binding stores. Never use Synapse's database.           |
+| `MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_TLS_MODE` | `verify-full` by default; `trusted-private-network` is only for an explicitly controlled isolated database network.                                            |
+| `MATRIX_CALENDAR_PRIVATE_CLIENT_EPOCH_KEY`         | Dedicated random 32-byte key encoded as 43 unpadded base64url characters. Keep it outside database backups and rotate it before opening ingress after restore. |
+| `MATRIX_CALENDAR_PRIVATE_CLIENT_CALLBACK_KEY`      | Separate random 32-byte callback HMAC key in the same encoding. Its bytes must differ from the private epoch key and configured public-feed signing key.       |
+
+Inject keys through deployment secret management. There are no key-file
+settings for private clients. Never place these keys, Matrix credentials, or
+the one-time CalDAV app password in widget configuration or browser persistence.
+The private epoch key is independent from the public-feed signing key: restoring
+private-client database state requires credential invalidation, while public
+feed links use their own recovery policy.
+
 ## Application PostgreSQL stores
 
-The two stores are independently optional and use separate schemas. Omitting
+The stores are independently optional and use separate schemas. Omitting
 one URL disables that store only; there is no fallback to the other URL. They
 may share an application-owned database, but must never use Synapse's database.
 
-| Purpose                               | Connection                              | TLS mode                                     |
-| ------------------------------------- | --------------------------------------- | -------------------------------------------- |
-| Dynamic room bindings                 | `MATRIX_CALENDAR_BINDING_DATABASE_URL`  | `MATRIX_CALENDAR_BINDING_DATABASE_TLS_MODE`  |
-| Reminder settings and delivery claims | `MATRIX_CALENDAR_REMINDER_DATABASE_URL` | `MATRIX_CALENDAR_REMINDER_DATABASE_TLS_MODE` |
+| Purpose                               | Connection                                    | TLS mode                                           |
+| ------------------------------------- | --------------------------------------------- | -------------------------------------------------- |
+| Dynamic room bindings                 | `MATRIX_CALENDAR_BINDING_DATABASE_URL`        | `MATRIX_CALENDAR_BINDING_DATABASE_TLS_MODE`        |
+| Reminder settings and delivery claims | `MATRIX_CALENDAR_REMINDER_DATABASE_URL`       | `MATRIX_CALENDAR_REMINDER_DATABASE_TLS_MODE`       |
+| Private CalDAV client credentials     | `MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_URL` | `MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_TLS_MODE` |
 
-Supply PostgreSQL URLs through secret management. Both stores default to
+Supply PostgreSQL URLs through secret management. All three stores default to
 `verify-full`, which verifies the certificate chain and hostname. Use
 `trusted-private-network` only for an explicitly controlled isolated database
 network. Startup migrations require a least-privilege application role with

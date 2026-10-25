@@ -210,6 +210,61 @@ const FAILURE_CODES = Object.freeze([
   'safe-storage-backend-unconfirmed',
   'probe-internal-error',
 ]);
+export const STARTUP_PHASES = Object.freeze([
+  'preflight',
+  'desktop-launch',
+  'desktop-process-observation',
+  'desktop-connection',
+  'desktop-journey',
+  'cleanup-child-observation',
+  'cleanup-app',
+  'safe-storage-finalization',
+  'record-emission',
+  'outer-catch',
+]);
+export const STARTUP_EXCEPTION_CLASSES = Object.freeze([
+  'error',
+  'type-error',
+  'range-error',
+  'reference-error',
+  'syntax-error',
+  'uri-error',
+  'eval-error',
+  'aggregate-error',
+  'unknown',
+]);
+
+export function startupExceptionDiagnostic(error, phase) {
+  let exceptionClass = 'unknown';
+  try {
+    exceptionClass =
+      error instanceof AggregateError
+        ? 'aggregate-error'
+        : error instanceof TypeError
+          ? 'type-error'
+          : error instanceof RangeError
+            ? 'range-error'
+            : error instanceof ReferenceError
+              ? 'reference-error'
+              : error instanceof SyntaxError
+                ? 'syntax-error'
+                : error instanceof URIError
+                  ? 'uri-error'
+                  : error instanceof EvalError
+                    ? 'eval-error'
+                    : error instanceof Error
+                      ? 'error'
+                      : 'unknown';
+  } catch {
+    // A hostile thrown value must not prevent the bounded record from emitting.
+  }
+  return {
+    failurePhase: STARTUP_PHASES.includes(phase) ? phase : 'outer-catch',
+    failureExceptionClass: STARTUP_EXCEPTION_CLASSES.includes(exceptionClass)
+      ? exceptionClass
+      : 'unknown',
+  };
+}
 
 export function createSafeStorageLogCollector() {
   const streams = new Map([
@@ -581,6 +636,11 @@ const desktopObservation = {
   },
 };
 let failureCode = null;
+let startupPhase = 'preflight';
+let startupFailureDiagnostic = {
+  failurePhase: null,
+  failureExceptionClass: null,
+};
 let rendererDiagnostics = emptyRendererDiagnostics();
 let egressPhaseCounters = {
   beforeApp: emptyEgressCounterObservation(),
@@ -3959,15 +4019,19 @@ async function stopApp() {
   }
 }
 
-function emitRecord(rendererCount = null) {
+export function createStartupRecord(
+  rendererCount = null,
+  recordSourceSha = sourceSha,
+) {
   const values = Object.values(checks);
   const passed =
     failureCode === null && values.every((value) => value === 'passed');
-  const record = {
+  return {
     phase: 'desktop-startup',
     status: passed ? 'passed' : 'failed',
     failureCode,
-    sourceSha,
+    ...startupFailureDiagnostic,
+    sourceSha: recordSourceSha,
     package: packageInfo,
     runtime,
     origin: FIXED_ORIGIN,
@@ -3979,164 +4043,203 @@ function emitRecord(rendererCount = null) {
     egressPhaseCounters,
     checks,
   };
+}
+
+function emitRecord(rendererCount = null) {
+  const record = createStartupRecord(rendererCount);
   process.stdout.write(`${JSON.stringify(record)}\n`);
-  if (!passed) process.exitCode = 1;
+  if (record.status !== 'passed') process.exitCode = 1;
+}
+
+export async function runStartupLifecycle(probe, onFailure, finalize) {
+  try {
+    await probe();
+  } catch (error) {
+    onFailure(error);
+  } finally {
+    await finalize();
+  }
+}
+
+export function captureStartupFailure(error, phase = startupPhase) {
+  failureCode =
+    error instanceof ProbeFailure ? error.code : 'probe-internal-error';
+  if (!(error instanceof ProbeFailure)) {
+    startupFailureDiagnostic = startupExceptionDiagnostic(error, phase);
+  }
+  if (
+    error instanceof ProbeFailure &&
+    error.check &&
+    checks[error.check] === 'not_run'
+  ) {
+    status(error.check, 'failed');
+  }
+}
+
+export function captureOuterStartupFailure(error, phase = startupPhase) {
+  if (startupFailureDiagnostic.failurePhase === null) {
+    startupFailureDiagnostic = startupExceptionDiagnostic(error, phase);
+  }
+  failureCode ??= 'probe-internal-error';
 }
 
 async function main() {
   let rendererCount = null;
-  try {
-    checkSource();
-    checkRunner();
-    checkPackage();
-    requireProfile();
-    startSecretService();
-    checkConfig();
-    if (process.env.ELEMENT_DESKTOP_NO_UPDATE !== 'true') {
-      fail('updates-enabled', 'updatesDisabled');
-    }
-    pass('updatesDisabled');
+  await runStartupLifecycle(
+    async () => {
+      startupPhase = 'preflight';
+      checkSource();
+      checkRunner();
+      checkPackage();
+      requireProfile();
+      startSecretService();
+      checkConfig();
+      if (process.env.ELEMENT_DESKTOP_NO_UPDATE !== 'true') {
+        fail('updates-enabled', 'updatesDisabled');
+      }
+      pass('updatesDisabled');
 
-    if (
-      !Number.isSafeInteger(cdpPort) ||
-      cdpPort < 1024 ||
-      cdpPort > 65535 ||
-      cdpPort === 8008 ||
-      !existsSync('/usr/bin/element-desktop') ||
-      !configPath
-    ) {
-      fail('probe-internal-error', 'desktopProcess');
-    }
-    process.stdout.write(
-      '{"phase":"desktop-startup-progress","milestone":"before-app"}\n',
-    );
-    egressPhaseCounters.beforeApp = emptyEgressCounterObservation(
-      (await waitForCounterAcknowledgement('before-app'))
-        ? 'observed'
-        : 'unavailable',
-    );
-    app = spawn(
-      '/usr/bin/element-desktop',
-      [
-        `--profile-dir=${profileRoot}/profile`,
-        `--config=${configPath}`,
-        '--no-update',
-        '--password-store=gnome-libsecret',
-        '--remote-debugging-address=127.0.0.1',
-        `--remote-debugging-port=${cdpPort}`,
-      ],
-      {
-        detached: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        env: Object.fromEntries(
-          Object.entries(process.env).filter(
-            ([name]) => name !== 'ELEMENT_DESKTOP_JOURNEY_HOLD',
+      if (
+        !Number.isSafeInteger(cdpPort) ||
+        cdpPort < 1024 ||
+        cdpPort > 65535 ||
+        cdpPort === 8008 ||
+        !existsSync('/usr/bin/element-desktop') ||
+        !configPath
+      ) {
+        fail('probe-internal-error', 'desktopProcess');
+      }
+      process.stdout.write(
+        '{"phase":"desktop-startup-progress","milestone":"before-app"}\n',
+      );
+      startupPhase = 'desktop-launch';
+      egressPhaseCounters.beforeApp = emptyEgressCounterObservation(
+        (await waitForCounterAcknowledgement('before-app'))
+          ? 'observed'
+          : 'unavailable',
+      );
+      app = spawn(
+        '/usr/bin/element-desktop',
+        [
+          `--profile-dir=${profileRoot}/profile`,
+          `--config=${configPath}`,
+          '--no-update',
+          '--password-store=gnome-libsecret',
+          '--remote-debugging-address=127.0.0.1',
+          `--remote-debugging-port=${cdpPort}`,
+        ],
+        {
+          detached: true,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: Object.fromEntries(
+            Object.entries(process.env).filter(
+              ([name]) => name !== 'ELEMENT_DESKTOP_JOURNEY_HOLD',
+            ),
           ),
-        ),
-      },
-    );
-    appLaunchState = 'pending';
-    const spawnOutcome = waitForDesktopChildSpawn(app);
-    app.on('spawn', () => {
-      if (appLaunchState === 'pending') appLaunchState = 'spawned';
-    });
-    app.on('error', (error) => {
-      if (appLaunchState !== 'pending') return;
-      appSpawnErrorClass = classifyChildSpawnError(error);
-      appLaunchState = 'spawn-error';
-      failureCode ??= 'desktop-not-ready';
-    });
-    safeStorageLogCollector = createSafeStorageLogCollector();
-    app.stdout?.on('data', (chunk) =>
-      safeStorageLogCollector.write('stdout', chunk),
-    );
-    app.stderr?.on('data', (chunk) =>
-      safeStorageLogCollector.write('stderr', chunk),
-    );
-    appClosePromise = new Promise((resolveClose) => {
-      app.once('close', () => {
-        appClosed = true;
-        resolveClose();
+        },
+      );
+      appLaunchState = 'pending';
+      const spawnOutcome = waitForDesktopChildSpawn(app);
+      app.on('spawn', () => {
+        if (appLaunchState === 'pending') appLaunchState = 'spawned';
       });
-    });
-    const spawnResult = await spawnOutcome;
-    if (spawnResult.outcome === 'spawn-error') {
-      appLaunchState = 'spawn-error';
-      appSpawnErrorClass = spawnResult.errorClass;
-      fail('desktop-not-ready', 'desktopProcess');
-    }
-    if (spawnResult.outcome === 'timeout') {
-      appLaunchState = 'launch-timeout';
-      fail('desktop-not-ready', 'desktopProcess');
-    }
-    if (!Number.isSafeInteger(app.pid))
-      fail('desktop-not-ready', 'desktopProcess');
-    const appStartTimeTicks = (() => {
-      try {
-        return parseProcStartTimeTicks(
-          app.pid,
-          readFileSync(`/proc/${app.pid}/stat`, 'utf8'),
-        );
-      } catch {
-        return null;
+      app.on('error', (error) => {
+        if (appLaunchState !== 'pending') return;
+        appSpawnErrorClass = classifyChildSpawnError(error);
+        appLaunchState = 'spawn-error';
+        failureCode ??= 'desktop-not-ready';
+      });
+      safeStorageLogCollector = createSafeStorageLogCollector();
+      app.stdout?.on('data', (chunk) =>
+        safeStorageLogCollector.write('stdout', chunk),
+      );
+      app.stderr?.on('data', (chunk) =>
+        safeStorageLogCollector.write('stderr', chunk),
+      );
+      appClosePromise = new Promise((resolveClose) => {
+        app.once('close', () => {
+          appClosed = true;
+          resolveClose();
+        });
+      });
+      startupPhase = 'desktop-process-observation';
+      const spawnResult = await spawnOutcome;
+      if (spawnResult.outcome === 'spawn-error') {
+        appLaunchState = 'spawn-error';
+        appSpawnErrorClass = spawnResult.errorClass;
+        fail('desktop-not-ready', 'desktopProcess');
       }
-    })();
-    writeFileSync(
-      `${profileRoot}/process-group`,
-      `${app.pid} ${appStartTimeTicks ?? 'unknown'}\n`,
-      { encoding: 'utf8', flag: 'wx', mode: 0o600 },
-    );
-    process.stdout.write(
-      `${JSON.stringify({
-        phase: 'desktop-startup-progress',
-        milestone: 'after-app-spawn',
-        appPid: app.pid,
-        appStartTimeTicks,
-      })}\n`,
-    );
-    egressPhaseCounters.afterAppSpawn = emptyEgressCounterObservation(
-      (await waitForCounterAcknowledgement('after-app-spawn'))
-        ? 'observed'
-        : 'unavailable',
-    );
-    rendererCount = await connectAndCheckPage();
-    await holdForDesktopJourney();
-  } catch (error) {
-    failureCode =
-      error instanceof ProbeFailure ? error.code : 'probe-internal-error';
-    if (
-      error instanceof ProbeFailure &&
-      error.check &&
-      checks[error.check] === 'not_run'
-    ) {
-      status(error.check, 'failed');
-    }
-  } finally {
-    sampleChildBeforeCleanup();
-    if (
-      checks.desktopProcess === 'passed' &&
-      desktopObservation.childState !== 'running'
-    ) {
-      failureCode ??= 'desktop-not-ready';
-      status('desktopProcess', 'failed');
-    }
-    await stopApp();
-    if (safeStorageLogCollector) {
-      safeStorageObservation = safeStorageLogCollector.finish(appClosed);
-      const encryptedBackendSelected =
-        safeStorageObservation.complete &&
-        safeStorageObservation.markerCount === 1 &&
-        safeStorageObservation.mode === 'encrypted' &&
-        SAFE_STORAGE_BACKENDS.has(safeStorageObservation.backend);
-      if (encryptedBackendSelected) {
-        pass('safeStorageBackend');
-      } else {
-        status('safeStorageBackend', 'failed');
-        failureCode ??= 'safe-storage-backend-unconfirmed';
+      if (spawnResult.outcome === 'timeout') {
+        appLaunchState = 'launch-timeout';
+        fail('desktop-not-ready', 'desktopProcess');
       }
-    }
-    emitRecord(rendererCount);
-  }
+      if (!Number.isSafeInteger(app.pid))
+        fail('desktop-not-ready', 'desktopProcess');
+      const appStartTimeTicks = (() => {
+        try {
+          return parseProcStartTimeTicks(
+            app.pid,
+            readFileSync(`/proc/${app.pid}/stat`, 'utf8'),
+          );
+        } catch {
+          return null;
+        }
+      })();
+      writeFileSync(
+        `${profileRoot}/process-group`,
+        `${app.pid} ${appStartTimeTicks ?? 'unknown'}\n`,
+        { encoding: 'utf8', flag: 'wx', mode: 0o600 },
+      );
+      process.stdout.write(
+        `${JSON.stringify({
+          phase: 'desktop-startup-progress',
+          milestone: 'after-app-spawn',
+          appPid: app.pid,
+          appStartTimeTicks,
+        })}\n`,
+      );
+      egressPhaseCounters.afterAppSpawn = emptyEgressCounterObservation(
+        (await waitForCounterAcknowledgement('after-app-spawn'))
+          ? 'observed'
+          : 'unavailable',
+      );
+      startupPhase = 'desktop-connection';
+      rendererCount = await connectAndCheckPage();
+      startupPhase = 'desktop-journey';
+      await holdForDesktopJourney();
+    },
+    captureStartupFailure,
+    async () => {
+      startupPhase = 'cleanup-child-observation';
+      sampleChildBeforeCleanup();
+      if (
+        checks.desktopProcess === 'passed' &&
+        desktopObservation.childState !== 'running'
+      ) {
+        failureCode ??= 'desktop-not-ready';
+        status('desktopProcess', 'failed');
+      }
+      startupPhase = 'cleanup-app';
+      await stopApp();
+      startupPhase = 'safe-storage-finalization';
+      if (safeStorageLogCollector) {
+        safeStorageObservation = safeStorageLogCollector.finish(appClosed);
+        const encryptedBackendSelected =
+          safeStorageObservation.complete &&
+          safeStorageObservation.markerCount === 1 &&
+          safeStorageObservation.mode === 'encrypted' &&
+          SAFE_STORAGE_BACKENDS.has(safeStorageObservation.backend);
+        if (encryptedBackendSelected) {
+          pass('safeStorageBackend');
+        } else {
+          status('safeStorageBackend', 'failed');
+          failureCode ??= 'safe-storage-backend-unconfirmed';
+        }
+      }
+      startupPhase = 'record-emission';
+      emitRecord(rendererCount);
+    },
+  );
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -4220,26 +4323,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       }
     }
   } else {
-    main().catch(() => {
-      process.stdout.write(
-        `${JSON.stringify({
-          phase: 'desktop-startup',
-          status: 'failed',
-          failureCode: 'probe-internal-error',
-          sourceSha,
-          package: packageInfo,
-          runtime,
-          origin: FIXED_ORIGIN,
-          secretService: secretServiceObservation,
-          safeStorage: safeStorageObservation,
-          desktopObservation,
-          rendererCount: null,
-          rendererDiagnostics,
-          egressPhaseCounters,
-          checks,
-        })}\n`,
-      );
-      process.exitCode = 1;
+    main().catch((error) => {
+      captureOuterStartupFailure(error);
+      emitRecord();
     });
   }
 }

@@ -120,6 +120,36 @@ describe('MatrixBotAccountReminderTransport', () => {
     }
   });
 
+  it('reads recipient labels through the normal bot account without user impersonation', async () => {
+    const fetchMock = createFetchMock().mockResolvedValue(
+      json({
+        joined: {
+          '@alice:example.test': {
+            display_name: 'Alice',
+            avatar_url: 'mxc://private-avatar',
+          },
+          [botIdentity.userId]: {},
+        },
+      }),
+    );
+    const transport = createTransport(fetchMock);
+
+    await expect(transport.getJoinedRoomRecipients(roomId)).resolves.toEqual([
+      { userId: '@alice:example.test', displayName: 'Alice' },
+      { userId: botIdentity.userId, displayName: null },
+    ]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    assertBotRequest(url, init);
+    expect(new URL(String(url)).pathname).toBe(
+      '/_matrix/client/v3/rooms/!team%3Aexample.test/joined_members',
+    );
+    expect(JSON.stringify(fetchMock.mock.calls)).not.toContain(
+      'private-avatar',
+    );
+  });
+
   it('sends the unchanged room mention as the selected bot account', async () => {
     const fetchMock = createFetchMock()
       .mockResolvedValueOnce(json({ errcode: 'M_NOT_FOUND' }, 404))

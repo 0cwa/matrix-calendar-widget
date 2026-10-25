@@ -6,6 +6,7 @@ import {
   capturePerformancePageError,
   classifyPerformancePageError,
   isVerifiedOpeningHostDiagnostic,
+  safePerformancePageErrorDetails,
   summarizeDefaultWaitObservation,
 } from './element-acceptance-performance-evidence.mjs';
 import { sanitizeElementAcceptance } from './sanitize-element-acceptance.mjs';
@@ -374,9 +375,9 @@ function verifiedHostObservation(overrides = {}) {
   };
 }
 
-function ordinaryReportWithVerifiedHostError() {
+function ordinaryReportWithVerifiedHostError(version = 13) {
   const report = ordinaryReport();
-  report.version = 13;
+  report.version = version;
   const error = new Error('private error text');
   error.stack =
     'Error: private error text\n' +
@@ -393,6 +394,64 @@ function ordinaryReportWithVerifiedHostError() {
   });
   return report;
 }
+
+test('publishes only closed exception classes in the current report version', () => {
+  const error = new TypeError(
+    "Cannot read properties of undefined (reading 'roomId') for @member:example.test at https://element.invalid/path?access_token=private-value",
+  );
+  const details = safePerformancePageErrorDetails(error);
+  assert.deepEqual(details, {
+    safeErrorName: 'TypeError',
+    safeErrorMessageClass: 'cannot-read-nullish-property',
+  });
+
+  assert.deepEqual(
+    safePerformancePageErrorDetails(
+      Object.assign(
+        new Error('private title at https://private.example.test/path'),
+        { name: 'short-secret' },
+      ),
+    ),
+    { safeErrorName: 'Error', safeErrorMessageClass: 'other' },
+  );
+
+  const report = ordinaryReportWithVerifiedHostError(14);
+  const observation = report.pageErrorObservations[0];
+  assert.deepEqual(
+    {
+      safeErrorName: observation.safeErrorName,
+      safeErrorMessageClass: observation.safeErrorMessageClass,
+    },
+    { safeErrorName: 'Error', safeErrorMessageClass: 'other' },
+  );
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(ordinaryStage('failed', report, 'performance-page-error')),
+    sourceSha,
+  );
+  assert.match(summary, /exception_name=Error exception_message_class=other/u);
+  assert.doesNotMatch(
+    summary,
+    /roomId|member|private-value|access_token|example\.test|https?:\/\//u,
+  );
+
+  for (const [key, value] of [
+    ['safeErrorName', 'private-hostname'],
+    ['safeErrorMessageClass', 'private calendar title'],
+  ]) {
+    const invalidReport = ordinaryReportWithVerifiedHostError(14);
+    invalidReport.pageErrorObservations[0][key] = value;
+    assert.throws(
+      () =>
+        sanitizeElementAcceptance(
+          JSON.stringify(
+            ordinaryStage('failed', invalidReport, 'performance-page-error'),
+          ),
+          sourceSha,
+        ),
+      /invalid element acceptance summary/u,
+    );
+  }
+});
 
 function ordinaryStage(status, report, failureCode) {
   return {
@@ -748,6 +807,32 @@ test('keeps only complete opening Element-bundle errors as ordinary diagnostics'
       ),
     /invalid element acceptance summary/u,
   );
+});
+
+test('accepts the verified opening Element diagnostic in report version 14', () => {
+  const report = ordinaryReportWithVerifiedHostError(14);
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify(ordinaryStage('passed', report)),
+    sourceSha,
+  );
+
+  assert.match(summary, /report_version=14/u);
+  assert.match(summary, /ordinary_gate_eligible=true status=passed/u);
+  assert.match(
+    summary,
+    /stage=widget-open .*error_source=element .*host_stack_status=complete .*host_stack_trusted_bundle_frames=1/u,
+  );
+  assert.doesNotMatch(summary, /private error text|https?:\/\//u);
+
+  for (const futureVersion of [15, 999]) {
+    assert.throws(() => {
+      const futureReport = ordinaryReportWithVerifiedHostError(futureVersion);
+      sanitizeElementAcceptance(
+        JSON.stringify(ordinaryStage('passed', futureReport)),
+        sourceSha,
+      );
+    }, /invalid element acceptance summary/u);
+  }
 });
 
 test('samples the ordinary error stage at emission and waits for real readiness', async () => {

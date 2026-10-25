@@ -46,8 +46,11 @@ import {
 import {
   MAX_REMINDER_EVENT_DURATION_MS,
   MAX_REMINDER_REPEAT_COUNT,
+  MAX_REMINDER_TIMEZONE_OFFSET_MARGIN_MS,
   MAX_REMINDER_TRIGGER_HORIZON_MS,
+  calculateAllDayReminderDueAt,
   calculateDisplayReminderDueAt,
+  isAllDayReminderScheduleWithinLimits,
   isReminderScheduleWithinLimits,
 } from './ReminderTrigger';
 import {
@@ -60,7 +63,6 @@ import {
 import { RoomReminderConfiguration } from './RoomReminderStore';
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
-const MAX_TIMEZONE_MARGIN_MS = 32 * 60 * 60 * 1_000;
 const MAX_PROJECTION_CHUNK_MS = 120 * DAY_MS;
 const MAX_PROJECTION_CHUNKS_PER_RUN = 1_200;
 const MAX_PROJECTION_CHUNKS_PER_SCAN = 10;
@@ -281,6 +283,7 @@ export class CanonicalRoomReminderSchedulerSource implements CanonicalReminderSc
             alarmUid: configuration.alarmUid,
           },
           resourceData,
+          configuration.allDaySchedule,
         );
         const parsed = new ICalendarEventCodec().parse(
           configuration.calendarId,
@@ -325,7 +328,7 @@ export class CanonicalRoomReminderSchedulerSource implements CanonicalReminderSc
     state: WindowCache,
     signal: AbortSignal,
   ): Promise<readonly MaterializedReminderCandidate[]> {
-    const { start, end } = searchRange(window);
+    const { start, end } = searchRange(window, configuration);
     const result = new Map<string, MaterializedReminderCandidate>();
     const maximumRepeat = repeatCount(selected.selection.alarm);
     let cursor = start;
@@ -391,12 +394,20 @@ export class CanonicalRoomReminderSchedulerSource implements CanonicalReminderSc
           selected.selection,
           occurrence.event.timing,
         );
-        if (
-          !isReminderScheduleWithinLimits(
-            selected.selection.alarmSource,
-            occurrenceTiming,
-          )
-        ) {
+        const scheduleWithinLimits =
+          occurrenceTiming.type === 'timed'
+            ? isReminderScheduleWithinLimits(
+                selected.selection.alarmSource,
+                occurrenceTiming,
+              )
+            : configuration.allDaySchedule !== undefined &&
+              configuration.allDaySchedule !== null &&
+              isAllDayReminderScheduleWithinLimits(
+                selected.selection.alarmSource,
+                configuration.allDaySchedule,
+                occurrenceTiming.startDate,
+              );
+        if (!scheduleWithinLimits) {
           throw new CanonicalReminderSourceError('unsupported-source');
         }
 
@@ -407,13 +418,30 @@ export class CanonicalRoomReminderSchedulerSource implements CanonicalReminderSc
           triggerOrdinal += 1
         ) {
           throwIfAborted(signal);
-          const dueAt = calculateDisplayReminderDueAt(
-            selected.selection.alarmSource,
-            occurrenceTiming,
-            triggerOrdinal,
-          );
+          const dueAt =
+            occurrenceTiming.type === 'all-day'
+              ? configuration.allDaySchedule
+                ? calculateAllDayReminderDueAt(
+                    selected.selection.alarmSource,
+                    configuration.allDaySchedule,
+                    occurrenceTiming.startDate,
+                    triggerOrdinal,
+                  )
+                : undefined
+              : calculateDisplayReminderDueAt(
+                  selected.selection.alarmSource,
+                  occurrenceTiming,
+                  triggerOrdinal,
+                );
           if (!dueAt) {
             throw new CanonicalReminderSourceError('unsupported-source');
+          }
+          if (
+            occurrenceTiming.type === 'all-day' &&
+            configuration.scheduleEffectiveAt instanceof Date &&
+            dueAt.getTime() < configuration.scheduleEffectiveAt.getTime()
+          ) {
+            continue;
           }
           if (!isDueAt(dueAt, window)) continue;
           dueFirings.push({ triggerOrdinal, dueAt });
@@ -462,17 +490,29 @@ export class CanonicalRoomReminderSchedulerSource implements CanonicalReminderSc
   }
 }
 
-function searchRange(window: ReminderSchedulerWindow): {
+function searchRange(
+  window: ReminderSchedulerWindow,
+  configuration: RoomReminderConfiguration,
+): {
   start: number;
   end: number;
 } {
   const lead = MAX_REMINDER_TRIGGER_HORIZON_MS + MAX_REMINDER_EVENT_DURATION_MS;
+  // All-day DATE firings are scheduled from sidecar metadata, independently
+  // of the canonical VALARM trigger. Their event date may be up to 366 local
+  // calendar days after the firing, with timezone/DST offset changes around
+  // the UTC projection boundary.
+  const allDayLookAhead =
+    (configuration.allDaySchedule?.daysBefore ?? 0) * DAY_MS;
   return {
-    start: window.notBefore.getTime() - lead - 2 * MAX_TIMEZONE_MARGIN_MS,
+    start:
+      window.notBefore.getTime() -
+      lead -
+      2 * MAX_REMINDER_TIMEZONE_OFFSET_MARGIN_MS,
     end:
       window.through.getTime() +
-      MAX_REMINDER_TRIGGER_HORIZON_MS +
-      2 * MAX_TIMEZONE_MARGIN_MS,
+      Math.max(MAX_REMINDER_TRIGGER_HORIZON_MS, allDayLookAhead) +
+      2 * MAX_REMINDER_TIMEZONE_OFFSET_MARGIN_MS,
   };
 }
 

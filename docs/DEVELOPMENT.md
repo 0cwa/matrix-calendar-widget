@@ -59,6 +59,14 @@ Normal widget startup is calendar-only. Some inherited meeting modules and serve
 
 All examples run from the repository root. Use the relevant workspace instead of waiting for the whole repository on every edit.
 
+Before focused widget checks, build the shared packages in dependency order, as CI does. Their `lib` outputs are generated from this checkout's source; if a shared package is missing or appears stale, check `node --version` and `yarn --version` against the [toolchain requirements above](#install-the-toolchain), then use `yarn workspaces info` to inspect the declared workspace map before rebuilding these packages. Do not reuse generated output from another checkout. When UI or translation catalog paths change, run the translation check before the affected widget tests:
+
+```bash
+yarn workspace @matrix-calendar-widget/ical-timezones build
+yarn workspace @matrix-calendar-widget/calendar build
+yarn workspace @matrix-calendar-widget/widget translate --ci --dry-run
+```
+
 ```bash
 # Widget interaction and transport tests (Vitest)
 yarn workspace @matrix-calendar-widget/widget test:all src/components/calendar/CalendarHome.test.tsx
@@ -100,7 +108,12 @@ yarn workspace e2e playwright install --with-deps chromium --only-shell
 yarn workspace e2e playwright test --config playwright.calendar.config.ts
 ```
 
-The browser installation may need system-package privileges on Linux. The [browser validation guide](./browser-calendar-validation.md) includes fixture type checks and explains the evidence limits.
+The browser installation may need system-package privileges on Linux. The [browser validation guide](./browser-calendar-validation.md) explains the evidence limits. When editing browser or screenshot-gallery fixtures, run their dedicated TypeScript projects; the workspace type-check does not include these fixture files:
+
+```bash
+yarn exec -- tsc -p matrix-calendar-widget/browser-tests/tsconfig.json --noEmit
+yarn exec -- tsc -p e2e/gallery-tests/tsconfig.json --noEmit
+```
 
 ## Run the repository gate
 

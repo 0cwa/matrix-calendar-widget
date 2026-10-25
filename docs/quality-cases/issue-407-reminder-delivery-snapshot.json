@@ -1,0 +1,135 @@
+{
+  "contract_version": "1.0.0",
+  "case_id": "issue-407-reminder-delivery-snapshot",
+  "objective": "Share the reminder delivery snapshot contract between restore production and acceptance sanitization.",
+  "status": "validating",
+  "trigger": {
+    "observation": "The restore producer assembled snapshot fields independently from the sanitizer's range and relationship checks, so valid restart snapshots with count 2 could be rejected by stale count-1 assumptions.",
+    "evidence_refs": [
+      "dev/element-acceptance-reminder-restore.mjs:snapshotDelivery",
+      "dev/sanitize-element-acceptance.mjs:reminder-delivery-snapshot validation",
+      "dev/sanitize-element-acceptance.test.mjs:reminder producer stream"
+    ],
+    "recurrence": "repeated"
+  },
+  "scope": {
+    "includes": [
+      "A pure factory and validator for the reminder-delivery snapshot details",
+      "Restore producer and sanitizer use of that shared contract",
+      "Initial and restart sanitizer fixtures built from factory output"
+    ],
+    "excludes": [
+      "Restore workflow, timeout, authorization, or product data changes",
+      "Changes to restart or restore exact-delivery gates",
+      "Framework or acceptance architecture rewrites"
+    ],
+    "constraints": [
+      "Preserve failed-record forms and exact field allowlists",
+      "Fail closed for count outside 1..2, attempts below count, configuration mismatch, false delivery/claim flags, and unknown fields"
+    ]
+  },
+  "options": [
+    {
+      "id": "defer",
+      "summary": "Keep the producer and sanitizer definitions separate.",
+      "expected_value": "low",
+      "effort": "small",
+      "risk": "medium",
+      "reversibility": "easy",
+      "tradeoffs": [
+        "The same snapshot contract remains split across files and can drift again."
+      ]
+    },
+    {
+      "id": "shared-contract",
+      "summary": "Extract one pure snapshot factory and validator used by the producer and sanitizer.",
+      "expected_value": "high",
+      "effort": "small",
+      "risk": "low",
+      "reversibility": "easy",
+      "tradeoffs": ["Adds one small internal module and import to each owner."]
+    },
+    {
+      "id": "larger-refactor",
+      "summary": "Restructure restore evidence production and sanitization around a broader schema framework.",
+      "expected_value": "medium",
+      "effort": "large",
+      "risk": "high",
+      "reversibility": "moderate",
+      "tradeoffs": [
+        "Expands the diff across unrelated evidence phases without a demonstrated need."
+      ]
+    }
+  ],
+  "decision": {
+    "outcome": "proceed",
+    "option_id": "shared-contract",
+    "rationale": "The pure shared contract removes the duplicated field and relationship rules with a narrow, reversible change and preserves existing delivery gates."
+  },
+  "blast_radius": {
+    "files": [
+      "dev/reminder-delivery-snapshot.mjs",
+      "dev/element-acceptance-reminder-restore.mjs",
+      "dev/sanitize-element-acceptance.mjs",
+      "dev/sanitize-element-acceptance.test.mjs"
+    ],
+    "interfaces": ["Internal reminder snapshot details contract"],
+    "data": [],
+    "users": ["Acceptance restore and sanitizer maintainers"],
+    "unknowns": []
+  },
+  "preservation_gates": [
+    {
+      "id": "fail-closed-shape",
+      "criterion": "Invalid count, attempts below count, configuration mismatch, and unknown fields are rejected.",
+      "status": "passed",
+      "evidence_refs": ["node:test:dev/sanitize-element-acceptance.test.mjs"]
+    },
+    {
+      "id": "restart-snapshot",
+      "criterion": "Factory-produced initial count-1 and restart count-2 snapshots sanitize successfully.",
+      "status": "passed",
+      "evidence_refs": ["node:test:dev/sanitize-element-acceptance.test.mjs"]
+    },
+    {
+      "id": "delivery-gates",
+      "criterion": "Existing restart and restore exact-delivery assertions remain unchanged.",
+      "status": "passed",
+      "evidence_refs": [
+        "git diff review: restart and restore workflow checks unchanged"
+      ]
+    }
+  ],
+  "validation": [
+    {
+      "id": "focused-sanitizer",
+      "criterion": "The focused sanitizer suite passes.",
+      "status": "passed",
+      "command": "node22 dev/sanitize-element-acceptance.test.mjs",
+      "evidence_refs": ["direct-test-run: 77 callbacks passed"]
+    },
+    {
+      "id": "diff-format",
+      "criterion": "The patch has no whitespace errors.",
+      "status": "passed",
+      "command": "git diff --check",
+      "evidence_refs": ["command-exit: 0"]
+    }
+  ],
+  "deferrals": [
+    {
+      "id": "broader-schema-framework",
+      "item": "Generalize unrelated acceptance record schemas.",
+      "reason": "No evidence shows comparable friction in other record families.",
+      "upgrade_seam": "Reassess after another concrete repeated producer/sanitizer contract drift."
+    }
+  ],
+  "blockers": [],
+  "next_action": "Integrate the independently reviewed bounded shared contract with issue 407.",
+  "extensions": {
+    "development-quality.architecture-friction": {
+      "classification": "duplication-friction and auditability-friction",
+      "net_source_line_target": 100
+    }
+  }
+}

@@ -16,6 +16,13 @@ export type DesktopJourneyPhase =
 
 export type DesktopJourneyOutcome = 'passed' | 'failed';
 
+export function desktopRouteEnforcementOutcome(input: {
+  failed: boolean;
+  recorded: ReadonlySet<DesktopJourneyPhase>;
+  observedHttpRequests: number;
+  blockedHttpRequests: number;
+}): DesktopJourneyOutcome | undefined;
+
 export type DesktopRoomWidgetFailurePoint =
   | 'room-navigation'
   | 'room-heading'
@@ -60,7 +67,27 @@ export type DesktopARefreshFailurePoint =
 
 export type DesktopRefreshRoomNavigationDiagnostic = {
   roomListItemCountCapped: 0 | 1 | 2 | null;
+  targetCountCapped: 0 | 1 | 2 | null;
   fixtureRoomTargetVisible: boolean | null;
+  centerHitObserved: boolean | null;
+  centerHitWithinTarget: boolean | null;
+  centerHitRole:
+    | 'button'
+    | 'row'
+    | 'option'
+    | 'treeitem'
+    | 'link'
+    | 'listbox'
+    | 'other'
+    | 'unavailable';
+  clickFailureClass:
+    | 'not_observed'
+    | 'pointer_interception'
+    | 'navigation_wait'
+    | 'frame_gone'
+    | 'playwright_timeout'
+    | 'other';
+  roomIdMatchesAfterFailure: boolean | null;
   clickAttempted: boolean;
   clickCompleted: boolean;
   elapsedBucket:
@@ -435,46 +462,59 @@ export type DesktopJourneyEvidenceFailureCode =
   | 'evidence_login_record_rejected'
   | 'evidence_progress_refresh_sequence_rejected'
   | 'evidence_phase_record_rejected'
+  | 'evidence_phase_record_object_rejected'
+  | 'evidence_phase_record_shape_rejected'
+  | 'evidence_phase_record_order_rejected'
+  | 'evidence_phase_record_diagnostic_rejected'
   | 'evidence_final_summary_cross_check_rejected';
+
+export type DesktopPhaseOrderReason =
+  | 'desktop_refresh_progress_mismatch'
+  | 'desktop_refresh_pending'
+  | 'desktop_refresh_not_passed'
+  | 'child_summary_before_phase_end'
+  | 'duplicate_phase';
+
+export type DesktopEvidenceOrderDiagnostic = {
+  reason: DesktopPhaseOrderReason;
+  recordIndex: number;
+  recordCount: number;
+  observedPhase: DesktopJourneyPhase | 'unknown';
+  expectedPhase: DesktopJourneyPhase | 'unknown';
+};
 
 export type DesktopJourneyEvidenceClassification =
   | {
       evidenceState: 'invalid';
-      evidenceFailureCode: DesktopJourneyEvidenceFailureCode;
+      evidenceFailureCode: 'evidence_phase_record_order_rejected';
+      evidenceOrderDiagnostic: DesktopEvidenceOrderDiagnostic;
+    }
+  | {
+      evidenceState: 'invalid';
+      evidenceFailureCode: Exclude<
+        DesktopJourneyEvidenceFailureCode,
+        'evidence_phase_record_order_rejected'
+      >;
     }
   | {
       evidenceState: Exclude<DesktopJourneyEvidenceState, 'invalid'>;
     };
 
 export type DesktopChildDiagnostic =
-  | {
+  | ({
       childOutcome: 'exited';
       childExitStatus: number;
-      evidenceState: 'invalid';
-      evidenceFailureCode: DesktopJourneyEvidenceFailureCode;
-    }
-  | {
-      childOutcome: 'exited';
-      childExitStatus: number;
-      evidenceState: Exclude<DesktopJourneyEvidenceState, 'invalid'>;
-    }
-  | {
+    } & DesktopJourneyEvidenceClassification)
+  | ({
       childOutcome: Exclude<DesktopChildOutcome, 'exited'>;
       childExitStatus: null;
-      evidenceState: 'invalid';
-      evidenceFailureCode: DesktopJourneyEvidenceFailureCode;
-    }
-  | {
-      childOutcome: Exclude<DesktopChildOutcome, 'exited'>;
-      childExitStatus: null;
-      evidenceState: Exclude<DesktopJourneyEvidenceState, 'invalid'>;
-    };
+    } & DesktopJourneyEvidenceClassification);
 
 type DesktopJourneyCliSummaryBase = Omit<
   DesktopJourneySummary,
   'schemaVersion' | 'status' | 'desktopChildCompletion'
 > & {
-  schemaVersion: 21;
+  schemaVersion: 23;
   desktopChildDiagnostic: DesktopChildDiagnostic;
 };
 
@@ -517,6 +557,7 @@ export declare const DESKTOP_JOURNEY_PHASES: readonly DesktopJourneyPhase[];
 export declare const DESKTOP_A_REFRESH_FAILURE_POINTS: readonly DesktopARefreshFailurePoint[];
 export declare const DESKTOP_JOURNEY_FAILURE_POINTS: readonly DesktopJourneyFailurePoint[];
 export declare const DESKTOP_JOURNEY_ERROR_CLASSES: readonly DesktopJourneyErrorClass[];
+export declare const DESKTOP_REFRESH_ROOM_NAVIGATION_CLICK_FAILURE_CLASSES: readonly DesktopRefreshRoomNavigationDiagnostic['clickFailureClass'][];
 export declare const DESKTOP_LOGIN_STEPS: readonly DesktopLoginStep[];
 export declare const DESKTOP_LOGIN_FAILURE_REASONS: readonly DesktopLoginFailureReason[];
 export declare const DESKTOP_LOGIN_ENTRIES: readonly DesktopLoginEntry[];
@@ -524,6 +565,10 @@ export declare const DESKTOP_LOGIN_ENTRIES: readonly DesktopLoginEntry[];
 export declare function classifyDesktopJourneyErrorClass(
   error: unknown,
 ): DesktopJourneyErrorClass;
+
+export declare function classifyDesktopRoomNavigationClickFailure(
+  error: unknown,
+): DesktopRefreshRoomNavigationDiagnostic['clickFailureClass'];
 
 export declare function classifyDesktopLoginFailure(
   error: unknown,

@@ -27,6 +27,14 @@ export interface IAppConfiguration {
   public_calendar_feed_origin?: string;
   public_calendar_feed_signing_key?: Buffer;
   public_calendar_feed_enabled: boolean;
+  private_calendar_clients_enabled?: boolean;
+  private_calendar_client_origin?: string;
+  private_calendar_client_database_url?: string;
+  private_calendar_client_database_tls_mode?:
+    | 'verify-full'
+    | 'trusted-private-network';
+  private_calendar_client_epoch_key?: Buffer;
+  private_calendar_client_callback_key?: Buffer;
   caldav_max_event_response_bytes?: number;
   room_calendar_bindings: readonly RoomCalendarBinding[];
   room_calendar_principal_mode: RoomCalendarPrincipalMode;

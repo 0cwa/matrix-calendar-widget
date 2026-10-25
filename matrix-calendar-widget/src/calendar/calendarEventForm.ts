@@ -37,8 +37,11 @@ import {
   SupportedCalendarEventRecurrenceFrequency,
   calendarEventRecurrenceIdentity,
   calendarLocalDateTimeToUnixMillis,
+  calendarUnixMillisToLocalDateTime,
   formatSupportedCalendarEventRecurrenceRule,
   isAllDayCalendarEvent,
+  isCalendarLocalDateTimeUnambiguous,
+  isCalendarTimezoneSupported,
   isSupportedCalendarEventOccurrenceExclusion,
   isTimedCalendarEvent,
   normalizeCalendarEventAttachmentInput,
@@ -155,13 +158,95 @@ export type CalendarEventValidationError =
   | 'invalid-conference'
   | 'invalid-attachment';
 
+const DEFAULT_EVENT_DURATION_HOURS = 1;
+const DEFAULT_EVENT_RANGE_SEARCH_HOURS = 48;
+
+// The form stores local date-times without offsets. Defaults must resolve to
+// exactly one instant so different CalDAV clients cannot choose different
+// occurrences of a repeated local time.
+function defaultEventTimedRange(
+  now: DateTime,
+  timezone: string,
+): { start: string; end: string } {
+  if (!now.isValid || !isCalendarTimezoneSupported(timezone)) {
+    return { start: 'Invalid DateTime', end: 'Invalid DateTime' };
+  }
+
+  const nowMillis = now.toMillis();
+  const localNow = calendarUnixMillisToLocalDateTime(nowMillis, timezone);
+  const firstStart = DateTime.fromISO(localNow, { zone: 'UTC' }).startOf(
+    'hour',
+  );
+
+  if (!firstStart.isValid) {
+    return { start: 'Invalid DateTime', end: 'Invalid DateTime' };
+  }
+
+  for (
+    let searchHours = 0;
+    searchHours <= DEFAULT_EVENT_RANGE_SEARCH_HOURS;
+    searchHours += 1
+  ) {
+    const start = formDateTimeValue(firstStart.plus({ hours: searchHours }));
+    const startMillis = uniqueCalendarLocalDateTimeInstant(start, timezone);
+    if (startMillis === undefined) {
+      continue;
+    }
+
+    const endMillis =
+      startMillis + DEFAULT_EVENT_DURATION_HOURS * 60 * 60 * 1000;
+    if (
+      (searchHours > 0 && startMillis <= nowMillis) ||
+      endMillis <= nowMillis
+    ) {
+      continue;
+    }
+
+    const end = calendarUnixMillisToLocalDateTime(endMillis, timezone).slice(
+      0,
+      16,
+    );
+    const endRoundTripMillis = uniqueCalendarLocalDateTimeInstant(
+      end,
+      timezone,
+    );
+    if (endRoundTripMillis === endMillis) {
+      return { start, end };
+    }
+  }
+
+  throw new Error(
+    'Unable to generate a representable default event range within 48 hours',
+  );
+}
+
+function formDateTimeValue(value: DateTime): string {
+  return value.toFormat("yyyy-MM-dd'T'HH:mm");
+}
+
+function uniqueCalendarLocalDateTimeInstant(
+  local: string,
+  timezone: string,
+): number | undefined {
+  if (!isCalendarLocalDateTimeUnambiguous(local, timezone)) {
+    return undefined;
+  }
+
+  const instantMillis = calendarLocalDateTimeToUnixMillis(local, timezone);
+  return calendarUnixMillisToLocalDateTime(instantMillis, timezone).slice(
+    0,
+    16,
+  ) === local
+    ? instantMillis
+    : undefined;
+}
+
 export function createCalendarEventFormValues(
   calendar: Calendar,
   now: DateTime = DateTime.local(),
 ): CalendarEventFormValues {
   const timezone = calendar.timezone ?? now.zoneName;
-  const start = now.setZone(timezone).startOf('hour');
-  const end = start.plus({ hours: 1 });
+  const { start, end } = defaultEventTimedRange(now, timezone);
 
   return {
     calendarId: calendar.id,
@@ -180,8 +265,8 @@ export function createCalendarEventFormValues(
     attachmentChanged: false,
     timingType: 'timed',
     timedKind: 'zoned',
-    start: start.toFormat("yyyy-MM-dd'T'HH:mm"),
-    end: end.toFormat("yyyy-MM-dd'T'HH:mm"),
+    start,
+    end,
     timezone,
     timingChanged: false,
     timezoneChanged: false,
@@ -190,7 +275,7 @@ export function createCalendarEventFormValues(
     recurrenceInterval: '1',
     recurrenceEnd: 'never',
     recurrenceCount: '2',
-    recurrenceUntil: start.toISODate() ?? '',
+    recurrenceUntil: start === 'Invalid DateTime' ? '' : start.slice(0, 10),
     recurrenceEditable: true,
     recurrenceChanged: false,
     ...emptyAlarmFormValues(),

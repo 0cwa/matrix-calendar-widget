@@ -18,6 +18,19 @@
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  resolve: {
+    dedupe: [
+      '@matrix-widget-toolkit/mui',
+      '@matrix-widget-toolkit/react',
+      '@mui/material',
+      'i18next',
+      'i18next-browser-languagedetector',
+      'react',
+      'react-18next',
+      'react-dom',
+      'react-redux',
+    ],
+  },
   test: {
     dangerouslyIgnoreUnhandledErrors: true,
     environment: 'happy-dom',

@@ -27,9 +27,17 @@ import {
 } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
-import { arch, platform, release } from 'node:os';
-import { isAbsolute, resolve, sep } from 'node:path';
+import {
+  appendFileSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs';
+import type { ClientRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
+import { arch, platform, release, tmpdir } from 'node:os';
+import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import {
   extractElementBundleFrames,
@@ -48,6 +56,7 @@ import {
   advanceOrdinaryPageErrorStage,
   capturePerformancePageError,
   isVerifiedOpeningHostDiagnostic,
+  safePerformancePageErrorDetails,
   summarizeDefaultWaitObservation,
   type PerformanceDefaultWaitFailureSnapshot,
   type PerformanceDefaultWaitObservation,
@@ -58,6 +67,23 @@ import {
   buildOrdinaryPerformanceSeedEnvironment,
   raceCalendarReadyOrIdentityPrompt,
 } from '../../dev/element-acceptance-performance.mjs';
+import {
+  PRIVATE_UI_CALENDAR_LIST_ENDPOINTS,
+  PRIVATE_UI_CALENDAR_LIST_METHODS,
+  classifyPrivateUiCalendarListNetworkFailure,
+  createPrivateUiCheckpointJournal,
+  type PrivateUiCalendarListEndpoint,
+  type PrivateUiCalendarListFailureCategory,
+  type PrivateUiCalendarListMethod,
+  type PrivateUiCalendarListTransportObservation,
+} from '../../dev/element-acceptance-private-ui-checkpoints.mjs';
+import {
+  planReminderAllDayEvent,
+  planReminderAllDaySchedule,
+  planReminderTimedEvent,
+  reminderFixtureAllDayExpectedScheduleMatches,
+  reminderFixtureLocalDateTimeToUnixMillis,
+} from '../../dev/element-acceptance-reminder-timing.mjs';
 import { classifyG6KeyboardFocusTarget } from '../../dev/element-g6-keyboard-focus.mjs';
 import {
   beginG6ResourceCreate,
@@ -72,10 +98,23 @@ import {
   summarizeG6ResourceOwnership,
   type G6ResourceOwnership,
 } from '../../dev/element-g6-resource-ownership.mjs';
+import { readReminderAllDayScheduleFields } from '../../dev/element-reminder-all-day-readback.mjs';
+import {
+  buildReminderFlowDiagnosticRecord,
+  completeReminderFlowDiagnosticStage,
+  createReminderFlowDiagnosticState,
+  enterReminderFlowDiagnosticStage,
+  failReminderFlowDiagnostic,
+  type ReminderFlowDiagnosticRecord,
+  type ReminderFlowDiagnosticStage,
+  type ReminderFlowDiagnosticState,
+  type ReminderFlowTestStatus,
+} from '../../dev/element-reminder-flow-diagnostics.mjs';
 import {
   ROOM_READINESS_SAMPLE_TIMEOUT_MS,
   collectRoomReadinessTimeline,
-  roomContextObservationForPhase,
+  createMemberRoomContextRecord,
+  createRoomNavigationReadinessObservation,
   unavailableRoomReadinessTimeline,
   type RoomReadinessSnapshot,
   type RoomReadinessTimeline,
@@ -115,37 +154,367 @@ type Fixture = {
 };
 
 type ReminderFlow = 'initial' | 'restart' | 'restore';
+type ReminderRecipient = 'room' | 'selected';
+type ReminderPlan = Readonly<{
+  recipient: ReminderRecipient;
+  allDay: boolean;
+  allDayTimezone?: string;
+  caldavAlarmLeadMinutes?: number;
+  allDayEventDate?: string;
+  allDaySchedule?: Readonly<{
+    daysBefore: number;
+    localTime: string;
+    timezone: string;
+  }>;
+}>;
+
+type ReminderReadbackReference = Readonly<{
+  expectedDueAt?: number;
+  expectedAlarmLeadMinutes?: number;
+  expectedAllDayEventDate?: string;
+  deliveredAt?: number;
+}>;
+
+type ReminderCreationResult = Readonly<{
+  dueAt: number;
+  alarmLeadMinutes: number;
+  allDayEventDate?: string;
+}>;
 
 type ReminderTimelineSnapshot = {
   httpStatus: number | null;
   complete: boolean;
   markerCounts: number[];
-  markerMentions: boolean[];
+  markerTargetsMatch: boolean[];
+  markerRoomMentions: boolean[];
+  markerSelectedMemberMentions: boolean[];
   markerTimestamps: Array<number | null>;
 };
 
 type ReminderConfigurationStep =
   | 'event-details'
-  | 'notify-control'
+  | 'settings-control'
   | 'options-load'
-  | 'eligible-option'
+  | 'destination-control'
+  | 'recipient-selection'
   | 'put-response'
+  | 'post-put-layout'
   | 'complete';
+
+type ReminderLayoutPredicate = boolean | 'not-observed';
+type ReminderLayoutDimension = number | 'not-observed';
+
+type MemberInputExpandedState =
+  | 'true'
+  | 'false'
+  | 'absent'
+  | 'other'
+  | 'not-observed';
+type MemberAriaHiddenState =
+  | 'true'
+  | 'false'
+  | 'absent'
+  | 'other'
+  | 'not-observed';
+type MemberInertState = 'true' | 'false' | 'not-observed';
+type MemberCssVisibility = 'visible' | 'hidden' | 'unknown' | 'not-observed';
+type MemberPickerObservationError =
+  | 'none'
+  | 'input-missing'
+  | 'input-not-unique'
+  | 'input-probe-install'
+  | 'input-probe-read'
+  | 'input-association'
+  | 'listbox-association'
+  | 'dom-sample'
+  | 'listbox-count'
+  | 'listbox-final-count'
+  | 'multiple';
 
 type ReminderConfigurationObservation = {
   reminderStep: ReminderConfigurationStep;
-  notifyButtonCount: number;
-  notifyButtonVisible: boolean;
+  reminderSettingsButtonCount: number;
+  reminderSettingsButtonVisible: boolean;
   reminderOptionsGetCount: number;
   reminderOptionsGetStatus: number;
   reminderConfigGetCount: number;
   reminderConfigGetStatus: number;
-  reminderEligibleOptionCount: number;
-  reminderOptionCheckedBefore: boolean;
-  reminderOptionCheckAttempted: boolean;
+  recipientRosterGetCount: number;
+  recipientRosterHttpStatus: number;
+  recipientRosterCount: number;
+  recipientRosterShapeValid: boolean;
+  recipientRosterTargetPresent: boolean;
+  recipientRosterOutcome:
+    | 'unobserved'
+    | 'http_error'
+    | 'empty'
+    | 'invalid_shape'
+    | 'nonempty';
+  reminderDestinationControlCount: number;
+  recipientKind: 'room' | 'selected' | 'unknown';
+  recipientSelectionAttempted: boolean;
+  recipientSelectionStep: ReminderRecipientSelectionStep;
+  recipientOptionCount: number;
+  memberInputProbeInstalled: boolean;
+  memberInputDomCount: number;
+  memberInputAriaExpanded: MemberInputExpandedState;
+  memberInputControlsTokenCount: number;
+  memberInputControlsNodePresent: boolean;
+  memberInputControlsListbox: boolean;
+  memberListboxDomCount: number;
+  memberOptionDomCount: number;
+  memberListboxOwnAriaHidden: MemberAriaHiddenState;
+  memberListboxAncestorAriaHidden: MemberAriaHiddenState;
+  memberListboxOwnInert: MemberInertState;
+  memberListboxAncestorInert: MemberInertState;
+  memberListboxCssVisibility: MemberCssVisibility;
+  memberNoOptionsTextPresent: boolean;
+  memberLoadErrorVisible: boolean;
+  memberPickerObservationError: MemberPickerObservationError;
+  memberQueryMatchesTargetAfterFill: boolean;
+  memberQueryMatchesTargetAtOptionCount: boolean;
+  memberInputFocusedBeforeFill: boolean;
+  memberDocumentFocusedBeforeFill: boolean;
+  memberInputFocusedAfterFill: boolean;
+  memberDocumentFocusedAfterFill: boolean;
+  memberInputEventMatchedTarget: boolean;
+  memberInputBlurEventCount: number;
+  memberInputSameNodeAfterFill: boolean;
+  memberListboxCount: number;
+  memberInputControlsUniqueListbox: boolean;
+  memberOptionCount: number;
+  memberOptionsContainingTargetIdCount: number;
+  selectedMemberTagCount: number;
+  selectedMemberKeyboardFlow: boolean;
+  reminderTargetMatches: boolean;
+  allDayScheduleMatches: boolean;
+  narrowSidePanelSafe: boolean;
+  narrowViewportWithinRange: ReminderLayoutPredicate;
+  narrowDialogWithinViewport: ReminderLayoutPredicate;
+  narrowDialogContentsFit: ReminderLayoutPredicate;
+  narrowDocumentContentsFit: ReminderLayoutPredicate;
+  narrowViewportWidth: ReminderLayoutDimension;
+  narrowDialogWidth: ReminderLayoutDimension;
+  narrowDialogClientWidth: ReminderLayoutDimension;
+  narrowDialogScrollWidth: ReminderLayoutDimension;
+  narrowDocumentClientWidth: ReminderLayoutDimension;
+  narrowDocumentScrollWidth: ReminderLayoutDimension;
   reminderPutCount: number;
   reminderPutStatus: number;
-  reminderOptionCheckedAfter: boolean;
+};
+
+// The standard Element side panel measured a 319 CSS-pixel content viewport.
+const MIN_REMINDER_LAYOUT_VIEWPORT_WIDTH = 319;
+const MAX_REMINDER_LAYOUT_VIEWPORT_WIDTH = 420;
+const MAX_REMINDER_RECIPIENT_ROSTER_SIZE = 20_000;
+
+function summarizeReminderRecipientRoster(
+  value: unknown,
+  expectedUserId: string,
+): {
+  recipientRosterCount: number;
+  recipientRosterShapeValid: boolean;
+  recipientRosterTargetPresent: boolean;
+  recipientRosterOutcome: 'empty' | 'invalid_shape' | 'nonempty';
+} {
+  const invalid = (recipientRosterCount = 0) => ({
+    recipientRosterCount,
+    recipientRosterShapeValid: false,
+    recipientRosterTargetPresent: false,
+    recipientRosterOutcome: 'invalid_shape' as const,
+  });
+  if (
+    !isRecord(value) ||
+    Object.keys(value).length !== 1 ||
+    !('recipients' in value) ||
+    !Array.isArray(value.recipients)
+  ) {
+    return invalid();
+  }
+
+  const recipients = value.recipients;
+  const recipientRosterCount = Math.min(
+    recipients.length,
+    MAX_REMINDER_RECIPIENT_ROSTER_SIZE,
+  );
+  if (recipients.length > MAX_REMINDER_RECIPIENT_ROSTER_SIZE) {
+    return invalid(recipientRosterCount);
+  }
+
+  const seen = new Set<string>();
+  for (const recipient of recipients) {
+    if (
+      !isRecord(recipient) ||
+      Object.keys(recipient).length !== 2 ||
+      !('userId' in recipient) ||
+      typeof recipient.userId !== 'string' ||
+      !/^@[^\s:#?]+:[^\s?#]+$/u.test(recipient.userId) ||
+      seen.has(recipient.userId) ||
+      !('displayName' in recipient)
+    ) {
+      return invalid(recipientRosterCount);
+    }
+    const displayName = recipient.displayName;
+    const displayNameValid =
+      displayName === null ||
+      (typeof displayName === 'string' &&
+        Array.from(displayName).length <= 256 &&
+        displayName.length > 0 &&
+        !Array.from(displayName).some((character) => {
+          const codePoint = character.codePointAt(0);
+          return (
+            codePoint !== undefined &&
+            (codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f))
+          );
+        }) &&
+        displayName ===
+          displayName.normalize('NFC').replace(/\s+/gu, ' ').trim());
+    if (!displayNameValid) return invalid(recipientRosterCount);
+    seen.add(recipient.userId);
+  }
+
+  return {
+    recipientRosterCount,
+    recipientRosterShapeValid: true,
+    recipientRosterTargetPresent: seen.has(expectedUserId),
+    recipientRosterOutcome: recipientRosterCount === 0 ? 'empty' : 'nonempty',
+  };
+}
+
+type ReminderAlarmUiObservation = {
+  alarmUiStep: ReminderAlarmUiStep;
+  alarmUiPatchStatus: number;
+  alarmUiRelativeAlarmReadback: boolean;
+  alarmUiAlarmToggleReadback: boolean;
+  alarmUiRelativeTriggerReadback: boolean;
+  alarmUiOffsetReadback: boolean;
+  alarmUiEditorClosed: boolean;
+  alarmUiDetailsClosed: boolean;
+};
+
+type ReminderAlarmUiStep =
+  | 'event-row-visible'
+  | 'event-open'
+  | 'details-ready'
+  | 'settings-open'
+  | 'edit-button-ready'
+  | 'editor-ready'
+  | 'alarm-toggle-read'
+  | 'alarm-toggle-enabled'
+  | 'relative-option-selected'
+  | 'offset-entered'
+  | 'save-response-armed'
+  | 'save-clicked'
+  | 'patch-response-received'
+  | 'editor-hidden'
+  | 'details-ready-after-save'
+  | 'details-hidden'
+  | 'readback-editor-open'
+  | 'readback-editor-ready'
+  | 'readback-alarm-toggle'
+  | 'readback-relative-option'
+  | 'readback-offset'
+  | 'readback-editor-cancelled'
+  | 'readback-editor-hidden'
+  | 'readback-details-hidden'
+  | 'complete';
+
+type ReminderRecipientSelectionStep =
+  | 'destination-clicked'
+  | 'destination-listbox-ready'
+  | 'destination-option-selected'
+  | 'destination-menu-close-wait'
+  | 'destination-menu-closed'
+  | 'member-input-probe-install'
+  | 'member-input-clicked'
+  | 'member-prefill-roster-ready'
+  | 'member-query-entered'
+  | 'member-query-settled'
+  | 'member-listbox-ready'
+  | 'member-option-ready'
+  | 'member-option-count-checked'
+  | 'member-arrow-down'
+  | 'member-enter'
+  | 'member-keyboard-closed'
+  | 'complete';
+
+type PublicFeedBrowserObservation = {
+  publicFeedLifecycleStep: PublicFeedLifecycleStep;
+  publicFeedSettingsEnabled?: boolean;
+  publicFeedSettingsUnpublished?: boolean;
+  publicFeedTargetCalendarMatches?: boolean;
+  publicFeedManagementTargetMatches?: boolean;
+  publicFeedConsentCheckboxCount?: number;
+  publicFeedConsentCheckboxVisible?: boolean;
+  publicFeedConsentCheckboxChecked?: boolean;
+  publicFeedPublishButtonCount?: number;
+  publicFeedPublishDisabledBeforeConsent?: boolean;
+  publicFeedPublishDisabledAfterConsent?: boolean;
+  publicFeedManagementGetStatus?: number;
+  publicFeedManagementErrorCode?: PublicFeedManagementErrorCode;
+  publicFeedPublishStatus?: number;
+  publicFeedGetStatus?: number;
+  publicFeedHeadStatus?: number;
+  publicFeedUnpublishStatus?: number;
+  publicFeedRevokedGetStatus?: number;
+  publicFeedRevokedHeadStatus?: number;
+  publicConsentGateObserved: boolean;
+  publicManagerPublishSucceeded: boolean;
+  publicUrlOriginAndRouteMatch: boolean;
+  anonymousGetContainsCanonicalEvent: boolean;
+  anonymousHeadMatchesGet: boolean;
+  unpublishSucceeded: boolean;
+  anonymousGetDeniedAfterUnpublish: boolean;
+  anonymousHeadDeniedAfterUnpublish: boolean;
+};
+
+const PUBLIC_FEED_MANAGEMENT_ERROR_CODES = [
+  'public-calendar-feed-upstream-unavailable',
+  'public-calendar-feeds-disabled',
+  'room-calendar-authorization-unavailable',
+  'room-calendar-caldav-disabled',
+] as const;
+
+type PublicFeedManagementErrorCode =
+  | (typeof PUBLIC_FEED_MANAGEMENT_ERROR_CODES)[number]
+  | 'unclassified';
+
+type PublicFeedLifecycleStep =
+  | 'opening-dialog'
+  | 'loading-settings'
+  | 'selecting-target-calendar'
+  | 'awaiting-consent-control'
+  | 'toggling-consent'
+  | 'verifying-consent'
+  | 'publishing'
+  | 'checking-public-feed'
+  | 'unpublishing'
+  | 'checking-revocation'
+  | 'complete';
+
+const PUBLIC_FEED_MANAGEMENT_ERROR_CODE_SET = new Set<string>(
+  PUBLIC_FEED_MANAGEMENT_ERROR_CODES,
+);
+
+function classifyPublicFeedManagementErrorCode(
+  state: unknown,
+): PublicFeedManagementErrorCode {
+  if (!isRecord(state) || typeof state.code !== 'string') {
+    return 'unclassified';
+  }
+  return PUBLIC_FEED_MANAGEMENT_ERROR_CODE_SET.has(state.code)
+    ? (state.code as PublicFeedManagementErrorCode)
+    : 'unclassified';
+}
+
+type AnonymousPublicFeedResponse = {
+  status?: number;
+  contentType?: string;
+  contentLength?: string;
+  cacheControl?: string;
+  pragma?: string;
+  nosniff?: string;
+  body: Uint8Array;
 };
 
 type G6Phase =
@@ -357,16 +726,33 @@ type G6CalDavResult = {
 };
 
 const ELEMENT_WEB_CONFIGURED_TAG = 'v1.12.30';
+const PRIVATE_ACCEPTANCE_GATEWAY_ORIGIN = 'https://127.0.0.1:3001';
 const G6_POSTSAVE_EVENT_COUNT_CAP = 100;
 
-const REMINDER_START_LEAD_MS = 150_000;
-const REMINDER_ALARM_OFFSET_MS = 60_000;
 // Allow one default 60-second scheduler interval plus its 30-second scan deadline.
 const REMINDER_SCAN_INTERVAL_MS = 60_000;
 const REMINDER_SCAN_DEADLINE_MS = 30_000;
 const REMINDER_POST_DUE_SCAN_ALLOWANCE_MS =
   REMINDER_SCAN_INTERVAL_MS + REMINDER_SCAN_DEADLINE_MS;
 const REMINDER_TIMELINE_POLL_MS = 5_000;
+const REMINDER_TIMED_TIMEZONE = 'Europe/Stockholm';
+const REMINDER_ALL_DAY_TIMEZONE = 'Asia/Tokyo';
+const REMINDER_ALL_DAY_CALDAV_ALARM_LEAD_MINUTES = 1;
+
+function reminderPlanForMarkerIndex(index: number): ReminderPlan {
+  if (index === 1) {
+    return {
+      recipient: 'selected',
+      allDay: true,
+      allDayTimezone: REMINDER_ALL_DAY_TIMEZONE,
+      caldavAlarmLeadMinutes: REMINDER_ALL_DAY_CALDAV_ALARM_LEAD_MINUTES,
+    };
+  }
+  if (index === 0 || index === 2) {
+    return { recipient: 'room', allDay: false };
+  }
+  throw new Error('Reminder acceptance marker plan is unavailable');
+}
 
 type Phase =
   | 'member-a-authenticated'
@@ -420,6 +806,7 @@ type Phase =
   | 'reminder-alarm-ui-readback'
   | 'reminder-room-configuration-enabled'
   | 'reminder-ui-readback'
+  | 'public-feed-browser-lifecycle'
   | 'reminder-initial-delivery'
   | 'reminder-restart-prior-state'
   | 'reminder-restart-scheduler-scan'
@@ -494,6 +881,17 @@ type MatrixChatPageTypeBucket =
   | 'other-page'
   | 'missing'
   | 'unavailable';
+type RoomNavigationReadinessSnapshot = {
+  firstSyncComplete: boolean | null;
+  ready: boolean | null;
+  pageType: MatrixChatPageTypeBucket;
+  currentRoomMatches: boolean | null;
+  matrixSyncState: MatrixSyncState;
+};
+type RoomNavigationReadinessObservation = {
+  beforeNavigation: RoomNavigationReadinessSnapshot;
+  afterRoute: RoomNavigationReadinessSnapshot;
+};
 
 type MemberARoomObservation = {
   matrixUserMatches: boolean;
@@ -511,6 +909,7 @@ type MemberARoomObservation = {
   roomViewRendererPresent: boolean | null;
   matrixChatStateAvailable: boolean;
   matrixChatViewBucket: MatrixChatViewBucket;
+  matrixChatFirstSyncComplete: boolean | null;
   matrixChatReady: boolean | null;
   matrixChatPageTypeBucket: MatrixChatPageTypeBucket;
   matrixChatCurrentRoomMatches: boolean | null;
@@ -556,6 +955,7 @@ type MemberARoomResult = {
   navigationCompleted: boolean;
   observation?: MemberARoomObservation;
   roomReadinessTimeline?: RoomReadinessTimeline;
+  roomNavigationReadiness?: RoomNavigationReadinessObservation;
   failureCode?: MemberARoomFailureCode;
 };
 
@@ -590,6 +990,8 @@ type PerformancePageErrorObservation = PerformancePageErrorClassification &
   ElementErrorSourcePointer & {
     profile: OrdinaryPerformanceProfile;
     stage: PerformancePageErrorStage;
+    safeErrorName: string;
+    safeErrorMessageClass: string;
   };
 
 type OrdinaryPerformanceProfile = 'empty' | 'events-25';
@@ -762,7 +1164,7 @@ type OrdinaryPerformanceCase = {
   detailSamples: PerformanceDetailsSample[];
 };
 type OrdinaryPerformanceReport = {
-  version: 13;
+  version: 14;
   viewportWidth: 1280;
   viewportHeight: 800;
   calendarDays: 7;
@@ -1045,7 +1447,13 @@ let fixture: Fixture;
 
 let activePhase: Phase = 'member-a-authenticated';
 let activeReminderFailureRecorded = false;
+let activeReminderFlowDiagnostic: ReminderFlowDiagnosticState | undefined;
 let pendingPinnedControlObservation: PinnedControlObservation | undefined;
+
+test.afterEach(async ({}, testInfo) => {
+  finishActiveReminderFlowDiagnostic(testInfo.status);
+});
+
 const memberAHomeserverHttpFailures = new WeakMap<
   Page,
   HomeserverHttpFailures
@@ -1319,7 +1727,7 @@ function makeEmptyOrdinaryPerformanceReport(initialDate: {
   month: number;
 }): OrdinaryPerformanceReport {
   return {
-    version: 13,
+    version: 14,
     viewportWidth: 1280,
     viewportHeight: 800,
     calendarDays: 7,
@@ -2513,6 +2921,7 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
     let page: Page | undefined;
     let observer: PerformanceApiObserver | undefined;
     let pageErrorStage: PerformancePageErrorStage = 'case-setup';
+    let privatePageErrorCaptureCount = 0;
     const pageErrorSourceProfiles = new Set<OrdinaryPerformanceProfile>();
     const pageErrorSourceLookups: Array<{
       page: Page;
@@ -2521,7 +2930,15 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
     }> = [];
     context.on('page', (openedPage) => {
       openedPage.on('pageerror', (error) => {
-        const observation = capturePerformancePageError(
+        if (privatePageErrorCaptureCount < 8) {
+          capturePrivatePerformancePageError(
+            error,
+            caseReport.profile,
+            pageErrorStage,
+          );
+          privatePageErrorCaptureCount += 1;
+        }
+        const capturedObservation = capturePerformancePageError(
           report,
           error,
           caseReport.profile,
@@ -2531,9 +2948,13 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
             widgetUrl: fixture.widgetUrl,
           },
         );
-        if (!observation) {
+        if (!capturedObservation) {
           return;
         }
+        const observation = Object.assign(
+          capturedObservation,
+          safePerformancePageErrorDetails(error),
+        );
         const frames =
           observation.errorSource === 'element' &&
           pageErrorStage === 'widget-open'
@@ -3129,28 +3550,37 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
   }
 });
 
-test('Element Web delivers a relative room reminder across restart and restore', async ({
+test('Element Web delivers room-timed and selected-member all-day reminders across restart and restore', async ({
   browser,
 }) => {
   test.setTimeout(360_000);
-  fixture = readFixture();
+  activeReminderFlowDiagnostic = undefined;
   activeReminderFailureRecorded = false;
   let flow: ReminderFlow;
   let eventTitles: string[];
   try {
     flow = readReminderFlow();
+    activeReminderFlowDiagnostic = createReminderFlowDiagnosticState(flow);
+    enterActiveReminderFlowStage('fixture');
+    fixture = readFixture();
     eventTitles = readReminderEventTitles();
-  } catch {
+    completeActiveReminderFlowStage('fixture');
+  } catch (error) {
+    failActiveReminderFlow(error);
     record('reminder-ui-readback', 'failed', undefined, 0);
     throw new Error('Reminder acceptance fixture state is unavailable');
   }
   const expectedPriorCount =
     flow === 'initial' ? 0 : flow === 'restart' ? 1 : 2;
   if (eventTitles.length !== expectedPriorCount) {
+    failActiveReminderFlow(
+      new Error('Reminder acceptance fixture state is inconsistent'),
+    );
     record('reminder-ui-readback', 'failed', undefined, eventTitles.length);
     throw new Error('Reminder acceptance fixture state is inconsistent');
   }
 
+  enterActiveReminderFlowStage('room-context');
   const allowedOrigins = new Set([
     new URL(fixture.elementUrl).origin,
     new URL(fixture.homeserverUrl).origin,
@@ -3211,6 +3641,12 @@ test('Element Web delivers a relative room reminder across restart and restore',
     const frame = await openCalendarWidget(element, page, {
       expectWidgetWarning: false,
     });
+    if (flow === 'restart') {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await expect(
+        frame.getByRole('button', { name: 'Create event', exact: true }),
+      ).toBeVisible();
+    }
     const contextResult = await reminderContextResponseObserver.response;
     failureHttpStatus = contextResult.status();
     const contextPayload: unknown = await contextResult
@@ -3235,21 +3671,70 @@ test('Element Web delivers a relative room reminder across restart and restore',
       canManageReminders,
     });
     failureHttpStatus = undefined;
+    completeActiveReminderFlowStage('room-context');
+
+    const priorReminderReadbackReferences = new Map<
+      string,
+      ReminderReadbackReference
+    >();
+    if (eventTitles.length > 0 && flow !== 'initial') {
+      enterActiveReminderFlowStage('prior-state');
+      activePhase =
+        flow === 'restart'
+          ? 'reminder-restart-prior-state'
+          : 'reminder-restore-prior-state';
+      const timeline = await inspectReminderTimeline(eventTitles);
+      const markersOnce =
+        timeline.complete &&
+        timeline.markerCounts.every((count) => count === 1) &&
+        timeline.markerTargetsMatch.every(Boolean);
+      if (timeline.httpStatus !== 200 || !markersOnce) {
+        record(
+          activePhase,
+          'failed',
+          timeline.httpStatus ?? undefined,
+          eventTitles.length,
+          { allMarkersOnce: markersOnce },
+        );
+        failureAlreadyRecorded = true;
+        throw new Error(
+          flow === 'restart'
+            ? 'Restarted reminder markers were not preserved'
+            : 'Restored reminder markers were not preserved',
+        );
+      }
+      record(activePhase, 'passed', timeline.httpStatus, eventTitles.length, {
+        allMarkersOnce: true,
+      });
+      completeActiveReminderFlowStage('prior-state');
+      for (const [index, title] of eventTitles.entries()) {
+        const deliveredAt = timeline.markerTimestamps[index];
+        if (deliveredAt !== null && deliveredAt !== undefined) {
+          priorReminderReadbackReferences.set(title, { deliveredAt });
+        }
+      }
+    }
 
     if (eventTitles.length > 0) {
+      enterActiveReminderFlowStage('prior-state-ui-readback');
       activePhase = 'reminder-ui-readback';
       const existingReadback = await readBackReminderMarkers(
         frame,
-        page,
         eventTitles,
+        priorReminderReadbackReferences,
+        captureReminderFlowReadbackError,
       );
       if (
         !existingReadback.relativeAlarmReadback ||
-        !existingReadback.reminderEnabled
+        !existingReadback.reminderEnabled ||
+        !existingReadback.targetSettingsReadback ||
+        !existingReadback.allDayScheduleReadback
       ) {
         record(activePhase, 'failed', undefined, existingReadback.count, {
           relativeAlarmReadback: existingReadback.relativeAlarmReadback,
           reminderEnabled: existingReadback.reminderEnabled,
+          targetSettingsReadback: existingReadback.targetSettingsReadback,
+          allDayScheduleReadback: existingReadback.allDayScheduleReadback,
         });
         failureAlreadyRecorded = true;
         throw new Error('Persisted reminder settings did not reload');
@@ -3257,72 +3742,52 @@ test('Element Web delivers a relative room reminder across restart and restore',
       record(activePhase, 'passed', undefined, existingReadback.count, {
         relativeAlarmReadback: existingReadback.relativeAlarmReadback,
         reminderEnabled: existingReadback.reminderEnabled,
+        targetSettingsReadback: existingReadback.targetSettingsReadback,
+        allDayScheduleReadback: existingReadback.allDayScheduleReadback,
       });
-
-      activePhase =
-        flow === 'restart'
-          ? 'reminder-restart-prior-state'
-          : 'reminder-restore-prior-state';
-      if (flow === 'restart') {
-        const timeline = await inspectReminderTimeline(eventTitles);
-        const markersOnce =
-          timeline.complete &&
-          timeline.markerCounts.every((count) => count === 1) &&
-          timeline.markerMentions.every(Boolean);
-        if (timeline.httpStatus !== 200 || !markersOnce) {
-          record(
-            activePhase,
-            'failed',
-            timeline.httpStatus ?? undefined,
-            eventTitles.length,
-            {
-              allMarkersOnce: markersOnce,
-            },
-          );
-          failureAlreadyRecorded = true;
-          throw new Error('Restarted reminder markers were not preserved');
-        }
-        record(activePhase, 'passed', timeline.httpStatus, eventTitles.length, {
-          allMarkersOnce: true,
-        });
-      }
-
-      if (flow === 'restore') {
-        activePhase = 'reminder-restore-prior-state';
-        const timeline = await inspectReminderTimeline(eventTitles);
-        const markersOnce =
-          timeline.complete &&
-          timeline.markerCounts.every((count) => count === 1) &&
-          timeline.markerMentions.every(Boolean);
-        if (timeline.httpStatus !== 200 || !markersOnce) {
-          record(
-            activePhase,
-            'failed',
-            timeline.httpStatus ?? undefined,
-            eventTitles.length,
-            {
-              allMarkersOnce: markersOnce,
-            },
-          );
-          failureAlreadyRecorded = true;
-          throw new Error('Restored reminder markers were not preserved');
-        }
-        record(activePhase, 'passed', timeline.httpStatus, eventTitles.length, {
-          allMarkersOnce: true,
-        });
-      }
+      completeActiveReminderFlowStage('prior-state-ui-readback');
     }
 
+    enterActiveReminderFlowStage('marker-creation');
     const markerTitle = `Reminder acceptance ${randomUUID()}`;
-    const dueAt = await createAndConfigureReminder(frame, page, markerTitle);
+    const markerPlan = reminderPlanForMarkerIndex(eventTitles.length);
+    const createdReminder = await createAndConfigureReminder(
+      frame,
+      page,
+      markerTitle,
+      markerPlan,
+    );
+    const dueAt = createdReminder.dueAt;
     eventTitles.push(markerTitle);
 
+    const reminderReadbackReferences = new Map(priorReminderReadbackReferences);
+    reminderReadbackReferences.set(markerTitle, {
+      expectedDueAt: dueAt,
+      expectedAlarmLeadMinutes: createdReminder.alarmLeadMinutes,
+      ...(createdReminder.allDayEventDate
+        ? { expectedAllDayEventDate: createdReminder.allDayEventDate }
+        : {}),
+    });
+    completeActiveReminderFlowStage('marker-creation');
+    enterActiveReminderFlowStage('marker-ui-readback');
     activePhase = 'reminder-ui-readback';
-    const allReadback = await readBackReminderMarkers(frame, page, eventTitles);
-    if (!allReadback.relativeAlarmReadback || !allReadback.reminderEnabled) {
+    const allReadback = await readBackReminderMarkers(
+      frame,
+      eventTitles,
+      reminderReadbackReferences,
+      captureReminderFlowReadbackError,
+    );
+    if (
+      !allReadback.relativeAlarmReadback ||
+      !allReadback.reminderEnabled ||
+      !allReadback.targetSettingsReadback ||
+      !allReadback.allDayScheduleReadback
+    ) {
       record(activePhase, 'failed', undefined, allReadback.count, {
         relativeAlarmReadback: allReadback.relativeAlarmReadback,
         reminderEnabled: allReadback.reminderEnabled,
+        targetSettingsReadback: allReadback.targetSettingsReadback,
+        allDayScheduleReadback: allReadback.allDayScheduleReadback,
       });
       failureAlreadyRecorded = true;
       throw new Error('Reminder settings did not reload after configuration');
@@ -3330,7 +3795,15 @@ test('Element Web delivers a relative room reminder across restart and restore',
     record(activePhase, 'passed', undefined, allReadback.count, {
       relativeAlarmReadback: allReadback.relativeAlarmReadback,
       reminderEnabled: allReadback.reminderEnabled,
+      targetSettingsReadback: allReadback.targetSettingsReadback,
+      allDayScheduleReadback: allReadback.allDayScheduleReadback,
     });
+    completeActiveReminderFlowStage('marker-ui-readback');
+
+    enterActiveReminderFlowStage('delivery');
+    if (flow === 'initial') {
+      await verifyPublicFeedBrowserLifecycle(frame, page, markerTitle);
+    }
 
     const deliveryPhase =
       flow === 'initial'
@@ -3346,11 +3819,20 @@ test('Element Web delivers a relative room reminder across restart and restore',
       dueAt,
     );
     const allMarkersOnce =
-      delivery.complete && delivery.markerCounts.every((count) => count === 1);
+      delivery.complete &&
+      delivery.markerCounts.every((count) => count === 1) &&
+      delivery.markerTargetsMatch.every(Boolean);
+    const targetMentioned = delivery.markerTargetsMatch.at(-1) === true;
+    const roomMentioned = delivery.markerRoomMentions.at(-1) === true;
+    const selectedMemberMentioned =
+      delivery.markerSelectedMemberMentions.at(-1) === true;
     const deliveryPassed =
       delivery.httpStatus === 200 &&
       delivery.markerCounts.at(-1) === 1 &&
-      delivery.markerMentions.at(-1) === true &&
+      targetMentioned &&
+      (markerPlan.recipient === 'room'
+        ? roomMentioned && !selectedMemberMentioned
+        : selectedMemberMentioned && !roomMentioned) &&
       delivery.deliveredAfterDue &&
       allMarkersOnce;
     if (!deliveryPassed) {
@@ -3361,7 +3843,11 @@ test('Element Web delivers a relative room reminder across restart and restore',
         eventTitles.length,
         {
           canaryDelivered: delivery.markerCounts.at(-1) === 1,
-          roomMentioned: delivery.markerMentions.at(-1) === true,
+          roomMentioned,
+          selectedMemberMentioned,
+          targetMentioned,
+          expectedRoomRecipient: markerPlan.recipient === 'room',
+          expectedSelectedRecipient: markerPlan.recipient === 'selected',
           deliveredAfterDue: delivery.deliveredAfterDue,
           allMarkersOnce,
         },
@@ -3376,7 +3862,11 @@ test('Element Web delivers a relative room reminder across restart and restore',
       eventTitles.length,
       {
         canaryDelivered: true,
-        roomMentioned: true,
+        roomMentioned,
+        selectedMemberMentioned,
+        targetMentioned: true,
+        expectedRoomRecipient: markerPlan.recipient === 'room',
+        expectedSelectedRecipient: markerPlan.recipient === 'selected',
         deliveredAfterDue: true,
         allMarkersOnce: true,
       },
@@ -3391,7 +3881,7 @@ test('Element Web delivers a relative room reminder across restart and restore',
       const markersOnce =
         afterScan.complete &&
         afterScan.markerCounts.every((count) => count === 1) &&
-        afterScan.markerMentions.every(Boolean);
+        afterScan.markerTargetsMatch.every(Boolean);
       if (afterScan.httpStatus !== 200 || !markersOnce) {
         record(
           activePhase,
@@ -3417,7 +3907,11 @@ test('Element Web delivers a relative room reminder across restart and restore',
       throw new Error('Reminder browser attempted an unapproved request');
     }
     record(activePhase, 'passed', undefined, blockedRequests);
-  } catch {
+    completeActiveReminderFlowStage('delivery');
+    enterActiveReminderFlowStage('complete');
+    completeActiveReminderFlowStage('complete');
+  } catch (error) {
+    failActiveReminderFlow(error);
     if (!failureAlreadyRecorded && !activeReminderFailureRecorded) {
       record(activePhase, 'failed', failureHttpStatus);
     }
@@ -5041,7 +5535,8 @@ async function createAndConfigureReminder(
   frame: FrameLocator,
   page: Page,
   title: string,
-): Promise<number> {
+  markerPlan: ReminderPlan,
+): Promise<ReminderCreationResult> {
   activePhase = 'reminder-event-create-dialog';
   record(activePhase, 'started');
   await frame
@@ -5050,27 +5545,46 @@ async function createAndConfigureReminder(
   const editor = frame.getByRole('dialog').last();
   await expect(editor).toBeVisible({ timeout: 15_000 });
 
-  const startAt =
-    Math.ceil((Date.now() + REMINDER_START_LEAD_MS) / 60_000) * 60_000;
-  const dueAt = startAt - REMINDER_ALARM_OFFSET_MS;
-  const startValue = localDateTimeInput(startAt, 'Europe/Stockholm');
-  const endValue = localDateTimeInput(
-    startAt + 60 * 60_000,
-    'Europe/Stockholm',
-  );
+  const fixtureNow = Date.now();
+  const timedPlan = markerPlan.allDay
+    ? undefined
+    : planReminderTimedEvent(fixtureNow, REMINDER_TIMED_TIMEZONE);
+  const allDayPlan = markerPlan.allDay
+    ? planReminderAllDayEvent(
+        fixtureNow,
+        markerPlan.allDayTimezone ?? REMINDER_ALL_DAY_TIMEZONE,
+      )
+    : undefined;
+  const dueAt = timedPlan?.dueAt ?? allDayPlan!.dueAt;
+  const startValue = timedPlan?.startValue ?? allDayPlan!.scheduleLocalDateTime;
+  const endValue = timedPlan?.endValue ?? '';
+  const eventStartDate = allDayPlan?.eventStartDate;
+  const eventEndDate = allDayPlan?.eventEndDate;
+  const alarmLeadMinutes =
+    timedPlan?.alarmLeadMinutes ??
+    markerPlan.caldavAlarmLeadMinutes ??
+    REMINDER_ALL_DAY_CALDAV_ALARM_LEAD_MINUTES;
+  const completePlan: ReminderPlan = {
+    ...markerPlan,
+    ...(eventStartDate ? { allDayEventDate: eventStartDate } : {}),
+  };
   await editor.getByRole('combobox', { name: 'Calendar' }).selectOption({
     value: `matrix-calendar-target://room/${encodeURIComponent(fixture.calendarId)}`,
   });
   await editor.getByRole('textbox', { name: 'Title' }).fill(title);
-  await editor.getByRole('textbox', { name: 'Start' }).fill(startValue);
-  await editor.getByRole('textbox', { name: 'End' }).fill(endValue);
-  await editor
-    .getByRole('textbox', { name: 'Time zone' })
-    .fill('Europe/Stockholm');
   const alarmToggle = editor.getByLabel('CalDAV reminder');
-  if (!(await alarmToggle.isChecked())) await alarmToggle.check();
-  await editor.getByRole('radio', { name: 'Before the event' }).check();
-  await editor.getByRole('spinbutton', { name: 'Minutes before' }).fill('1');
+  if (await alarmToggle.isChecked()) await alarmToggle.uncheck();
+  if (markerPlan.allDay) {
+    await editor.getByLabel('All day').check();
+    await editor.getByRole('textbox', { name: 'Start' }).fill(eventStartDate!);
+    await editor.getByRole('textbox', { name: 'End' }).fill(eventEndDate!);
+  } else {
+    await editor.getByRole('textbox', { name: 'Start' }).fill(startValue);
+    await editor.getByRole('textbox', { name: 'End' }).fill(endValue);
+    await editor
+      .getByRole('textbox', { name: 'Time zone' })
+      .fill(REMINDER_TIMED_TIMEZONE);
+  }
   record(activePhase, 'passed');
 
   activePhase = 'reminder-event-created';
@@ -5105,106 +5619,406 @@ async function createAndConfigureReminder(
   record(activePhase, 'passed', status, 1);
 
   activePhase = 'reminder-alarm-ui-readback';
-  const alarmReadback = await readBackRelativeAlarm(frame, title);
+  const alarmObservation: ReminderAlarmUiObservation = {
+    alarmUiStep: 'event-row-visible',
+    alarmUiPatchStatus: 0,
+    alarmUiRelativeAlarmReadback: false,
+    alarmUiAlarmToggleReadback: false,
+    alarmUiRelativeTriggerReadback: false,
+    alarmUiOffsetReadback: false,
+    alarmUiEditorClosed: false,
+    alarmUiDetailsClosed: false,
+  };
+  const alarmSaved = await addCalDavAlarmFromReminderSettings(
+    frame,
+    page,
+    title,
+    alarmLeadMinutes,
+    alarmObservation,
+  );
+  const alarmReadback =
+    alarmSaved &&
+    (await readBackRelativeAlarm(
+      frame,
+      title,
+      {
+        expectedDueAt: markerPlan.allDay ? undefined : dueAt,
+        expectedAlarmLeadMinutes: alarmLeadMinutes,
+      },
+      alarmObservation,
+    ));
   if (!alarmReadback) {
-    record(activePhase, 'failed', undefined, 1, {
-      relativeAlarmReadback: false,
-    });
+    record(
+      activePhase,
+      'failed',
+      alarmObservation.alarmUiPatchStatus || undefined,
+      1,
+      {
+        ...alarmObservation,
+        relativeAlarmReadback: false,
+      },
+    );
     activeReminderFailureRecorded = true;
     throw new Error('The relative alarm did not reload from the event');
   }
-  record(activePhase, 'passed', undefined, 1, { relativeAlarmReadback: true });
+  alarmObservation.alarmUiStep = 'complete';
+  alarmObservation.alarmUiRelativeAlarmReadback = true;
+  record(activePhase, 'passed', alarmObservation.alarmUiPatchStatus, 1, {
+    ...alarmObservation,
+    relativeAlarmReadback: true,
+  });
 
   activePhase = 'reminder-room-configuration-enabled';
-  await setRoomReminder(frame, page, title, true);
+  const reminderConfiguration = await setRoomReminder(
+    frame,
+    page,
+    title,
+    completePlan,
+  );
 
   const titles = readReminderEventTitles();
   titles.push(title);
   writeReminderEventTitles(titles);
-  return dueAt;
+  return {
+    dueAt: markerPlan.allDay ? reminderConfiguration.dueAt! : dueAt,
+    alarmLeadMinutes,
+    ...(eventStartDate ? { allDayEventDate: eventStartDate } : {}),
+  };
 }
 
-function localDateTimeInput(
-  epochMilliseconds: number,
-  timeZone: string,
-): string {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(new Date(epochMilliseconds));
-  const part = (type: Intl.DateTimeFormatPartTypes) =>
-    parts.find((candidate) => candidate.type === type)?.value ?? '';
-  return `${part('year')}-${part('month')}-${part('day')}T${part('hour')}:${part('minute')}`;
+function addCalendarDays(date: string, days: number): string {
+  const [year, month, day] = date.split('-').map(Number);
+  const next = new Date(Date.UTC(year, month - 1, day + days));
+  return [
+    String(next.getUTCFullYear()).padStart(4, '0'),
+    String(next.getUTCMonth() + 1).padStart(2, '0'),
+    String(next.getUTCDate()).padStart(2, '0'),
+  ].join('-');
 }
 
 async function readBackRelativeAlarm(
   frame: FrameLocator,
   title: string,
+  readbackReference?: ReminderReadbackReference,
+  observation: Pick<
+    ReminderAlarmUiObservation,
+    | 'alarmUiStep'
+    | 'alarmUiRelativeAlarmReadback'
+    | 'alarmUiAlarmToggleReadback'
+    | 'alarmUiRelativeTriggerReadback'
+    | 'alarmUiOffsetReadback'
+    | 'alarmUiEditorClosed'
+    | 'alarmUiDetailsClosed'
+  > = {
+    alarmUiStep: 'event-row-visible',
+    alarmUiRelativeAlarmReadback: false,
+    alarmUiAlarmToggleReadback: false,
+    alarmUiRelativeTriggerReadback: false,
+    alarmUiOffsetReadback: false,
+    alarmUiEditorClosed: false,
+    alarmUiDetailsClosed: false,
+  },
+  onReadbackError?: (error: unknown) => void,
 ): Promise<boolean> {
-  await openEventEditor(frame, title);
-  const editor = frame.getByRole('dialog').last();
-  const alarmEnabled = await editor
-    .getByLabel('CalDAV reminder')
-    .isChecked()
-    .catch(() => false);
-  const relativeSelected = await editor
-    .getByRole('radio', { name: 'Before the event' })
-    .isChecked()
-    .catch(() => false);
-  const minutesBefore = await editor
-    .getByRole('spinbutton', { name: 'Minutes before' })
-    .inputValue()
-    .catch(() => '');
-  await editor.getByRole('button', { name: 'Cancel', exact: true }).click();
-  const details = frame.getByRole('dialog').last();
-  await details.getByRole('button', { name: 'Close', exact: true }).click();
-  return alarmEnabled && relativeSelected && minutesBefore === '1';
+  try {
+    observation.alarmUiRelativeAlarmReadback = false;
+    observation.alarmUiAlarmToggleReadback = false;
+    observation.alarmUiRelativeTriggerReadback = false;
+    observation.alarmUiOffsetReadback = false;
+    observation.alarmUiEditorClosed = false;
+    observation.alarmUiDetailsClosed = false;
+    const row = frame.getByRole('listitem', { name: title });
+    observation.alarmUiStep = 'event-row-visible';
+    await expect(row).toBeVisible();
+    observation.alarmUiStep = 'event-open';
+    await row.click();
+    const details = frame.getByRole('dialog').last();
+    observation.alarmUiStep = 'details-ready';
+    await expect(
+      details.getByRole('button', { name: 'Edit', exact: true }),
+    ).toBeVisible();
+    observation.alarmUiStep = 'readback-editor-open';
+    await details.getByRole('button', { name: 'Edit', exact: true }).click();
+    const editor = frame.getByRole('dialog', {
+      name: 'Edit event',
+      exact: true,
+    });
+    observation.alarmUiStep = 'readback-editor-ready';
+    await expect(editor.getByRole('textbox', { name: 'Title' })).toBeVisible();
+    observation.alarmUiStep = 'readback-alarm-toggle';
+    observation.alarmUiAlarmToggleReadback = await editor
+      .getByLabel('CalDAV reminder')
+      .isChecked();
+    observation.alarmUiStep = 'readback-relative-option';
+    observation.alarmUiRelativeTriggerReadback = await editor
+      .getByRole('radio', { name: 'Before the event' })
+      .isChecked();
+    observation.alarmUiStep = 'readback-offset';
+    const allDayEvent = await editor.getByLabel('All day').isChecked();
+    const leadMinutes = Number(
+      await editor
+        .getByRole('spinbutton', { name: 'Minutes before' })
+        .inputValue(),
+    );
+    const expectedLeadMinutes = readbackReference?.expectedAlarmLeadMinutes;
+    let timedRangeMatches = allDayEvent;
+    let dueMatchesReference = allDayEvent;
+    if (!allDayEvent) {
+      const startValue = await editor
+        .getByRole('textbox', { name: 'Start' })
+        .inputValue();
+      const endValue = await editor
+        .getByRole('textbox', { name: 'End' })
+        .inputValue();
+      const timezone = await editor
+        .getByRole('textbox', { name: 'Time zone' })
+        .inputValue();
+      const startAt = reminderFixtureLocalDateTimeToUnixMillis(
+        startValue,
+        timezone,
+      );
+      const endAt = reminderFixtureLocalDateTimeToUnixMillis(
+        endValue,
+        timezone,
+      );
+      const dueAt =
+        startAt !== undefined && Number.isSafeInteger(leadMinutes)
+          ? startAt - leadMinutes * 60_000
+          : undefined;
+      const expectedStartAt =
+        readbackReference?.expectedDueAt !== undefined &&
+        expectedLeadMinutes !== undefined
+          ? readbackReference.expectedDueAt + expectedLeadMinutes * 60_000
+          : undefined;
+      timedRangeMatches =
+        startAt !== undefined &&
+        endAt !== undefined &&
+        endAt - startAt === 60 * 60_000 &&
+        timezone === REMINDER_TIMED_TIMEZONE &&
+        (expectedStartAt === undefined || startAt === expectedStartAt);
+      dueMatchesReference =
+        dueAt !== undefined &&
+        (readbackReference?.expectedDueAt !== undefined
+          ? dueAt === readbackReference.expectedDueAt
+          : readbackReference?.deliveredAt !== undefined &&
+            readbackReference.deliveredAt >= dueAt &&
+            readbackReference.deliveredAt - dueAt <=
+              REMINDER_POST_DUE_SCAN_ALLOWANCE_MS);
+    }
+    observation.alarmUiOffsetReadback =
+      Number.isSafeInteger(leadMinutes) &&
+      leadMinutes > 0 &&
+      leadMinutes <= 48 * 60 + 1 &&
+      (expectedLeadMinutes === undefined ||
+        leadMinutes === expectedLeadMinutes);
+    observation.alarmUiOffsetReadback &&=
+      timedRangeMatches && dueMatchesReference;
+    observation.alarmUiStep = 'readback-editor-cancelled';
+    await editor.getByRole('button', { name: 'Cancel', exact: true }).click();
+    observation.alarmUiStep = 'readback-editor-hidden';
+    await expect(editor).toBeHidden({ timeout: 20_000 });
+    observation.alarmUiEditorClosed = true;
+    const parentDetails = frame.getByRole('dialog').last();
+    observation.alarmUiStep = 'details-ready-after-save';
+    await expect(parentDetails).toBeVisible();
+    observation.alarmUiStep = 'readback-details-hidden';
+    await parentDetails
+      .getByRole('button', { name: 'Close', exact: true })
+      .click();
+    await expect(parentDetails).toBeHidden({ timeout: 20_000 });
+    observation.alarmUiDetailsClosed = true;
+    observation.alarmUiRelativeAlarmReadback =
+      observation.alarmUiAlarmToggleReadback &&
+      observation.alarmUiRelativeTriggerReadback &&
+      observation.alarmUiOffsetReadback;
+    return observation.alarmUiRelativeAlarmReadback;
+  } catch (error) {
+    onReadbackError?.(error);
+    return false;
+  }
+}
+
+async function addCalDavAlarmFromReminderSettings(
+  frame: FrameLocator,
+  page: Page,
+  title: string,
+  leadMinutes: number,
+  observation: Pick<
+    ReminderAlarmUiObservation,
+    | 'alarmUiStep'
+    | 'alarmUiPatchStatus'
+    | 'alarmUiEditorClosed'
+    | 'alarmUiDetailsClosed'
+  >,
+): Promise<boolean> {
+  try {
+    const row = frame.getByRole('listitem', { name: title });
+    observation.alarmUiStep = 'event-row-visible';
+    await expect(row).toBeVisible();
+    observation.alarmUiStep = 'event-open';
+    await row.click();
+    const details = frame.getByRole('dialog').last();
+    observation.alarmUiStep = 'details-ready';
+    await expect(details).toBeVisible();
+    observation.alarmUiStep = 'settings-open';
+    await details
+      .getByRole('button', { name: 'Reminder settings', exact: true })
+      .click();
+    const editCalDavButton = details.getByRole('button', {
+      name: 'Edit CalDAV reminder',
+      exact: true,
+    });
+    observation.alarmUiStep = 'edit-button-ready';
+    await expect(editCalDavButton).toBeVisible({ timeout: 20_000 });
+    await editCalDavButton.click();
+
+    const editor = frame.getByRole('dialog', {
+      name: 'Edit event',
+      exact: true,
+    });
+    observation.alarmUiStep = 'editor-ready';
+    await expect(editor).toBeVisible();
+    const alarmToggle = editor.getByLabel('CalDAV reminder');
+    observation.alarmUiStep = 'alarm-toggle-read';
+    if (!(await alarmToggle.isChecked())) {
+      observation.alarmUiStep = 'alarm-toggle-enabled';
+      await alarmToggle.check();
+    }
+    observation.alarmUiStep = 'relative-option-selected';
+    await editor.getByRole('radio', { name: 'Before the event' }).check();
+    observation.alarmUiStep = 'offset-entered';
+    await editor
+      .getByRole('spinbutton', { name: 'Minutes before' })
+      .fill(String(leadMinutes));
+    const saveResponse = page.waitForResponse(
+      (response) => {
+        const url = new URL(response.url());
+        return (
+          url.origin === new URL(fixture.gatewayUrl).origin &&
+          url.pathname === '/v1/calendar/events' &&
+          response.request().method() === 'PATCH'
+        );
+      },
+      { timeout: 30_000 },
+    );
+    observation.alarmUiStep = 'save-response-armed';
+    await editor.getByRole('button', { name: 'Save', exact: true }).click();
+    observation.alarmUiStep = 'save-clicked';
+    const response = await saveResponse;
+    observation.alarmUiPatchStatus = response.status();
+    observation.alarmUiStep = 'patch-response-received';
+    observation.alarmUiStep = 'editor-hidden';
+    await expect(editor).toBeHidden({ timeout: 20_000 });
+    observation.alarmUiEditorClosed = true;
+    const parentDetails = frame.getByRole('dialog').last();
+    observation.alarmUiStep = 'details-ready-after-save';
+    await expect(parentDetails).toBeVisible();
+    await parentDetails
+      .getByRole('button', { name: 'Close', exact: true })
+      .click();
+    observation.alarmUiStep = 'details-hidden';
+    await expect(parentDetails).toBeHidden({ timeout: 20_000 });
+    observation.alarmUiDetailsClosed = true;
+    return response.status() >= 200 && response.status() < 300;
+  } catch {
+    return false;
+  }
 }
 
 async function setRoomReminder(
   frame: FrameLocator,
   page: Page,
   title: string,
-  enable: boolean,
-): Promise<{ enabled: boolean; httpStatus: number | null }> {
+  plan: ReminderPlan,
+): Promise<{
+  enabled: boolean;
+  httpStatus: number | null;
+  dueAt?: number;
+}> {
   const row = frame.getByRole('listitem', { name: title });
   const details = frame.getByRole('dialog').last();
-  const option = details.getByRole('checkbox', {
-    name: /relative to event start$/u,
-  });
-
-  if (!enable) {
-    await expect(row).toBeVisible();
-    await row.click();
-    await expect(details).toBeVisible();
-    await details
-      .getByRole('button', { name: 'Notify room', exact: true })
-      .click();
-    await expect(option).toBeVisible({ timeout: 20_000 });
-    const enabled = await option.isChecked();
-    await details.getByRole('button', { name: 'Close', exact: true }).click();
-    return { enabled, httpStatus: null };
-  }
-
   const observation: ReminderConfigurationObservation = {
     reminderStep: 'event-details',
-    notifyButtonCount: 0,
-    notifyButtonVisible: false,
+    reminderSettingsButtonCount: 0,
+    reminderSettingsButtonVisible: false,
     reminderOptionsGetCount: 0,
     reminderOptionsGetStatus: 0,
     reminderConfigGetCount: 0,
     reminderConfigGetStatus: 0,
-    reminderEligibleOptionCount: 0,
-    reminderOptionCheckedBefore: false,
-    reminderOptionCheckAttempted: false,
+    recipientRosterGetCount: 0,
+    recipientRosterHttpStatus: 0,
+    recipientRosterCount: 0,
+    recipientRosterShapeValid: false,
+    recipientRosterTargetPresent: false,
+    recipientRosterOutcome: 'unobserved',
+    reminderDestinationControlCount: 0,
+    recipientKind: 'unknown',
+    recipientSelectionAttempted: false,
+    recipientSelectionStep: 'destination-clicked',
+    recipientOptionCount: 0,
+    memberInputProbeInstalled: false,
+    memberInputDomCount: 0,
+    memberInputAriaExpanded: 'not-observed',
+    memberInputControlsTokenCount: 0,
+    memberInputControlsNodePresent: false,
+    memberInputControlsListbox: false,
+    memberListboxDomCount: 0,
+    memberOptionDomCount: 0,
+    memberListboxOwnAriaHidden: 'not-observed',
+    memberListboxAncestorAriaHidden: 'not-observed',
+    memberListboxOwnInert: 'not-observed',
+    memberListboxAncestorInert: 'not-observed',
+    memberListboxCssVisibility: 'not-observed',
+    memberNoOptionsTextPresent: false,
+    memberLoadErrorVisible: false,
+    memberPickerObservationError: 'none',
+    memberQueryMatchesTargetAfterFill: false,
+    memberQueryMatchesTargetAtOptionCount: false,
+    memberInputFocusedBeforeFill: false,
+    memberDocumentFocusedBeforeFill: false,
+    memberInputFocusedAfterFill: false,
+    memberDocumentFocusedAfterFill: false,
+    memberInputEventMatchedTarget: false,
+    memberInputBlurEventCount: 0,
+    memberInputSameNodeAfterFill: false,
+    memberListboxCount: 0,
+    memberInputControlsUniqueListbox: false,
+    memberOptionCount: 0,
+    memberOptionsContainingTargetIdCount: 0,
+    selectedMemberTagCount: 0,
+    selectedMemberKeyboardFlow: false,
+    reminderTargetMatches: false,
+    allDayScheduleMatches: false,
+    narrowSidePanelSafe: false,
+    narrowViewportWithinRange: 'not-observed',
+    narrowDialogWithinViewport: 'not-observed',
+    narrowDialogContentsFit: 'not-observed',
+    narrowDocumentContentsFit: 'not-observed',
+    narrowViewportWidth: 'not-observed',
+    narrowDialogWidth: 'not-observed',
+    narrowDialogClientWidth: 'not-observed',
+    narrowDialogScrollWidth: 'not-observed',
+    narrowDocumentClientWidth: 'not-observed',
+    narrowDocumentScrollWidth: 'not-observed',
     reminderPutCount: 0,
     reminderPutStatus: 0,
-    reminderOptionCheckedAfter: false,
+  };
+  let effectivePlan = plan;
+  let dueAt: number | undefined;
+  let latestRecipientRosterRequest: Request | undefined;
+  let latestRecipientRosterResponse: Response | undefined;
+  let sampleMemberPickerDomState: (() => Promise<void>) | undefined;
+  const noteMemberPickerObservationError = (
+    error: Exclude<MemberPickerObservationError, 'none' | 'multiple'>,
+  ) => {
+    if (
+      observation.memberPickerObservationError === 'none' ||
+      observation.memberPickerObservationError === error
+    ) {
+      observation.memberPickerObservationError = error;
+    } else {
+      observation.memberPickerObservationError = 'multiple';
+    }
   };
   const roomPath = `/v1/calendar/rooms/${fixture.teamRoomId}/reminders`;
   const gatewayOrigin = new URL(fixture.gatewayUrl).origin;
@@ -5213,6 +6027,9 @@ async function setRoomReminder(
       const url = new URL(urlValue);
       if (url.origin !== gatewayOrigin) return undefined;
       const pathname = decodeURIComponent(url.pathname);
+      if (method === 'GET' && pathname === `${roomPath}/recipients`) {
+        return 'recipients' as const;
+      }
       if (method === 'GET' && pathname === `${roomPath}/options`) {
         return 'options' as const;
       }
@@ -5229,7 +6046,19 @@ async function setRoomReminder(
   };
   const onRequest = (request: Request) => {
     const kind = classifyRequest(request.url(), request.method());
-    if (kind === 'options') {
+    if (kind === 'recipients') {
+      observation.recipientRosterGetCount = Math.min(
+        observation.recipientRosterGetCount + 1,
+        2,
+      );
+      latestRecipientRosterRequest = request;
+      latestRecipientRosterResponse = undefined;
+      observation.recipientRosterHttpStatus = 0;
+      observation.recipientRosterCount = 0;
+      observation.recipientRosterShapeValid = false;
+      observation.recipientRosterTargetPresent = false;
+      observation.recipientRosterOutcome = 'unobserved';
+    } else if (kind === 'options') {
       observation.reminderOptionsGetCount = Math.min(
         observation.reminderOptionsGetCount + 1,
         2,
@@ -5244,11 +6073,46 @@ async function setRoomReminder(
         observation.reminderPutCount + 1,
         2,
       );
+      try {
+        const body: unknown = request.postDataJSON();
+        const target =
+          isRecord(body) && isRecord(body.target) ? body.target : undefined;
+        if (target?.kind === 'room') {
+          observation.reminderTargetMatches = plan.recipient === 'room';
+        } else if (target?.kind === 'users' && Array.isArray(target.userIds)) {
+          observation.reminderTargetMatches =
+            plan.recipient === 'selected' &&
+            target.userIds.length === 1 &&
+            target.userIds[0] === fixture.users.memberB.userId;
+        }
+        const allDaySchedule = isRecord(body) ? body.allDaySchedule : undefined;
+        if (effectivePlan.allDay) {
+          observation.allDayScheduleMatches =
+            Boolean(effectivePlan.allDaySchedule) &&
+            isRecord(allDaySchedule) &&
+            allDaySchedule.daysBefore ===
+              effectivePlan.allDaySchedule?.daysBefore &&
+            allDaySchedule.localTime ===
+              effectivePlan.allDaySchedule?.localTime &&
+            allDaySchedule.timezone === effectivePlan.allDaySchedule?.timezone;
+        } else {
+          observation.allDayScheduleMatches = allDaySchedule === null;
+        }
+      } catch {
+        observation.reminderTargetMatches = false;
+        observation.allDayScheduleMatches = false;
+      }
     }
   };
   const onResponse = (response: Response) => {
     const kind = classifyRequest(response.url(), response.request().method());
-    if (kind === 'options') {
+    if (
+      kind === 'recipients' &&
+      response.request() === latestRecipientRosterRequest
+    ) {
+      observation.recipientRosterHttpStatus = response.status();
+      latestRecipientRosterResponse = response;
+    } else if (kind === 'options') {
       observation.reminderOptionsGetStatus = response.status();
     } else if (kind === 'config') {
       observation.reminderConfigGetStatus = response.status();
@@ -5256,10 +6120,52 @@ async function setRoomReminder(
       observation.reminderPutStatus = response.status();
     }
   };
+  const onRequestFailed = (request: Request) => {
+    if (
+      classifyRequest(request.url(), request.method()) === 'recipients' &&
+      request === latestRecipientRosterRequest
+    ) {
+      observation.recipientRosterHttpStatus = 0;
+      observation.recipientRosterCount = 0;
+      observation.recipientRosterShapeValid = false;
+      observation.recipientRosterTargetPresent = false;
+      observation.recipientRosterOutcome = 'http_error';
+    }
+  };
+  const sampleRecipientRosterResponse = async () => {
+    const response = latestRecipientRosterResponse;
+    if (!response) return;
+
+    const status = response.status();
+    observation.recipientRosterHttpStatus = status;
+    if (status < 200 || status >= 300) {
+      observation.recipientRosterCount = 0;
+      observation.recipientRosterShapeValid = false;
+      observation.recipientRosterTargetPresent = false;
+      observation.recipientRosterOutcome = 'http_error';
+      return;
+    }
+
+    try {
+      const roster = summarizeReminderRecipientRoster(
+        await response.json(),
+        fixture.users.memberB.userId,
+      );
+      observation.recipientRosterCount = roster.recipientRosterCount;
+      observation.recipientRosterShapeValid = roster.recipientRosterShapeValid;
+      observation.recipientRosterTargetPresent =
+        roster.recipientRosterTargetPresent;
+      observation.recipientRosterOutcome = roster.recipientRosterOutcome;
+    } catch {
+      observation.recipientRosterCount = 0;
+      observation.recipientRosterShapeValid = false;
+      observation.recipientRosterTargetPresent = false;
+      observation.recipientRosterOutcome = 'invalid_shape';
+    }
+  };
   const writeFailure = async () => {
-    observation.reminderOptionCheckedAfter = await option
-      .isChecked()
-      .catch(() => false);
+    await sampleRecipientRosterResponse();
+    await sampleMemberPickerDomState?.();
     const httpStatus =
       observation.reminderPutStatus ||
       observation.reminderOptionsGetStatus ||
@@ -5267,49 +6173,606 @@ async function setRoomReminder(
       undefined;
     record(activePhase, 'failed', httpStatus, undefined, {
       ...observation,
-      reminderEnabled: observation.reminderOptionCheckedAfter,
+      reminderEnabled: false,
     });
     activeReminderFailureRecorded = true;
   };
 
   page.on('request', onRequest);
   page.on('response', onResponse);
+  page.on('requestfailed', onRequestFailed);
   try {
     await expect(row).toBeVisible();
     await row.click();
     await expect(details).toBeVisible();
-    observation.reminderStep = 'notify-control';
-    const notifyButton = details.getByRole('button', {
-      name: 'Notify room',
+    observation.reminderStep = 'settings-control';
+    const settingsButton = details.getByRole('button', {
+      name: 'Reminder settings',
       exact: true,
     });
-    observation.notifyButtonCount = Math.min(await notifyButton.count(), 2);
-    observation.notifyButtonVisible =
-      observation.notifyButtonCount === 1 &&
-      (await notifyButton.isVisible().catch(() => false));
-    if (!observation.notifyButtonVisible) {
-      throw new Error('Room reminder control is unavailable');
+    observation.reminderSettingsButtonCount = Math.min(
+      await settingsButton.count(),
+      2,
+    );
+    observation.reminderSettingsButtonVisible =
+      observation.reminderSettingsButtonCount === 1 &&
+      (await settingsButton.isVisible().catch(() => false));
+    if (!observation.reminderSettingsButtonVisible) {
+      throw new Error('Reminder settings control is unavailable');
     }
 
     observation.reminderStep = 'options-load';
-    await notifyButton.click();
-    await option.waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {});
-    observation.reminderEligibleOptionCount = Math.min(await option.count(), 2);
-    observation.reminderOptionCheckedBefore =
-      observation.reminderEligibleOptionCount === 1 &&
-      (await option.isChecked().catch(() => false));
+    await settingsButton.click();
+    const destination = details.getByRole('combobox', {
+      name: 'Matrix destination',
+    });
+    await destination
+      .waitFor({ state: 'visible', timeout: 20_000 })
+      .catch(() => {});
+    observation.reminderDestinationControlCount = Math.min(
+      await destination.count(),
+      2,
+    );
     if (
-      observation.reminderEligibleOptionCount !== 1 ||
+      observation.reminderDestinationControlCount !== 1 ||
       observation.reminderOptionsGetCount === 0 ||
       observation.reminderConfigGetCount === 0 ||
       observation.reminderOptionsGetStatus < 200 ||
       observation.reminderOptionsGetStatus >= 300 ||
       observation.reminderConfigGetStatus < 200 ||
-      observation.reminderConfigGetStatus >= 300 ||
-      observation.reminderOptionCheckedBefore
+      observation.reminderConfigGetStatus >= 300
     ) {
-      observation.reminderStep = 'eligible-option';
-      throw new Error('Expected reminder alarm option is unavailable');
+      observation.reminderStep = 'destination-control';
+      throw new Error('Matrix reminder destination control is unavailable');
+    }
+
+    const layout = await details.evaluate(
+      (element, viewportBounds) => {
+        const viewportWidth = document.documentElement.clientWidth;
+        const dialogWidth = element.getBoundingClientRect().width;
+        const dialogClientWidth = element.clientWidth;
+        const dialogScrollWidth = element.scrollWidth;
+        const documentClientWidth = document.documentElement.clientWidth;
+        const documentScrollWidth = document.documentElement.scrollWidth;
+        const viewportWithinRange =
+          viewportWidth >= viewportBounds.minimum &&
+          viewportWidth <= viewportBounds.maximum;
+        const dialogWithinViewport = dialogWidth <= viewportWidth + 1;
+        const dialogContentsFit = dialogScrollWidth <= dialogClientWidth + 1;
+        const documentContentsFit = documentScrollWidth <= viewportWidth + 1;
+        const safe =
+          viewportWidth >= viewportBounds.minimum &&
+          viewportWidth <= viewportBounds.maximum &&
+          dialogWidth <= viewportWidth + 1 &&
+          dialogScrollWidth <= dialogClientWidth + 1 &&
+          documentScrollWidth <= viewportWidth + 1;
+        // Keep raw dimensions for validation; only sanitizer output is rounded.
+        const boundedDimension = (value: number): number | 'not-observed' =>
+          Number.isFinite(value) && value >= 0 && value <= 100_000
+            ? value
+            : 'not-observed';
+
+        return {
+          safe,
+          viewportWithinRange,
+          dialogWithinViewport,
+          dialogContentsFit,
+          documentContentsFit,
+          viewportWidth: boundedDimension(viewportWidth),
+          dialogWidth: boundedDimension(dialogWidth),
+          dialogClientWidth: boundedDimension(dialogClientWidth),
+          dialogScrollWidth: boundedDimension(dialogScrollWidth),
+          documentClientWidth: boundedDimension(documentClientWidth),
+          documentScrollWidth: boundedDimension(documentScrollWidth),
+        };
+      },
+      {
+        minimum: MIN_REMINDER_LAYOUT_VIEWPORT_WIDTH,
+        maximum: MAX_REMINDER_LAYOUT_VIEWPORT_WIDTH,
+      },
+    );
+    observation.narrowSidePanelSafe = layout.safe;
+    observation.narrowViewportWithinRange = layout.viewportWithinRange;
+    observation.narrowDialogWithinViewport = layout.dialogWithinViewport;
+    observation.narrowDialogContentsFit = layout.dialogContentsFit;
+    observation.narrowDocumentContentsFit = layout.documentContentsFit;
+    observation.narrowViewportWidth = layout.viewportWidth;
+    observation.narrowDialogWidth = layout.dialogWidth;
+    observation.narrowDialogClientWidth = layout.dialogClientWidth;
+    observation.narrowDialogScrollWidth = layout.dialogScrollWidth;
+    observation.narrowDocumentClientWidth = layout.documentClientWidth;
+    observation.narrowDocumentScrollWidth = layout.documentScrollWidth;
+
+    observation.reminderStep = 'recipient-selection';
+    observation.recipientSelectionAttempted = true;
+    observation.recipientKind = plan.recipient;
+    observation.recipientSelectionStep = 'destination-clicked';
+    await destination.click();
+    // MUI renders Select and Autocomplete listboxes in a frame-level portal,
+    // outside the event details dialog subtree.
+    const destinationListbox = frame
+      .getByRole('listbox')
+      .filter({ visible: true });
+    observation.recipientSelectionStep = 'destination-listbox-ready';
+    await expect(destinationListbox).toHaveCount(1, { timeout: 15_000 });
+    const destinationListboxId = await destinationListbox.evaluateAll(
+      (listboxes) =>
+        listboxes.length === 1 && listboxes[0].id.length > 0
+          ? listboxes[0].id
+          : undefined,
+    );
+    expect(destinationListboxId).toBeTruthy();
+    const selectedDestinationListbox = frame.locator(
+      `[id=${JSON.stringify(destinationListboxId)}]`,
+    );
+    const destinationOption = destinationListbox.getByRole('option', {
+      name: plan.recipient === 'room' ? 'Whole room' : 'Selected people',
+      exact: true,
+    });
+    observation.recipientOptionCount = Math.min(
+      await destinationOption.count(),
+      2,
+    );
+    observation.recipientSelectionStep = 'destination-option-selected';
+    await destinationOption.click();
+    observation.recipientSelectionStep = 'destination-menu-close-wait';
+    await selectedDestinationListbox.waitFor({
+      state: 'hidden',
+      timeout: 15_000,
+    });
+    observation.recipientSelectionStep = 'destination-menu-closed';
+    let selectedMemberKeyboardFlow = false;
+    if (plan.recipient === 'selected') {
+      const memberInput = details.getByRole('combobox', {
+        name: 'Selected people',
+      });
+      const memberListbox = frame
+        .getByRole('listbox')
+        .filter({ visible: true });
+      sampleMemberPickerDomState = async () => {
+        try {
+          const sample = await memberInput.evaluateAll((inputs) => {
+            const capCount = (count: number) => Math.min(count, 2);
+            if (inputs.length !== 1) {
+              return {
+                observationError:
+                  inputs.length === 0
+                    ? ('input-missing' as const)
+                    : ('input-not-unique' as const),
+                inputDomCount: capCount(inputs.length),
+                inputAriaExpanded: 'not-observed' as const,
+                controlsTokenCount: 0,
+                controlsNodePresent: false,
+                controlsListbox: false,
+                listboxDomCount: 0,
+                optionDomCount: 0,
+                listboxOwnAriaHidden: 'not-observed' as const,
+                listboxAncestorAriaHidden: 'not-observed' as const,
+                listboxOwnInert: 'not-observed' as const,
+                listboxAncestorInert: 'not-observed' as const,
+                listboxCssVisibility: 'not-observed' as const,
+                noOptionsTextPresent: false,
+                loadErrorVisible: false,
+              };
+            }
+
+            const input = inputs[0];
+            const doc = input.ownerDocument;
+            const mapAriaHidden = (
+              element: Element | null,
+            ): MemberAriaHiddenState => {
+              if (!element) return 'not-observed';
+              const value = element.getAttribute('aria-hidden');
+              if (value === null) return 'absent';
+              if (value === 'true' || value === 'false') return value;
+              return 'other';
+            };
+            const ancestorAriaHidden = (
+              element: Element | null,
+            ): MemberAriaHiddenState => {
+              if (!element) return 'not-observed';
+              let ancestor = element.parentElement;
+              let depth = 0;
+              let foundOther = false;
+              for (; ancestor && depth < 32; depth += 1) {
+                const value = ancestor.getAttribute('aria-hidden');
+                if (value === 'true') return 'true';
+                if (value !== null && value !== 'false') foundOther = true;
+                ancestor = ancestor.parentElement;
+              }
+              if (ancestor) return 'other';
+              return foundOther ? 'other' : 'false';
+            };
+            const inertState = (element: Element | null): MemberInertState => {
+              if (!element) return 'not-observed';
+              const isInert =
+                element.hasAttribute('inert') ||
+                ('inert' in element &&
+                  Boolean(
+                    (element as HTMLElement & { inert?: boolean }).inert,
+                  ));
+              return isInert ? 'true' : 'false';
+            };
+            const ancestorInert = (
+              element: Element | null,
+            ): MemberInertState => {
+              if (!element) return 'not-observed';
+              let ancestor = element.parentElement;
+              let depth = 0;
+              for (; ancestor && depth < 32; depth += 1) {
+                if (
+                  ancestor.hasAttribute('inert') ||
+                  ('inert' in ancestor &&
+                    Boolean(
+                      (ancestor as HTMLElement & { inert?: boolean }).inert,
+                    ))
+                ) {
+                  return 'true';
+                }
+                ancestor = ancestor.parentElement;
+              }
+              return ancestor ? 'not-observed' : 'false';
+            };
+            const cssVisibility = (
+              element: Element | null,
+            ): MemberCssVisibility => {
+              if (!element) return 'not-observed';
+              if (!doc.defaultView) return 'unknown';
+              let current: Element | null = element;
+              let depth = 0;
+              for (; current && depth < 32; depth += 1) {
+                const style = doc.defaultView.getComputedStyle(current);
+                if (
+                  current.hasAttribute('hidden') ||
+                  style.display === 'none' ||
+                  style.visibility === 'hidden' ||
+                  style.visibility === 'collapse' ||
+                  style.opacity === '0'
+                ) {
+                  return 'hidden';
+                }
+                current = current.parentElement;
+              }
+              return current ? 'unknown' : 'visible';
+            };
+            const controls =
+              input
+                .getAttribute('aria-controls')
+                ?.trim()
+                .split(/\s+/u)
+                .filter(Boolean) ?? [];
+            const controlledNode =
+              controls.length === 1 ? doc.getElementById(controls[0]) : null;
+            const listboxes = Array.from(
+              doc.querySelectorAll('[role="listbox"]'),
+            );
+            const alertNodes = Array.from(
+              doc.querySelectorAll('[role="alert"]'),
+            );
+            const loadErrorVisible = alertNodes.some(
+              (alert) =>
+                /could not load joined room members/iu.test(
+                  alert.textContent ?? '',
+                ) && cssVisibility(alert) === 'visible',
+            );
+            const controlledText = controlledNode?.textContent
+              ?.replace(/\s+/gu, ' ')
+              .trim();
+            const expanded = input.getAttribute('aria-expanded');
+
+            return {
+              observationError: 'none' as const,
+              inputDomCount: 1,
+              inputAriaExpanded: (expanded === null
+                ? 'absent'
+                : expanded === 'true' || expanded === 'false'
+                  ? expanded
+                  : 'other') as MemberInputExpandedState,
+              controlsTokenCount: capCount(controls.length),
+              controlsNodePresent: controlledNode !== null,
+              controlsListbox:
+                controlledNode?.getAttribute('role') === 'listbox',
+              listboxDomCount: capCount(listboxes.length),
+              optionDomCount: capCount(
+                controlledNode?.querySelectorAll('[role="option"]').length ?? 0,
+              ),
+              listboxOwnAriaHidden: mapAriaHidden(controlledNode),
+              listboxAncestorAriaHidden: ancestorAriaHidden(controlledNode),
+              listboxOwnInert: inertState(controlledNode),
+              listboxAncestorInert: ancestorInert(controlledNode),
+              listboxCssVisibility: cssVisibility(controlledNode),
+              noOptionsTextPresent: Boolean(
+                controlledText &&
+                /^(?:no options(?: available)?|no matching members)$/iu.test(
+                  controlledText,
+                ),
+              ),
+              loadErrorVisible,
+            };
+          });
+
+          observation.memberInputDomCount = sample.inputDomCount;
+          observation.memberInputAriaExpanded = sample.inputAriaExpanded;
+          observation.memberInputControlsTokenCount = sample.controlsTokenCount;
+          observation.memberInputControlsNodePresent =
+            sample.controlsNodePresent;
+          observation.memberInputControlsListbox = sample.controlsListbox;
+          observation.memberListboxDomCount = sample.listboxDomCount;
+          observation.memberOptionDomCount = sample.optionDomCount;
+          observation.memberListboxOwnAriaHidden = sample.listboxOwnAriaHidden;
+          observation.memberListboxAncestorAriaHidden =
+            sample.listboxAncestorAriaHidden;
+          observation.memberListboxOwnInert = sample.listboxOwnInert;
+          observation.memberListboxAncestorInert = sample.listboxAncestorInert;
+          observation.memberListboxCssVisibility = sample.listboxCssVisibility;
+          observation.memberNoOptionsTextPresent = sample.noOptionsTextPresent;
+          observation.memberLoadErrorVisible = sample.loadErrorVisible;
+          if (sample.observationError !== 'none') {
+            noteMemberPickerObservationError(sample.observationError);
+          }
+        } catch {
+          noteMemberPickerObservationError('dom-sample');
+        }
+      };
+      const measureMemberInputListboxAssociation = async () => {
+        let controls: string | null;
+        try {
+          controls = await memberInput.evaluateAll((inputs) =>
+            inputs.length === 1
+              ? inputs[0].getAttribute('aria-controls')
+              : null,
+          );
+        } catch {
+          noteMemberPickerObservationError('input-association');
+          return false;
+        }
+        let controlledIds: string[];
+        try {
+          controlledIds = await memberListbox.evaluateAll((listboxes) =>
+            listboxes.map((listbox) => listbox.id),
+          );
+        } catch {
+          noteMemberPickerObservationError('listbox-association');
+          return false;
+        }
+        const tokens = controls?.trim().split(/\s+/u) ?? [];
+        return (
+          tokens.length === 1 &&
+          tokens[0].length > 0 &&
+          controlledIds.length === 1 &&
+          controlledIds[0] === tokens[0]
+        );
+      };
+      const expectedMemberUserId = fixture.users.memberB.userId;
+      const memberInputProbeKey = '__calendarRoomReminderInputProbe';
+      observation.recipientSelectionStep = 'member-input-probe-install';
+      const beforeFill = await memberInput
+        .evaluateAll(
+          (inputs, { expectedUserId, probeKey }) => {
+            if (inputs.length !== 1) return undefined;
+            const input = inputs[0] as HTMLInputElement;
+            type InputProbe = {
+              input: HTMLInputElement;
+              matchedTargetValue: boolean;
+              blurEventCount: number;
+              onInput: () => void;
+              onBlur: () => void;
+            };
+            const probe: InputProbe = {
+              input,
+              matchedTargetValue: false,
+              blurEventCount: 0,
+              onInput: () => undefined,
+              onBlur: () => undefined,
+            };
+            probe.onInput = () => {
+              if (input.value === expectedUserId) {
+                probe.matchedTargetValue = true;
+              }
+            };
+            probe.onBlur = () => {
+              probe.blurEventCount = Math.min(probe.blurEventCount + 1, 2);
+            };
+            input.addEventListener('input', probe.onInput, true);
+            input.addEventListener('blur', probe.onBlur, true);
+            (window as unknown as Record<string, unknown>)[probeKey] = probe;
+            return {
+              inputFocused: document.activeElement === input,
+              documentFocused: document.hasFocus(),
+            };
+          },
+          {
+            expectedUserId: expectedMemberUserId,
+            probeKey: memberInputProbeKey,
+          },
+        )
+        .catch(() => undefined);
+      observation.memberInputProbeInstalled = beforeFill !== undefined;
+      if (!beforeFill) {
+        noteMemberPickerObservationError('input-probe-install');
+      }
+      if (beforeFill) {
+        observation.memberInputFocusedBeforeFill = beforeFill.inputFocused;
+        observation.memberDocumentFocusedBeforeFill =
+          beforeFill.documentFocused;
+      }
+
+      try {
+        observation.recipientSelectionStep = 'member-input-clicked';
+        await memberInput.click({ timeout: 15_000 });
+        observation.recipientSelectionStep = 'member-query-entered';
+        await memberInput.fill(expectedMemberUserId);
+        await expect(memberInput).toHaveValue(expectedMemberUserId, {
+          timeout: 15_000,
+        });
+        observation.recipientSelectionStep = 'member-query-settled';
+      } finally {
+        const afterFill = await memberInput
+          .evaluateAll(
+            (inputs, { expectedUserId, probeKey }) => {
+              type InputProbe = {
+                input: HTMLInputElement;
+                matchedTargetValue: boolean;
+                blurEventCount: number;
+                onInput: () => void;
+                onBlur: () => void;
+              };
+              const probe = (window as unknown as Record<string, unknown>)[
+                probeKey
+              ] as InputProbe | undefined;
+              const input = inputs.length === 1 ? inputs[0] : undefined;
+              const result = {
+                queryMatchesTarget:
+                  input instanceof HTMLInputElement &&
+                  input.value === expectedUserId,
+                inputFocused:
+                  input instanceof HTMLInputElement &&
+                  document.activeElement === input,
+                documentFocused: document.hasFocus(),
+                inputEventMatchedTarget: probe?.matchedTargetValue ?? false,
+                blurEventCount: Math.min(probe?.blurEventCount ?? 0, 2),
+                sameInputNode: Boolean(
+                  input instanceof HTMLInputElement &&
+                  probe &&
+                  input === probe.input,
+                ),
+              };
+              if (probe) {
+                probe.input.removeEventListener('input', probe.onInput, true);
+                probe.input.removeEventListener('blur', probe.onBlur, true);
+                delete (window as unknown as Record<string, unknown>)[probeKey];
+              }
+              return result;
+            },
+            {
+              expectedUserId: expectedMemberUserId,
+              probeKey: memberInputProbeKey,
+            },
+          )
+          .catch(() => undefined);
+        if (!afterFill) {
+          noteMemberPickerObservationError('input-probe-read');
+        }
+        if (afterFill) {
+          observation.memberQueryMatchesTargetAfterFill =
+            afterFill.queryMatchesTarget;
+          observation.memberInputFocusedAfterFill = afterFill.inputFocused;
+          observation.memberDocumentFocusedAfterFill =
+            afterFill.documentFocused;
+          observation.memberInputEventMatchedTarget =
+            afterFill.inputEventMatchedTarget;
+          observation.memberInputBlurEventCount = afterFill.blurEventCount;
+          observation.memberInputSameNodeAfterFill = afterFill.sameInputNode;
+        }
+      }
+      await sampleMemberPickerDomState?.();
+      observation.recipientSelectionStep = 'member-listbox-ready';
+      try {
+        observation.memberListboxCount = Math.min(
+          await memberListbox.count(),
+          2,
+        );
+      } catch {
+        noteMemberPickerObservationError('listbox-count');
+        throw new Error('Member listbox observation failed');
+      }
+      try {
+        await expect
+          .poll(
+            async () => {
+              const associated = await measureMemberInputListboxAssociation();
+              observation.memberInputControlsUniqueListbox = associated;
+              return associated;
+            },
+            { timeout: 15_000 },
+          )
+          .toBe(true);
+        await expect(memberListbox).toHaveCount(1, { timeout: 15_000 });
+      } finally {
+        observation.memberListboxCount = await memberListbox
+          .count()
+          .then((count) => Math.min(count, 2))
+          .catch(() => {
+            noteMemberPickerObservationError('listbox-final-count');
+            return observation.memberListboxCount;
+          });
+        observation.memberInputControlsUniqueListbox =
+          await measureMemberInputListboxAssociation().catch(() => {
+            noteMemberPickerObservationError('listbox-association');
+            return false;
+          });
+      }
+      expect(observation.memberInputControlsUniqueListbox).toBe(true);
+      const memberOptions = memberListbox.getByRole('option');
+      const memberOption = memberOptions.first();
+      observation.recipientSelectionStep = 'member-option-ready';
+      await memberOption.waitFor({ state: 'visible', timeout: 15_000 });
+      observation.memberQueryMatchesTargetAtOptionCount =
+        (await memberInput.inputValue()) === fixture.users.memberB.userId;
+      observation.memberOptionCount = Math.min(await memberOptions.count(), 2);
+      observation.memberOptionsContainingTargetIdCount = Math.min(
+        await memberOptions.evaluateAll(
+          (options, expectedId) =>
+            options.filter((option) => option.textContent?.includes(expectedId))
+              .length,
+          fixture.users.memberB.userId,
+        ),
+        2,
+      );
+      observation.recipientSelectionStep = 'member-option-count-checked';
+      await expect(memberOptions).toHaveCount(1);
+      observation.recipientSelectionStep = 'member-arrow-down';
+      await memberInput.press('ArrowDown');
+      observation.recipientSelectionStep = 'member-enter';
+      await memberInput.press('Enter');
+      // Enter closes the selected option popup. A second Escape bubbles to the
+      // owning Dialog and closes the whole reminder form.
+      await expect(memberListbox).toHaveCount(0, { timeout: 15_000 });
+      observation.recipientSelectionStep = 'member-keyboard-closed';
+      observation.selectedMemberTagCount = Math.min(
+        await details.locator('.MuiAutocomplete-tag').count(),
+        2,
+      );
+      selectedMemberKeyboardFlow = observation.selectedMemberTagCount === 1;
+      observation.selectedMemberKeyboardFlow = selectedMemberKeyboardFlow;
+      expect(selectedMemberKeyboardFlow).toBe(true);
+    }
+    observation.recipientSelectionStep = 'complete';
+
+    if (plan.allDay && plan.allDayEventDate) {
+      const timezone = plan.allDayTimezone ?? REMINDER_ALL_DAY_TIMEZONE;
+      const refreshedSchedule = planReminderAllDaySchedule(
+        Date.now(),
+        plan.allDayEventDate,
+        timezone,
+      );
+      dueAt = refreshedSchedule.dueAt;
+      const scheduleValue = refreshedSchedule.scheduleLocalDateTime;
+      const localDate = scheduleValue.slice(0, 10);
+      const schedule = {
+        daysBefore: refreshedSchedule.daysBefore,
+        localTime: refreshedSchedule.localTime,
+        timezone,
+      };
+      const reconstructedDueAt = reminderFixtureLocalDateTimeToUnixMillis(
+        `${addCalendarDays(plan.allDayEventDate, -schedule.daysBefore)}T${schedule.localTime}`,
+        timezone,
+      );
+      if (
+        addCalendarDays(plan.allDayEventDate, -schedule.daysBefore) !==
+          localDate ||
+        reconstructedDueAt !== dueAt
+      ) {
+        throw new Error('All-day reminder schedule date is no longer future');
+      }
+      effectivePlan = { ...plan, allDaySchedule: schedule };
+      await details
+        .getByRole('spinbutton', { name: 'Days before event' })
+        .fill(String(schedule.daysBefore));
+      await details.getByLabel('Local time').fill(schedule.localTime);
+      await details
+        .getByRole('textbox', { name: 'Time zone (IANA)' })
+        .fill(schedule.timezone);
     }
 
     observation.reminderStep = 'put-response';
@@ -5321,59 +6784,281 @@ async function setRoomReminder(
         { timeout: 15_000 },
       )
       .catch(() => undefined);
-    observation.reminderOptionCheckAttempted = true;
-    await option.click();
+    await details
+      .getByRole('button', { name: 'Save Matrix destination', exact: true })
+      .click();
     const response = await putResponse;
     if (response) observation.reminderPutStatus = response.status();
-    observation.reminderOptionCheckedAfter = await option
-      .isChecked()
-      .catch(() => false);
     if (
       observation.reminderPutCount !== 1 ||
       observation.reminderPutStatus < 200 ||
       observation.reminderPutStatus >= 300 ||
-      !observation.reminderOptionCheckedAfter
+      !observation.reminderTargetMatches ||
+      !observation.allDayScheduleMatches ||
+      (plan.recipient === 'selected' && !selectedMemberKeyboardFlow)
     ) {
-      throw new Error('Room reminder configuration was not saved');
+      throw new Error('Matrix reminder configuration did not match its target');
+    }
+    if (plan.recipient === 'selected') {
+      observation.reminderStep = 'post-put-layout';
+      if (!observation.narrowSidePanelSafe) {
+        throw new Error('Selected-recipient layout safety check failed');
+      }
+      observation.reminderStep = 'put-response';
     }
 
+    await details
+      .getByRole('button', { name: 'Close reminder settings', exact: true })
+      .click();
+    await settingsButton.click();
+    await destination.waitFor({ state: 'visible', timeout: 20_000 });
+    const savedDestination = (await destination.innerText()).trim();
+    const expectedDestination =
+      plan.recipient === 'room' ? 'Whole room' : 'Selected people';
+    const savedTargetMatches =
+      savedDestination === expectedDestination &&
+      (await details
+        .getByText(
+          plan.recipient === 'room'
+            ? 'Matrix pings the whole room.'
+            : 'Matrix pings the selected people.',
+          { exact: true },
+        )
+        .isVisible()
+        .catch(() => false));
+    const savedScheduleFields = await readReminderAllDayScheduleFields(
+      details,
+      effectivePlan.allDay,
+    );
+    const savedDaysBefore = savedScheduleFields.daysBefore;
+    const savedLocalTime = savedScheduleFields.localTime;
+    const savedTimezone = savedScheduleFields.timezone;
+    const savedScheduleDate = effectivePlan.allDayEventDate
+      ? addCalendarDays(effectivePlan.allDayEventDate, -savedDaysBefore)
+      : undefined;
+    const savedScheduleDueAt =
+      savedScheduleDate && /^\d{2}:\d{2}$/u.test(savedLocalTime)
+        ? reminderFixtureLocalDateTimeToUnixMillis(
+            `${savedScheduleDate}T${savedLocalTime}`,
+            savedTimezone,
+          )
+        : undefined;
+    const savedScheduleMatches = effectivePlan.allDay
+      ? dueAt !== undefined &&
+        savedDaysBefore === effectivePlan.allDaySchedule?.daysBefore &&
+        savedLocalTime === effectivePlan.allDaySchedule?.localTime &&
+        savedTimezone === effectivePlan.allDaySchedule?.timezone &&
+        savedScheduleDate ===
+          addCalendarDays(
+            effectivePlan.allDayEventDate!,
+            -effectivePlan.allDaySchedule!.daysBefore,
+          ) &&
+        savedScheduleDueAt === dueAt
+      : true;
+    observation.reminderTargetMatches &&= savedTargetMatches;
+    observation.allDayScheduleMatches &&= savedScheduleMatches;
+    if (!savedTargetMatches || !savedScheduleMatches) {
+      throw new Error('Saved Matrix reminder settings did not reload');
+    }
+
+    await details
+      .getByRole('button', { name: 'Close reminder settings', exact: true })
+      .click();
     await details.getByRole('button', { name: 'Close', exact: true }).click();
     observation.reminderStep = 'complete';
+    await sampleRecipientRosterResponse();
     record(activePhase, 'passed', observation.reminderPutStatus, 1, {
       ...observation,
       reminderEnabled: true,
     });
-    return { enabled: true, httpStatus: observation.reminderPutStatus };
+    return {
+      enabled: true,
+      httpStatus: observation.reminderPutStatus,
+      ...(dueAt === undefined ? {} : { dueAt }),
+    };
   } catch {
     if (!activeReminderFailureRecorded) await writeFailure();
     throw new Error('Room reminder configuration could not be confirmed');
   } finally {
     page.off('request', onRequest);
     page.off('response', onResponse);
+    page.off('requestfailed', onRequestFailed);
   }
 }
 
 async function readBackReminderMarkers(
   frame: FrameLocator,
-  page: Page,
   titles: readonly string[],
+  readbackReferences: ReadonlyMap<
+    string,
+    ReminderReadbackReference
+  > = new Map(),
+  onReadbackError?: (error: unknown) => void,
 ): Promise<{
   count: number;
   relativeAlarmReadback: boolean;
   reminderEnabled: boolean;
+  targetSettingsReadback: boolean;
+  allDayScheduleReadback: boolean;
 }> {
   let relativeAlarmReadback = true;
   let reminderEnabled = true;
-  for (const title of titles) {
+  let targetSettingsReadback = true;
+  let allDayScheduleReadback = true;
+  for (const [index, title] of titles.entries()) {
+    const plan = reminderPlanForMarkerIndex(index);
+    const readbackReference = {
+      ...readbackReferences.get(title),
+      ...(plan.caldavAlarmLeadMinutes === undefined
+        ? {}
+        : { expectedAlarmLeadMinutes: plan.caldavAlarmLeadMinutes }),
+    };
     relativeAlarmReadback =
-      (await readBackRelativeAlarm(frame, title)) && relativeAlarmReadback;
-    const current = await setRoomReminder(frame, page, title, false);
-    reminderEnabled = current.enabled && reminderEnabled;
+      (await readBackRelativeAlarm(
+        frame,
+        title,
+        readbackReference,
+        undefined,
+        onReadbackError,
+      )) && relativeAlarmReadback;
+    const settings = await readBackMatrixReminder(
+      frame,
+      title,
+      plan,
+      readbackReference,
+    );
+    reminderEnabled = settings.enabled && reminderEnabled;
+    targetSettingsReadback = settings.targetMatches && targetSettingsReadback;
+    allDayScheduleReadback =
+      settings.allDayScheduleMatches && allDayScheduleReadback;
   }
   return {
     count: titles.length,
     relativeAlarmReadback,
     reminderEnabled,
+    targetSettingsReadback,
+    allDayScheduleReadback,
+  };
+}
+
+async function readBackMatrixReminder(
+  frame: FrameLocator,
+  title: string,
+  plan: ReminderPlan,
+  readbackReference?: ReminderReadbackReference,
+): Promise<{
+  enabled: boolean;
+  targetMatches: boolean;
+  allDayScheduleMatches: boolean;
+}> {
+  const row = frame.getByRole('listitem', { name: title });
+  await expect(row).toBeVisible();
+  await row.click();
+  const details = frame.getByRole('dialog').last();
+  await expect(details).toBeVisible();
+  let eventStartDate: string | undefined;
+  let eventEndDate: string | undefined;
+  let allDayEvent = !plan.allDay;
+  if (plan.allDay) {
+    await details.getByRole('button', { name: 'Edit', exact: true }).click();
+    const editor = frame.getByRole('dialog', {
+      name: 'Edit event',
+      exact: true,
+    });
+    await expect(editor.getByLabel('All day')).toBeVisible();
+    allDayEvent = await editor.getByLabel('All day').isChecked();
+    eventStartDate = await editor
+      .getByRole('textbox', { name: 'Start' })
+      .inputValue();
+    eventEndDate = await editor
+      .getByRole('textbox', { name: 'End' })
+      .inputValue();
+    await editor.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(editor).toBeHidden({ timeout: 20_000 });
+  }
+  await details
+    .getByRole('button', { name: 'Reminder settings', exact: true })
+    .click();
+  const destination = details.getByRole('combobox', {
+    name: 'Matrix destination',
+  });
+  const available = await destination
+    .waitFor({ state: 'visible', timeout: 20_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (!available) {
+    await details.getByRole('button', { name: 'Close', exact: true }).click();
+    return {
+      enabled: false,
+      targetMatches: false,
+      allDayScheduleMatches: !plan.allDay,
+    };
+  }
+  const destinationLabel = (await destination.innerText()).trim();
+  const expectedDestination =
+    plan.recipient === 'room' ? 'Whole room' : 'Selected people';
+  const targetMatches = destinationLabel === expectedDestination;
+  const savedState = await details
+    .getByText(
+      plan.recipient === 'room'
+        ? 'Matrix pings the whole room.'
+        : 'Matrix pings the selected people.',
+      { exact: true },
+    )
+    .isVisible()
+    .catch(() => false);
+  const scheduleFields = await readReminderAllDayScheduleFields(
+    details,
+    plan.allDay,
+  );
+  const { daysBefore, localTime, timezone } = scheduleFields;
+  const scheduleDate = eventStartDate
+    ? addCalendarDays(eventStartDate, -daysBefore)
+    : undefined;
+  const scheduleDueAt =
+    scheduleDate && /^\d{2}:\d{2}$/u.test(localTime)
+      ? reminderFixtureLocalDateTimeToUnixMillis(
+          `${scheduleDate}T${localTime}`,
+          timezone,
+        )
+      : undefined;
+  const expectedScheduleMatches = reminderFixtureAllDayExpectedScheduleMatches({
+    allDay: plan.allDay,
+    expectedDueAt: readbackReference?.expectedDueAt,
+    eventStartDate,
+    daysBefore,
+    localTime,
+    timeZone: timezone,
+  });
+  const deliveryMatchesDue =
+    scheduleDueAt !== undefined &&
+    (readbackReference?.expectedDueAt !== undefined
+      ? scheduleDueAt === readbackReference.expectedDueAt &&
+        expectedScheduleMatches
+      : readbackReference?.deliveredAt !== undefined &&
+        readbackReference.deliveredAt >= scheduleDueAt &&
+        readbackReference.deliveredAt - scheduleDueAt <=
+          REMINDER_POST_DUE_SCAN_ALLOWANCE_MS);
+  const allDayScheduleMatches = plan.allDay
+    ? allDayEvent &&
+      Boolean(eventStartDate && /^\d{4}-\d{2}-\d{2}$/u.test(eventStartDate)) &&
+      (readbackReference?.expectedAllDayEventDate === undefined ||
+        eventStartDate === readbackReference.expectedAllDayEventDate) &&
+      eventEndDate === eventStartDate &&
+      Number.isSafeInteger(daysBefore) &&
+      /^\d{2}:\d{2}$/u.test(localTime) &&
+      timezone === plan.allDayTimezone &&
+      expectedScheduleMatches &&
+      deliveryMatchesDue
+    : true;
+  await details
+    .getByRole('button', { name: 'Close reminder settings', exact: true })
+    .click();
+  await details.getByRole('button', { name: 'Close', exact: true }).click();
+  return {
+    enabled: targetMatches && savedState,
+    targetMatches: targetMatches && savedState,
+    allDayScheduleMatches,
   };
 }
 
@@ -5384,7 +7069,9 @@ async function inspectReminderTimeline(
     httpStatus: null,
     complete: false,
     markerCounts: titles.map(() => 0),
-    markerMentions: titles.map(() => false),
+    markerTargetsMatch: titles.map(() => false),
+    markerRoomMentions: titles.map(() => false),
+    markerSelectedMemberMentions: titles.map(() => false),
     markerTimestamps: titles.map(() => null),
   };
   let response: Awaited<ReturnType<typeof fetch>>;
@@ -5429,30 +7116,51 @@ async function inspectReminderTimeline(
 
   const events = chunk.filter(isRecord);
   const markerCounts: number[] = [];
-  const markerMentions: boolean[] = [];
+  const markerTargetsMatch: boolean[] = [];
+  const markerRoomMentions: boolean[] = [];
+  const markerSelectedMemberMentions: boolean[] = [];
   const markerTimestamps: Array<number | null> = [];
-  for (const title of titles) {
+  for (const [index, title] of titles.entries()) {
     const matching = events.filter((event) => {
       const content = isRecord(event.content) ? event.content : undefined;
       return (
-        event.sender === fixture.serviceSender.userId &&
         event.type === 'm.room.message' &&
         content?.msgtype === 'm.text' &&
         content.body === `Reminder: ${title}`
       );
     });
     markerCounts.push(Math.min(matching.length, 2));
+    const serviceEvent =
+      matching.length === 1 &&
+      matching[0].sender === fixture.serviceSender.userId;
     const content =
-      matching.length === 1 && isRecord(matching[0].content)
+      serviceEvent && isRecord(matching[0].content)
         ? matching[0].content
         : undefined;
     const mentions =
       content && isRecord(content['m.mentions'])
         ? content['m.mentions']
         : undefined;
-    markerMentions.push(matching.length === 1 && mentions?.room === true);
-    const timestamp =
-      matching.length === 1 ? matching[0].origin_server_ts : undefined;
+    const userIds = mentions?.user_ids;
+    const plan = reminderPlanForMarkerIndex(index);
+    const roomMention =
+      serviceEvent &&
+      mentions?.room === true &&
+      (!Object.hasOwn(mentions, 'user_ids') ||
+        (Array.isArray(userIds) && userIds.length === 0));
+    const selectedMemberMention =
+      serviceEvent &&
+      mentions !== undefined &&
+      (!Object.hasOwn(mentions, 'room') || mentions.room === false) &&
+      Array.isArray(userIds) &&
+      userIds.length === 1 &&
+      userIds[0] === fixture.users.memberB.userId;
+    markerRoomMentions.push(roomMention);
+    markerSelectedMemberMentions.push(selectedMemberMention);
+    markerTargetsMatch.push(
+      plan.recipient === 'room' ? roomMention : selectedMemberMention,
+    );
+    const timestamp = serviceEvent ? matching[0].origin_server_ts : undefined;
     markerTimestamps.push(
       typeof timestamp === 'number' && Number.isSafeInteger(timestamp)
         ? timestamp
@@ -5463,7 +7171,9 @@ async function inspectReminderTimeline(
     httpStatus: response.status,
     complete: true,
     markerCounts,
-    markerMentions,
+    markerTargetsMatch,
+    markerRoomMentions,
+    markerSelectedMemberMentions,
     markerTimestamps,
   };
 }
@@ -5493,6 +7203,384 @@ async function waitForReminderDelivery(
     latest = await inspectReminderTimeline(titles);
   }
   return { ...latest, deliveredAfterDue: false };
+}
+
+async function waitForPublicFeedPublicationResponse(
+  page: Page,
+  method: 'GET' | 'PUT' | 'DELETE',
+  targetScope: 'any' | 'fixture-room' = 'any',
+): Promise<Response> {
+  const gatewayOrigin = new URL(fixture.gatewayUrl).origin;
+  return page.waitForResponse(
+    (response) => {
+      const url = new URL(response.url());
+      return (
+        url.origin === gatewayOrigin &&
+        url.pathname === '/v1/calendar-feeds/publication' &&
+        response.request().method() === method &&
+        (targetScope === 'any' || publicFeedManagementTargetMatches(response))
+      );
+    },
+    { timeout: 20_000 },
+  );
+}
+
+function publicFeedManagementTargetMatches(response: Response): boolean {
+  try {
+    const url = new URL(response.url());
+    return (
+      url.origin === new URL(fixture.gatewayUrl).origin &&
+      url.pathname === '/v1/calendar-feeds/publication' &&
+      url.searchParams.get('target') === 'room' &&
+      url.searchParams.get('calendarId') === fixture.calendarId &&
+      url.searchParams.get('roomId') === fixture.teamRoomId
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function fetchAnonymousPublicFeed(
+  url: string,
+  method: 'GET' | 'HEAD',
+): Promise<AnonymousPublicFeedResponse> {
+  const headers = new Headers({ Accept: 'text/calendar' });
+  try {
+    const response = await fetch(url, {
+      method,
+      headers,
+      redirect: 'manual',
+      signal: AbortSignal.timeout(10_000),
+    });
+    let body = new Uint8Array();
+    try {
+      body = new Uint8Array(await response.arrayBuffer());
+    } catch {
+      // Retain the observed status and closed headers if the body read fails.
+    }
+    return {
+      status: response.status,
+      contentType: response.headers.get('Content-Type') ?? undefined,
+      contentLength: response.headers.get('Content-Length') ?? undefined,
+      cacheControl: response.headers.get('Cache-Control') ?? undefined,
+      pragma: response.headers.get('Pragma') ?? undefined,
+      nosniff: response.headers.get('X-Content-Type-Options') ?? undefined,
+      body,
+    };
+  } catch {
+    return { body: new Uint8Array() };
+  }
+}
+
+async function verifyPublicFeedBrowserLifecycle(
+  frame: FrameLocator,
+  page: Page,
+  eventTitle: string,
+): Promise<void> {
+  activePhase = 'public-feed-browser-lifecycle';
+  record(activePhase, 'started');
+  const observation: PublicFeedBrowserObservation = {
+    publicFeedLifecycleStep: 'opening-dialog',
+    publicConsentGateObserved: false,
+    publicManagerPublishSucceeded: false,
+    publicUrlOriginAndRouteMatch: false,
+    anonymousGetContainsCanonicalEvent: false,
+    anonymousHeadMatchesGet: false,
+    unpublishSucceeded: false,
+    anonymousGetDeniedAfterUnpublish: false,
+    anonymousHeadDeniedAfterUnpublish: false,
+  };
+  let publicUrl: string | undefined;
+  let dialog: Locator | undefined;
+  let publicationCreated = false;
+  try {
+    const publicFeedButton = frame.getByRole('button', {
+      name: 'Public feed',
+      exact: true,
+    });
+    await expect(publicFeedButton).toBeVisible();
+    observation.publicFeedLifecycleStep = 'loading-settings';
+    const initialSettingsResponse = waitForPublicFeedPublicationResponse(
+      page,
+      'GET',
+    );
+    await publicFeedButton.click();
+    dialog = frame.getByRole('dialog', {
+      name: 'Public calendar feed',
+    });
+    await expect(dialog).toBeVisible();
+    const settingsResponse = await initialSettingsResponse;
+    let managementResponse = settingsResponse;
+    observation.publicFeedManagementGetStatus = settingsResponse.status();
+    let managementState: unknown = await settingsResponse
+      .json()
+      .catch(() => null);
+    if (settingsResponse.status() === 503) {
+      observation.publicFeedManagementErrorCode =
+        classifyPublicFeedManagementErrorCode(managementState);
+    }
+
+    observation.publicFeedLifecycleStep = 'selecting-target-calendar';
+    const calendarSelect = dialog.getByRole('combobox', {
+      name: 'Calendar',
+    });
+    let selectedCalendarName = (await calendarSelect.innerText()).trim();
+    if (selectedCalendarName !== 'Room calendar') {
+      const targetSettingsResponse = waitForPublicFeedPublicationResponse(
+        page,
+        'GET',
+        'fixture-room',
+      );
+      await calendarSelect.click();
+      // MUI renders Select options in a frame-level portal. Scope the choice
+      // to the one visible listbox instead of querying the frame for options.
+      const calendarListbox = frame
+        .getByRole('listbox')
+        .filter({ visible: true });
+      await expect(calendarListbox).toHaveCount(1);
+      await calendarListbox
+        .getByRole('option', {
+          name: 'Room calendar',
+          exact: true,
+        })
+        .click();
+      await expect(calendarSelect).toHaveText('Room calendar');
+      const response = await targetSettingsResponse;
+      managementResponse = response;
+      observation.publicFeedManagementGetStatus = response.status();
+      managementState = await response.json().catch(() => null);
+      if (response.status() === 503) {
+        observation.publicFeedManagementErrorCode =
+          classifyPublicFeedManagementErrorCode(managementState);
+      }
+      selectedCalendarName = (await calendarSelect.innerText()).trim();
+    }
+    observation.publicFeedTargetCalendarMatches =
+      selectedCalendarName === 'Room calendar';
+    observation.publicFeedManagementTargetMatches =
+      publicFeedManagementTargetMatches(managementResponse);
+    observation.publicFeedSettingsEnabled =
+      isRecord(managementState) && managementState.enabled === true;
+    observation.publicFeedSettingsUnpublished =
+      isRecord(managementState) && managementState.published === false;
+    if (!observation.publicFeedManagementTargetMatches) {
+      throw new Error(
+        'Public feed management target did not match the fixture',
+      );
+    }
+
+    const managerCanPublish =
+      isRecord(managementState) &&
+      managementState.enabled === true &&
+      managementState.published === false;
+    const consent = dialog.getByRole('checkbox', {
+      name: 'I understand that anyone with the link can read this calendar.',
+      exact: true,
+    });
+    const publishButton = dialog.getByRole('button', {
+      name: 'Publish feed',
+      exact: true,
+    });
+    observation.publicFeedLifecycleStep = 'awaiting-consent-control';
+    observation.publicFeedConsentCheckboxCount = Math.min(
+      await consent.count(),
+      10,
+    );
+    observation.publicFeedConsentCheckboxVisible =
+      observation.publicFeedConsentCheckboxCount > 0 &&
+      (await consent.isVisible());
+    observation.publicFeedConsentCheckboxChecked =
+      observation.publicFeedConsentCheckboxCount > 0 &&
+      (await consent.isChecked());
+    observation.publicFeedPublishButtonCount = Math.min(
+      await publishButton.count(),
+      10,
+    );
+    await expect(consent).toBeVisible();
+    observation.publicFeedConsentCheckboxCount = Math.min(
+      await consent.count(),
+      10,
+    );
+    observation.publicFeedConsentCheckboxVisible = await consent.isVisible();
+    observation.publicFeedConsentCheckboxChecked = await consent.isChecked();
+    const publishDisabledBeforeConsent = await publishButton.isDisabled();
+    observation.publicFeedPublishDisabledBeforeConsent =
+      publishDisabledBeforeConsent;
+    observation.publicFeedLifecycleStep = 'toggling-consent';
+    await consent.check();
+    observation.publicFeedLifecycleStep = 'verifying-consent';
+    observation.publicFeedConsentCheckboxChecked = await consent.isChecked();
+    const publishEnabledAfterConsent = !(await publishButton.isDisabled());
+    observation.publicFeedPublishDisabledAfterConsent =
+      !publishEnabledAfterConsent;
+    observation.publicConsentGateObserved =
+      managerCanPublish &&
+      publishDisabledBeforeConsent &&
+      publishEnabledAfterConsent;
+    if (!observation.publicConsentGateObserved) {
+      throw new Error('Manager publication consent gate was not observed');
+    }
+
+    observation.publicFeedLifecycleStep = 'publishing';
+    const publishResponsePromise = waitForPublicFeedPublicationResponse(
+      page,
+      'PUT',
+    );
+    await publishButton.click();
+    const publishResponse = await publishResponsePromise;
+    observation.publicFeedPublishStatus = publishResponse.status();
+    const publishedState: unknown = await publishResponse
+      .json()
+      .catch(() => null);
+    publicationCreated =
+      publishResponse.status() >= 200 &&
+      publishResponse.status() < 300 &&
+      isRecord(publishedState) &&
+      publishedState.published === true;
+    observation.publicManagerPublishSucceeded = publicationCreated;
+    if (!publicationCreated) {
+      throw new Error('Manager publication did not succeed');
+    }
+
+    observation.publicFeedLifecycleStep = 'checking-public-feed';
+    const publicUrlInput = dialog.getByRole('textbox', {
+      name: 'Public feed URL',
+      exact: true,
+    });
+    await expect(publicUrlInput).toBeVisible();
+    publicUrl = await publicUrlInput.inputValue();
+    let parsedPublicUrl: URL | undefined;
+    try {
+      parsedPublicUrl = new URL(publicUrl);
+    } catch {
+      parsedPublicUrl = undefined;
+    }
+    observation.publicUrlOriginAndRouteMatch =
+      parsedPublicUrl !== undefined &&
+      parsedPublicUrl.origin === new URL(fixture.gatewayUrl).origin &&
+      /^\/v1\/public-calendar-feeds\/[A-Za-z0-9_.-]+$/u.test(
+        parsedPublicUrl.pathname,
+      ) &&
+      parsedPublicUrl.username === '' &&
+      parsedPublicUrl.password === '' &&
+      parsedPublicUrl.search === '' &&
+      parsedPublicUrl.hash === '';
+    if (!observation.publicUrlOriginAndRouteMatch) {
+      throw new Error('Public feed URL did not match the synthetic gateway');
+    }
+
+    const [publicGet, publicHead] = await Promise.all([
+      fetchAnonymousPublicFeed(publicUrl, 'GET'),
+      fetchAnonymousPublicFeed(publicUrl, 'HEAD'),
+    ]);
+    observation.publicFeedGetStatus = publicGet.status;
+    observation.publicFeedHeadStatus = publicHead.status;
+    let feedText = '';
+    try {
+      feedText = new TextDecoder('utf-8', { fatal: true }).decode(
+        publicGet.body,
+      );
+    } catch {
+      feedText = '';
+    }
+    const getHeadersAreSafe =
+      publicGet.cacheControl?.toLowerCase().includes('no-store') === true &&
+      publicGet.pragma?.toLowerCase() === 'no-cache' &&
+      publicGet.nosniff?.toLowerCase() === 'nosniff';
+    observation.anonymousGetContainsCanonicalEvent =
+      publicGet.status === 200 &&
+      publicGet.contentType?.toLowerCase().startsWith('text/calendar') ===
+        true &&
+      getHeadersAreSafe &&
+      feedText.startsWith('BEGIN:VCALENDAR') &&
+      feedText.includes('BEGIN:VEVENT') &&
+      feedText.includes(eventTitle) &&
+      feedText.trimEnd().endsWith('END:VCALENDAR');
+    const headHeadersAreSafe =
+      publicHead.cacheControl?.toLowerCase().includes('no-store') === true &&
+      publicHead.pragma?.toLowerCase() === 'no-cache' &&
+      publicHead.nosniff?.toLowerCase() === 'nosniff';
+    observation.anonymousHeadMatchesGet =
+      publicHead.status === 200 &&
+      publicHead.contentType?.toLowerCase().startsWith('text/calendar') ===
+        true &&
+      headHeadersAreSafe &&
+      publicHead.body.byteLength === 0 &&
+      publicHead.contentLength === String(publicGet.body.byteLength);
+    if (
+      !observation.anonymousGetContainsCanonicalEvent ||
+      !observation.anonymousHeadMatchesGet
+    ) {
+      throw new Error('Anonymous public feed GET/HEAD did not match');
+    }
+
+    observation.publicFeedLifecycleStep = 'unpublishing';
+    const unpublishResponsePromise = waitForPublicFeedPublicationResponse(
+      page,
+      'DELETE',
+    );
+    await dialog
+      .getByRole('button', { name: 'Unpublish', exact: true })
+      .click();
+    const unpublishResponse = await unpublishResponsePromise;
+    observation.publicFeedUnpublishStatus = unpublishResponse.status();
+    observation.unpublishSucceeded =
+      unpublishResponse.status() >= 200 && unpublishResponse.status() < 300;
+    if (!observation.unpublishSucceeded) {
+      throw new Error('Public feed could not be unpublished');
+    }
+    publicationCreated = false;
+
+    observation.publicFeedLifecycleStep = 'checking-revocation';
+    const [revokedGet, revokedHead] = await Promise.all([
+      fetchAnonymousPublicFeed(publicUrl, 'GET'),
+      fetchAnonymousPublicFeed(publicUrl, 'HEAD'),
+    ]);
+    observation.publicFeedRevokedGetStatus = revokedGet.status;
+    observation.publicFeedRevokedHeadStatus = revokedHead.status;
+    observation.anonymousGetDeniedAfterUnpublish =
+      revokedGet.status === 404 && revokedGet.body.byteLength === 0;
+    observation.anonymousHeadDeniedAfterUnpublish =
+      revokedHead.status === 404 && revokedHead.body.byteLength === 0;
+    if (
+      !observation.anonymousGetDeniedAfterUnpublish ||
+      !observation.anonymousHeadDeniedAfterUnpublish
+    ) {
+      throw new Error('Public feed remained available after unpublishing');
+    }
+
+    observation.publicFeedLifecycleStep = 'complete';
+    record(
+      activePhase,
+      'passed',
+      observation.publicFeedRevokedGetStatus,
+      undefined,
+      observation,
+    );
+  } catch {
+    activeReminderFailureRecorded = true;
+    record(activePhase, 'failed', undefined, undefined, observation);
+    throw new Error('Public calendar feed lifecycle could not be confirmed');
+  } finally {
+    if (publicationCreated && dialog) {
+      try {
+        const unpublishButton = dialog.getByRole('button', {
+          name: 'Unpublish',
+          exact: true,
+        });
+        if (await unpublishButton.isVisible()) {
+          const cleanupResponse = waitForPublicFeedPublicationResponse(
+            page,
+            'DELETE',
+          );
+          await unpublishButton.click();
+          await cleanupResponse;
+        }
+      } catch {
+        // The isolated Element stack is removed by the acceptance job.
+      }
+    }
+  }
 }
 
 function readFixture(): Fixture {
@@ -5785,7 +7873,13 @@ async function openMemberARoomWithDiagnostics(
   } = {},
 ): Promise<MemberARoomResult> {
   const element = new ElementWebPage(page);
+  const beforeNavigation = options.captureRoomReadinessTimeline
+    ? await observeMemberARoomReadinessSnapshot(page, roomId).catch(
+        () => undefined,
+      )
+    : undefined;
   let navigationCompleted = false;
+  let afterRoute: RoomReadinessSnapshot | undefined;
   try {
     if (options.useNormalRoomSelection) {
       await element.navigateToRoomOrInvitation(roomName);
@@ -5795,6 +7889,12 @@ async function openMemberARoomWithDiagnostics(
       await page.goto(roomUrl.href, { timeout: 20_000 });
     }
     navigationCompleted = true;
+    if (options.captureRoomReadinessTimeline) {
+      afterRoute = await observeMemberARoomReadinessSnapshot(
+        page,
+        roomId,
+      ).catch(() => undefined);
+    }
   } catch {
     // The failure summary records only whether this bounded navigation ended.
   }
@@ -5848,6 +7948,14 @@ async function openMemberARoomWithDiagnostics(
     navigationCompleted,
     observation,
     roomReadinessTimeline,
+    ...(options.captureRoomReadinessTimeline
+      ? {
+          roomNavigationReadiness: createRoomNavigationReadinessObservation(
+            beforeNavigation,
+            afterRoute,
+          ),
+        }
+      : {}),
     failureCode: getMemberARoomFailureCode(navigationCompleted, observation),
   };
 }
@@ -5868,14 +7976,40 @@ async function observeMemberARoomReadinessSnapshot(
       ]);
       let currentRoomMatches: boolean | null = null;
       let matrixSyncState: RoomReadinessSnapshot['matrixSyncState'] = 'UNKNOWN';
+      let matrixChatFirstSyncComplete: boolean | null = null;
+      let matrixChatReady: boolean | null = null;
+      let matrixChatPageTypeBucket: MatrixChatPageTypeBucket = 'unavailable';
       try {
         const matrixChat = (
-          window as Window & { matrixChat?: { state?: unknown } }
+          window as Window & {
+            matrixChat?: { firstSyncComplete?: unknown; state?: unknown };
+          }
         ).matrixChat;
+        matrixChatFirstSyncComplete =
+          typeof matrixChat?.firstSyncComplete === 'boolean'
+            ? matrixChat.firstSyncComplete
+            : null;
         const state = matrixChat?.state;
         if (state !== null && typeof state === 'object') {
-          const currentRoomId = (state as { currentRoomId?: unknown })
-            .currentRoomId;
+          const matrixChatState = state as {
+            ready?: unknown;
+            page_type?: unknown;
+            currentRoomId?: unknown;
+          };
+          matrixChatReady =
+            typeof matrixChatState.ready === 'boolean'
+              ? matrixChatState.ready
+              : null;
+          matrixChatPageTypeBucket =
+            matrixChatState.page_type === undefined ||
+            matrixChatState.page_type === null
+              ? 'missing'
+              : typeof matrixChatState.page_type === 'string'
+                ? matrixChatState.page_type === 'room_view'
+                  ? 'room-view'
+                  : 'other-page'
+                : 'unavailable';
+          const currentRoomId = matrixChatState.currentRoomId;
           if (typeof currentRoomId === 'string' || currentRoomId === null) {
             currentRoomMatches = currentRoomId === expectedRoomId;
           }
@@ -5909,6 +8043,9 @@ async function observeMemberARoomReadinessSnapshot(
           roomHeader.querySelector('[role="heading"]') !== null,
         currentRoomMatches,
         matrixSyncState,
+        matrixChatFirstSyncComplete,
+        matrixChatReady,
+        matrixChatPageTypeBucket,
       };
     },
     expectedRoomId,
@@ -5924,6 +8061,7 @@ type RoomRenderStateObservation = Pick<
   | 'roomViewRendererPresent'
   | 'matrixChatStateAvailable'
   | 'matrixChatViewBucket'
+  | 'matrixChatFirstSyncComplete'
   | 'matrixChatReady'
   | 'matrixChatPageTypeBucket'
   | 'matrixChatCurrentRoomMatches'
@@ -5945,6 +8083,7 @@ function unavailableRoomRenderState(): RoomRenderStateObservation {
     roomViewRendererPresent: null,
     matrixChatStateAvailable: false,
     matrixChatViewBucket: 'unavailable',
+    matrixChatFirstSyncComplete: null,
     matrixChatReady: null,
     matrixChatPageTypeBucket: 'unavailable',
     matrixChatCurrentRoomMatches: null,
@@ -5971,12 +8110,17 @@ async function observeRoomRenderState(
       currentRoomId?: unknown;
     };
     let matrixChatState: MatrixChatState | undefined;
+    let matrixChatFirstSyncComplete: boolean | null = null;
     try {
       const matrixChat = (
         window as Window & {
-          matrixChat?: { state?: unknown };
+          matrixChat?: { firstSyncComplete?: unknown; state?: unknown };
         }
       ).matrixChat;
+      matrixChatFirstSyncComplete =
+        typeof matrixChat?.firstSyncComplete === 'boolean'
+          ? matrixChat.firstSyncComplete
+          : null;
       if (
         matrixChat?.state !== null &&
         typeof matrixChat?.state === 'object' &&
@@ -6056,6 +8200,7 @@ async function observeRoomRenderState(
       roomViewRendererPresent,
       matrixChatStateAvailable,
       matrixChatViewBucket,
+      matrixChatFirstSyncComplete,
       matrixChatReady,
       matrixChatPageTypeBucket,
       matrixChatCurrentRoomMatches,
@@ -6573,6 +8718,483 @@ function waitForGatewayResponse(
     },
     { timeout: 30_000 },
   );
+}
+
+type PrivateCalendarListRequestObserver = {
+  dispose: () => void;
+  recordSnapshot: (
+    record: (observations: PrivateUiCalendarListTransportObservation[]) => void,
+  ) => void;
+};
+
+function createPrivateCalendarListRequestObserver(
+  page: Page,
+  expectedRoomId: string,
+): PrivateCalendarListRequestObserver {
+  const observations = new Map<
+    string,
+    PrivateUiCalendarListTransportObservation
+  >();
+  let snapshotRecorded = false;
+
+  // These are the read routes in GatewayCalendarRepository's initial list.
+  // Request origin and room ID are only matched and never retained.
+  const identifyRequest = (
+    request: Request,
+  ):
+    | {
+        endpoint: PrivateUiCalendarListEndpoint;
+        method: PrivateUiCalendarListMethod;
+        key: string;
+      }
+    | undefined => {
+    try {
+      const url = new URL(request.url());
+      const method = request.method();
+      if (
+        url.origin !== PRIVATE_ACCEPTANCE_GATEWAY_ORIGIN ||
+        url.searchParams.get('roomId') !== expectedRoomId ||
+        (method !== 'GET' && method !== 'OPTIONS')
+      ) {
+        return undefined;
+      }
+
+      let endpoint: PrivateUiCalendarListEndpoint | undefined;
+      if (url.pathname === '/v1/calendar/context') {
+        endpoint = 'room-context';
+      } else if (url.pathname === '/v1/calendar/calendars') {
+        const target = url.searchParams.get('target');
+        if (target === 'personal') endpoint = 'personal-list';
+        if (target === 'room') endpoint = 'room-list';
+      }
+      if (!endpoint || !PRIVATE_UI_CALENDAR_LIST_ENDPOINTS.includes(endpoint)) {
+        return undefined;
+      }
+      return { endpoint, method, key: `${endpoint}:${method}` };
+    } catch {
+      return undefined;
+    }
+  };
+
+  const onRequest = (request: Request) => {
+    const match = identifyRequest(request);
+    if (!match) return;
+    observations.set(match.key, {
+      endpoint: match.endpoint,
+      method: match.method,
+      outcome: 'pending',
+    });
+  };
+
+  const onResponse = (response: Response) => {
+    const match = identifyRequest(response.request());
+    const previous = match ? observations.get(match.key) : undefined;
+    if (!match || !previous) return;
+    observations.set(match.key, {
+      endpoint: previous.endpoint,
+      method: previous.method,
+      outcome: 'response',
+      httpStatus: response.status(),
+    });
+  };
+
+  const onRequestFailed = (request: Request) => {
+    const match = identifyRequest(request);
+    const previous = match ? observations.get(match.key) : undefined;
+    if (!match || !previous) return;
+    observations.set(match.key, {
+      endpoint: previous.endpoint,
+      method: previous.method,
+      outcome: 'network-failure',
+      networkFailure: privateCalendarListNetworkFailure(request),
+    });
+  };
+
+  page.on('request', onRequest);
+  page.on('response', onResponse);
+  page.on('requestfailed', onRequestFailed);
+
+  const dispose = () => {
+    page.off('request', onRequest);
+    page.off('response', onResponse);
+    page.off('requestfailed', onRequestFailed);
+  };
+  const snapshot = () =>
+    [...observations.values()].sort((left, right) => {
+      const endpointOrder =
+        PRIVATE_UI_CALENDAR_LIST_ENDPOINTS.indexOf(left.endpoint) -
+        PRIVATE_UI_CALENDAR_LIST_ENDPOINTS.indexOf(right.endpoint);
+      return (
+        endpointOrder ||
+        PRIVATE_UI_CALENDAR_LIST_METHODS.indexOf(left.method) -
+          PRIVATE_UI_CALENDAR_LIST_METHODS.indexOf(right.method)
+      );
+    });
+
+  return {
+    recordSnapshot: (record) => {
+      if (snapshotRecorded) return;
+      snapshotRecorded = true;
+      try {
+        record(snapshot());
+      } catch {
+        // Bounded request diagnostics never mask an acceptance failure.
+      }
+      dispose();
+    },
+    dispose,
+  };
+}
+
+function privateCalendarListNetworkFailure(
+  request: Request,
+): PrivateUiCalendarListFailureCategory {
+  return classifyPrivateUiCalendarListNetworkFailure(
+    request.failure()?.errorText,
+  );
+}
+
+function waitForPrivateClientResponse(
+  page: Page,
+  method: 'GET' | 'POST' | 'DELETE',
+): Promise<Response> {
+  return page.waitForResponse(
+    (response) => {
+      try {
+        const url = new URL(response.url());
+        return (
+          url.origin === new URL(fixture.gatewayUrl).origin &&
+          (method === 'DELETE'
+            ? /^\/v1\/calendar\/private-clients\/mcwpc~[a-f0-9]{48}$/u.test(
+                url.pathname,
+              )
+            : url.pathname === '/v1/calendar/private-clients') &&
+          response.request().method() === method
+        );
+      } catch {
+        return false;
+      }
+    },
+    { timeout: 30_000 },
+  );
+}
+
+async function requestPrivateClientListStatus(
+  page: Page,
+  gatewayUrl: string,
+  roomId: string,
+  calendarId: string,
+): Promise<number> {
+  return page.evaluate(
+    async ({ gatewayUrl, roomId, calendarId }) => {
+      type OpenIdCredentials = {
+        access_token?: unknown;
+        matrix_server_name?: unknown;
+      };
+      type MatrixClient = {
+        getOpenIdToken?: () => Promise<OpenIdCredentials>;
+      };
+      type MatrixClientWindow = Window & {
+        mxMatrixClientPeg?: { get?: () => MatrixClient };
+      };
+
+      try {
+        const matrixClient = (
+          window as MatrixClientWindow
+        ).mxMatrixClientPeg?.get?.();
+        if (!matrixClient?.getOpenIdToken) return 0;
+        const credentials = await matrixClient.getOpenIdToken();
+        if (
+          typeof credentials.access_token !== 'string' ||
+          typeof credentials.matrix_server_name !== 'string'
+        ) {
+          return 0;
+        }
+        const query = new URLSearchParams({
+          target: 'room',
+          roomId,
+          calendarId,
+        });
+        const response = await fetch(
+          `${gatewayUrl}/v1/calendar/private-clients?${query.toString()}`,
+          {
+            headers: {
+              Authorization: `MX-Identity ${btoa(
+                JSON.stringify({
+                  matrix_server_name: credentials.matrix_server_name,
+                  access_token: credentials.access_token,
+                }),
+              )}`,
+            },
+          },
+        );
+        await response.body?.cancel();
+        return response.status;
+      } catch {
+        return 0;
+      }
+    },
+    { gatewayUrl, roomId, calendarId },
+  );
+}
+
+type PrivateDavRequestResult = Readonly<{
+  status: number;
+  bodyBytes: number;
+  etag?: string;
+  expectedTextPresent?: boolean;
+}>;
+
+function requestPrivateDav({
+  url,
+  username,
+  password,
+  caCertificate,
+  method,
+  headers = {},
+  body = '',
+  expectedText,
+}: {
+  url: URL;
+  username: string;
+  password: string;
+  caCertificate: Buffer;
+  method: string;
+  headers?: Record<string, string>;
+  body?: string;
+  expectedText?: string;
+}): Promise<PrivateDavRequestResult> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const fail = () => {
+      if (settled) return;
+      settled = true;
+      reject(new Error('Private CalDAV acceptance request failed'));
+    };
+    const authorization = `Basic ${Buffer.from(
+      `${username}:${password}`,
+      'utf8',
+    ).toString('base64')}`;
+    let request: ClientRequest;
+    try {
+      request = httpsRequest(
+        url,
+        {
+          method,
+          headers: {
+            accept: '*/*',
+            authorization,
+            connection: 'close',
+            ...headers,
+          },
+          ca: caCertificate,
+          agent: false,
+          timeout: 15_000,
+        },
+        (response) => {
+          const chunks: Buffer[] = [];
+          let bodyBytes = 0;
+          response.on('data', (chunk: Buffer) => {
+            bodyBytes += chunk.byteLength;
+            if (bodyBytes > 1_000_000) {
+              request.destroy();
+              fail();
+              return;
+            }
+            chunks.push(Buffer.from(chunk));
+          });
+          response.once('error', fail);
+          response.once('end', () => {
+            if (settled) return;
+            const responseBody = Buffer.concat(chunks);
+            const etag = response.headers.etag;
+            settled = true;
+            resolve({
+              status: response.statusCode ?? 0,
+              bodyBytes,
+              ...(typeof etag === 'string' ? { etag } : {}),
+              ...(expectedText === undefined
+                ? {}
+                : {
+                    expectedTextPresent: responseBody.includes(
+                      Buffer.from(expectedText, 'utf8'),
+                    ),
+                  }),
+            });
+          });
+        },
+      );
+    } catch {
+      fail();
+      return;
+    }
+    request.once('error', fail);
+    request.once('timeout', () => request.destroy());
+    request.end(body);
+  });
+}
+
+async function privateSetupDetailsAbsent(dialog: Locator): Promise<boolean> {
+  const counts = await Promise.all(
+    ['CalDAV URL', 'Username', 'App password'].map((name) =>
+      dialog.getByRole('textbox', { name, exact: true }).count(),
+    ),
+  );
+  return counts.every((count) => count === 0);
+}
+
+function privateTlsDirectoryMatchesRunnerTemp(): boolean {
+  const runnerTemp = process.env.RUNNER_TEMP;
+  const tlsDirectory = process.env.ELEMENT_ACCEPTANCE_PRIVATE_TLS_DIR;
+  return (
+    typeof runnerTemp === 'string' &&
+    typeof tlsDirectory === 'string' &&
+    isAbsolute(runnerTemp) &&
+    isAbsolute(tlsDirectory) &&
+    resolve(tlsDirectory).startsWith(`${resolve(runnerTemp)}${sep}`)
+  );
+}
+
+function readPrivateAcceptanceCaCertificate(): Buffer {
+  const tlsDirectory = process.env.ELEMENT_ACCEPTANCE_PRIVATE_TLS_DIR;
+  if (typeof tlsDirectory !== 'string' || !isAbsolute(tlsDirectory)) {
+    throw new Error('Private acceptance CA certificate is unavailable');
+  }
+  try {
+    return readFileSync(join(tlsDirectory, 'ca.pem'));
+  } catch {
+    throw new Error('Private acceptance CA certificate is unavailable');
+  }
+}
+
+async function selectPrivateAcceptanceCalendar(
+  page: Page,
+  calendarPicker: Locator,
+  targetCalendarOption: Locator,
+): Promise<boolean> {
+  const alreadySelected =
+    (await targetCalendarOption.getAttribute('aria-selected')) === 'true';
+  if (alreadySelected) {
+    await calendarPicker.press('Escape');
+    return true;
+  }
+
+  const selectedListResponse = waitForPrivateClientResponse(page, 'GET');
+  await targetCalendarOption.click();
+  return (await selectedListResponse).status() === 200;
+}
+
+function privateCredentialsMatchGateway(
+  username: string,
+  password: string,
+  credentialUrl: URL,
+): boolean {
+  return [
+    /^mcwpc~[a-f0-9]{48}$/u.test(username),
+    /^[A-Za-z0-9_-]{43}$/u.test(password),
+    credentialUrl.origin === PRIVATE_ACCEPTANCE_GATEWAY_ORIGIN,
+    credentialUrl.pathname === `/${username}/calendar/`,
+    credentialUrl.username === '',
+    credentialUrl.password === '',
+    credentialUrl.search === '',
+    credentialUrl.hash === '',
+  ].every(Boolean);
+}
+
+function parsePrivateCredentialUrl(credentialUrlText: string): URL {
+  try {
+    return new URL(credentialUrlText);
+  } catch {
+    throw new Error('Private app credentials were not rendered');
+  }
+}
+
+function privateDavLifecycleSucceeded(
+  principalDiscovery: PrivateDavRequestResult,
+  collectionDiscovery: PrivateDavRequestResult,
+  createdResource: PrivateDavRequestResult,
+  readCreatedResource: PrivateDavRequestResult,
+  updatedResource: PrivateDavRequestResult,
+  readUpdatedResource: PrivateDavRequestResult,
+  deletedResource: PrivateDavRequestResult,
+): boolean {
+  return (
+    principalDiscovery.status === 207 &&
+    collectionDiscovery.status === 207 &&
+    privateDavWriteSucceeded(createdResource) &&
+    readCreatedResource.status === 200 &&
+    readCreatedResource.expectedTextPresent === true &&
+    isStrongPrivateDavEtag(readCreatedResource.etag) &&
+    privateDavWriteSucceeded(updatedResource) &&
+    readUpdatedResource.status === 200 &&
+    readUpdatedResource.expectedTextPresent === true &&
+    isStrongPrivateDavEtag(readUpdatedResource.etag) &&
+    privateDavWriteSucceeded(deletedResource)
+  );
+}
+
+function privateDavWriteSucceeded(result: PrivateDavRequestResult): boolean {
+  return result.status >= 200 && result.status < 300;
+}
+
+function isStrongPrivateDavEtag(etag: string | undefined): etag is string {
+  return typeof etag === 'string' && /^"[\x21\x23-\x7e]{1,200}"$/u.test(etag);
+}
+
+function privateDavEtagOrEmpty(etag: string | undefined): string {
+  return isStrongPrivateDavEtag(etag) ? etag : '';
+}
+
+function privateDavReadSucceeded(result: PrivateDavRequestResult): boolean {
+  return result.status === 200 && result.expectedTextPresent === true;
+}
+
+function privateDavReadEtagOrEmpty(result: PrivateDavRequestResult): string {
+  return privateDavReadSucceeded(result)
+    ? privateDavEtagOrEmpty(result.etag)
+    : '';
+}
+
+async function bestEffortDeleteOwnedPrivateDavResource(
+  requestBase: {
+    username: string;
+    password: string;
+    caCertificate: Buffer;
+  },
+  url: URL,
+  expectedUid: string,
+): Promise<void> {
+  try {
+    const existingResource = await requestPrivateDav({
+      ...requestBase,
+      url,
+      method: 'GET',
+      expectedText: `UID:${expectedUid}`,
+    });
+    if (existingResource.status === 404) return;
+    if (
+      existingResource.status !== 200 ||
+      existingResource.expectedTextPresent !== true ||
+      !isStrongPrivateDavEtag(existingResource.etag)
+    ) {
+      return;
+    }
+
+    await requestPrivateDav({
+      ...requestBase,
+      url,
+      method: 'DELETE',
+      headers: { 'if-match': existingResource.etag },
+    });
+  } catch {
+    // Best-effort cleanup must not replace the primary acceptance result.
+  }
+}
+
+function revokedPrivateDavCredentialDenied(
+  result: PrivateDavRequestResult,
+): boolean {
+  return result.status === 401 && result.bodyBytes === 0;
 }
 
 function observeReminderWidgetContextResponse(
@@ -8217,10 +10839,18 @@ function record(
     reminderEnabled?: boolean;
     canaryDelivered?: boolean;
     roomMentioned?: boolean;
+    selectedMemberMentioned?: boolean;
+    targetMentioned?: boolean;
+    expectedRoomRecipient?: boolean;
+    expectedSelectedRecipient?: boolean;
     deliveredAfterDue?: boolean;
     allMarkersOnce?: boolean;
+    targetSettingsReadback?: boolean;
+    allDayScheduleReadback?: boolean;
     canManageReminders?: boolean;
   } & Partial<ReminderConfigurationObservation> &
+    Partial<ReminderAlarmUiObservation> &
+    Partial<PublicFeedBrowserObservation> &
     Partial<Omit<G6StageRecord, 'phase' | 'status' | 'httpStatus' | 'count'>>,
 ) {
   const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
@@ -8236,6 +10866,64 @@ function record(
     })}\n`,
     { encoding: 'utf8', mode: 0o600 },
   );
+}
+
+function enterActiveReminderFlowStage(
+  stage: ReminderFlowDiagnosticStage,
+): void {
+  const state = activeReminderFlowDiagnostic;
+  if (state) enterReminderFlowDiagnosticStage(state, stage);
+}
+
+function completeActiveReminderFlowStage(
+  stage: ReminderFlowDiagnosticStage,
+): void {
+  const state = activeReminderFlowDiagnostic;
+  if (state) completeReminderFlowDiagnosticStage(state, stage);
+}
+
+function failActiveReminderFlow(error: unknown): void {
+  const state = activeReminderFlowDiagnostic;
+  if (state) failReminderFlowDiagnostic(state, error);
+}
+
+function finishActiveReminderFlowDiagnostic(status: string | undefined): void {
+  const state = activeReminderFlowDiagnostic;
+  activeReminderFlowDiagnostic = undefined;
+  if (!state) return;
+
+  const knownStatuses = new Set<ReminderFlowTestStatus>([
+    'passed',
+    'failed',
+    'timedOut',
+    'skipped',
+    'interrupted',
+    'unknown',
+  ]);
+  const testStatus = knownStatuses.has(status as ReminderFlowTestStatus)
+    ? (status as ReminderFlowTestStatus)
+    : 'unknown';
+  if (testStatus !== 'passed' && testStatus !== 'skipped') {
+    failReminderFlowDiagnostic(state, undefined);
+  }
+  recordReminderFlowDiagnostic(
+    buildReminderFlowDiagnosticRecord(state, testStatus),
+  );
+}
+
+function captureReminderFlowReadbackError(error: unknown): void {
+  failActiveReminderFlow(error);
+}
+
+function recordReminderFlowDiagnostic(
+  diagnostic: ReminderFlowDiagnosticRecord,
+): void {
+  const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
+  if (!stageFile) throw new Error('Element acceptance fixture unavailable');
+  appendFileSync(stageFile, `${JSON.stringify(diagnostic)}\n`, {
+    encoding: 'utf8',
+    mode: 0o600,
+  });
 }
 
 function recordPerformancePilot(
@@ -8255,6 +10943,51 @@ function recordPerformancePilot(
     })}\n`,
     { encoding: 'utf8', mode: 0o600 },
   );
+}
+
+function capturePrivatePerformancePageError(
+  error: Error,
+  profile: OrdinaryPerformanceProfile,
+  stage: PerformancePageErrorStage,
+): void {
+  // This is an opt-in local synthetic-run aid. CI never writes raw exception
+  // text, and the file is never attached to acceptance artifacts.
+  if (process.env.CI || process.env.GITHUB_ACTIONS) return;
+  const configuredPath =
+    process.env.ELEMENT_ACCEPTANCE_PRIVATE_ERROR_CAPTURE_PATH;
+  if (!configuredPath || !isAbsolute(configuredPath)) return;
+  const capturePath = resolve(configuredPath);
+  const privateRoot = realpathSync(tmpdir()) + sep;
+  if (!capturePath.startsWith(privateRoot)) return;
+
+  try {
+    mkdirSync(dirname(capturePath), { recursive: true, mode: 0o700 });
+    const captureParent = realpathSync(dirname(capturePath));
+    if (
+      captureParent !== realpathSync(tmpdir()) &&
+      !captureParent.startsWith(privateRoot)
+    ) {
+      return;
+    }
+    const bounded = (value: unknown, maxLength: number): string | null =>
+      typeof value === 'string' ? value.slice(0, maxLength) : null;
+    const payload = `${JSON.stringify({
+      profile,
+      stage,
+      name: bounded(error.name, 128),
+      message: bounded(error.message, 4_096),
+      stack: bounded(error.stack, 32_768),
+    })}\n`;
+    if (Buffer.byteLength(payload, 'utf8') > 40_000) return;
+    // Exclusive create refuses existing files and symlinks; first error wins.
+    writeFileSync(capturePath, payload, {
+      encoding: 'utf8',
+      flag: 'wx',
+      mode: 0o600,
+    });
+  } catch {
+    // Diagnostics must never replace the original acceptance failure.
+  }
 }
 
 function recordMemberASessionObservation(
@@ -8287,31 +11020,11 @@ function recordMemberARoomObservation(
 ) {
   const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
   if (!stageFile) throw new Error('Element acceptance fixture unavailable');
-  const observation = result.observation
-    ? roomContextObservationForPhase(
-        {
-          ...result.observation,
-          ...(result.roomReadinessTimeline
-            ? { roomReadinessTimeline: result.roomReadinessTimeline }
-            : {}),
-        },
-        phase,
-      )
-    : result.roomReadinessTimeline
-      ? roomContextObservationForPhase(
-          { roomReadinessTimeline: result.roomReadinessTimeline },
-          phase,
-        )
-      : undefined;
   appendFileSync(
     stageFile,
-    `${JSON.stringify({
-      phase,
-      status: result.failureCode ? 'failed' : 'passed',
-      ...(result.failureCode ? { failureCode: result.failureCode } : {}),
-      ...(observation ?? {}),
-      ...(reminderWidgetContext ?? {}),
-    })}\n`,
+    `${JSON.stringify(
+      createMemberRoomContextRecord(result, phase, reminderWidgetContext),
+    )}\n`,
     { encoding: 'utf8', mode: 0o600 },
   );
 }
@@ -8335,4 +11048,549 @@ function recordRuntimeVersions(chromiumVersion: string) {
     })}\n`,
     { encoding: 'utf8', mode: 0o600 },
   );
+}
+
+function requirePrivateUiCheckpointJournal<T>(journal: T | undefined): T {
+  if (journal === undefined) {
+    throw new Error('Private acceptance checkpoints are unavailable');
+  }
+  return journal;
+}
+
+if (process.env.ELEMENT_ACCEPTANCE_PRIVATE_UI === 'true') {
+  test.describe('private calendar app acceptance', () => {
+    let privateUiJournal:
+      | ReturnType<typeof createPrivateUiCheckpointJournal>
+      | undefined;
+
+    test.beforeEach(() => {
+      const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
+      const sourceSha = process.env.ELEMENT_ACCEPTANCE_SOURCE_SHA;
+      if (process.env.ROOM_CALENDAR_PRINCIPAL_MODE !== 'bot-account') {
+        throw new Error('Private acceptance requires the normal bot profile');
+      }
+      if (!stageFile || !sourceSha) {
+        throw new Error('Private acceptance checkpoints are unavailable');
+      }
+      privateUiJournal = createPrivateUiCheckpointJournal({
+        stageFile,
+        sourceSha,
+        profile: 'normal-bot',
+      });
+    });
+
+    test.afterEach(async ({}, testInfo) => {
+      privateUiJournal?.finish(testInfo.status);
+      privateUiJournal = undefined;
+    });
+
+    test('Element Web manages private app access and revokes CalDAV authorization', async ({
+      browser,
+    }) => {
+      test.setTimeout(360_000);
+      const checkpoint = requirePrivateUiCheckpointJournal(privateUiJournal);
+      const caCertificate = await checkpoint.run(
+        'private-ui-fixture-ready',
+        () => {
+          fixture = readFixture();
+          const privateGatewayOriginMatches =
+            new URL(fixture.gatewayUrl).origin ===
+            PRIVATE_ACCEPTANCE_GATEWAY_ORIGIN;
+          expect(privateGatewayOriginMatches).toBe(true);
+          expect(privateTlsDirectoryMatchesRunnerTemp()).toBe(true);
+          return readPrivateAcceptanceCaCertificate();
+        },
+      );
+
+      const allowedOrigins = new Set([
+        new URL(fixture.elementUrl).origin,
+        new URL(fixture.homeserverUrl).origin,
+        new URL(fixture.gatewayUrl).origin,
+        new URL(fixture.widgetUrl).origin,
+        'http://localhost:8008',
+      ]);
+      const contexts: BrowserContext[] = [];
+      let blockedExternalRequests = 0;
+      let calendarListRequestObserver:
+        | PrivateCalendarListRequestObserver
+        | undefined;
+      const makeContext = async () => {
+        const context = await browser.newContext({
+          locale: 'en-US',
+          timezoneId: 'Europe/Stockholm',
+          viewport: { width: 1440, height: 900 },
+        });
+        contexts.push(context);
+        await context.route('**/*', async (route) => {
+          let origin: string;
+          try {
+            origin = new URL(route.request().url()).origin;
+          } catch {
+            blockedExternalRequests += 1;
+            await route.abort('blockedbyclient');
+            return;
+          }
+          if (!allowedOrigins.has(origin)) {
+            blockedExternalRequests += 1;
+            await route.abort('blockedbyclient');
+            return;
+          }
+          await route.continue();
+        });
+        return context;
+      };
+
+      try {
+        const { contextA, pageA } = await checkpoint.run(
+          'private-ui-member-a-auth',
+          async () => {
+            const contextA = await makeContext();
+            const pageA = await authenticateInElement(
+              contextA,
+              fixture.users.memberA,
+            );
+            return { contextA, pageA };
+          },
+        );
+        const teamRoomA = await checkpoint.run('private-ui-member-a-room', () =>
+          openFixtureRoom(pageA, fixture.roomName, fixture.teamRoomId),
+        );
+        calendarListRequestObserver = createPrivateCalendarListRequestObserver(
+          pageA,
+          fixture.teamRoomId,
+        );
+        const frameA = await checkpoint.run(
+          'private-ui-member-a-widget-ready',
+          () =>
+            openCalendarWidget(teamRoomA, pageA, {
+              expectWidgetWarning: false,
+            }),
+        );
+        const privateClientButtonA = frameA.getByRole('button', {
+          name: 'Calendar app access',
+          exact: true,
+        });
+        await checkpoint.run('private-ui-access-button-visible', () =>
+          expect(privateClientButtonA).toBeVisible(),
+        );
+        await checkpoint.run('private-ui-access-button-enabled', () =>
+          expect(privateClientButtonA).toBeEnabled(),
+        );
+        calendarListRequestObserver.recordSnapshot((observations) =>
+          checkpoint.recordCalendarListTransport(observations),
+        );
+        const initialListResponse = waitForPrivateClientResponse(pageA, 'GET');
+        await checkpoint.run('private-ui-access-button-click', () =>
+          privateClientButtonA.click(),
+        );
+        const dialogA = frameA.getByRole('dialog').last();
+        await checkpoint.run('private-ui-dialog-visible', () =>
+          expect(dialogA).toBeVisible(),
+        );
+        await checkpoint.run('private-ui-initial-list', async () => {
+          const response = await initialListResponse;
+          expect(response.status()).toBe(200);
+        });
+
+        const calendarPicker = dialogA.getByRole('combobox', {
+          name: 'Calendar',
+        });
+        await checkpoint.run('private-ui-calendar-select', async () => {
+          await calendarPicker.click();
+          const targetCalendarOption = frameA.getByRole('option', {
+            name: 'Synthetic team calendar',
+            exact: true,
+          });
+          await expect(targetCalendarOption).toHaveCount(1);
+          expect(
+            await selectPrivateAcceptanceCalendar(
+              pageA,
+              calendarPicker,
+              targetCalendarOption,
+            ),
+          ).toBe(true);
+        });
+
+        let publicFeedMutationCount = 0;
+        pageA.on('request', (request) => {
+          try {
+            const url = new URL(request.url());
+            if (
+              url.origin === PRIVATE_ACCEPTANCE_GATEWAY_ORIGIN &&
+              url.pathname === '/v1/calendar-feeds/publication' &&
+              ['PUT', 'DELETE'].includes(request.method())
+            ) {
+              publicFeedMutationCount += 1;
+            }
+          } catch {
+            // Keep only the mutation count; never retain the request URL.
+          }
+        });
+
+        const { credentialUrlText, credentialUrl, username, password } =
+          await checkpoint.run(
+            'private-ui-credential-issue-reveal',
+            async () => {
+              const createResponse = waitForPrivateClientResponse(
+                pageA,
+                'POST',
+              );
+              await dialogA
+                .getByRole('button', {
+                  name: 'Create app access',
+                  exact: true,
+                })
+                .click();
+              expect((await createResponse).status()).toBe(201);
+
+              const credentialUrlText = await dialogA
+                .getByRole('textbox', { name: 'CalDAV URL', exact: true })
+                .inputValue();
+              const credentialUrl =
+                parsePrivateCredentialUrl(credentialUrlText);
+              const username = await dialogA
+                .getByRole('textbox', { name: 'Username', exact: true })
+                .inputValue();
+              const password = await dialogA
+                .getByRole('textbox', { name: 'App password', exact: true })
+                .inputValue();
+              expect(
+                privateCredentialsMatchGateway(
+                  username,
+                  password,
+                  credentialUrl,
+                ),
+              ).toBe(true);
+              return { credentialUrlText, credentialUrl, username, password };
+            },
+          );
+        await checkpoint.run('private-ui-no-publication', () => {
+          expect(publicFeedMutationCount).toBe(0);
+        });
+
+        await checkpoint.run('private-ui-credential-hide', async () => {
+          await expect(
+            dialogA.getByText('Status: Active', { exact: true }),
+          ).toBeVisible();
+          await dialogA
+            .getByRole('button', { name: 'Hide setup details', exact: true })
+            .click();
+          expect(await privateSetupDetailsAbsent(dialogA)).toBe(true);
+        });
+
+        await checkpoint.run('private-ui-storage-check', async () => {
+          const browserStorage = JSON.stringify(await contextA.storageState());
+          const appCredentialWasPersisted =
+            browserStorage.includes(username) ||
+            browserStorage.includes(password) ||
+            browserStorage.includes(credentialUrlText);
+          expect(appCredentialWasPersisted).toBe(false);
+        });
+
+        const reopenedDialogA = await checkpoint.run(
+          'private-ui-list-reopen',
+          async () => {
+            await dialogA
+              .getByRole('button', { name: 'Close', exact: true })
+              .click();
+            const listedAfterReopen = waitForPrivateClientResponse(
+              pageA,
+              'GET',
+            );
+            await privateClientButtonA.click();
+            const dialog = frameA.getByRole('dialog').last();
+            expect((await listedAfterReopen).status()).toBe(200);
+            expect(await privateSetupDetailsAbsent(dialog)).toBe(true);
+            await expect(
+              dialog.getByText('Status: Active', { exact: true }),
+            ).toBeVisible();
+            return dialog;
+          },
+        );
+
+        const principalUrl = new URL('../', credentialUrl);
+        const collectionUrl = new URL(credentialUrl.href);
+        const eventResourceId = randomUUID();
+        const resourceUrl = new URL(
+          `private-ui-${eventResourceId}.ics`,
+          collectionUrl,
+        );
+        const eventUid = `private-ui-${eventResourceId}@acceptance.invalid`;
+        const timeValue = (value: Date) =>
+          value
+            .toISOString()
+            .replace(/[-:]/gu, '')
+            .replace(/\.\d{3}Z$/u, 'Z');
+        const eventStart = new Date(Date.now() + 5 * 60_000);
+        const eventEnd = new Date(eventStart.getTime() + 30 * 60_000);
+        const originalSummary = 'Private UI acceptance original';
+        const updatedSummary = 'Private UI acceptance updated';
+        const makeIcs = (summary: string) =>
+          [
+            'BEGIN:VCALENDAR',
+            'VERSION:2.0',
+            'PRODID:-//Matrix Calendar Widget//Private Acceptance//EN',
+            'BEGIN:VEVENT',
+            `UID:${eventUid}`,
+            `DTSTAMP:${timeValue(new Date())}`,
+            `DTSTART:${timeValue(eventStart)}`,
+            `DTEND:${timeValue(eventEnd)}`,
+            `SUMMARY:${summary}`,
+            'END:VEVENT',
+            'END:VCALENDAR',
+            '',
+          ].join('\r\n');
+        const discoveryBody = [
+          '<?xml version="1.0" encoding="utf-8"?>',
+          '<d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>',
+        ].join('');
+        const requestBase = {
+          username,
+          password,
+          caCertificate,
+        };
+        try {
+          const principalDiscovery = await checkpoint.run(
+            'private-ui-dav-principal-discovery',
+            async () => {
+              const result = await requestPrivateDav({
+                ...requestBase,
+                url: principalUrl,
+                method: 'PROPFIND',
+                headers: { depth: '0', 'content-type': 'application/xml' },
+                body: discoveryBody,
+              });
+              expect(result.status).toBe(207);
+              return result;
+            },
+          );
+          const collectionDiscovery = await checkpoint.run(
+            'private-ui-dav-collection-discovery',
+            async () => {
+              const result = await requestPrivateDav({
+                ...requestBase,
+                url: collectionUrl,
+                method: 'PROPFIND',
+                headers: { depth: '1', 'content-type': 'application/xml' },
+                body: discoveryBody,
+              });
+              expect(result.status).toBe(207);
+              return result;
+            },
+          );
+          const createdResource = await checkpoint.run(
+            'private-ui-dav-create',
+            async () => {
+              const result = await requestPrivateDav({
+                ...requestBase,
+                url: resourceUrl,
+                method: 'PUT',
+                headers: {
+                  'content-type': 'text/calendar; charset=utf-8',
+                  'if-none-match': '*',
+                },
+                body: makeIcs(originalSummary),
+              });
+              expect(privateDavWriteSucceeded(result)).toBe(true);
+              return result;
+            },
+          );
+          const readCreatedResource = await checkpoint.run(
+            'private-ui-dav-read-created',
+            async () => {
+              const result = await requestPrivateDav({
+                ...requestBase,
+                url: resourceUrl,
+                method: 'GET',
+                expectedText: `SUMMARY:${originalSummary}`,
+              });
+              expect(privateDavReadSucceeded(result)).toBe(true);
+              expect(isStrongPrivateDavEtag(result.etag)).toBe(true);
+              return result;
+            },
+          );
+          const updatedResource = await checkpoint.run(
+            'private-ui-dav-update',
+            async () => {
+              const result = await requestPrivateDav({
+                ...requestBase,
+                url: resourceUrl,
+                method: 'PUT',
+                headers: {
+                  'content-type': 'text/calendar; charset=utf-8',
+                  'if-match': privateDavReadEtagOrEmpty(readCreatedResource),
+                },
+                body: makeIcs(updatedSummary),
+              });
+              expect(privateDavWriteSucceeded(result)).toBe(true);
+              return result;
+            },
+          );
+          const readUpdatedResource = await checkpoint.run(
+            'private-ui-dav-read-updated',
+            async () => {
+              const result = await requestPrivateDav({
+                ...requestBase,
+                url: resourceUrl,
+                method: 'GET',
+                expectedText: `SUMMARY:${updatedSummary}`,
+              });
+              expect(privateDavReadSucceeded(result)).toBe(true);
+              expect(isStrongPrivateDavEtag(result.etag)).toBe(true);
+              return result;
+            },
+          );
+          const deletedResource = await checkpoint.run(
+            'private-ui-dav-delete',
+            async () => {
+              const result = await requestPrivateDav({
+                ...requestBase,
+                url: resourceUrl,
+                method: 'DELETE',
+                headers: {
+                  'if-match': privateDavReadEtagOrEmpty(readUpdatedResource),
+                },
+              });
+              expect(privateDavWriteSucceeded(result)).toBe(true);
+              return result;
+            },
+          );
+          expect(
+            privateDavLifecycleSucceeded(
+              principalDiscovery,
+              collectionDiscovery,
+              createdResource,
+              readCreatedResource,
+              updatedResource,
+              readUpdatedResource,
+              deletedResource,
+            ),
+          ).toBe(true);
+        } finally {
+          // This only deletes this random resource after verifying its UID and
+          // current strong ETag. Cleanup failure never masks the test failure.
+          await checkpoint.cleanup('private-ui-dav-cleanup', () =>
+            bestEffortDeleteOwnedPrivateDavResource(
+              requestBase,
+              resourceUrl,
+              eventUid,
+            ),
+          );
+        }
+
+        const memberBPage = await checkpoint.run(
+          'private-ui-member-b-auth',
+          async () => {
+            const memberBContext = await makeContext();
+            return authenticateInElement(memberBContext, fixture.users.memberB);
+          },
+        );
+        const memberBRoom = await checkpoint.run(
+          'private-ui-member-b-room',
+          () =>
+            openFixtureRoom(memberBPage, fixture.roomName, fixture.teamRoomId),
+        );
+        const memberBFrame = await checkpoint.run(
+          'private-ui-member-b-widget-ready',
+          () =>
+            openCalendarWidget(memberBRoom, memberBPage, {
+              expectWidgetWarning: true,
+            }),
+        );
+        await checkpoint.run('private-ui-member-b-deny', async () => {
+          const memberBDialogList = waitForPrivateClientResponse(
+            memberBPage,
+            'GET',
+          );
+          await memberBFrame
+            .getByRole('button', {
+              name: 'Calendar app access',
+              exact: true,
+            })
+            .click();
+          const memberBDialog = memberBFrame.getByRole('dialog').last();
+          expect((await memberBDialogList).status()).toBe(403);
+          await expect(
+            memberBDialog.getByRole('button', {
+              name: 'Create app access',
+              exact: true,
+            }),
+          ).toHaveCount(0);
+        });
+
+        const outsiderPage = await checkpoint.run(
+          'private-ui-outsider-auth',
+          async () => {
+            const outsiderContext = await makeContext();
+            return authenticateInElement(
+              outsiderContext,
+              fixture.users.outsider,
+            );
+          },
+        );
+        const outsiderRoom = await checkpoint.run(
+          'private-ui-outsider-room',
+          () =>
+            openFixtureRoom(
+              outsiderPage,
+              fixture.outsiderRoomName,
+              fixture.outsiderRoomId,
+            ),
+        );
+        await checkpoint.run('private-ui-outsider-widget-ready', () =>
+          openCalendarWidget(outsiderRoom, outsiderPage, {
+            expectWidgetWarning: false,
+            waitForCalendar: false,
+          }),
+        );
+        await checkpoint.run('private-ui-outsider-deny', async () => {
+          const outsiderPrivateClientStatus =
+            await requestPrivateClientListStatus(
+              outsiderPage,
+              fixture.gatewayUrl,
+              fixture.teamRoomId,
+              fixture.calendarId,
+            );
+          expect(outsiderPrivateClientStatus).toBe(403);
+        });
+
+        await checkpoint.run('private-ui-revoke', async () => {
+          const revokeResponse = waitForPrivateClientResponse(pageA, 'DELETE');
+          await reopenedDialogA
+            .getByRole('button', { name: 'Revoke', exact: true })
+            .click();
+          await reopenedDialogA
+            .getByRole('button', { name: 'Revoke access', exact: true })
+            .click();
+          expect((await revokeResponse).status()).toBe(200);
+          await expect(
+            reopenedDialogA.getByText('Status: Revoked', { exact: true }),
+          ).toBeVisible();
+        });
+
+        await checkpoint.run('private-ui-dav-deny-after-revoke', async () => {
+          const davAfterRevoke = await requestPrivateDav({
+            ...requestBase,
+            url: resourceUrl,
+            method: 'GET',
+          });
+          expect(revokedPrivateDavCredentialDenied(davAfterRevoke)).toBe(true);
+        });
+        await checkpoint.run('private-ui-egress-check', async () => {
+          expect(blockedExternalRequests).toBe(0);
+          expect(publicFeedMutationCount).toBe(0);
+        });
+      } finally {
+        calendarListRequestObserver?.recordSnapshot((observations) =>
+          checkpoint.recordCalendarListTransport(observations),
+        );
+        calendarListRequestObserver?.dispose();
+        await checkpoint.cleanup('private-ui-context-cleanup', async () => {
+          await Promise.all(
+            contexts.map((context) => context.close().catch(() => undefined)),
+          );
+        });
+      }
+    });
+  });
 }

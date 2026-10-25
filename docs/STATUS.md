@@ -2,7 +2,7 @@
 
 [Documentation](./README.md) · [Roadmap](./ROADMAP.md) · [Implementation plan](./PLAN.md) · [Release evidence](./RELEASE.md)
 
-_Updated 21 October 2026 against `main` at [`817854b`](https://github.com/0cwa/matrix-calendar-widget/commit/817854b9d9662f400069501b2c527abdc306035b), after public-feed PR #385 merged. Open PRs are identified separately below._
+_Updated 25 October 2026 against `main` at [`c8f7260`](https://github.com/0cwa/matrix-calendar-widget/commit/c8f72604eda29542237f0fb86c67f4cb267cb10d), after public-feed PR #385 merged. Open PRs are identified separately below._
 
 **Pre-alpha.** The calendar implementation is available for development. The controlled pilot targets Element Web/Desktop, one gateway replica, an independent project-owned Radicale store, and separate app-owned PostgreSQL state. A previously frozen source has application and image evidence; target configuration, live pilot use, backup/recovery, and wider rollout remain distinct gates in the [release ledger](./RELEASE.md).
 
@@ -24,9 +24,10 @@ The [user guide](./user-guide.md) explains the supported workflows. The [data mo
 
 ## In development and deferred
 
-- [PR #384](https://github.com/0cwa/matrix-calendar-widget/pull/384) is open at this snapshot: selected joined-member reminder targets, explicit all-day delivery schedules, and combined alarm/reminder controls. These are not shipped features of the baseline above.
+- [PR #404](https://github.com/0cwa/matrix-calendar-widget/pull/404) contains the developing selected-member and all-day reminder and private external CalDAV features. The native-client qualification recorded here is source K, [`a308cea`](https://github.com/0cwa/matrix-calendar-widget/commit/a308cea4ea7aa3bd3a6700c52aa42ec7be19b0c3). Selected targets load the complete joined-member roster from the gateway as tracked in [#401](https://github.com/0cwa/matrix-calendar-widget/issues/401). Private access remains default-off and is not qualified for Element manager/DAV use on K. Native public and private CalDAV profiles passed on K, including server-side post-revocation PUT denial with canonical bytes unchanged; client-observed rejection remains indeterminate. These features are not shipped on `main`.
+- On M, [Element acceptance](https://github.com/0cwa/matrix-calendar-widget/actions/runs/40207487246) passed normal-bot initial delivery, restart, and restore, then failed the post-restore G6 member-B room-context check. The expected user, joined room, and route matched, but Element did not render the expected current room or heading; the sampled sync state was `SYNCING`. The cause remains unknown. A local diagnostic records the MatrixChat gate and route state around navigation without changing the room-entry behavior or acceptance criteria; hosted qualification is pending.
 - [Issue #382](https://github.com/0cwa/matrix-calendar-widget/issues/382) tracks remaining subscription/reminder/bot work. Public feeds and readable bot replies have merged; private external CalDAV read/write credentials remain open.
-- [Issue #386](https://github.com/0cwa/matrix-calendar-widget/issues/386) tracks appservice-mode packaged Desktop room navigation on the public-feed source. The normal-bot acceptance job passed on that source; the appservice failure is not silently reclassified as a pass.
+- [Issue #386](https://github.com/0cwa/matrix-calendar-widget/issues/386) retains the deferred full appservice-mode Element browser certification. On M, its browser job failed during `desktop_journey` before the reminder journey began. The required backend reminder contract for both principal modes passed; the missing browser evidence remains deferred, not passed.
 - [Issue #5](https://github.com/0cwa/matrix-calendar-widget/issues/5) retains collection timezone work; [#6](https://github.com/0cwa/matrix-calendar-widget/issues/6) retains broader recurrence and cross-client interoperability.
 - Mobile/other-client certification, full-width/pinned layouts, broader capacity claims, and formal screen-reader certification remain outside the bounded pilot. Calendar/Radicale testing for the developing Android widget host belongs in [#372](https://github.com/0cwa/matrix-calendar-widget/issues/372).
 

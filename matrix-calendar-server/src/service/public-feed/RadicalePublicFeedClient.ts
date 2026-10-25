@@ -75,6 +75,14 @@ export class RadicalePublicFeedClient {
       credentialProvider,
     );
     if (
+      isRecord(response) &&
+      response.Status === 'not-found' &&
+      Array.isArray(response.Content) &&
+      response.Content.length === 0
+    ) {
+      return Object.freeze([]);
+    }
+    if (
       !isRecord(response) ||
       response.Status !== 'success' ||
       !Array.isArray(response.Content)

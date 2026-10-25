@@ -40,6 +40,10 @@ vi.mock('@matrix-widget-toolkit/mui', () => ({
   ),
 }));
 
+vi.mock('./components/common/CalendarMuiThemeProvider', () => ({
+  CalendarMuiThemeProvider: ({ children }: { children: ReactNode }) => children,
+}));
+
 vi.mock('./store', () => {
   throw new Error('The calendar-only app must not load the meeting store.');
 });

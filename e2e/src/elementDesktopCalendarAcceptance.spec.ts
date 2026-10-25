@@ -45,7 +45,9 @@ import {
   appendDesktopUncaughtError,
   classifyDesktopJourneyErrorClass,
   classifyDesktopLoginFailure,
+  classifyDesktopRoomNavigationClickFailure,
   collectWebBEventTitleMatches,
+  desktopRouteEnforcementOutcome,
   desktopWidgetIsReady,
   enterDesktopPasswordLogin,
   findUniqueWebBEventId,
@@ -458,6 +460,11 @@ async function observeDesktopGatewayReadFailureDiagnostic(
 }
 
 test('Element Desktop room event journey', async ({ browser }) => {
+  // The full cross-client journey needs a larger harness wall-clock budget
+  // than the shared 150 s default. Keep it bounded and allow room-navigation
+  // click diagnostics to finish before the child deadline. Product startup,
+  // details, and API performance assertions retain their existing limits.
+  test.setTimeout(210_000);
   const runnerTemp = requireAbsoluteEnvironment('RUNNER_TEMP');
   const usersFile = requirePrivateRunnerFile(
     'ELEMENT_ACCEPTANCE_USERS_FILE',
@@ -932,6 +939,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
     desktopRefreshRoomNavigationClickStartedAt = roomNavigationStartedAt;
     const roomNavigationClick = desktopElement.navigateToRoomOrInvitation(
       fixture.roomName,
+      { timeout: 20_000 },
     );
     desktopRefreshRoomNavigationDiagnostic.clickAttempted = true;
     desktopRefreshRoomNavigationDiagnostic.elapsedBucket = 'not_completed';
@@ -952,7 +960,35 @@ test('Element Desktop room event journey', async ({ browser }) => {
       'desktop-refresh-room-navigation',
       desktopRefreshRoomNavigationDiagnostic,
     );
-    await roomNavigationClick;
+    try {
+      await roomNavigationClick;
+    } catch (error: unknown) {
+      const clickFailureClass =
+        classifyDesktopRoomNavigationClickFailure(error);
+      const hitTest = await desktopElement.observeRoomNavigationHitTest(
+        fixture.roomName,
+      );
+      let roomIdMatchesAfterFailure: boolean | null = null;
+      try {
+        roomIdMatchesAfterFailure =
+          desktopElement.getCurrentRoomId() === fixture.teamRoomId;
+      } catch {
+        // The room identity is unavailable if Element closed or navigated away.
+      }
+      desktopRefreshRoomNavigationDiagnostic.clickFailureClass =
+        clickFailureClass;
+      desktopRefreshRoomNavigationDiagnostic.targetCountCapped =
+        hitTest.targetCountCapped;
+      desktopRefreshRoomNavigationDiagnostic.centerHitObserved =
+        hitTest.centerHitObserved;
+      desktopRefreshRoomNavigationDiagnostic.centerHitWithinTarget =
+        hitTest.centerHitWithinTarget;
+      desktopRefreshRoomNavigationDiagnostic.centerHitRole =
+        hitTest.centerHitRole;
+      desktopRefreshRoomNavigationDiagnostic.roomIdMatchesAfterFailure =
+        roomIdMatchesAfterFailure;
+      throw error;
+    }
     const roomNavigationClickElapsedBucket = desktopRefreshElapsedBucket(
       Date.now() - roomNavigationStartedAt,
     );
@@ -1221,19 +1257,24 @@ test('Element Desktop room event journey', async ({ browser }) => {
       webHttpRoute &&
       !recorded.has('web-http-route-enforcement')
     ) {
-      const routePolicyEnforced =
-        webHttpRoute.observedHttpRequests > 0 &&
-        webHttpRoute.blockedHttpRequests === 0;
-      if (!routePolicyEnforced) failed = true;
-      if (
-        !safeRecordPhase(
-          evidence,
-          recorded,
-          'web-http-route-enforcement',
-          routePolicyEnforced ? 'passed' : 'failed',
-        )
-      ) {
-        failed = true;
+      const routeOutcome = desktopRouteEnforcementOutcome({
+        failed,
+        recorded,
+        observedHttpRequests: webHttpRoute.observedHttpRequests,
+        blockedHttpRequests: webHttpRoute.blockedHttpRequests,
+      });
+      if (routeOutcome !== undefined) {
+        if (routeOutcome === 'failed') failed = true;
+        if (
+          !safeRecordPhase(
+            evidence,
+            recorded,
+            'web-http-route-enforcement',
+            routeOutcome,
+          )
+        ) {
+          failed = true;
+        }
       }
     }
   }
@@ -2956,7 +2997,13 @@ async function observeDesktopRefreshRoomNavigation(
   }
   return {
     roomListItemCountCapped,
+    targetCountCapped: null,
     fixtureRoomTargetVisible,
+    centerHitObserved: null,
+    centerHitWithinTarget: null,
+    centerHitRole: 'unavailable',
+    clickFailureClass: 'not_observed',
+    roomIdMatchesAfterFailure: null,
     clickAttempted: false,
     clickCompleted: false,
     elapsedBucket: 'not_started',

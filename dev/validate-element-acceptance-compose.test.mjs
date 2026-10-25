@@ -12,6 +12,7 @@ import {
   hasAcceptanceGatewayRateLimitBudget,
   hasAcceptanceLoopbackBindings,
   hasLocalPrebuiltOwnershipLabels,
+  hasPrivateClientCallbackNetwork,
 } from './validate-element-acceptance-compose.mjs';
 
 function port(target, published, hostIp = '127.0.0.1') {
@@ -120,6 +121,53 @@ test('checks loopback bindings for project services when the overlay is present'
   assert.equal(hasAcceptanceLoopbackBindings(model), true);
   model.services.widget.ports[0].host_ip = '0.0.0.0';
   assert.equal(hasAcceptanceLoopbackBindings(model), false);
+});
+
+test('private HTTPS gateway is optional and must publish only on loopback', () => {
+  const model = webAcceptanceModel();
+  model.services['private-gateway-https'] = {
+    ports: [port(3443, 3001)],
+  };
+  assert.equal(hasAcceptanceLoopbackBindings(model), true);
+
+  model.services['private-gateway-https'].ports[0].host_ip = '0.0.0.0';
+  assert.equal(hasAcceptanceLoopbackBindings(model), false);
+});
+
+test('private callback bridge uses a dedicated internal network', () => {
+  const model = webAcceptanceModel();
+  model.networks = {
+    default: {},
+    'private-client-callback': { internal: true },
+  };
+  for (const name of ['gateway', 'radicale']) {
+    model.services[name].networks = {
+      default: {},
+      'private-client-callback': {},
+    };
+  }
+  for (const name of ['synapse', 'widget', 'element']) {
+    model.services[name].networks = { default: {} };
+  }
+  model.services['private-gateway-https'] = {
+    ports: [port(3443, 3001)],
+    networks: { 'private-client-callback': {} },
+  };
+  assert.equal(hasPrivateClientCallbackNetwork(model), true);
+
+  const nonInternal = structuredClone(model);
+  nonInternal.networks['private-client-callback'].internal = false;
+  assert.equal(hasPrivateClientCallbackNetwork(nonInternal), false);
+
+  const publicServiceAttached = structuredClone(model);
+  publicServiceAttached.services.widget.networks = {
+    'private-client-callback': {},
+  };
+  assert.equal(hasPrivateClientCallbackNetwork(publicServiceAttached), false);
+
+  const bridgeOnDefault = structuredClone(model);
+  bridgeOnDefault.services['private-gateway-https'].networks.default = {};
+  assert.equal(hasPrivateClientCallbackNetwork(bridgeOnDefault), false);
 });
 
 test('acceptance gateways use the same finite rate budget across restart and restore', () => {

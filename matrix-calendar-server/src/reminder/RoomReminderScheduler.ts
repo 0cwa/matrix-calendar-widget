@@ -20,7 +20,7 @@ import { RoomCalendarBinding } from '../model/IRoomCalendarBinding';
 import { validateRoomCalendarBindings } from '../service/RoomCalendarBindingResolver';
 import type { RoomCalendarPrincipalIdentity } from '../service/RoomCalendarPrincipalIdentity';
 import {
-  buildRoomMentionMessage,
+  buildReminderMentionMessage,
   RoomMentionMessage,
 } from './RoomMentionMessage';
 import {
@@ -31,6 +31,7 @@ import {
   createReminderDeliveryKey,
   ReminderConfigurationCursor,
   ReminderDeliveryClaim,
+  ReminderDeliverySendResult,
   ReminderFiringIdentity,
   RoomReminderConfiguration,
   RoomReminderStore,
@@ -147,7 +148,7 @@ export interface RoomReminderSchedulerSender {
     message: RoomMentionMessage,
     transactionId: string,
     signal: AbortSignal,
-  ): Promise<void>;
+  ): Promise<ReminderDeliverySendResult | void>;
 }
 
 export interface RoomReminderSchedulerDependencies {
@@ -182,6 +183,7 @@ export type RoomReminderSchedulerReport = {
   deliveryClaimAttempts: number;
   deliveryClaimsAcquired: number;
   deliveriesSent: number;
+  deliveriesSkippedNoCurrentRecipients: number;
   deliveriesDenied: number;
   deliveriesStale: number;
   deliveryClaimsReleased: number;
@@ -634,17 +636,27 @@ export class RoomReminderScheduler {
         return;
       }
 
-      const stillConfigured = await this.runPostClaimOperation(
+      const currentConfiguration = await this.runPostClaimOperation(
         workDeadline,
         (signal) =>
-          this.dependencies.store.hasConfiguration(configuration, signal),
+          this.dependencies.store.getConfiguration(configuration, signal),
         signal,
       );
-      if (!stillConfigured) {
+      if (!currentConfiguration) {
         this.candidateCursors.delete(getConfigurationKey(configuration));
         report.deliveriesStale += 1;
         return;
       }
+      if (
+        getConfigurationRevision(currentConfiguration) !==
+        getConfigurationRevision(configuration)
+      ) {
+        this.candidateCursors.delete(getConfigurationKey(configuration));
+        report.deliveriesStale += 1;
+        return;
+      }
+
+      const target = currentConfiguration.target ?? { kind: 'room' as const };
 
       const roomCalendarPrincipalIdentity =
         currentRuntime.roomCalendarPrincipalIdentity;
@@ -661,6 +673,7 @@ export class RoomReminderScheduler {
               calendarId: configuration.calendarId,
               roomCalendarPrincipalIdentity,
               configuredBindings: currentRuntime.roomCalendarBindings,
+              mentionTarget: target.kind,
             },
             this.dependencies.matrixState,
             signal,
@@ -679,7 +692,7 @@ export class RoomReminderScheduler {
         workDeadline,
         (signal) =>
           this.dependencies.canonical.resolveCurrentDelivery(
-            configuration,
+            currentConfiguration,
             candidate.identity,
             window,
             signal,
@@ -706,8 +719,33 @@ export class RoomReminderScheduler {
         report.deliveryFailures += 1;
         return;
       }
-      const message = buildRoomMentionMessage(current.body);
-      await this.runPostClaimOperation(
+
+      // This second revision read is the last config linearization point. A
+      // later update can race the Matrix PUT, but reuses the same durable
+      // firing identity and therefore cannot create a second notification.
+      const finalConfiguration = await this.runPostClaimOperation(
+        workDeadline,
+        (signal) =>
+          this.dependencies.store.getConfiguration(
+            currentConfiguration,
+            signal,
+          ),
+        signal,
+      );
+      if (
+        !finalConfiguration ||
+        getConfigurationRevision(finalConfiguration) !==
+          getConfigurationRevision(currentConfiguration)
+      ) {
+        this.candidateCursors.delete(getConfigurationKey(configuration));
+        report.deliveriesStale += 1;
+        return;
+      }
+      const finalTarget = finalConfiguration.target ?? {
+        kind: 'room' as const,
+      };
+      const message = buildReminderMentionMessage(current.body, finalTarget);
+      const sendResult = await this.runPostClaimOperation(
         workDeadline,
         (signal) =>
           this.dependencies.sender.sendRoomMention(
@@ -719,6 +757,28 @@ export class RoomReminderScheduler {
           ),
         signal,
       );
+
+      if (sendResult === 'no-current-recipients') {
+        const markedSkipped = await this.runPostClaimOperation(
+          workDeadline,
+          (signal) =>
+            this.dependencies.store.markDeliverySkipped(
+              claim.deliveryKey,
+              claim.claimToken,
+              'no-current-recipients',
+              signal,
+            ),
+          signal,
+        );
+        if (markedSkipped) {
+          shouldRelease = false;
+          report.deliveriesSkippedNoCurrentRecipients += 1;
+        } else {
+          shouldRelease = false;
+          report.deliveryFailures += 1;
+        }
+        return;
+      }
 
       const markedSent = await this.runPostClaimOperation(
         workDeadline,
@@ -933,6 +993,7 @@ function createEmptyReport(): RoomReminderSchedulerReport {
     deliveryClaimAttempts: 0,
     deliveryClaimsAcquired: 0,
     deliveriesSent: 0,
+    deliveriesSkippedNoCurrentRecipients: 0,
     deliveriesDenied: 0,
     deliveriesStale: 0,
     deliveryClaimsReleased: 0,
@@ -1014,9 +1075,16 @@ function getConfigurationKey(configuration: RoomReminderConfiguration): string {
         configuration.eventUid,
         configuration.recurrenceId,
         configuration.alarmUid,
+        getConfigurationRevision(configuration),
       ]),
     )
     .digest('hex');
+}
+
+function getConfigurationRevision(
+  configuration: RoomReminderConfiguration,
+): number {
+  return configuration.revision ?? 1;
 }
 
 function compareBindings(

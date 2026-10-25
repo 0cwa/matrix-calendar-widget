@@ -49,6 +49,13 @@ export {
   visibleRangeForView,
 } from './calendarEventPresentation';
 export {
+  isCalendarPrivateClientRepository,
+  type CalendarPrivateClientRepository,
+  type CreatedPrivateCalendarClient,
+  type PrivateCalendarClientMetadata,
+  type PrivateCalendarClientTarget,
+} from './CalendarPrivateClientRepository';
+export {
   isCalendarPublicFeedRepository,
   type CalendarPublicFeedPublication,
   type CalendarPublicFeedRepository,
@@ -62,8 +69,12 @@ export {
 export {
   isCalendarRoomReminderRepository,
   type CalendarRoomReminderAlarmOption,
+  type CalendarRoomReminderAllDaySchedule,
+  type CalendarRoomReminderConfiguration,
   type CalendarRoomReminderIdentity,
+  type CalendarRoomReminderRecipient,
   type CalendarRoomReminderRepository,
+  type CalendarRoomReminderTarget,
 } from './CalendarRoomReminderRepository';
 export {
   isCalendarTargetAvailabilityRepository,

@@ -12,6 +12,11 @@ import {
   appendLocalComposeEnvFile,
   loadElementAcceptanceOverrides,
 } from './element-acceptance-overrides.mjs';
+import {
+  PRIVATE_ACCEPTANCE_TLS,
+  validatePrivateAcceptanceTlsFixture,
+} from './element-acceptance-private-tls.mjs';
+import { readPrivateUiComposeEnvironment } from './element-acceptance-private-ui-prepare.mjs';
 import { writeSyntheticDesktopCredentials } from './element-desktop-journey.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -134,8 +139,75 @@ function safeCredential(value) {
   return (
     typeof value === 'string' &&
     value.length > 0 &&
+    // eslint-disable-next-line no-control-regex
     !/[\r\n\u0000-\u001f]/u.test(value)
   );
+}
+
+function privateUiSettings() {
+  const enabled = process.env.ELEMENT_ACCEPTANCE_PRIVATE_UI;
+  if (enabled === undefined || enabled === 'false') return undefined;
+  if (enabled !== 'true') throw new FixtureSetupError('accounts-ready');
+
+  const runnerTemp = process.env.RUNNER_TEMP;
+  const envFile = requiredEnvironment('ELEMENT_ACCEPTANCE_PRIVATE_UI_ENV_FILE');
+  if (
+    !runnerTemp ||
+    !isAbsolute(envFile) ||
+    !resolve(envFile).startsWith(`${resolve(runnerTemp)}${sep}`)
+  ) {
+    throw new FixtureSetupError('accounts-ready');
+  }
+
+  try {
+    const values = readPrivateUiComposeEnvironment({
+      filePath: envFile,
+      runnerTemp,
+    });
+    const tlsDirectory = requiredEnvironment(
+      'ELEMENT_ACCEPTANCE_PRIVATE_TLS_DIR',
+    );
+    if (
+      !isAbsolute(tlsDirectory) ||
+      !resolve(tlsDirectory).startsWith(`${resolve(runnerTemp)}${sep}`)
+    ) {
+      throw new FixtureSetupError('accounts-ready');
+    }
+    const tls = validatePrivateAcceptanceTlsFixture({
+      directory: tlsDirectory,
+    });
+    const epochKey = values.MATRIX_CALENDAR_PRIVATE_CLIENT_EPOCH_KEY;
+    const callbackKey = values.MATRIX_CALENDAR_PRIVATE_CLIENT_CALLBACK_KEY;
+    if (
+      values.ELEMENT_ACCEPTANCE_PRIVATE_TLS_DIR !== tlsDirectory ||
+      values.MATRIX_CALENDAR_PRIVATE_CLIENTS_ENABLED !== 'true' ||
+      values.MATRIX_CALENDAR_PRIVATE_CLIENT_ORIGIN !==
+        PRIVATE_ACCEPTANCE_TLS.browserOrigin ||
+      values.RADICALE_PRIVATE_CLIENT_CALLBACK_ORIGIN !==
+        PRIVATE_ACCEPTANCE_TLS.callbackOrigin ||
+      values.RADICALE_PRIVATE_CLIENT_CALLBACK_KEY !== callbackKey ||
+      values.MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_TLS_MODE !==
+        'trusted-private-network' ||
+      tls.serverSpkiPin !==
+        process.env.ELEMENT_ACCEPTANCE_PRIVATE_TLS_SPKI_PIN ||
+      !/^[A-Za-z0-9_-]{43}$/u.test(epochKey) ||
+      !/^[A-Za-z0-9_-]{43}$/u.test(callbackKey) ||
+      epochKey === callbackKey
+    ) {
+      throw new FixtureSetupError('accounts-ready');
+    }
+    return Object.freeze({ epochKey, callbackKey, tlsDirectory });
+  } catch {
+    throw new FixtureSetupError('accounts-ready');
+  }
+}
+
+function randomDistinctKey(existingKeys) {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const candidate = randomBytes(32).toString('base64url');
+    if (!existingKeys.includes(candidate)) return candidate;
+  }
+  throw new FixtureSetupError('runtime-ready');
 }
 
 function matrixUserId(localpart) {
@@ -553,9 +625,15 @@ async function createServiceCalendar({
   return principal;
 }
 
-async function registerWidget(stateRoomId, targetRoomId, actor, widgetId) {
+async function registerWidget(
+  stateRoomId,
+  targetRoomId,
+  actor,
+  widgetId,
+  gatewayUrl = GATEWAY_URL,
+) {
   const url = new URL('/', WIDGET_URL);
-  url.searchParams.set('meetings_bot_base_url', GATEWAY_URL);
+  url.searchParams.set('meetings_bot_base_url', gatewayUrl);
   // Keep the target room literal for the outsider cross-room probe.
   url.searchParams.set('matrix_room_id', targetRoomId);
   // Element fills these standard widget-context placeholders at launch.
@@ -772,11 +850,19 @@ function readComposeServiceDiagnostic(service) {
 }
 
 async function provision() {
-  const stageFile = stagePath();
+  stagePath();
   const userFile = requiredEnvironment('ELEMENT_ACCEPTANCE_USERS_FILE');
   const serverEnvFile = requiredEnvironment(
     'ELEMENT_ACCEPTANCE_SERVER_ENV_FILE',
   );
+  const privateUi = privateUiSettings();
+  if (privateUi) {
+    addMask(privateUi.epochKey);
+    addMask(privateUi.callbackKey);
+  }
+  const browserGatewayUrl = privateUi
+    ? PRIVATE_ACCEPTANCE_TLS.browserOrigin
+    : GATEWAY_URL;
   const principalMode = resolveAcceptancePrincipalMode(
     process.env.ROOM_CALENDAR_PRINCIPAL_MODE,
   );
@@ -873,6 +959,7 @@ async function provision() {
       rooms.teamRoomId,
       actors.memberA,
       'matrix-calendar-team-calendar',
+      browserGatewayUrl,
     );
     // The outsider opens a widget in their own room whose room parameter
     // targets the team room. The gateway must still authorize the Matrix user.
@@ -881,6 +968,7 @@ async function provision() {
       rooms.teamRoomId,
       actors.outsider,
       'matrix-calendar-outsider-probe',
+      browserGatewayUrl,
     );
   });
 
@@ -888,8 +976,12 @@ async function provision() {
   addMask(bot.accessToken);
   const reminderBootstrapPassword = randomBytes(32).toString('base64url');
   const reminderAppPassword = randomBytes(32).toString('base64url');
+  const publicFeedSigningKey = randomDistinctKey(
+    privateUi ? [privateUi.epochKey, privateUi.callbackKey] : [],
+  );
   addMask(reminderBootstrapPassword);
   addMask(reminderAppPassword);
+  addMask(publicFeedSigningKey);
   const reminderDatabaseUrl =
     `postgresql://matrix_calendar_app:${reminderAppPassword}` +
     '@postgres:5432/matrix_calendar_test';
@@ -903,6 +995,24 @@ async function provision() {
     ELEMENT_ACCEPTANCE_REMINDER_DATABASE_URL: reminderDatabaseUrl,
     ELEMENT_ACCEPTANCE_REMINDER_RESTORE_DATABASE_URL:
       reminderRestoreDatabaseUrl,
+    MATRIX_CALENDAR_PUBLIC_FEED_ORIGIN: browserGatewayUrl,
+    MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY: publicFeedSigningKey,
+    ...(privateUi
+      ? {
+          ELEMENT_ACCEPTANCE_PRIVATE_TLS_DIR: privateUi.tlsDirectory,
+          MATRIX_CALENDAR_PRIVATE_CLIENTS_ENABLED: 'true',
+          MATRIX_CALENDAR_PRIVATE_CLIENT_ORIGIN:
+            PRIVATE_ACCEPTANCE_TLS.browserOrigin,
+          MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_URL: reminderDatabaseUrl,
+          MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_TLS_MODE:
+            'trusted-private-network',
+          MATRIX_CALENDAR_PRIVATE_CLIENT_EPOCH_KEY: privateUi.epochKey,
+          MATRIX_CALENDAR_PRIVATE_CLIENT_CALLBACK_KEY: privateUi.callbackKey,
+          RADICALE_PRIVATE_CLIENT_CALLBACK_ORIGIN:
+            PRIVATE_ACCEPTANCE_TLS.callbackOrigin,
+          RADICALE_PRIVATE_CLIENT_CALLBACK_KEY: privateUi.callbackKey,
+        }
+      : {}),
     ELEMENT_ACCEPTANCE_RESTORE_VOLUME_NAME: `${requiredEnvironment('COMPOSE_PROJECT_NAME')}_radicale-restore`,
     ELEMENT_ACCEPTANCE_ROOM_BINDING: JSON.stringify([
       { roomId: rooms.teamRoomId, calendarId: CALENDAR_ID },
@@ -925,7 +1035,7 @@ async function provision() {
   writePrivateJson(userFile, {
     homeserverUrl: HOMESERVER_URL,
     elementUrl: ELEMENT_URL,
-    gatewayUrl: GATEWAY_URL,
+    gatewayUrl: browserGatewayUrl,
     widgetUrl: WIDGET_URL,
     roomName: ROOM_NAME,
     outsiderRoomName: OUTSIDER_ROOM_NAME,

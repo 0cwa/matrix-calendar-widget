@@ -14,8 +14,20 @@
  * limitations under the License.
  */
 
-import { Calendar, CalendarEvent } from '@matrix-calendar-widget/calendar';
-import { DateTime } from 'luxon';
+import {
+  Calendar,
+  CalendarEvent,
+  calendarLocalDateTimeToUnixMillis,
+  calendarUnixMillisToLocalDateTime,
+  isCalendarLocalDateTimeUnambiguous,
+} from '@matrix-calendar-widget/calendar';
+import { DateTime, IANAZone, Settings } from 'luxon';
+import { vi } from 'vitest';
+import {
+  planReminderAllDayEvent,
+  planReminderAllDaySchedule,
+  planReminderTimedEvent,
+} from '../../../dev/element-acceptance-reminder-timing.mjs';
 import {
   calendarEventInputFromForm,
   calendarEventOccurrenceTextOperationsFromForm,
@@ -35,6 +47,19 @@ const calendar: Calendar = {
   name: 'Team calendar',
   timezone: 'Europe/Stockholm',
 };
+
+function withLuxonNow<T>(now: number, callback: () => T): T {
+  const previousNow = Settings.now;
+  Settings.now = () => now;
+  Settings.resetCaches();
+
+  try {
+    return callback();
+  } finally {
+    Settings.now = previousNow;
+    Settings.resetCaches();
+  }
+}
 
 describe('calendar event form adapter', () => {
   it('tracks occurrence text source presence separately from equal values', () => {
@@ -280,6 +305,507 @@ describe('calendar event form adapter', () => {
       alarmEditable: true,
       alarmChanged: false,
     });
+  });
+
+  it('leaves unsupported calendar timezones for the existing validation gate', () => {
+    const values = createCalendarEventFormValues(
+      { ...calendar, timezone: 'Not/A-Timezone' },
+      DateTime.fromISO('2026-10-24T07:37:00Z', { zone: 'UTC' }),
+    );
+
+    expect(values.start).toBe('Invalid DateTime');
+    expect(values.end).toBe('Invalid DateTime');
+    expect(
+      validateCalendarEventForm({ ...values, title: 'Unsupported zone' }),
+    ).toBe('invalid-timezone');
+  });
+
+  it.each([
+    {
+      name: 'the first Stockholm rollback occurrence',
+      now: '2026-10-25T00:11:00Z',
+      timezone: 'Europe/Stockholm',
+      nowLocal: '2026-10-25T02:11',
+      nowOffsetMinutes: 120,
+      start: '2026-10-25T03:00',
+      end: '2026-10-25T04:00',
+      startInstant: '2026-10-25T02:00:00Z',
+      endInstant: '2026-10-25T03:00:00Z',
+      advanced: true,
+    },
+    {
+      name: 'the second Stockholm rollback occurrence',
+      now: '2026-10-25T01:11:00Z',
+      timezone: 'Europe/Stockholm',
+      nowLocal: '2026-10-25T02:11',
+      nowOffsetMinutes: 60,
+      start: '2026-10-25T03:00',
+      end: '2026-10-25T04:00',
+      startInstant: '2026-10-25T02:00:00Z',
+      endInstant: '2026-10-25T03:00:00Z',
+      advanced: true,
+    },
+    {
+      name: 'an ordinary Stockholm hour',
+      now: '2026-10-24T07:37:00Z',
+      timezone: 'Europe/Stockholm',
+      nowLocal: '2026-10-24T09:37',
+      nowOffsetMinutes: 120,
+      start: '2026-10-24T09:00',
+      end: '2026-10-24T10:00',
+      startInstant: '2026-10-24T07:00:00Z',
+      endInstant: '2026-10-24T08:00:00Z',
+      advanced: false,
+    },
+    {
+      name: 'the Stockholm spring-forward boundary',
+      now: '2026-03-29T00:37:00Z',
+      timezone: 'Europe/Stockholm',
+      nowLocal: '2026-03-29T01:37',
+      nowOffsetMinutes: 60,
+      start: '2026-03-29T01:00',
+      end: '2026-03-29T03:00',
+      startInstant: '2026-03-29T00:00:00Z',
+      endInstant: '2026-03-29T01:00:00Z',
+      advanced: false,
+    },
+    {
+      name: 'the first Lord Howe rollback occurrence',
+      now: '2026-04-04T14:45:00Z',
+      timezone: 'Australia/Lord_Howe',
+      nowLocal: '2026-04-05T01:45',
+      nowOffsetMinutes: 660,
+      start: '2026-04-05T02:00',
+      end: '2026-04-05T03:00',
+      startInstant: '2026-04-04T15:30:00Z',
+      endInstant: '2026-04-04T16:30:00Z',
+      advanced: true,
+    },
+    {
+      name: 'the second Lord Howe rollback occurrence',
+      now: '2026-04-04T15:15:00Z',
+      timezone: 'Australia/Lord_Howe',
+      nowLocal: '2026-04-05T01:45',
+      nowOffsetMinutes: 630,
+      start: '2026-04-05T02:00',
+      end: '2026-04-05T03:00',
+      startInstant: '2026-04-04T15:30:00Z',
+      endInstant: '2026-04-04T16:30:00Z',
+      advanced: true,
+    },
+  ])('creates a valid one-hour default for $name', (scenario) => {
+    const ambientClocks = [
+      '2026-01-15T12:00:00Z',
+      '2026-07-15T12:00:00Z',
+      '2026-10-25T00:11:00Z',
+      '2026-10-25T01:11:00Z',
+    ];
+    const valuesByAmbientClock = ambientClocks.map((ambientClock) =>
+      withLuxonNow(Date.parse(ambientClock), () => {
+        const now = DateTime.fromISO(scenario.now, { zone: 'UTC' });
+        return createCalendarEventFormValues(
+          { ...calendar, timezone: scenario.timezone },
+          now,
+        );
+      }),
+    );
+    const values = valuesByAmbientClock[0]!;
+    const now = DateTime.fromISO(scenario.now, { zone: 'UTC' });
+    const form = { ...values, title: 'DST event' };
+
+    expect(valuesByAmbientClock.map(({ start, end }) => [start, end])).toEqual(
+      ambientClocks.map(() => [scenario.start, scenario.end]),
+    );
+    expect(values.start).toBe(scenario.start);
+    expect(values.end).toBe(scenario.end);
+    expect(validateCalendarEventForm(form)).toBeUndefined();
+    const submittedTiming = calendarEventInputFromForm(
+      form,
+      'dst@example.test',
+    ).timing;
+    expect(submittedTiming).toEqual({
+      type: 'timed',
+      start: {
+        type: 'zoned',
+        local: scenario.start,
+        timezone: scenario.timezone,
+      },
+      end: {
+        type: 'zoned',
+        local: scenario.end,
+        timezone: scenario.timezone,
+      },
+    });
+    if (submittedTiming.type !== 'timed') {
+      throw new Error('Expected a timed event submission');
+    }
+
+    const nowMillis = now.toMillis();
+    const nowWallMillis = DateTime.fromISO(scenario.nowLocal, {
+      zone: 'UTC',
+    }).toMillis();
+    const startMillis = calendarLocalDateTimeToUnixMillis(
+      submittedTiming.start.local,
+      scenario.timezone,
+    );
+    const endMillis = calendarLocalDateTimeToUnixMillis(
+      submittedTiming.end.local,
+      scenario.timezone,
+    );
+
+    expect(
+      calendarUnixMillisToLocalDateTime(nowMillis, scenario.timezone).slice(
+        0,
+        16,
+      ),
+    ).toBe(scenario.nowLocal);
+    expect((nowWallMillis - nowMillis) / 60_000).toBe(
+      scenario.nowOffsetMinutes,
+    );
+    expect(
+      isCalendarLocalDateTimeUnambiguous(values.start, scenario.timezone),
+    ).toBe(true);
+    expect(
+      isCalendarLocalDateTimeUnambiguous(values.end, scenario.timezone),
+    ).toBe(true);
+    expect(startMillis).toBe(Date.parse(scenario.startInstant));
+    expect(endMillis).toBe(Date.parse(scenario.endInstant));
+    expect(endMillis - startMillis).toBe(60 * 60 * 1000);
+    expect(endMillis).toBeGreaterThan(nowMillis);
+    expect(startMillis > nowMillis).toBe(scenario.advanced);
+  });
+
+  it('uses bundled timezone rules when browser offsets disagree', () => {
+    const rollbackInstant = Date.parse('2026-10-25T01:00:00Z');
+    const originalOffset = IANAZone.prototype.offset;
+    const browserTimezoneOffset = vi
+      .spyOn(IANAZone.prototype, 'offset')
+      .mockImplementation(function (this: IANAZone, timestamp: number) {
+        const browserOffset = originalOffset.call(this, timestamp);
+        return this.name === 'Europe/Stockholm' && timestamp >= rollbackInstant
+          ? browserOffset + 60
+          : browserOffset;
+      });
+
+    try {
+      withLuxonNow(Date.parse('2026-10-25T00:11:00Z'), () => {
+        const values = createCalendarEventFormValues(
+          calendar,
+          DateTime.fromISO('2026-10-25T00:11:00Z', { zone: 'UTC' }),
+        );
+        const form = { ...values, title: 'Bundled timezone event' };
+        const timing = calendarEventInputFromForm(
+          form,
+          'bundled-timezone@example.test',
+        ).timing;
+
+        expect([values.start, values.end]).toEqual([
+          '2026-10-25T03:00',
+          '2026-10-25T04:00',
+        ]);
+        expect(validateCalendarEventForm(form)).toBeUndefined();
+        expect(timing).toEqual({
+          type: 'timed',
+          start: {
+            type: 'zoned',
+            local: '2026-10-25T03:00',
+            timezone: 'Europe/Stockholm',
+          },
+          end: {
+            type: 'zoned',
+            local: '2026-10-25T04:00',
+            timezone: 'Europe/Stockholm',
+          },
+        });
+        if (timing.type !== 'timed') {
+          throw new Error('Expected a timed event submission');
+        }
+        expect(
+          DateTime.fromISO(timing.start.local, {
+            zone: 'Europe/Stockholm',
+          }).toMillis(),
+        ).not.toBe(
+          calendarLocalDateTimeToUnixMillis(
+            timing.start.local,
+            'Europe/Stockholm',
+          ),
+        );
+        expect(
+          calendarLocalDateTimeToUnixMillis(
+            timing.start.local,
+            'Europe/Stockholm',
+          ),
+        ).toBe(Date.parse('2026-10-25T02:00:00Z'));
+        expect(
+          calendarLocalDateTimeToUnixMillis(
+            timing.end.local,
+            'Europe/Stockholm',
+          ),
+        ).toBe(Date.parse('2026-10-25T03:00:00Z'));
+      });
+    } finally {
+      browserTimezoneOffset.mockRestore();
+      Settings.resetCaches();
+    }
+  });
+
+  it.each([
+    {
+      name: 'the first Stockholm rollback occurrence',
+      now: '2026-10-25T00:11:00Z',
+      timezone: 'Europe/Stockholm',
+      dueAt: '2026-10-25T00:14:00Z',
+      startAt: '2026-10-25T02:00:00Z',
+      endAt: '2026-10-25T03:00:00Z',
+      start: '2026-10-25T03:00',
+      end: '2026-10-25T04:00',
+      alarmLeadMinutes: 106,
+    },
+    {
+      name: 'the second Stockholm rollback occurrence',
+      now: '2026-10-25T01:11:00Z',
+      timezone: 'Europe/Stockholm',
+      dueAt: '2026-10-25T01:14:00Z',
+      startAt: '2026-10-25T02:00:00Z',
+      endAt: '2026-10-25T03:00:00Z',
+      start: '2026-10-25T03:00',
+      end: '2026-10-25T04:00',
+      alarmLeadMinutes: 46,
+    },
+    {
+      name: 'an ordinary Stockholm hour',
+      now: '2026-10-24T07:37:00Z',
+      timezone: 'Europe/Stockholm',
+      dueAt: '2026-10-24T07:40:00Z',
+      startAt: '2026-10-24T07:41:00Z',
+      endAt: '2026-10-24T08:41:00Z',
+      start: '2026-10-24T09:41',
+      end: '2026-10-24T10:41',
+      alarmLeadMinutes: 1,
+    },
+    {
+      name: 'the Stockholm spring-forward boundary',
+      now: '2026-03-29T00:37:00Z',
+      timezone: 'Europe/Stockholm',
+      dueAt: '2026-03-29T00:40:00Z',
+      startAt: '2026-03-29T00:41:00Z',
+      endAt: '2026-03-29T01:41:00Z',
+      start: '2026-03-29T01:41',
+      end: '2026-03-29T03:41',
+      alarmLeadMinutes: 1,
+    },
+    {
+      name: 'the first Lord Howe half-hour rollback occurrence',
+      now: '2026-04-04T14:45:00Z',
+      timezone: 'Australia/Lord_Howe',
+      dueAt: '2026-04-04T14:48:00Z',
+      startAt: '2026-04-04T15:30:00Z',
+      endAt: '2026-04-04T16:30:00Z',
+      start: '2026-04-05T02:00',
+      end: '2026-04-05T03:00',
+      alarmLeadMinutes: 42,
+    },
+    {
+      name: 'the second Lord Howe half-hour rollback occurrence',
+      now: '2026-04-04T15:15:00Z',
+      timezone: 'Australia/Lord_Howe',
+      dueAt: '2026-04-04T15:18:00Z',
+      startAt: '2026-04-04T15:30:00Z',
+      endAt: '2026-04-04T16:30:00Z',
+      start: '2026-04-05T02:00',
+      end: '2026-04-05T03:00',
+      alarmLeadMinutes: 12,
+    },
+  ])('plans a valid near-future reminder event for $name', (scenario) => {
+    const now = Date.parse(scenario.now);
+    const plan = planReminderTimedEvent(now, scenario.timezone);
+    const values = {
+      ...createCalendarEventFormValues(
+        { ...calendar, timezone: scenario.timezone },
+        DateTime.fromMillis(now, { zone: 'UTC' }),
+      ),
+      title: 'Reminder fixture',
+      start: plan.startValue,
+      end: plan.endValue,
+      timezone: scenario.timezone,
+      alarmEnabled: true,
+      alarmMode: 'relative' as const,
+      alarmWeeks: '0',
+      alarmDays: '0',
+      alarmHours: '0',
+      alarmMinutes: String(plan.alarmLeadMinutes),
+      alarmSeconds: '0',
+    };
+
+    expect(plan.dueAt).toBe(Date.parse(scenario.dueAt));
+    expect(plan.startAt).toBe(Date.parse(scenario.startAt));
+    expect(plan.endAt).toBe(Date.parse(scenario.endAt));
+    expect(plan.startValue).toBe(scenario.start);
+    expect(plan.endValue).toBe(scenario.end);
+    expect(plan.alarmLeadMinutes).toBe(scenario.alarmLeadMinutes);
+    expect(plan.dueAt - now).toBeGreaterThanOrEqual(150_000);
+    expect(plan.dueAt - now).toBeLessThan(210_000);
+    expect(
+      isCalendarLocalDateTimeUnambiguous(plan.startValue, scenario.timezone),
+    ).toBe(true);
+    expect(
+      isCalendarLocalDateTimeUnambiguous(plan.endValue, scenario.timezone),
+    ).toBe(true);
+    expect(validateCalendarEventForm(values)).toBeUndefined();
+
+    const input = calendarEventInputFromForm(
+      values,
+      'reminder-fixture@example.test',
+    );
+    expect(input.timing).toEqual({
+      type: 'timed',
+      start: {
+        type: 'zoned',
+        local: scenario.start,
+        timezone: scenario.timezone,
+      },
+      end: {
+        type: 'zoned',
+        local: scenario.end,
+        timezone: scenario.timezone,
+      },
+    });
+    expect(input.alarm).toEqual({
+      action: 'display',
+      trigger: {
+        weeks: 0,
+        days: 0,
+        hours: 0,
+        minutes: scenario.alarmLeadMinutes,
+        seconds: 0,
+      },
+    });
+
+    const parsedStart = calendarLocalDateTimeToUnixMillis(
+      plan.startValue,
+      scenario.timezone,
+    );
+    const parsedEnd = calendarLocalDateTimeToUnixMillis(
+      plan.endValue,
+      scenario.timezone,
+    );
+    expect(parsedStart).toBe(plan.startAt);
+    expect(parsedEnd).toBe(plan.endAt);
+    expect(parsedEnd - parsedStart).toBe(60 * 60_000);
+    expect(parsedStart - scenario.alarmLeadMinutes * 60_000).toBe(plan.dueAt);
+  });
+
+  it.each([
+    {
+      name: 'crossing UTC midnight without crossing Tokyo midnight',
+      now: '2026-10-24T23:59:00Z',
+      dueAt: '2026-10-25T00:02:00Z',
+      schedule: '2026-10-25T09:02',
+      eventStart: '2026-10-26',
+    },
+    {
+      name: 'crossing Tokyo local midnight before the due instant',
+      now: '2026-10-24T14:59:00Z',
+      dueAt: '2026-10-24T15:02:00Z',
+      schedule: '2026-10-25T00:02',
+      eventStart: '2026-10-26',
+    },
+    {
+      name: 'a Stockholm second-fold clock with a Tokyo schedule zone',
+      now: '2026-10-25T01:11:00Z',
+      dueAt: '2026-10-25T01:14:00Z',
+      schedule: '2026-10-25T10:14',
+      eventStart: '2026-10-26',
+    },
+  ])(
+    'keeps the all-day DATE and local schedule aligned when $name',
+    (scenario) => {
+      const now = Date.parse(scenario.now);
+      const plan = planReminderAllDayEvent(now, 'Asia/Tokyo');
+      const values = {
+        ...createCalendarEventFormValues(
+          calendar,
+          DateTime.fromMillis(now, { zone: 'UTC' }),
+        ),
+        title: 'All-day reminder fixture',
+        timingType: 'all-day' as const,
+        start: plan.eventStartDate,
+        end: plan.eventEndDate,
+        timezone: plan.timeZone,
+      };
+
+      expect(plan.dueAt).toBe(Date.parse(scenario.dueAt));
+      expect(plan.scheduleLocalDateTime).toBe(scenario.schedule);
+      expect(plan.expectedDaysBefore).toBe(1);
+      expect(plan.eventStartDate).toBe(scenario.eventStart);
+      expect(plan.eventEndDate).toBe(scenario.eventStart);
+      expect(plan.timeZone).toBe('Asia/Tokyo');
+      expect(validateCalendarEventForm(values)).toBeUndefined();
+      expect(
+        calendarEventInputFromForm(values, 'all-day-reminder@example.test')
+          .timing,
+      ).toEqual({
+        type: 'all-day',
+        startDate: plan.eventStartDate,
+        endDate: new Date(
+          Date.parse(`${plan.eventEndDate}T00:00:00Z`) + 24 * 60 * 60_000,
+        )
+          .toISOString()
+          .slice(0, 10),
+      });
+      expect(
+        isCalendarLocalDateTimeUnambiguous(
+          plan.scheduleLocalDateTime,
+          plan.timeZone,
+        ),
+      ).toBe(true);
+      expect(
+        calendarLocalDateTimeToUnixMillis(
+          plan.scheduleLocalDateTime,
+          plan.timeZone,
+        ),
+      ).toBe(plan.dueAt);
+      const scheduleDay = plan.scheduleLocalDateTime.slice(0, 10);
+      const eventDay = new Date(
+        Date.parse(`${scheduleDay}T00:00:00Z`) + 24 * 60 * 60_000,
+      )
+        .toISOString()
+        .slice(0, 10);
+      expect(plan.eventStartDate).toBe(eventDay);
+      expect(plan.eventStartDate).toBe(
+        new Date(
+          Date.parse(`${scheduleDay}T00:00:00Z`) +
+            plan.expectedDaysBefore * 24 * 60 * 60_000,
+        )
+          .toISOString()
+          .slice(0, 10),
+      );
+    },
+  );
+
+  it('recomputes the exact all-day offset when a refreshed due crosses local midnight', () => {
+    const original = planReminderAllDayEvent(
+      Date.parse('2026-10-25T14:55:00Z'),
+      'Asia/Tokyo',
+    );
+    const refreshed = planReminderAllDaySchedule(
+      Date.parse('2026-10-25T14:59:00Z'),
+      original.eventStartDate,
+      original.timeZone,
+    );
+
+    expect(original.scheduleLocalDateTime).toBe('2026-10-25T23:58');
+    expect(original.eventStartDate).toBe('2026-10-26');
+    expect(original.eventEndDate).toBe('2026-10-26');
+    expect(refreshed.scheduleLocalDateTime).toBe('2026-10-26T00:02');
+    expect(refreshed.daysBefore).toBe(0);
+    expect(refreshed.eventStartDate).toBe('2026-10-26');
+    expect(
+      calendarLocalDateTimeToUnixMillis(
+        `${refreshed.eventStartDate}T${refreshed.localTime}`,
+        refreshed.timeZone,
+      ),
+    ).toBe(refreshed.dueAt);
   });
 
   it('converts timed form values into domain input', () => {

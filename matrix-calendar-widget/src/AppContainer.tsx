@@ -22,7 +22,6 @@ import {
 } from '@matrix-widget-toolkit/api';
 import {
   getEnvironment,
-  MuiThemeProvider,
   MuiWidgetApiProvider,
 } from '@matrix-widget-toolkit/mui';
 import { Alert, Box } from '@mui/material';
@@ -33,6 +32,7 @@ import {
   GatewayCalendarRepository,
 } from './calendar';
 import { resolveCalendarGatewayConfig } from './calendar/resolveCalendarGatewayConfig';
+import { CalendarMuiThemeProvider } from './components/common/CalendarMuiThemeProvider';
 import { LocalizationProvider } from './components/common/LocalizationProvider';
 import { PageLoader } from './components/common/PageLoader';
 
@@ -51,19 +51,19 @@ function AppContainer({
 
   if (!repository) {
     return (
-      <MuiThemeProvider>
+      <CalendarMuiThemeProvider>
         <Box padding={2}>
           <Alert severity="error">
             Calendar configuration is incomplete. A Matrix room ID and calendar
             API URL are required.
           </Alert>
         </Box>
-      </MuiThemeProvider>
+      </CalendarMuiThemeProvider>
     );
   }
 
   return (
-    <MuiThemeProvider>
+    <CalendarMuiThemeProvider>
       <Suspense fallback={<PageLoader />}>
         <LocalizationProvider>
           <MuiWidgetApiProvider
@@ -80,7 +80,7 @@ function AppContainer({
           </MuiWidgetApiProvider>
         </LocalizationProvider>
       </Suspense>
-    </MuiThemeProvider>
+    </CalendarMuiThemeProvider>
   );
 }
 

@@ -24,6 +24,8 @@ import {
   CalendarEvent,
   InMemoryCalendarRepository,
 } from '@matrix-calendar-widget/calendar';
+import type { StateEvent, WidgetApi } from '@matrix-widget-toolkit/api';
+import { WidgetApiMockProvider } from '@matrix-widget-toolkit/react';
 import {
   Box,
   Button,
@@ -36,12 +38,17 @@ import i18next from 'i18next';
 import { useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { I18nextProvider, initReactI18next } from 'react-i18next';
+import { Subject } from 'rxjs';
 import en from '../public/locales/en/translation.json';
 import type {
   CalendarRoomCapabilities,
   CalendarRoomReminderAlarmOption,
+  CalendarRoomReminderAllDaySchedule,
+  CalendarRoomReminderConfiguration,
   CalendarRoomReminderIdentity,
+  CalendarRoomReminderRecipient,
   CalendarRoomReminderRepository,
+  CalendarRoomReminderTarget,
   CalendarTargetAvailabilityRepository,
 } from '../src/calendar';
 import { CalendarRepositoryProvider } from '../src/calendar';
@@ -51,6 +58,7 @@ import { CalendarEventsList } from '../src/components/calendar/CalendarEventsLis
 import { CalendarEventsSurface } from '../src/components/calendar/CalendarEventsSurface';
 import type { CalendarSurfaceView } from '../src/components/calendar/CalendarNavigation';
 import { CalendarToolbar } from '../src/components/calendar/CalendarToolbar';
+import { CalendarMuiThemeProvider } from '../src/components/common/CalendarMuiThemeProvider';
 import { LocalizationProvider } from '../src/components/common/LocalizationProvider';
 import { registerDateRangeFormatter } from '../src/dateRangeFormatter';
 import { setLocale } from '../src/lib/locale';
@@ -103,6 +111,41 @@ const roomCalendar: Calendar = {
   operatorManaged: true,
   supportedComponents: ['VEVENT'],
 };
+const syntheticRoomId = '!synthetic-room:example.test';
+const syntheticBotUserId = '@calendar-bot:example.test';
+const syntheticJoinedRecipients = new Map<string, string | null>([
+  ['@alice:example.test', 'Alice'],
+  ['@bob:example.test', 'Bob'],
+  [syntheticBotUserId, 'Calendar bot'],
+]);
+const syntheticRoomMemberUpdates = new Subject<StateEvent>();
+declare global {
+  interface Window {
+    __updateSyntheticRoomMember: (event: StateEvent) => void;
+    __syntheticRoomReminderTarget?: CalendarRoomReminderTarget;
+  }
+}
+window.__updateSyntheticRoomMember = (event) => {
+  if (event.room_id === syntheticRoomId && event.type === 'm.room.member') {
+    const member = event as StateEvent<{
+      membership?: string;
+      displayname?: string;
+    }>;
+    if (member.content.membership === 'join') {
+      syntheticJoinedRecipients.set(
+        member.state_key,
+        member.content.displayname ?? null,
+      );
+    } else {
+      syntheticJoinedRecipients.delete(member.state_key);
+    }
+  }
+  syntheticRoomMemberUpdates.next(event);
+};
+const syntheticRoomWidgetApi = {
+  receiveStateEvents: async () => [],
+  observeStateEvents: () => syntheticRoomMemberUpdates.asObservable(),
+} as unknown as WidgetApi;
 const roomEvent: CalendarEvent = {
   id: 'synthetic-room-event',
   uid: 'synthetic-room-event@example.test',
@@ -250,6 +293,9 @@ const roomAlarmOption: CalendarRoomReminderAlarmOption = {
   eventUid: roomEvent.uid,
   recurrenceId: null,
   alarmUid: 'synthetic-room-alarm',
+  timingType: 'timed',
+  supported: true,
+  requiresAllDaySchedule: false,
   relatedTo: 'start',
   trigger: {
     weeks: 0,
@@ -432,7 +478,7 @@ class SyntheticRoomCalendarRepository
   private readonly capabilities: CalendarRoomCapabilities;
   private readonly reminderConfigurations = new Map<
     string,
-    CalendarRoomReminderIdentity
+    CalendarRoomReminderConfiguration
   >();
 
   constructor(
@@ -442,7 +488,7 @@ class SyntheticRoomCalendarRepository
     super(data ?? { calendars: [roomCalendar], events: [roomEvent] });
     this.capabilities = {
       calendarId: roomCalendar.id,
-      roomId: '!synthetic-room:example.test',
+      roomId: syntheticRoomId,
       canReadEvents: true,
       canWriteEvents: manager,
       canManageReminders: manager,
@@ -488,8 +534,15 @@ class SyntheticRoomCalendarRepository
     return event.uid === roomAlarmOption.eventUid ? [roomAlarmOption] : [];
   }
 
+  async listRoomReminderRecipients(): Promise<CalendarRoomReminderRecipient[]> {
+    return [...syntheticJoinedRecipients].map(([userId, displayName]) => ({
+      userId,
+      displayName,
+    }));
+  }
+
   async listRoomReminderConfigurations(): Promise<
-    CalendarRoomReminderIdentity[]
+    CalendarRoomReminderConfiguration[]
   > {
     return [...this.reminderConfigurations.values()];
   }
@@ -499,7 +552,9 @@ class SyntheticRoomCalendarRepository
     eventId: string,
     alarmUid: string,
     recurrenceId: string | null,
-  ): Promise<CalendarRoomReminderIdentity> {
+    target: CalendarRoomReminderTarget,
+    allDaySchedule: CalendarRoomReminderAllDaySchedule | null,
+  ): Promise<CalendarRoomReminderConfiguration> {
     const event = await super.getEvent(calendarId, eventId);
     if (
       !this.manager ||
@@ -508,9 +563,23 @@ class SyntheticRoomCalendarRepository
     ) {
       throw new Error('Synthetic room reminder is unavailable');
     }
-    const identity = { eventUid: event.uid, alarmUid, recurrenceId };
-    this.reminderConfigurations.set(alarmUid, identity);
-    return identity;
+    if (
+      target.kind === 'users' &&
+      target.userIds.some((userId) => !syntheticJoinedRecipients.has(userId))
+    ) {
+      throw new Error('Synthetic recipient is no longer joined');
+    }
+    const configuration: CalendarRoomReminderConfiguration = {
+      eventUid: event.uid,
+      alarmUid,
+      recurrenceId,
+      target,
+      allDaySchedule,
+      revision: 1,
+    };
+    this.reminderConfigurations.set(alarmUid, configuration);
+    window.__syntheticRoomReminderTarget = target;
+    return configuration;
   }
 
   async disableRoomReminder(
@@ -606,19 +675,26 @@ async function start() {
     );
     performance.mark('synthetic-large-calendar-mount-start');
   }
-  createRoot(document.getElementById('root')!).render(
+  const fixture = (
     <I18nextProvider i18n={i18next}>
-      <ThemeProvider theme={theme}>
-        <CssBaseline />
-        <LocalizationProvider>
-          <CalendarRepositoryProvider repository={repository}>
-            <CalendarFixture
-              largeCalendarRepository={largeCalendarRepository}
-            />
-          </CalendarRepositoryProvider>
-        </LocalizationProvider>
-      </ThemeProvider>
-    </I18nextProvider>,
+      <LocalizationProvider>
+        <CalendarRepositoryProvider repository={repository}>
+          <CalendarFixture largeCalendarRepository={largeCalendarRepository} />
+        </CalendarRepositoryProvider>
+      </LocalizationProvider>
+    </I18nextProvider>
+  );
+  createRoot(document.getElementById('root')!).render(
+    <WidgetApiMockProvider value={syntheticRoomWidgetApi}>
+      {query.get('mode') === 'room-manager' ? (
+        <CalendarMuiThemeProvider>{fixture}</CalendarMuiThemeProvider>
+      ) : (
+        <ThemeProvider theme={theme}>
+          <CssBaseline />
+          {fixture}
+        </ThemeProvider>
+      )}
+    </WidgetApiMockProvider>,
   );
 }
 
