@@ -108,6 +108,11 @@ export function isRoomNavigationReadinessObservation(
   value: unknown,
 ): value is RoomNavigationReadinessObservation;
 
+export function isElementRoomEntryReady(
+  snapshotValue: unknown,
+  identityAndRoomValue: unknown,
+): boolean;
+
 export function roomContextObservationForPhase<T extends object>(
   observation: T,
   phase: MemberRoomContextPhase,

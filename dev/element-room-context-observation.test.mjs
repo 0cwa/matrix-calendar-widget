@@ -11,8 +11,6 @@ import {
   roomContextObservationForPhase,
 } from './element-room-context-observation.mjs';
 
-const AbortController = globalThis.AbortController;
-
 test('projects the existing room observer into a closed private readiness receipt', () => {
   const observation = {
     matrixUserMatches: true,
@@ -30,6 +28,7 @@ test('projects the existing room observer into a closed private readiness receip
     roomViewRendererPresent: true,
     matrixChatStateAvailable: true,
     matrixChatViewBucket: 'logged-in',
+    matrixChatFirstSyncComplete: true,
     matrixChatReady: true,
     matrixChatPageTypeBucket: 'other-page',
     matrixChatCurrentRoomMatches: false,

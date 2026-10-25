@@ -8,25 +8,25 @@ import {
 } from './element-acceptance-diagnostics.mjs';
 import { formatPerformanceEvidence } from './element-acceptance-performance-evidence.mjs';
 import {
+  normalizePrivateUiCalendarListTransportObservations,
+  normalizePrivateUiCalendarSelectionObservation,
   PRIVATE_UI_CALENDAR_LIST_TRANSPORT_PHASE,
   PRIVATE_UI_CALENDAR_SELECTION_DIAGNOSTIC_PHASE,
   PRIVATE_UI_CHECKPOINT_PHASES,
   PRIVATE_UI_RESULT_PHASE,
   PRIVATE_UI_ROOM_READINESS_PHASE,
-  normalizePrivateUiCalendarListTransportObservations,
-  normalizePrivateUiCalendarSelectionObservation,
 } from './element-acceptance-private-ui-checkpoints.mjs';
-import {
-  PRIVATE_UI_ROOM_READINESS_FIELDS,
-  normalizePrivateUiRoomReadinessObservation,
-  isRoomNavigationReadinessObservation,
-  ROOM_RENDER_DIAGNOSTIC_FIELDS,
-} from './element-room-context-observation.mjs';
 import {
   formatReminderFlowDiagnosticRecord,
   isReminderFlowDiagnosticRecord,
   REMINDER_FLOW_DIAGNOSTIC_PHASE,
 } from './element-reminder-flow-diagnostics.mjs';
+import {
+  isRoomNavigationReadinessObservation,
+  normalizePrivateUiRoomReadinessObservation,
+  PRIVATE_UI_ROOM_READINESS_FIELDS,
+  ROOM_RENDER_DIAGNOSTIC_FIELDS,
+} from './element-room-context-observation.mjs';
 import { isReminderDeliverySnapshot } from './reminder-delivery-snapshot.mjs';
 
 const RUNTIME_DEPENDENCIES = loadRuntimeDependencyAllowlist(

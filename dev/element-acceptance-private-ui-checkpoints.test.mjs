@@ -649,6 +649,7 @@ test('records room readiness only after that phase fails and preserves its first
       roomViewRendererPresent: true,
       matrixChatStateAvailable: true,
       matrixChatViewBucket: 'logged-in',
+      matrixChatFirstSyncComplete: true,
       matrixChatReady: true,
       matrixChatPageTypeBucket: 'other-page',
       matrixChatCurrentRoomMatches: false,

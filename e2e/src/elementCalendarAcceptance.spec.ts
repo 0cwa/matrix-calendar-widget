@@ -116,7 +116,10 @@ import {
   collectRoomReadinessTimeline,
   createMemberRoomContextRecord,
   createRoomNavigationReadinessObservation,
+  isElementRoomEntryReady,
   unavailableRoomReadinessTimeline,
+  type RoomNavigationReadinessObservation,
+  type RoomNavigationReadinessSnapshot,
   type RoomReadinessSnapshot,
   type RoomReadinessTimeline,
 } from '../../dev/element-room-context-observation.mjs';
@@ -882,18 +885,6 @@ type MatrixChatPageTypeBucket =
   | 'other-page'
   | 'missing'
   | 'unavailable';
-type RoomNavigationReadinessSnapshot = {
-  firstSyncComplete: boolean | null;
-  ready: boolean | null;
-  pageType: MatrixChatPageTypeBucket;
-  currentRoomMatches: boolean | null;
-  matrixSyncState: MatrixSyncState;
-};
-type RoomNavigationReadinessObservation = {
-  beforeNavigation: RoomNavigationReadinessSnapshot;
-  afterRoute: RoomNavigationReadinessSnapshot;
-};
-
 type MemberARoomObservation = {
   matrixUserMatches: boolean;
   matrixRoomKnown: boolean;
@@ -7851,17 +7842,23 @@ async function openFixtureRoom(
     navigationCompleted: boolean;
     roomHeadingReady: boolean;
   }) => void,
+  timeouts: { navigationMs: number; headingMs: number } = {
+    navigationMs: 30_000,
+    headingMs: 30_000,
+  },
 ): Promise<ElementWebPage> {
   const roomUrl = new URL(fixture.elementUrl);
   roomUrl.hash = `/room/${roomId}`;
   let navigationCompleted = false;
   let roomHeadingReady = false;
   try {
-    await page.goto(roomUrl.href);
+    await page.goto(roomUrl.href, { timeout: timeouts.navigationMs });
     navigationCompleted = true;
 
     const element = new ElementWebPage(page);
-    await expect(getPinnedElementRoomNameHeading(page)).toHaveText(roomName);
+    await expect(getPinnedElementRoomNameHeading(page)).toHaveText(roomName, {
+      timeout: timeouts.headingMs,
+    });
     roomHeadingReady = true;
     expect(element.getCurrentRoomId()).toBe(roomId);
     return element;
@@ -7873,6 +7870,148 @@ async function openFixtureRoom(
     }
     throw error;
   }
+}
+
+const PRIVATE_ROOM_ENTRY_TIMEOUTS = Object.freeze({
+  readinessMs: 15_000,
+  navigationMs: 20_000,
+  headingMs: 25_000,
+});
+
+async function openPrivateFixtureRoom(
+  page: Page,
+  roomName: string,
+  roomId: string,
+  expectedUserId: string,
+  onFailure?: (state: {
+    navigationCompleted: boolean;
+    roomHeadingReady: boolean;
+  }) => void,
+): Promise<ElementWebPage> {
+  await expect
+    .poll(
+      async () => {
+        const readiness = await page
+          .evaluate(
+            ({ expectedUserId, roomId }) => {
+              type MatrixRoom = { getMyMembership?: () => string | null };
+              type MatrixClient = {
+                getUserId?: () => string | null;
+                getRoom?: (id: string) => MatrixRoom | null | undefined;
+                getSyncState?: () => string | null;
+              };
+              const knownSyncStates = new Set([
+                'ERROR',
+                'PREPARED',
+                'RECONNECTING',
+                'STOPPED',
+                'SYNCING',
+                'CATCHUP',
+              ]);
+              const record = (
+                value: unknown,
+              ): Record<string, unknown> | undefined =>
+                value !== null &&
+                typeof value === 'object' &&
+                !Array.isArray(value)
+                  ? (value as Record<string, unknown>)
+                  : undefined;
+              let firstSyncComplete: boolean | null = null;
+              let ready: boolean | null = null;
+              let pageType: RoomNavigationReadinessSnapshot['pageType'] =
+                'unavailable';
+              let currentRoomMatches: boolean | null = null;
+              let matrixSyncState: MatrixSyncState = 'UNKNOWN';
+              let matrixUserMatches = false;
+              let matrixRoomKnown = false;
+              let matrixRoomJoined = false;
+              try {
+                const windowState = window as Window & {
+                  matrixChat?: { firstSyncComplete?: unknown; state?: unknown };
+                  mxMatrixClientPeg?: { get?: () => MatrixClient | undefined };
+                };
+                const matrixChat = windowState.matrixChat;
+                firstSyncComplete =
+                  typeof matrixChat?.firstSyncComplete === 'boolean'
+                    ? matrixChat.firstSyncComplete
+                    : null;
+                const chatState = record(matrixChat?.state);
+                ready =
+                  typeof chatState?.ready === 'boolean'
+                    ? chatState.ready
+                    : null;
+                const rawPageType = chatState?.page_type;
+                pageType =
+                  rawPageType === undefined || rawPageType === null
+                    ? chatState
+                      ? 'missing'
+                      : 'unavailable'
+                    : typeof rawPageType === 'string'
+                      ? rawPageType === 'room_view'
+                        ? 'room-view'
+                        : 'other-page'
+                      : 'unavailable';
+                const currentRoomId = chatState?.currentRoomId;
+                if (
+                  typeof currentRoomId === 'string' ||
+                  currentRoomId === null
+                ) {
+                  currentRoomMatches = currentRoomId === roomId;
+                }
+                const matrixClient = windowState.mxMatrixClientPeg?.get?.();
+                matrixUserMatches =
+                  matrixClient?.getUserId?.() === expectedUserId;
+                const matrixRoom = matrixClient?.getRoom?.(roomId);
+                matrixRoomKnown =
+                  matrixRoom !== null && matrixRoom !== undefined;
+                matrixRoomJoined = matrixRoom?.getMyMembership?.() === 'join';
+                const rawSyncState = matrixClient?.getSyncState?.();
+                if (
+                  typeof rawSyncState === 'string' &&
+                  knownSyncStates.has(rawSyncState)
+                ) {
+                  matrixSyncState = rawSyncState as MatrixSyncState;
+                }
+              } catch {
+                // Unknown Matrix state remains closed in the shared predicate.
+              }
+              return {
+                snapshot: {
+                  firstSyncComplete,
+                  ready,
+                  pageType,
+                  currentRoomMatches,
+                  matrixSyncState,
+                },
+                identityAndRoom: {
+                  matrixUserMatches,
+                  matrixRoomKnown,
+                  matrixRoomJoined,
+                },
+              };
+            },
+            { expectedUserId, roomId },
+          )
+          .catch(() => undefined);
+        return Boolean(
+          readiness &&
+          isElementRoomEntryReady(
+            readiness.snapshot,
+            readiness.identityAndRoom,
+          ),
+        );
+      },
+      {
+        timeout: PRIVATE_ROOM_ENTRY_TIMEOUTS.readinessMs,
+        intervals: [100, 250, 500, 1_000],
+      },
+    )
+    .toBe(true);
+
+  return openFixtureRoom(page, roomName, roomId, onFailure, {
+    navigationMs: PRIVATE_ROOM_ENTRY_TIMEOUTS.navigationMs,
+    headingMs: PRIVATE_ROOM_ENTRY_TIMEOUTS.headingMs,
+  });
 }
 
 function getPinnedElementRoomNameHeading(page: Page): Locator {
@@ -11159,10 +11298,11 @@ if (process.env.ELEMENT_ACCEPTANCE_PRIVATE_UI === 'true') {
         let teamRoomA: ElementWebPage;
         try {
           teamRoomA = await checkpoint.run('private-ui-member-a-room', () =>
-            openFixtureRoom(
+            openPrivateFixtureRoom(
               pageA,
               fixture.roomName,
               fixture.teamRoomId,
+              fixture.users.memberA.userId,
               (state) => {
                 memberARoomNavigationCompleted = state.navigationCompleted;
                 memberARoomHeadingReady = state.roomHeadingReady;
@@ -11543,7 +11683,12 @@ if (process.env.ELEMENT_ACCEPTANCE_PRIVATE_UI === 'true') {
         const memberBRoom = await checkpoint.run(
           'private-ui-member-b-room',
           () =>
-            openFixtureRoom(memberBPage, fixture.roomName, fixture.teamRoomId),
+            openPrivateFixtureRoom(
+              memberBPage,
+              fixture.roomName,
+              fixture.teamRoomId,
+              fixture.users.memberB.userId,
+            ),
         );
         const memberBFrame = await checkpoint.run(
           'private-ui-member-b-widget-ready',
@@ -11586,10 +11731,11 @@ if (process.env.ELEMENT_ACCEPTANCE_PRIVATE_UI === 'true') {
         const outsiderRoom = await checkpoint.run(
           'private-ui-outsider-room',
           () =>
-            openFixtureRoom(
+            openPrivateFixtureRoom(
               outsiderPage,
               fixture.outsiderRoomName,
               fixture.outsiderRoomId,
+              fixture.users.outsider.userId,
             ),
         );
         await checkpoint.run('private-ui-outsider-widget-ready', () =>

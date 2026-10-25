@@ -54,6 +54,7 @@ test('sanitizes the produced private room observation without replacing the firs
       roomViewRendererPresent: true,
       matrixChatStateAvailable: true,
       matrixChatViewBucket: 'logged-in',
+      matrixChatFirstSyncComplete: true,
       matrixChatReady: true,
       matrixChatPageTypeBucket: 'other-page',
       matrixChatCurrentRoomMatches: false,
@@ -87,7 +88,7 @@ test('sanitizes the produced private room observation without replacing the firs
     });
     assert.match(
       summary,
-      /phase=private-ui-room-readiness status=observed profile=normal-bot matrix_user_matches=true matrix_room_known=true matrix_room_joined=true matrix_sync_state=SYNCING room_navigation_completed=true room_heading_ready=false room_heading_present=false room_name_matches=false room_id_matches=true/u,
+      /phase=private-ui-room-readiness status=observed profile=normal-bot matrix_user_matches=true matrix_room_known=true matrix_room_joined=true matrix_sync_state=SYNCING room_navigation_completed=true room_heading_ready=false room_heading_present=false room_name_matches=false room_id_matches=true .*matrix_chat_first_sync_complete=true/u,
     );
     assert.match(
       summary,

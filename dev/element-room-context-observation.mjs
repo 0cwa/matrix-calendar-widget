@@ -15,8 +15,6 @@
  * limitations under the License.
  */
 
-import { performance } from 'node:perf_hooks';
-
 const ROOM_CONTEXT_PHASES = new Set([
   'member-a-room-context',
   'reminder-room-context',
@@ -66,6 +64,7 @@ export const PRIVATE_UI_ROOM_READINESS_FIELDS = Object.freeze([
   'roomViewRendererPresent',
   'matrixChatStateAvailable',
   'matrixChatViewBucket',
+  'matrixChatFirstSyncComplete',
   'matrixChatReady',
   'matrixChatPageTypeBucket',
   'matrixChatCurrentRoomMatches',
@@ -189,6 +188,7 @@ function validPrivateUiRoomReadinessObservation(value) {
   const chatStateValid =
     typeof value.matrixChatStateAvailable === 'boolean' &&
     PRIVATE_UI_ROOM_CHAT_VIEW_BUCKETS.has(value.matrixChatViewBucket) &&
+    isBooleanOrNull(value.matrixChatFirstSyncComplete) &&
     isBooleanOrNull(value.matrixChatReady) &&
     PRIVATE_UI_ROOM_CHAT_PAGE_TYPE_BUCKETS.has(
       value.matrixChatPageTypeBucket,
@@ -196,6 +196,7 @@ function validPrivateUiRoomReadinessObservation(value) {
     isBooleanOrNull(value.matrixChatCurrentRoomMatches) &&
     (value.matrixChatStateAvailable ||
       (value.matrixChatViewBucket === 'unavailable' &&
+        value.matrixChatFirstSyncComplete === null &&
         value.matrixChatReady === null &&
         value.matrixChatPageTypeBucket === 'unavailable' &&
         value.matrixChatCurrentRoomMatches === null));
@@ -348,10 +349,7 @@ export function isRoomNavigationReadinessObservation(value) {
  * @param {unknown} snapshotValue
  * @param {unknown} identityAndRoomValue
  */
-export function isElementRoomEntryReady(
-  snapshotValue,
-  identityAndRoomValue,
-) {
+export function isElementRoomEntryReady(snapshotValue, identityAndRoomValue) {
   const snapshot = normalizeRoomNavigationReadinessSnapshot(snapshotValue);
   if (
     identityAndRoomValue === null ||
