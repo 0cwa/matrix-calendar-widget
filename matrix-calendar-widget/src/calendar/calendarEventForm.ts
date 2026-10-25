@@ -155,13 +155,66 @@ export type CalendarEventValidationError =
   | 'invalid-conference'
   | 'invalid-attachment';
 
+const DEFAULT_EVENT_DURATION_HOURS = 1;
+const DEFAULT_EVENT_RANGE_SEARCH_HOURS = 48;
+
+// The form stores local date-times without offsets. Defaults must round-trip
+// through those fields to the same instants before they can be offered.
+function defaultEventTimedRange(
+  now: DateTime,
+  timezone: string,
+): { start: DateTime; end: DateTime } {
+  const firstStart = now.setZone(timezone).startOf('hour');
+  if (!firstStart.isValid) {
+    return {
+      start: firstStart,
+      end: firstStart.plus({ hours: DEFAULT_EVENT_DURATION_HOURS }),
+    };
+  }
+
+  for (
+    let elapsedHours = 0;
+    elapsedHours <= DEFAULT_EVENT_RANGE_SEARCH_HOURS;
+    elapsedHours += 1
+  ) {
+    const start = firstStart.plus({ hours: elapsedHours }).startOf('hour');
+    const end = start.plus({ hours: DEFAULT_EVENT_DURATION_HOURS });
+    if (elapsedHours > 0 && start <= now) {
+      continue;
+    }
+    const startFromForm = DateTime.fromISO(formDateTimeValue(start), {
+      zone: timezone,
+    });
+    const endFromForm = DateTime.fromISO(formDateTimeValue(end), {
+      zone: timezone,
+    });
+
+    if (
+      startFromForm.isValid &&
+      endFromForm.isValid &&
+      startFromForm.toMillis() === start.toMillis() &&
+      endFromForm.toMillis() === end.toMillis() &&
+      endFromForm > startFromForm
+    ) {
+      return { start, end };
+    }
+  }
+
+  throw new Error(
+    'Unable to generate a representable default event range within 48 hours',
+  );
+}
+
+function formDateTimeValue(value: DateTime): string {
+  return value.toFormat("yyyy-MM-dd'T'HH:mm");
+}
+
 export function createCalendarEventFormValues(
   calendar: Calendar,
   now: DateTime = DateTime.local(),
 ): CalendarEventFormValues {
   const timezone = calendar.timezone ?? now.zoneName;
-  const start = now.setZone(timezone).startOf('hour');
-  const end = start.plus({ hours: 1 });
+  const { start, end } = defaultEventTimedRange(now, timezone);
 
   return {
     calendarId: calendar.id,
@@ -180,8 +233,8 @@ export function createCalendarEventFormValues(
     attachmentChanged: false,
     timingType: 'timed',
     timedKind: 'zoned',
-    start: start.toFormat("yyyy-MM-dd'T'HH:mm"),
-    end: end.toFormat("yyyy-MM-dd'T'HH:mm"),
+    start: formDateTimeValue(start),
+    end: formDateTimeValue(end),
     timezone,
     timingChanged: false,
     timezoneChanged: false,
