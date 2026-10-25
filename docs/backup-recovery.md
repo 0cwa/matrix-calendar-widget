@@ -192,6 +192,11 @@ until its placeholders and host paths are replaced:
   "projectName": "matrix-calendar-sidecar",
   "projectDirectory": "/opt/matrix-calendar-widget",
   "composeEnvFile": "/etc/matrix-calendar/sidecar.env",
+  "composeFiles": [
+    "deploy/etke-sidecar.compose.yaml",
+    "deploy/image-overlay.yaml",
+    "deploy/migration-off.yaml"
+  ],
   "captureRoot": "/var/backups/matrix-calendar",
   "dockerSocket": "/var/run/docker.sock",
   "helperImage": "busybox:1.37.0@sha256:<reviewed-image-digest>",
@@ -213,6 +218,18 @@ until its placeholders and host paths are replaced:
   ]
 }
 ```
+
+`composeFiles` is optional for compatibility with existing configurations. If
+omitted, the coordinator uses only `deploy/etke-sidecar.compose.yaml`. When
+provided, list every Compose file in the exact order required to run and resume
+the selected services. Each entry must be a unique, canonical relative file
+inside `projectDirectory`; traversal, absolute paths, symlinks, and more than
+16 files are rejected. The coordinator applies the same `composeEnvFile` and
+ordered file list to Compose configuration checks, service discovery, stop,
+and resume commands. Put any temporary migration or recovery safety overlay
+last so its settings take precedence during that phase. After a phase change,
+update the installed coordinator configuration and review the next timer run's
+active stack before enabling it.
 
 `restoreInputs` is optional for older configurations. When used, it is an
 explicit allowlist of at most 32 named regular files; each file is limited to

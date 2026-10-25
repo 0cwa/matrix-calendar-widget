@@ -564,6 +564,61 @@ function composeServiceCommand(call, operation, service) {
   );
 }
 
+function composeContextCalls(calls) {
+  return calls.filter(
+    (call) =>
+      call.name === 'docker' &&
+      call.args[0] === 'compose' &&
+      call.args.includes('--project-directory'),
+  );
+}
+
+function composeFilesFromArgs(args) {
+  const files = [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === '-f') files.push(args[index + 1]);
+  }
+  return files;
+}
+
+function assertComposeContext(calls, fixture, relativeFiles) {
+  const composeCalls = composeContextCalls(calls);
+  assert.ok(composeCalls.length > 0);
+  const expectedFiles = relativeFiles.map((file) =>
+    join(fixture.config.projectDirectory, file),
+  );
+  for (const call of composeCalls) {
+    const envFileIndex = call.args.indexOf('--env-file');
+    const firstComposeFileIndex = call.args.indexOf('-f');
+    assert.ok(envFileIndex >= 0);
+    assert.equal(call.args.filter((arg) => arg === '--env-file').length, 1);
+    assert.equal(call.args[envFileIndex + 1], fixture.composeEnvFile);
+    assert.equal(firstComposeFileIndex, envFileIndex + 2);
+    assert.deepEqual(composeFilesFromArgs(call.args), expectedFiles);
+  }
+  return composeCalls;
+}
+
+async function addComposeOverlays(fixture) {
+  const relativeFiles = [
+    'deploy/etke-sidecar.compose.yaml',
+    'deploy/candidate-image-overlay.yaml',
+    'deploy/migration-off-overlay.yaml',
+  ];
+  await writeFile(
+    join(fixture.config.projectDirectory, relativeFiles[1]),
+    'services: {}\n',
+    { mode: 0o600 },
+  );
+  await writeFile(
+    join(fixture.config.projectDirectory, relativeFiles[2]),
+    'services: {}\n',
+    { mode: 0o600 },
+  );
+  fixture.config.composeFiles = relativeFiles;
+  return relativeFiles;
+}
+
 async function waitForFile(path, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -588,6 +643,9 @@ test('captures the configured paired stores, resumes services, then uploads one 
     now: () => new Date('2026-10-12T02:03:04.000Z'),
     id: () => 'synthetic-run-id',
   });
+  assertComposeContext(fake.calls, fixture, [
+    'deploy/etke-sidecar.compose.yaml',
+  ]);
 
   const files = (await readdir(result.captureDirectory)).sort();
   assert.deepEqual(files, [
@@ -731,6 +789,34 @@ test('captures the configured paired stores, resumes services, then uploads one 
     ),
     false,
   );
+});
+
+test('uses the exact ordered Compose stack and interpolation env file for every successful operation', async (t) => {
+  const fixture = await makeFixture({ databaseEnabled: false });
+  t.after(fixture.cleanup);
+  const relativeFiles = await addComposeOverlays(fixture);
+  const fake = fakeCommands({ databaseEnabled: false });
+
+  await runColdBackup(fixture.config, {
+    command: fake.command,
+    env: fixture.env,
+    now: () => new Date('2026-10-12T02:03:04.000Z'),
+    id: () => 'ordered-compose-success',
+  });
+
+  assertComposeContext(fake.calls, fixture, relativeFiles);
+  assert.equal(relativeFiles.at(-1), 'deploy/migration-off-overlay.yaml');
+  for (const service of ['radicale', 'server', 'widget']) {
+    const startCall = fake.calls.find((call) =>
+      composeServiceCommand(call, 'start', service),
+    );
+    assert.ok(startCall, `resume includes ${service}`);
+    assert.deepEqual(composeFilesFromArgs(startCall.args), [
+      join(fixture.config.projectDirectory, relativeFiles[0]),
+      join(fixture.config.projectDirectory, relativeFiles[1]),
+      join(fixture.config.projectDirectory, relativeFiles[2]),
+    ]);
+  }
 });
 
 test('captures large binary restore inputs under flat names and verifies their encrypted snapshot readback', async (t) => {
@@ -1939,6 +2025,62 @@ test('invalid or missing project retention scope fails before commands', async (
   }
 });
 
+test('rejects invalid, duplicate, traversal, absolute, and oversized Compose file lists before commands', async (t) => {
+  const fixture = await makeFixture({ databaseEnabled: false });
+  t.after(fixture.cleanup);
+  const invalidLists = [
+    [],
+    ['deploy/etke-sidecar.compose.yaml', 'deploy/etke-sidecar.compose.yaml'],
+    ['../outside.yaml'],
+    ['/tmp/outside.yaml'],
+    ['deploy/../deploy/etke-sidecar.compose.yaml'],
+    Array.from({ length: 17 }, (_, index) => `deploy/overlay-${index}.yaml`),
+  ];
+
+  for (const composeFiles of invalidLists) {
+    const fake = fakeCommands({ databaseEnabled: false });
+    await assert.rejects(
+      runColdBackup(
+        { ...fixture.config, composeFiles },
+        { command: fake.command, env: fixture.env },
+      ),
+      (error) =>
+        error instanceof ColdBackupFailure && error.stage === 'configuration',
+    );
+    assert.equal(fake.calls.length, 0);
+  }
+});
+
+test('rejects a Compose file symlink that escapes the configured project directory before commands', async (t) => {
+  const fixture = await makeFixture({ databaseEnabled: false });
+  t.after(fixture.cleanup);
+  const externalFile = join(fixture.root, 'external-compose.yaml');
+  const linkedFile = join(
+    fixture.config.projectDirectory,
+    'deploy',
+    'external.yaml',
+  );
+  await writeFile(externalFile, 'services: {}\n', { mode: 0o600 });
+  await symlink(externalFile, linkedFile);
+  const fake = fakeCommands({ databaseEnabled: false });
+
+  await assert.rejects(
+    runColdBackup(
+      {
+        ...fixture.config,
+        composeFiles: [
+          'deploy/etke-sidecar.compose.yaml',
+          'deploy/external.yaml',
+        ],
+      },
+      { command: fake.command, env: fixture.env },
+    ),
+    (error) =>
+      error instanceof ColdBackupFailure && error.stage === 'preflight',
+  );
+  assert.equal(fake.calls.length, 0);
+});
+
 test('dump, archive, and archive-read failures stop before upload and always resume', async (t) => {
   const failures = [
     {
@@ -2019,6 +2161,49 @@ test('dump, archive, and archive-read failures stop before upload and always res
       );
     });
   }
+});
+
+test('resumes from the same ordered migration-off stack after capture failure', async (t) => {
+  const fixture = await makeFixture({ databaseEnabled: false });
+  t.after(fixture.cleanup);
+  const relativeFiles = await addComposeOverlays(fixture);
+  const fake = fakeCommands({ databaseEnabled: false, failArchive: true });
+
+  await assert.rejects(
+    runColdBackup(fixture.config, {
+      command: fake.command,
+      env: fixture.env,
+      id: () => 'ordered-compose-capture-failure',
+    }),
+    (error) => error instanceof ColdBackupFailure && error.stage === 'archive',
+  );
+
+  const composeCalls = assertComposeContext(fake.calls, fixture, relativeFiles);
+  const startCalls = fake.calls.filter((call) =>
+    ['radicale', 'server', 'widget'].some((service) =>
+      composeServiceCommand(call, 'start', service),
+    ),
+  );
+  assert.deepEqual(
+    startCalls.map((call) => call.args.at(-1)),
+    ['radicale', 'server', 'widget'],
+  );
+  assert.equal(startCalls.length, 3);
+  assert.ok(
+    startCalls.every((call) =>
+      composeFilesFromArgs(call.args).includes(
+        join(fixture.config.projectDirectory, relativeFiles.at(-1)),
+      ),
+    ),
+    'each resumed service keeps migration-off last in its exact context',
+  );
+  assert.ok(composeCalls.some((call) => call.args.includes('config')));
+  assert.equal(
+    fake.calls.some(
+      (call) => call.name === 'restic' && call.args[0] === 'backup',
+    ),
+    false,
+  );
 });
 
 test('a failed resume attempts every dependency in order and prevents upload', async (t) => {
