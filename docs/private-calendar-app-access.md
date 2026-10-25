@@ -1,10 +1,9 @@
 # Connect a private calendar app
 
-Private external CalDAV access is in development, disabled by default, and not
-deployed. Use these steps only if the operator confirms that the installed
-build is qualified and this feature has been enabled. The branch validation
-record describes local checks and remaining acceptance gates; it is not a
-deployment qualification. See the [validation record](./private-calendar-app-access-validation.md).
+Private external CalDAV access is optional and disabled by default. Ask the
+operator whether it has been enabled and qualified for this installation.
+The branch validation record describes local checks and remaining acceptance
+gates; it is not a deployment qualification. See the [validation record](./private-calendar-app-access-validation.md).
 
 The widget lets a user create a separate CalDAV credential for one personal or
 room calendar. It does not reveal or store the user's Matrix password. When

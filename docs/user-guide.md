@@ -64,7 +64,7 @@ Unpublishing blocks future requests but cannot retract calendar data already dow
 
 ## Connect a private calendar app
 
-Private CalDAV app access is a separate, default-off feature that remains in development and is not deployed. Use it only if the operator confirms that the installed build is qualified and has enabled it. If **Calendar app access** is available in the toolbar, select one calendar and choose **Create app access**. Enter its displayed CalDAV URL, username, and app password in the calendar app. The password is shown once; save it in the app's credential manager. Each credential expires after 90 days.
+Private CalDAV app access is optional and disabled by default. Ask the operator whether it has been enabled and qualified for this installation. If **Calendar app access** is available in the toolbar, select one calendar and choose **Create app access**. Enter its displayed CalDAV URL, username, and app password in the calendar app. The password is shown once; save it in the app's credential manager. Each credential expires after 90 days.
 
 The widget lists each credential's status and expiry. To replace one, create a new credential, update the calendar app, then revoke the old credential. Revocation blocks future access, but cannot remove copies already downloaded by the app. A lost one-time password cannot be recovered; create a replacement. Never enter your Matrix password into a CalDAV application. See [private calendar app access](./private-calendar-app-access.md) for the setup details and current limits.
 
