@@ -4035,6 +4035,79 @@ test('emits allowlisted gateway container state without exposing its error text'
   );
 });
 
+test('emits private HTTPS readiness state with only bounded failure fields', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'private-gateway-https-ready',
+      status: 'failed',
+      containerState: 'exited',
+      containerHealth: 'none',
+      containerExitCode: 1,
+      containerOomKilled: false,
+      containerRuntimeErrorPresent: true,
+    }),
+    sourceSha,
+  );
+
+  assert.equal(
+    summary,
+    [
+      `element-acceptance source_sha=${sourceSha}`,
+      'phase=private-gateway-https-ready status=failed container_state=exited container_health=none container_exit_code=1 container_oom_killed=false container_runtime_error_present=true',
+      '',
+    ].join('\n'),
+  );
+  assert.equal(summary.includes('runtime detail'), false);
+
+  const ready = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'private-gateway-https-ready',
+      status: 'passed',
+      httpStatus: 403,
+    }),
+    sourceSha,
+  );
+  assert.equal(
+    ready,
+    [
+      `element-acceptance source_sha=${sourceSha}`,
+      'phase=private-gateway-https-ready status=passed http_status=403',
+      '',
+    ].join('\n'),
+  );
+});
+
+test('rejects unsafe or contradictory private HTTPS readiness records', () => {
+  const rejectedRecords = [
+    {
+      phase: 'private-gateway-https-ready',
+      status: 'passed',
+      httpStatus: 200,
+    },
+    {
+      phase: 'private-gateway-https-ready',
+      status: 'passed',
+      httpStatus: 403,
+      containerState: 'running',
+      containerHealth: 'none',
+    },
+    {
+      phase: 'private-gateway-https-ready',
+      status: 'failed',
+      containerState: 'running',
+      containerHealth: 'none',
+      startupText: 'synthetic-private-runtime-detail',
+    },
+  ];
+
+  for (const record of rejectedRecords) {
+    assert.throws(
+      () => sanitizeElementAcceptance(JSON.stringify(record), sourceSha),
+      { message: 'invalid element acceptance summary' },
+    );
+  }
+});
+
 test('emits only fixed Radicale readiness state after an unanswered probe', () => {
   const summary = sanitizeElementAcceptance(
     JSON.stringify({

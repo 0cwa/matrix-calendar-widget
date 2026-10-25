@@ -39,6 +39,7 @@ const PHASES = new Set([
   'widget-registered',
   'runtime-ready',
   'gateway-ready',
+  'private-gateway-https-ready',
   'widget-ready',
   'element-ready',
   'member-a-registration',
@@ -849,6 +850,125 @@ function readComposeServiceDiagnostic(service) {
   }
 }
 
+export function readPrivateHttpsServiceDiagnostic({
+  projectName = process.env.COMPOSE_PROJECT_NAME,
+  serverEnvFile = process.env.ELEMENT_ACCEPTANCE_SERVER_ENV_FILE,
+  privateUiEnvFile = process.env.ELEMENT_ACCEPTANCE_PRIVATE_UI_ENV_FILE,
+  runnerTemp = process.env.RUNNER_TEMP,
+  composeFiles = ACCEPTANCE_OVERRIDES.composeFiles,
+  execute = execFileSync,
+} = {}) {
+  const unavailable = {
+    containerState: 'unavailable',
+    containerHealth: 'unavailable',
+  };
+  const isRunnerTempFile = (path) =>
+    typeof path === 'string' &&
+    isAbsolute(path) &&
+    typeof runnerTemp === 'string' &&
+    isAbsolute(runnerTemp) &&
+    resolve(path).startsWith(`${resolve(runnerTemp)}${sep}`);
+  if (
+    !projectName ||
+    !/^[a-z0-9][a-z0-9_-]{0,62}$/u.test(projectName) ||
+    !isRunnerTempFile(serverEnvFile) ||
+    !isRunnerTempFile(privateUiEnvFile)
+  ) {
+    return unavailable;
+  }
+
+  const composeArgs = appendComposeOverrideFiles(
+    [
+      'compose',
+      '-p',
+      projectName,
+      '--env-file',
+      serverEnvFile,
+      '-f',
+      'dev/compose.yaml',
+      '-f',
+      'dev/element-acceptance.compose.yaml',
+    ],
+    composeFiles,
+  );
+  composeArgs.push(
+    '-f',
+    'dev/element-acceptance-reminder.compose.yaml',
+    '--env-file',
+    privateUiEnvFile,
+    '-f',
+    'dev/element-acceptance-private-ui-tls.compose.yaml',
+    '-f',
+    'dev/element-acceptance-private-ui.compose.yaml',
+  );
+  const executeDocker = (arguments_) =>
+    execute('docker', arguments_, {
+      cwd: ROOT,
+      encoding: 'utf8',
+      maxBuffer: 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 10_000,
+    });
+
+  try {
+    const ids = executeDocker([
+      ...composeArgs,
+      'ps',
+      '--all',
+      '-q',
+      'private-gateway-https',
+    ])
+      .trim()
+      .split(/\s+/u)
+      .filter(Boolean);
+    if (ids.length !== 1 || !/^[a-f0-9]{12,64}$/iu.test(ids[0])) {
+      return unavailable;
+    }
+
+    const state = JSON.parse(
+      executeDocker(['inspect', '--format', '{{json .State}}', ids[0]]),
+    );
+    if (state === null || typeof state !== 'object' || Array.isArray(state)) {
+      return unavailable;
+    }
+    const states = new Set([
+      'created',
+      'restarting',
+      'running',
+      'removing',
+      'paused',
+      'exited',
+      'dead',
+    ]);
+    const healthStates = new Set(['starting', 'healthy', 'unhealthy']);
+    const diagnostic = {
+      containerState: states.has(state.Status) ? state.Status : 'unavailable',
+      containerHealth:
+        state.Health === null || state.Health === undefined
+          ? 'none'
+          : healthStates.has(state.Health.Status)
+            ? state.Health.Status
+            : 'unavailable',
+    };
+    if (
+      Number.isInteger(state.ExitCode) &&
+      state.ExitCode >= 0 &&
+      state.ExitCode <= 255
+    ) {
+      diagnostic.containerExitCode = state.ExitCode;
+    }
+    if (typeof state.OOMKilled === 'boolean') {
+      diagnostic.containerOomKilled = state.OOMKilled;
+    }
+    if (typeof state.Error === 'string') {
+      diagnostic.containerRuntimeErrorPresent = state.Error.length > 0;
+    }
+    return diagnostic;
+  } catch {
+    return unavailable;
+  }
+}
+
 async function provision() {
   stagePath();
   const userFile = requiredEnvironment('ELEMENT_ACCEPTANCE_USERS_FILE');
@@ -1147,7 +1267,11 @@ async function waitForEndpoint(phase, url, expectedStatus) {
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 1_000));
   }
   const serviceDiagnostic =
-    phase === 'gateway-ready' ? readComposeServiceDiagnostic('gateway') : {};
+    phase === 'gateway-ready'
+      ? readComposeServiceDiagnostic('gateway')
+      : phase === 'private-gateway-https-ready'
+        ? readPrivateHttpsServiceDiagnostic()
+        : {};
   recordStage(phase, 'failed', {
     ...(Number.isInteger(lastStatus) ? { httpStatus: lastStatus } : {}),
     ...serviceDiagnostic,
@@ -1161,19 +1285,29 @@ async function waitForEndpoint(phase, url, expectedStatus) {
   );
 }
 
-export function getAcceptanceReadinessEndpoints(skipElement = false) {
+export function getAcceptanceReadinessEndpoints(
+  skipElement = false,
+  privateUiEnabled = false,
+) {
   const endpoints = [
     {
       phase: 'gateway-ready',
       url: `${GATEWAY_URL}/v1/calendar/context`,
       expectedStatus: (status) => status >= 400 && status < 500,
     },
-    {
-      phase: 'widget-ready',
-      url: `${WIDGET_URL}/`,
-      expectedStatus: (status) => status === 200,
-    },
   ];
+  if (privateUiEnabled) {
+    endpoints.push({
+      phase: 'private-gateway-https-ready',
+      url: `${PRIVATE_ACCEPTANCE_TLS.browserOrigin}/v1/calendar/context`,
+      expectedStatus: (status) => status === 403,
+    });
+  }
+  endpoints.push({
+    phase: 'widget-ready',
+    url: `${WIDGET_URL}/`,
+    expectedStatus: (status) => status === 200,
+  });
   if (!skipElement) {
     endpoints.push({
       phase: 'element-ready',
@@ -1185,7 +1319,11 @@ export function getAcceptanceReadinessEndpoints(skipElement = false) {
 }
 
 async function waitForServices({ skipElement = false } = {}) {
-  for (const endpoint of getAcceptanceReadinessEndpoints(skipElement)) {
+  const privateUiEnabled = privateUiSettings() !== undefined;
+  for (const endpoint of getAcceptanceReadinessEndpoints(
+    skipElement,
+    privateUiEnabled,
+  )) {
     await waitForEndpoint(
       endpoint.phase,
       endpoint.url,

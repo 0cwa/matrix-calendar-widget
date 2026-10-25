@@ -28,6 +28,7 @@ const PHASES = new Set([
   'widget-registered',
   'runtime-ready',
   'gateway-ready',
+  'private-gateway-https-ready',
   'widget-ready',
   'element-ready',
   'member-a-registration',
@@ -3667,6 +3668,14 @@ export function sanitizeElementAcceptance(
     }
 
     if (
+      record.phase === 'private-gateway-https-ready' &&
+      record.status === 'passed' &&
+      record.httpStatus !== 403
+    ) {
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+    }
+
+    if (
       (Object.hasOwn(record, 'teamRoomMatches') &&
         typeof record.teamRoomMatches !== 'boolean') ||
       (record.phase !== 'outsider-room-widget-team-target' &&
@@ -4211,6 +4220,7 @@ export function sanitizeElementAcceptance(
       (hasContainerDiagnostic &&
         (!(
           record.phase === 'gateway-ready' ||
+          record.phase === 'private-gateway-https-ready' ||
           (record.phase === 'restore-radicale-ready' &&
             hasRestoreRadicaleProbeDiagnostic)
         ) ||

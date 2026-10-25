@@ -4,6 +4,7 @@ import {
   assertAcceptancePrincipalBootstrap,
   createPrincipalOpenIdRequest,
   getAcceptanceReadinessEndpoints,
+  readPrivateHttpsServiceDiagnostic,
   resolveAcceptancePrincipalMode,
 } from './element-acceptance-setup.mjs';
 
@@ -24,6 +25,97 @@ test('local readiness omits Element and keeps gateway and widget checks', () => 
     endpoints.some(({ url }) => url.includes(':8090/')),
     false,
   );
+});
+
+test('private readiness checks the HTTPS bridge before widget and Element', () => {
+  const endpoints = getAcceptanceReadinessEndpoints(false, true);
+  assert.deepEqual(
+    endpoints.map(({ phase }) => phase),
+    [
+      'gateway-ready',
+      'private-gateway-https-ready',
+      'widget-ready',
+      'element-ready',
+    ],
+  );
+  const privateEndpoint = endpoints[1];
+  assert.equal(
+    privateEndpoint.url,
+    'https://127.0.0.1:3001/v1/calendar/context',
+  );
+  assert.equal(privateEndpoint.expectedStatus(403), true);
+  assert.equal(privateEndpoint.expectedStatus(200), false);
+});
+
+test('private HTTPS startup diagnostics retain only bounded container state', () => {
+  const calls = [];
+  const diagnostic = readPrivateHttpsServiceDiagnostic({
+    projectName: 'matrix-acceptance-test',
+    serverEnvFile: '/tmp/runner/server.env',
+    privateUiEnvFile: '/tmp/runner/private-ui.env',
+    runnerTemp: '/tmp/runner',
+    composeFiles: [],
+    execute(command, args) {
+      calls.push({ command, args });
+      return args[0] === 'compose'
+        ? '0123456789ab\n'
+        : JSON.stringify({
+            Status: 'exited',
+            Health: null,
+            ExitCode: 1,
+            OOMKilled: false,
+            Error: 'synthetic-private-runtime-detail',
+          });
+    },
+  });
+
+  assert.deepEqual(diagnostic, {
+    containerState: 'exited',
+    containerHealth: 'none',
+    containerExitCode: 1,
+    containerOomKilled: false,
+    containerRuntimeErrorPresent: true,
+  });
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].command, 'docker');
+  assert.equal(calls[0].args.includes('private-gateway-https'), true);
+  assert.equal(calls[0].args.includes('logs'), false);
+  assert.equal(calls[1].args[0], 'inspect');
+  assert.equal(
+    JSON.stringify(diagnostic).includes('synthetic-private-runtime-detail'),
+    false,
+  );
+});
+
+test('private HTTPS diagnostics fail closed for unsafe compose inputs and IDs', () => {
+  let calls = 0;
+  const execute = () => {
+    calls += 1;
+    return 'unsafe-container-id';
+  };
+  assert.deepEqual(
+    readPrivateHttpsServiceDiagnostic({
+      projectName: 'matrix-acceptance-test',
+      serverEnvFile: '/tmp/outside/server.env',
+      privateUiEnvFile: '/tmp/runner/private-ui.env',
+      runnerTemp: '/tmp/runner',
+      execute,
+    }),
+    { containerState: 'unavailable', containerHealth: 'unavailable' },
+  );
+  assert.equal(calls, 0);
+  assert.deepEqual(
+    readPrivateHttpsServiceDiagnostic({
+      projectName: 'matrix-acceptance-test',
+      serverEnvFile: '/tmp/runner/server.env',
+      privateUiEnvFile: '/tmp/runner/private-ui.env',
+      runnerTemp: '/tmp/runner',
+      composeFiles: [],
+      execute,
+    }),
+    { containerState: 'unavailable', containerHealth: 'unavailable' },
+  );
+  assert.equal(calls, 1);
 });
 
 test('acceptance principal mode defaults to the legacy appservice path', () => {

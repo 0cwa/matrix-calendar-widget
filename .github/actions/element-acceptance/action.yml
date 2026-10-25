@@ -207,7 +207,11 @@ runs:
           echo 'Synthetic Element stack startup failed.' >&2
           exit 1
         fi
-        node dev/element-acceptance-setup.mjs wait
+        if [[ "${ELEMENT_ACCEPTANCE_PRIVATE_UI:-false}" == true ]]; then
+          NODE_EXTRA_CA_CERTS="$ELEMENT_ACCEPTANCE_PRIVATE_TLS_DIR/ca.pem" node dev/element-acceptance-setup.mjs wait
+        else
+          node dev/element-acceptance-setup.mjs wait
+        fi
 
     - name: Run the opt-in private app UI and CalDAV lifecycle
       if: ${{ inputs.private-ui == 'true' }}
