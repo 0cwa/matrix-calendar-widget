@@ -7,6 +7,13 @@ import {
   classifyRadicaleStartupLogs,
   createRadicaleFilesystemEvidence,
 } from './element-acceptance-reminder-restore.mjs';
+import {
+  buildReminderFlowDiagnosticRecord,
+  completeReminderFlowDiagnosticStage,
+  createReminderFlowDiagnosticState,
+  enterReminderFlowDiagnosticStage,
+  failReminderFlowDiagnostic,
+} from './element-reminder-flow-diagnostics.mjs';
 import { roomContextObservationForPhase } from './element-room-context-observation.mjs';
 import { createReminderDeliverySnapshot } from './reminder-delivery-snapshot.mjs';
 import {
@@ -16,6 +23,25 @@ import {
 } from './sanitize-element-acceptance.mjs';
 
 const sourceSha = 'a'.repeat(40);
+
+function reminderFlowSuccessRecord(flow) {
+  const state = createReminderFlowDiagnosticState(flow);
+  const complete = (stage) => {
+    enterReminderFlowDiagnosticStage(state, stage);
+    completeReminderFlowDiagnosticStage(state, stage);
+  };
+  complete('fixture');
+  complete('room-context');
+  if (flow !== 'initial') {
+    complete('prior-state');
+    complete('prior-state-ui-readback');
+  }
+  complete('marker-creation');
+  complete('marker-ui-readback');
+  complete('delivery');
+  complete('complete');
+  return buildReminderFlowDiagnosticRecord(state, 'passed');
+}
 const g6PassedTitleDiagnostic = {
   neighborEditedRowVisible: true,
   neighborPatchTitleOutcome: 'matched',
@@ -932,6 +958,99 @@ test('reports skipped Element only on a three-container restore quiescence', () 
       /invalid element acceptance summary/u,
     );
   }
+});
+
+test('sanitizes producer-shaped reminder flow results in deterministic order', () => {
+  const records = ['restore', 'initial', 'restart'].map(
+    reminderFlowSuccessRecord,
+  );
+  const summary = sanitizeElementAcceptance(
+    records.map((record) => JSON.stringify(record)).join('\n'),
+    sourceSha,
+  );
+
+  const initialIndex = summary.indexOf('flow=initial test_status=passed');
+  const restartIndex = summary.indexOf('flow=restart test_status=passed');
+  const restoreIndex = summary.indexOf('flow=restore test_status=passed');
+  assert.ok(initialIndex >= 0);
+  assert.ok(initialIndex < restartIndex);
+  assert.ok(restartIndex < restoreIndex);
+  assert.match(
+    summary,
+    /phase=reminder-flow-diagnostic flow=restore test_status=passed last_entered=complete last_completed=complete failure_phase=none exception_class=none/u,
+  );
+});
+
+test('preserves the first reminder failure and terminal test status', () => {
+  const initial = createReminderFlowDiagnosticState('initial');
+  enterReminderFlowDiagnosticStage(initial, 'marker-creation');
+  failReminderFlowDiagnostic(initial, new Error('first failure'));
+  failReminderFlowDiagnostic(initial, new TypeError('later error'));
+
+  const restart = createReminderFlowDiagnosticState('restart');
+  enterReminderFlowDiagnosticStage(restart, 'marker-ui-readback');
+  failReminderFlowDiagnostic(restart, new TypeError('readback failure'));
+
+  const restore = createReminderFlowDiagnosticState('restore');
+  enterReminderFlowDiagnosticStage(restore, 'fixture');
+  completeReminderFlowDiagnosticStage(restore, 'fixture');
+  enterReminderFlowDiagnosticStage(restore, 'room-context');
+  completeReminderFlowDiagnosticStage(restore, 'room-context');
+  enterReminderFlowDiagnosticStage(restore, 'prior-state');
+  completeReminderFlowDiagnosticStage(restore, 'prior-state');
+  enterReminderFlowDiagnosticStage(restore, 'prior-state-ui-readback');
+  const firstError = new Error('private title and request URL must not appear');
+  firstError.name = 'TimeoutError';
+  failReminderFlowDiagnostic(restore, firstError);
+  failReminderFlowDiagnostic(
+    restore,
+    new TypeError('later error must not win'),
+  );
+
+  const records = [
+    buildReminderFlowDiagnosticRecord(initial, 'failed'),
+    buildReminderFlowDiagnosticRecord(restart, 'interrupted'),
+    buildReminderFlowDiagnosticRecord(restore, 'timedOut'),
+  ];
+  const summary = sanitizeElementAcceptance(
+    records.map((record) => JSON.stringify(record)).join('\n'),
+    sourceSha,
+  );
+
+  assert.match(
+    summary,
+    /flow=initial test_status=failed last_entered=marker-creation last_completed=none failure_phase=marker-creation exception_class=Error/u,
+  );
+  assert.match(
+    summary,
+    /flow=restart test_status=interrupted last_entered=marker-ui-readback last_completed=none failure_phase=marker-ui-readback exception_class=TypeError/u,
+  );
+  assert.match(
+    summary,
+    /flow=restore test_status=timedOut last_entered=prior-state-ui-readback last_completed=prior-state failure_phase=prior-state-ui-readback exception_class=TimeoutError/u,
+  );
+  assert.doesNotMatch(summary, /private title|request URL|later error/u);
+});
+
+test('rejects malformed or duplicate reminder flow diagnostic records', () => {
+  const record = reminderFlowSuccessRecord('initial');
+  for (const invalid of [
+    { ...record, errorMessage: 'raw error text' },
+    { ...record, failureStage: 'prior-state', exceptionClass: 'Error' },
+  ]) {
+    assert.throws(
+      () => sanitizeElementAcceptance(JSON.stringify(invalid), sourceSha),
+      { message: 'invalid element acceptance summary' },
+    );
+  }
+  assert.throws(
+    () =>
+      sanitizeElementAcceptance(
+        [record, record].map((item) => JSON.stringify(item)).join('\n'),
+        sourceSha,
+      ),
+    { message: 'invalid element acceptance summary' },
+  );
 });
 
 test('reminder delivery snapshot factory enforces the serialized contract', () => {

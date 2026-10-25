@@ -77,6 +77,9 @@ Tracked in [#382](https://github.com/0cwa/matrix-calendar-widget/issues/382):
 - [x] Gate Desktop final route-policy evidence on successful recording of every
       earlier journey phase; preserve an eligible route-policy failure as a
       failed outcome. Issue #409.
+- [ ] Preserve per-flow stage, bounded exception class, and terminal browser
+      status for staged reminder acceptance without changing delivery,
+      restart, or restore assertions. Issue [#413](https://github.com/0cwa/matrix-calendar-widget/issues/413).
 - [x] Calendar-only widget startup and obsolete route retirement: #275/#276.
 - [x] Bounded calendar editor extraction: #258.
 - [x] Human-first documentation entry points, current source map, separate historical records and agent workflow, and local documentation link/anchor checks.

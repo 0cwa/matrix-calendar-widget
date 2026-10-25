@@ -8,11 +8,16 @@ import {
 } from './element-acceptance-diagnostics.mjs';
 import { formatPerformanceEvidence } from './element-acceptance-performance-evidence.mjs';
 import {
+  normalizePrivateUiCalendarListTransportObservations,
   PRIVATE_UI_CALENDAR_LIST_TRANSPORT_PHASE,
   PRIVATE_UI_CHECKPOINT_PHASES,
   PRIVATE_UI_RESULT_PHASE,
-  normalizePrivateUiCalendarListTransportObservations,
 } from './element-acceptance-private-ui-checkpoints.mjs';
+import {
+  formatReminderFlowDiagnosticRecord,
+  isReminderFlowDiagnosticRecord,
+  REMINDER_FLOW_DIAGNOSTIC_PHASE,
+} from './element-reminder-flow-diagnostics.mjs';
 import { ROOM_RENDER_DIAGNOSTIC_FIELDS } from './element-room-context-observation.mjs';
 import { isReminderDeliverySnapshot } from './reminder-delivery-snapshot.mjs';
 
@@ -3256,6 +3261,7 @@ export function sanitizeElementAcceptance(
   }
 
   const phases = new Map();
+  const reminderFlowDiagnostics = new Map();
   let rejectedPhase = 'unknown';
   let rejectionCategory = 'invalid-stage-record';
   let performanceTerminalStatus;
@@ -3280,6 +3286,22 @@ export function sanitizeElementAcceptance(
       throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
     rejectionCategory = 'invalid-stage-record';
+    if (
+      record !== null &&
+      typeof record === 'object' &&
+      !Array.isArray(record) &&
+      record.phase === REMINDER_FLOW_DIAGNOSTIC_PHASE
+    ) {
+      rejectedPhase = REMINDER_FLOW_DIAGNOSTIC_PHASE;
+      if (
+        !isReminderFlowDiagnosticRecord(record) ||
+        reminderFlowDiagnostics.has(record.flow)
+      ) {
+        throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+      }
+      reminderFlowDiagnostics.set(record.flow, record);
+      continue;
+    }
     const privateUiCheckpoint =
       record !== null &&
       typeof record === 'object' &&
@@ -5258,6 +5280,10 @@ export function sanitizeElementAcceptance(
       fields.push(`details_tab_focus=${observations.join(',') || 'none'}`);
     }
     lines.push(fields.join(' '));
+  }
+  for (const flow of ['initial', 'restart', 'restore']) {
+    const record = reminderFlowDiagnostics.get(flow);
+    if (record) lines.push(formatReminderFlowDiagnosticRecord(record));
   }
   return `${lines.join('\n')}\n`;
 }

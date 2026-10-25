@@ -99,6 +99,17 @@ import {
   type G6ResourceOwnership,
 } from '../../dev/element-g6-resource-ownership.mjs';
 import {
+  buildReminderFlowDiagnosticRecord,
+  completeReminderFlowDiagnosticStage,
+  createReminderFlowDiagnosticState,
+  enterReminderFlowDiagnosticStage,
+  failReminderFlowDiagnostic,
+  type ReminderFlowDiagnosticRecord,
+  type ReminderFlowDiagnosticStage,
+  type ReminderFlowDiagnosticState,
+  type ReminderFlowTestStatus,
+} from '../../dev/element-reminder-flow-diagnostics.mjs';
+import {
   ROOM_READINESS_SAMPLE_TIMEOUT_MS,
   collectRoomReadinessTimeline,
   roomContextObservationForPhase,
@@ -1421,7 +1432,13 @@ let fixture: Fixture;
 
 let activePhase: Phase = 'member-a-authenticated';
 let activeReminderFailureRecorded = false;
+let activeReminderFlowDiagnostic: ReminderFlowDiagnosticState | undefined;
 let pendingPinnedControlObservation: PinnedControlObservation | undefined;
+
+test.afterEach(async ({}, testInfo) => {
+  finishActiveReminderFlowDiagnostic(testInfo.status);
+});
+
 const memberAHomeserverHttpFailures = new WeakMap<
   Page,
   HomeserverHttpFailures
@@ -3522,24 +3539,33 @@ test('Element Web delivers room-timed and selected-member all-day reminders acro
   browser,
 }) => {
   test.setTimeout(360_000);
-  fixture = readFixture();
+  activeReminderFlowDiagnostic = undefined;
   activeReminderFailureRecorded = false;
   let flow: ReminderFlow;
   let eventTitles: string[];
   try {
     flow = readReminderFlow();
+    activeReminderFlowDiagnostic = createReminderFlowDiagnosticState(flow);
+    enterActiveReminderFlowStage('fixture');
+    fixture = readFixture();
     eventTitles = readReminderEventTitles();
-  } catch {
+    completeActiveReminderFlowStage('fixture');
+  } catch (error) {
+    failActiveReminderFlow(error);
     record('reminder-ui-readback', 'failed', undefined, 0);
     throw new Error('Reminder acceptance fixture state is unavailable');
   }
   const expectedPriorCount =
     flow === 'initial' ? 0 : flow === 'restart' ? 1 : 2;
   if (eventTitles.length !== expectedPriorCount) {
+    failActiveReminderFlow(
+      new Error('Reminder acceptance fixture state is inconsistent'),
+    );
     record('reminder-ui-readback', 'failed', undefined, eventTitles.length);
     throw new Error('Reminder acceptance fixture state is inconsistent');
   }
 
+  enterActiveReminderFlowStage('room-context');
   const allowedOrigins = new Set([
     new URL(fixture.elementUrl).origin,
     new URL(fixture.homeserverUrl).origin,
@@ -3630,12 +3656,14 @@ test('Element Web delivers room-timed and selected-member all-day reminders acro
       canManageReminders,
     });
     failureHttpStatus = undefined;
+    completeActiveReminderFlowStage('room-context');
 
     const priorReminderReadbackReferences = new Map<
       string,
       ReminderReadbackReference
     >();
     if (eventTitles.length > 0 && flow !== 'initial') {
+      enterActiveReminderFlowStage('prior-state');
       activePhase =
         flow === 'restart'
           ? 'reminder-restart-prior-state'
@@ -3663,6 +3691,7 @@ test('Element Web delivers room-timed and selected-member all-day reminders acro
       record(activePhase, 'passed', timeline.httpStatus, eventTitles.length, {
         allMarkersOnce: true,
       });
+      completeActiveReminderFlowStage('prior-state');
       for (const [index, title] of eventTitles.entries()) {
         const deliveredAt = timeline.markerTimestamps[index];
         if (deliveredAt !== null && deliveredAt !== undefined) {
@@ -3672,11 +3701,13 @@ test('Element Web delivers room-timed and selected-member all-day reminders acro
     }
 
     if (eventTitles.length > 0) {
+      enterActiveReminderFlowStage('prior-state-ui-readback');
       activePhase = 'reminder-ui-readback';
       const existingReadback = await readBackReminderMarkers(
         frame,
         eventTitles,
         priorReminderReadbackReferences,
+        captureReminderFlowReadbackError,
       );
       if (
         !existingReadback.relativeAlarmReadback ||
@@ -3699,8 +3730,10 @@ test('Element Web delivers room-timed and selected-member all-day reminders acro
         targetSettingsReadback: existingReadback.targetSettingsReadback,
         allDayScheduleReadback: existingReadback.allDayScheduleReadback,
       });
+      completeActiveReminderFlowStage('prior-state-ui-readback');
     }
 
+    enterActiveReminderFlowStage('marker-creation');
     const markerTitle = `Reminder acceptance ${randomUUID()}`;
     const markerPlan = reminderPlanForMarkerIndex(eventTitles.length);
     const createdReminder = await createAndConfigureReminder(
@@ -3720,11 +3753,14 @@ test('Element Web delivers room-timed and selected-member all-day reminders acro
         ? { expectedAllDayEventDate: createdReminder.allDayEventDate }
         : {}),
     });
+    completeActiveReminderFlowStage('marker-creation');
+    enterActiveReminderFlowStage('marker-ui-readback');
     activePhase = 'reminder-ui-readback';
     const allReadback = await readBackReminderMarkers(
       frame,
       eventTitles,
       reminderReadbackReferences,
+      captureReminderFlowReadbackError,
     );
     if (
       !allReadback.relativeAlarmReadback ||
@@ -3747,7 +3783,9 @@ test('Element Web delivers room-timed and selected-member all-day reminders acro
       targetSettingsReadback: allReadback.targetSettingsReadback,
       allDayScheduleReadback: allReadback.allDayScheduleReadback,
     });
+    completeActiveReminderFlowStage('marker-ui-readback');
 
+    enterActiveReminderFlowStage('delivery');
     if (flow === 'initial') {
       await verifyPublicFeedBrowserLifecycle(frame, page, markerTitle);
     }
@@ -3854,7 +3892,11 @@ test('Element Web delivers room-timed and selected-member all-day reminders acro
       throw new Error('Reminder browser attempted an unapproved request');
     }
     record(activePhase, 'passed', undefined, blockedRequests);
-  } catch {
+    completeActiveReminderFlowStage('delivery');
+    enterActiveReminderFlowStage('complete');
+    completeActiveReminderFlowStage('complete');
+  } catch (error) {
+    failActiveReminderFlow(error);
     if (!failureAlreadyRecorded && !activeReminderFailureRecorded) {
       record(activePhase, 'failed', failureHttpStatus);
     }
@@ -5661,6 +5703,7 @@ async function readBackRelativeAlarm(
     alarmUiEditorClosed: false,
     alarmUiDetailsClosed: false,
   },
+  onReadbackError?: (error: unknown) => void,
 ): Promise<boolean> {
   try {
     observation.alarmUiRelativeAlarmReadback = false;
@@ -5774,7 +5817,8 @@ async function readBackRelativeAlarm(
       observation.alarmUiRelativeTriggerReadback &&
       observation.alarmUiOffsetReadback;
     return observation.alarmUiRelativeAlarmReadback;
-  } catch {
+  } catch (error) {
+    onReadbackError?.(error);
     return false;
   }
 }
@@ -6841,6 +6885,7 @@ async function readBackReminderMarkers(
     string,
     ReminderReadbackReference
   > = new Map(),
+  onReadbackError?: (error: unknown) => void,
 ): Promise<{
   count: number;
   relativeAlarmReadback: boolean;
@@ -6861,8 +6906,13 @@ async function readBackReminderMarkers(
         : { expectedAlarmLeadMinutes: plan.caldavAlarmLeadMinutes }),
     };
     relativeAlarmReadback =
-      (await readBackRelativeAlarm(frame, title, readbackReference)) &&
-      relativeAlarmReadback;
+      (await readBackRelativeAlarm(
+        frame,
+        title,
+        readbackReference,
+        undefined,
+        onReadbackError,
+      )) && relativeAlarmReadback;
     const settings = await readBackMatrixReminder(
       frame,
       title,
@@ -10760,6 +10810,64 @@ function record(
     })}\n`,
     { encoding: 'utf8', mode: 0o600 },
   );
+}
+
+function enterActiveReminderFlowStage(
+  stage: ReminderFlowDiagnosticStage,
+): void {
+  const state = activeReminderFlowDiagnostic;
+  if (state) enterReminderFlowDiagnosticStage(state, stage);
+}
+
+function completeActiveReminderFlowStage(
+  stage: ReminderFlowDiagnosticStage,
+): void {
+  const state = activeReminderFlowDiagnostic;
+  if (state) completeReminderFlowDiagnosticStage(state, stage);
+}
+
+function failActiveReminderFlow(error: unknown): void {
+  const state = activeReminderFlowDiagnostic;
+  if (state) failReminderFlowDiagnostic(state, error);
+}
+
+function finishActiveReminderFlowDiagnostic(status: string | undefined): void {
+  const state = activeReminderFlowDiagnostic;
+  activeReminderFlowDiagnostic = undefined;
+  if (!state) return;
+
+  const knownStatuses = new Set<ReminderFlowTestStatus>([
+    'passed',
+    'failed',
+    'timedOut',
+    'skipped',
+    'interrupted',
+    'unknown',
+  ]);
+  const testStatus = knownStatuses.has(status as ReminderFlowTestStatus)
+    ? (status as ReminderFlowTestStatus)
+    : 'unknown';
+  if (testStatus !== 'passed' && testStatus !== 'skipped') {
+    failReminderFlowDiagnostic(state, undefined);
+  }
+  recordReminderFlowDiagnostic(
+    buildReminderFlowDiagnosticRecord(state, testStatus),
+  );
+}
+
+function captureReminderFlowReadbackError(error: unknown): void {
+  failActiveReminderFlow(error);
+}
+
+function recordReminderFlowDiagnostic(
+  diagnostic: ReminderFlowDiagnosticRecord,
+): void {
+  const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
+  if (!stageFile) throw new Error('Element acceptance fixture unavailable');
+  appendFileSync(stageFile, `${JSON.stringify(diagnostic)}\n`, {
+    encoding: 'utf8',
+    mode: 0o600,
+  });
 }
 
 function recordPerformancePilot(
