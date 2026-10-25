@@ -282,6 +282,136 @@ describe('calendar event form adapter', () => {
     });
   });
 
+  it('leaves unsupported calendar timezones for the existing validation gate', () => {
+    const values = createCalendarEventFormValues(
+      { ...calendar, timezone: 'Not/A-Timezone' },
+      DateTime.fromISO('2026-10-24T07:37:00Z', { zone: 'UTC' }),
+    );
+
+    expect(values.start).toBe('Invalid DateTime');
+    expect(values.end).toBe('Invalid DateTime');
+    expect(
+      validateCalendarEventForm({ ...values, title: 'Unsupported zone' }),
+    ).toBe('invalid-timezone');
+  });
+
+  it.each([
+    {
+      name: 'the first Stockholm rollback occurrence',
+      now: '2026-10-25T00:11:00Z',
+      timezone: 'Europe/Stockholm',
+      nowLocal: '2026-10-25T02:11',
+      nowOffsetMinutes: 120,
+      start: '2026-10-25T03:00',
+      end: '2026-10-25T04:00',
+      startInstant: '2026-10-25T02:00:00Z',
+      endInstant: '2026-10-25T03:00:00Z',
+      advanced: true,
+    },
+    {
+      name: 'the second Stockholm rollback occurrence',
+      now: '2026-10-25T01:11:00Z',
+      timezone: 'Europe/Stockholm',
+      nowLocal: '2026-10-25T02:11',
+      nowOffsetMinutes: 60,
+      start: '2026-10-25T03:00',
+      end: '2026-10-25T04:00',
+      startInstant: '2026-10-25T02:00:00Z',
+      endInstant: '2026-10-25T03:00:00Z',
+      advanced: true,
+    },
+    {
+      name: 'an ordinary Stockholm hour',
+      now: '2026-10-24T07:37:00Z',
+      timezone: 'Europe/Stockholm',
+      nowLocal: '2026-10-24T09:37',
+      nowOffsetMinutes: 120,
+      start: '2026-10-24T09:00',
+      end: '2026-10-24T10:00',
+      startInstant: '2026-10-24T07:00:00Z',
+      endInstant: '2026-10-24T08:00:00Z',
+      advanced: false,
+    },
+    {
+      name: 'the Stockholm spring-forward boundary',
+      now: '2026-03-29T00:37:00Z',
+      timezone: 'Europe/Stockholm',
+      nowLocal: '2026-03-29T01:37',
+      nowOffsetMinutes: 60,
+      start: '2026-03-29T01:00',
+      end: '2026-03-29T03:00',
+      startInstant: '2026-03-29T00:00:00Z',
+      endInstant: '2026-03-29T01:00:00Z',
+      advanced: false,
+    },
+    {
+      name: 'the first Lord Howe rollback occurrence',
+      now: '2026-04-04T14:45:00Z',
+      timezone: 'Australia/Lord_Howe',
+      nowLocal: '2026-04-05T01:45',
+      nowOffsetMinutes: 660,
+      start: '2026-04-05T02:00',
+      end: '2026-04-05T03:00',
+      startInstant: '2026-04-04T15:30:00Z',
+      endInstant: '2026-04-04T16:30:00Z',
+      advanced: true,
+    },
+    {
+      name: 'the second Lord Howe rollback occurrence',
+      now: '2026-04-04T15:15:00Z',
+      timezone: 'Australia/Lord_Howe',
+      nowLocal: '2026-04-05T01:45',
+      nowOffsetMinutes: 630,
+      start: '2026-04-05T02:00',
+      end: '2026-04-05T03:00',
+      startInstant: '2026-04-04T15:30:00Z',
+      endInstant: '2026-04-04T16:30:00Z',
+      advanced: true,
+    },
+  ])('creates a valid one-hour default for $name', (scenario) => {
+    const now = DateTime.fromISO(scenario.now, { zone: 'UTC' });
+    const values = createCalendarEventFormValues(
+      { ...calendar, timezone: scenario.timezone },
+      now,
+    );
+    const form = { ...values, title: 'DST event' };
+
+    expect(values.start).toBe(scenario.start);
+    expect(values.end).toBe(scenario.end);
+    expect(validateCalendarEventForm(form)).toBeUndefined();
+    expect(calendarEventInputFromForm(form, 'dst@example.test').timing).toEqual(
+      {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: scenario.start,
+          timezone: scenario.timezone,
+        },
+        end: {
+          type: 'zoned',
+          local: scenario.end,
+          timezone: scenario.timezone,
+        },
+      },
+    );
+
+    const parsedStart = DateTime.fromISO(values.start, {
+      zone: scenario.timezone,
+    });
+    const parsedEnd = DateTime.fromISO(values.end, {
+      zone: scenario.timezone,
+    });
+    const nowInTimezone = now.setZone(scenario.timezone);
+    expect(nowInTimezone.toFormat("yyyy-MM-dd'T'HH:mm")).toBe(
+      scenario.nowLocal,
+    );
+    expect(nowInTimezone.offset).toBe(scenario.nowOffsetMinutes);
+    expect(parsedStart.toMillis()).toBe(Date.parse(scenario.startInstant));
+    expect(parsedEnd.toMillis()).toBe(Date.parse(scenario.endInstant));
+    expect(parsedEnd.diff(parsedStart, 'hours').hours).toBe(1);
+    expect(parsedStart.toMillis() > now.toMillis()).toBe(scenario.advanced);
+  });
+
   it('converts timed form values into domain input', () => {
     expect(
       calendarEventInputFromForm(

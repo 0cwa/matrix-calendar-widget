@@ -22,6 +22,7 @@ import {
 } from '@matrix-calendar-widget/calendar';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { DateTime } from 'luxon';
 import { PropsWithChildren, useState } from 'react';
 import { vi } from 'vitest';
 import { CalendarRepositoryProvider } from '../../calendar';
@@ -477,6 +478,65 @@ describe('<CalendarEventEditorDialog />', () => {
         calendarId: 'team',
       },
     );
+  });
+
+  it('keeps create enabled and saves the representable default during a DST fold', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      idFactory: () => 'created-dst',
+    });
+    const createEvent = vi.spyOn(repository, 'createEvent');
+    const onClose = vi.fn();
+    const localNow = DateTime.fromISO('2026-10-25T00:11:00Z', {
+      zone: 'UTC',
+    });
+    const localClock = vi.spyOn(DateTime, 'local').mockReturnValue(localNow);
+
+    try {
+      render(
+        <CalendarEventEditorDialog
+          calendars={[calendar]}
+          onClose={onClose}
+          open
+          uidFactory={() => 'created-dst@example.test'}
+        />,
+        { wrapper: createWrapper(repository) },
+      );
+
+      fireEvent.change(await screen.findByRole('textbox', { name: /Title/i }), {
+        target: { value: 'Created during the rollback hour' },
+      });
+      expect(screen.getByLabelText(/^Start/)).toHaveValue('2026-10-25T03:00');
+      expect(screen.getByLabelText(/^End/)).toHaveValue('2026-10-25T04:00');
+      expect(
+        screen.getByRole('button', { name: 'Create event' }),
+      ).toBeEnabled();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Create event' }));
+      await waitFor(() => expect(onClose).toHaveBeenCalled());
+      expect(createEvent).toHaveBeenCalledWith(
+        'team',
+        expect.objectContaining({
+          uid: 'created-dst@example.test',
+          title: 'Created during the rollback hour',
+          timing: {
+            type: 'timed',
+            start: {
+              type: 'zoned',
+              local: '2026-10-25T03:00',
+              timezone: 'Europe/Stockholm',
+            },
+            end: {
+              type: 'zoned',
+              local: '2026-10-25T04:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+        }),
+      );
+    } finally {
+      localClock.mockRestore();
+    }
   });
 
   it('creates a conference link with an accessible URL and label', async () => {
