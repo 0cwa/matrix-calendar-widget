@@ -98,6 +98,7 @@ import {
   summarizeG6ResourceOwnership,
   type G6ResourceOwnership,
 } from '../../dev/element-g6-resource-ownership.mjs';
+import { readReminderAllDayScheduleFields } from '../../dev/element-reminder-all-day-readback.mjs';
 import {
   buildReminderFlowDiagnosticRecord,
   completeReminderFlowDiagnosticStage,
@@ -6811,20 +6812,13 @@ async function setRoomReminder(
         )
         .isVisible()
         .catch(() => false));
-    const savedDaysBefore = Number(
-      await details
-        .getByRole('spinbutton', { name: 'Days before event' })
-        .inputValue()
-        .catch(() => ''),
+    const savedScheduleFields = await readReminderAllDayScheduleFields(
+      details,
+      effectivePlan.allDay,
     );
-    const savedLocalTime = await details
-      .getByLabel('Local time')
-      .inputValue()
-      .catch(() => '');
-    const savedTimezone = await details
-      .getByRole('textbox', { name: 'Time zone (IANA)' })
-      .inputValue()
-      .catch(() => '');
+    const savedDaysBefore = savedScheduleFields.daysBefore;
+    const savedLocalTime = savedScheduleFields.localTime;
+    const savedTimezone = savedScheduleFields.timezone;
     const savedScheduleDate = effectivePlan.allDayEventDate
       ? addCalendarDays(effectivePlan.allDayEventDate, -savedDaysBefore)
       : undefined;
@@ -6999,20 +6993,11 @@ async function readBackMatrixReminder(
     )
     .isVisible()
     .catch(() => false);
-  const daysBefore = Number(
-    await details
-      .getByRole('spinbutton', { name: 'Days before event' })
-      .inputValue()
-      .catch(() => ''),
+  const scheduleFields = await readReminderAllDayScheduleFields(
+    details,
+    plan.allDay,
   );
-  const localTime = await details
-    .getByLabel('Local time')
-    .inputValue()
-    .catch(() => '');
-  const timezone = await details
-    .getByRole('textbox', { name: 'Time zone (IANA)' })
-    .inputValue()
-    .catch(() => '');
+  const { daysBefore, localTime, timezone } = scheduleFields;
   const scheduleDate = eventStartDate
     ? addCalendarDays(eventStartDate, -daysBefore)
     : undefined;
