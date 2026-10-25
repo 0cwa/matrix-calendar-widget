@@ -67,6 +67,7 @@ export {
 export { calendarEventTimedDateTimeToDateTime } from './calendarEventTimedDateTime';
 export {
   calendarLocalDateTimeToUnixMillis,
+  calendarUnixMillisToLocalDateTime,
   isCalendarLocalDateTimeUnambiguous,
   isCalendarTimezoneSupported,
 } from './calendarEventTimezone';

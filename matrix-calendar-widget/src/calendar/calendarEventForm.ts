@@ -37,8 +37,11 @@ import {
   SupportedCalendarEventRecurrenceFrequency,
   calendarEventRecurrenceIdentity,
   calendarLocalDateTimeToUnixMillis,
+  calendarUnixMillisToLocalDateTime,
   formatSupportedCalendarEventRecurrenceRule,
   isAllDayCalendarEvent,
+  isCalendarLocalDateTimeUnambiguous,
+  isCalendarTimezoneSupported,
   isSupportedCalendarEventOccurrenceExclusion,
   isTimedCalendarEvent,
   normalizeCalendarEventAttachmentInput,
@@ -157,7 +160,6 @@ export type CalendarEventValidationError =
 
 const DEFAULT_EVENT_DURATION_HOURS = 1;
 const DEFAULT_EVENT_RANGE_SEARCH_HOURS = 48;
-const DEFAULT_EVENT_OFFSET_SAMPLE_HOURS = 48;
 
 // The form stores local date-times without offsets. Defaults must resolve to
 // exactly one instant so different CalDAV clients cannot choose different
@@ -165,32 +167,50 @@ const DEFAULT_EVENT_OFFSET_SAMPLE_HOURS = 48;
 function defaultEventTimedRange(
   now: DateTime,
   timezone: string,
-): { start: DateTime; end: DateTime } {
-  const firstStart = now.setZone(timezone).startOf('hour');
+): { start: string; end: string } {
+  if (!now.isValid || !isCalendarTimezoneSupported(timezone)) {
+    return { start: 'Invalid DateTime', end: 'Invalid DateTime' };
+  }
+
+  const nowMillis = now.toMillis();
+  const localNow = calendarUnixMillisToLocalDateTime(nowMillis, timezone);
+  const firstStart = DateTime.fromISO(localNow, { zone: 'UTC' }).startOf(
+    'hour',
+  );
+
   if (!firstStart.isValid) {
-    return {
-      start: firstStart,
-      end: firstStart.plus({ hours: DEFAULT_EVENT_DURATION_HOURS }),
-    };
+    return { start: 'Invalid DateTime', end: 'Invalid DateTime' };
   }
 
   for (
-    let elapsedHours = 0;
-    elapsedHours <= DEFAULT_EVENT_RANGE_SEARCH_HOURS;
-    elapsedHours += 1
+    let searchHours = 0;
+    searchHours <= DEFAULT_EVENT_RANGE_SEARCH_HOURS;
+    searchHours += 1
   ) {
-    const start = firstStart.plus({ hours: elapsedHours }).startOf('hour');
-    const end = start.plus({ hours: DEFAULT_EVENT_DURATION_HOURS });
-    if ((elapsedHours > 0 && start <= now) || end <= now) {
+    const start = formDateTimeValue(firstStart.plus({ hours: searchHours }));
+    const startMillis = uniqueCalendarLocalDateTimeInstant(start, timezone);
+    if (startMillis === undefined) {
       continue;
     }
 
+    const endMillis =
+      startMillis + DEFAULT_EVENT_DURATION_HOURS * 60 * 60 * 1000;
     if (
-      formDateTimeResolvesUniquely(start, timezone) &&
-      formDateTimeResolvesUniquely(end, timezone) &&
-      end.toMillis() - start.toMillis() ===
-        DEFAULT_EVENT_DURATION_HOURS * 60 * 60 * 1000
+      (searchHours > 0 && startMillis <= nowMillis) ||
+      endMillis <= nowMillis
     ) {
+      continue;
+    }
+
+    const end = calendarUnixMillisToLocalDateTime(endMillis, timezone).slice(
+      0,
+      16,
+    );
+    const endRoundTripMillis = uniqueCalendarLocalDateTimeInstant(
+      end,
+      timezone,
+    );
+    if (endRoundTripMillis === endMillis) {
       return { start, end };
     }
   }
@@ -204,47 +224,21 @@ function formDateTimeValue(value: DateTime): string {
   return value.toFormat("yyyy-MM-dd'T'HH:mm");
 }
 
-function formDateTimeResolvesUniquely(
-  candidate: DateTime,
+function uniqueCalendarLocalDateTimeInstant(
+  local: string,
   timezone: string,
-): boolean {
-  if (!candidate.isValid) {
-    return false;
+): number | undefined {
+  if (!isCalendarLocalDateTimeUnambiguous(local, timezone)) {
+    return undefined;
   }
 
-  const local = formDateTimeValue(candidate);
-  const wallTime = DateTime.fromISO(local, { zone: 'UTC' });
-  if (!wallTime.isValid) {
-    return false;
-  }
-
-  const possibleOffsets = new Set<number>();
-  for (
-    let offsetSampleHours = -DEFAULT_EVENT_OFFSET_SAMPLE_HOURS;
-    offsetSampleHours <= DEFAULT_EVENT_OFFSET_SAMPLE_HOURS;
-    offsetSampleHours += 1
-  ) {
-    possibleOffsets.add(
-      candidate.zone.offset(
-        candidate.toMillis() + offsetSampleHours * 60 * 60 * 1000,
-      ),
-    );
-  }
-
-  const possibleInstants = new Set<number>();
-  for (const offset of possibleOffsets) {
-    const instant = DateTime.fromMillis(
-      wallTime.toMillis() - offset * 60 * 1000,
-      { zone: timezone },
-    );
-    if (instant.isValid && formDateTimeValue(instant) === local) {
-      possibleInstants.add(instant.toMillis());
-    }
-  }
-
-  return (
-    possibleInstants.size === 1 && possibleInstants.has(candidate.toMillis())
-  );
+  const instantMillis = calendarLocalDateTimeToUnixMillis(local, timezone);
+  return calendarUnixMillisToLocalDateTime(instantMillis, timezone).slice(
+    0,
+    16,
+  ) === local
+    ? instantMillis
+    : undefined;
 }
 
 export function createCalendarEventFormValues(
@@ -271,8 +265,8 @@ export function createCalendarEventFormValues(
     attachmentChanged: false,
     timingType: 'timed',
     timedKind: 'zoned',
-    start: formDateTimeValue(start),
-    end: formDateTimeValue(end),
+    start,
+    end,
     timezone,
     timingChanged: false,
     timezoneChanged: false,
@@ -281,7 +275,7 @@ export function createCalendarEventFormValues(
     recurrenceInterval: '1',
     recurrenceEnd: 'never',
     recurrenceCount: '2',
-    recurrenceUntil: start.toISODate() ?? '',
+    recurrenceUntil: start === 'Invalid DateTime' ? '' : start.slice(0, 10),
     recurrenceEditable: true,
     recurrenceChanged: false,
     ...emptyAlarmFormValues(),
