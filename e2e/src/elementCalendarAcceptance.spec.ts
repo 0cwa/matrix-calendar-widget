@@ -81,7 +81,7 @@ import {
   planReminderAllDayEvent,
   planReminderAllDaySchedule,
   planReminderTimedEvent,
-  reminderFixtureLocalDateTimeInput,
+  reminderFixtureAllDayExpectedScheduleMatches,
   reminderFixtureLocalDateTimeToUnixMillis,
 } from '../../dev/element-acceptance-reminder-timing.mjs';
 import { classifyG6KeyboardFocusTarget } from '../../dev/element-g6-keyboard-focus.mjs';
@@ -6973,26 +6973,19 @@ async function readBackMatrixReminder(
           timezone,
         )
       : undefined;
-  const expectedScheduleLocalDateTime =
-    readbackReference?.expectedDueAt !== undefined
-      ? reminderFixtureLocalDateTimeInput(
-          readbackReference.expectedDueAt,
-          timezone,
-        )
-      : undefined;
-  const expectedDaysBefore =
-    eventStartDate && expectedScheduleLocalDateTime
-      ? (Date.parse(`${eventStartDate}T00:00:00Z`) -
-          Date.parse(
-            `${expectedScheduleLocalDateTime.slice(0, 10)}T00:00:00Z`,
-          )) /
-        (24 * 60 * 60_000)
-      : undefined;
+  const expectedScheduleMatches = reminderFixtureAllDayExpectedScheduleMatches({
+    allDay: plan.allDay,
+    expectedDueAt: readbackReference?.expectedDueAt,
+    eventStartDate,
+    daysBefore,
+    localTime,
+    timeZone: timezone,
+  });
   const deliveryMatchesDue =
     scheduleDueAt !== undefined &&
     (readbackReference?.expectedDueAt !== undefined
       ? scheduleDueAt === readbackReference.expectedDueAt &&
-        expectedScheduleLocalDateTime?.slice(11, 16) === localTime
+        expectedScheduleMatches
       : readbackReference?.deliveredAt !== undefined &&
         readbackReference.deliveredAt >= scheduleDueAt &&
         readbackReference.deliveredAt - scheduleDueAt <=
@@ -7006,7 +6999,7 @@ async function readBackMatrixReminder(
       Number.isSafeInteger(daysBefore) &&
       /^\d{2}:\d{2}$/u.test(localTime) &&
       timezone === plan.allDayTimezone &&
-      (expectedDaysBefore === undefined || daysBefore === expectedDaysBefore) &&
+      expectedScheduleMatches &&
       deliveryMatchesDue
     : true;
   await details

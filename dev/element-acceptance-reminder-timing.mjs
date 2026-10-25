@@ -45,6 +45,47 @@ export function reminderFixtureLocalDateTimeToUnixMillis(
   }
 }
 
+export function reminderFixtureAllDayExpectedScheduleMatches({
+  allDay,
+  expectedDueAt,
+  eventStartDate,
+  daysBefore,
+  localTime,
+  timeZone,
+}) {
+  if (!allDay || expectedDueAt === undefined) {
+    return true;
+  }
+
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/u.test(eventStartDate) ||
+    !Number.isSafeInteger(daysBefore) ||
+    !/^\d{2}:\d{2}$/u.test(localTime)
+  ) {
+    return false;
+  }
+
+  let expectedScheduleLocalDateTime;
+  try {
+    expectedScheduleLocalDateTime = reminderFixtureLocalDateTimeInput(
+      expectedDueAt,
+      timeZone,
+    );
+  } catch {
+    return false;
+  }
+
+  const expectedDaysBefore = calendarDaysBetween(
+    eventStartDate,
+    expectedScheduleLocalDateTime.slice(0, 10),
+  );
+  return (
+    Number.isSafeInteger(expectedDaysBefore) &&
+    daysBefore === expectedDaysBefore &&
+    localTime === expectedScheduleLocalDateTime.slice(11, 16)
+  );
+}
+
 export function planReminderTimedEvent(nowMilliseconds, timeZone) {
   const dueAt = reminderDueAt(nowMilliseconds);
   const firstStartAt = dueAt + MINUTE_MS;
