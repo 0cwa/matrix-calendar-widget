@@ -65,6 +65,13 @@ import {
   buildOrdinaryPerformanceSeedEnvironment,
   raceCalendarReadyOrIdentityPrompt,
 } from '../../dev/element-acceptance-performance.mjs';
+import {
+  planReminderAllDayEvent,
+  planReminderAllDaySchedule,
+  planReminderTimedEvent,
+  reminderFixtureLocalDateTimeInput,
+  reminderFixtureLocalDateTimeToUnixMillis,
+} from '../../dev/element-acceptance-reminder-timing.mjs';
 import { classifyG6KeyboardFocusTarget } from '../../dev/element-g6-keyboard-focus.mjs';
 import {
   beginG6ResourceCreate,
@@ -126,12 +133,27 @@ type ReminderRecipient = 'room' | 'selected';
 type ReminderPlan = Readonly<{
   recipient: ReminderRecipient;
   allDay: boolean;
+  allDayTimezone?: string;
+  caldavAlarmLeadMinutes?: number;
   allDayEventDate?: string;
   allDaySchedule?: Readonly<{
     daysBefore: number;
     localTime: string;
     timezone: string;
   }>;
+}>;
+
+type ReminderReadbackReference = Readonly<{
+  expectedDueAt?: number;
+  expectedAlarmLeadMinutes?: number;
+  expectedAllDayEventDate?: string;
+  deliveredAt?: number;
+}>;
+
+type ReminderCreationResult = Readonly<{
+  dueAt: number;
+  alarmLeadMinutes: number;
+  allDayEventDate?: string;
 }>;
 
 type ReminderTimelineSnapshot = {
@@ -681,18 +703,25 @@ type G6CalDavResult = {
 const ELEMENT_WEB_CONFIGURED_TAG = 'v1.12.30';
 const G6_POSTSAVE_EVENT_COUNT_CAP = 100;
 
-const REMINDER_START_LEAD_MS = 150_000;
-const REMINDER_ALARM_OFFSET_MS = 60_000;
 // Allow one default 60-second scheduler interval plus its 30-second scan deadline.
 const REMINDER_SCAN_INTERVAL_MS = 60_000;
 const REMINDER_SCAN_DEADLINE_MS = 30_000;
 const REMINDER_POST_DUE_SCAN_ALLOWANCE_MS =
   REMINDER_SCAN_INTERVAL_MS + REMINDER_SCAN_DEADLINE_MS;
 const REMINDER_TIMELINE_POLL_MS = 5_000;
-const REMINDER_ALL_DAY_TIMEZONE = 'Europe/Stockholm';
+const REMINDER_TIMED_TIMEZONE = 'Europe/Stockholm';
+const REMINDER_ALL_DAY_TIMEZONE = 'Asia/Tokyo';
+const REMINDER_ALL_DAY_CALDAV_ALARM_LEAD_MINUTES = 1;
 
 function reminderPlanForMarkerIndex(index: number): ReminderPlan {
-  if (index === 1) return { recipient: 'selected', allDay: true };
+  if (index === 1) {
+    return {
+      recipient: 'selected',
+      allDay: true,
+      allDayTimezone: REMINDER_ALL_DAY_TIMEZONE,
+      caldavAlarmLeadMinutes: REMINDER_ALL_DAY_CALDAV_ALARM_LEAD_MINUTES,
+    };
+  }
   if (index === 0 || index === 2) {
     return { recipient: 'room', allDay: false };
   }
@@ -3589,11 +3618,52 @@ test('Element Web delivers room-timed and selected-member all-day reminders acro
     });
     failureHttpStatus = undefined;
 
+    const priorReminderReadbackReferences = new Map<
+      string,
+      ReminderReadbackReference
+    >();
+    if (eventTitles.length > 0 && flow !== 'initial') {
+      activePhase =
+        flow === 'restart'
+          ? 'reminder-restart-prior-state'
+          : 'reminder-restore-prior-state';
+      const timeline = await inspectReminderTimeline(eventTitles);
+      const markersOnce =
+        timeline.complete &&
+        timeline.markerCounts.every((count) => count === 1) &&
+        timeline.markerTargetsMatch.every(Boolean);
+      if (timeline.httpStatus !== 200 || !markersOnce) {
+        record(
+          activePhase,
+          'failed',
+          timeline.httpStatus ?? undefined,
+          eventTitles.length,
+          { allMarkersOnce: markersOnce },
+        );
+        failureAlreadyRecorded = true;
+        throw new Error(
+          flow === 'restart'
+            ? 'Restarted reminder markers were not preserved'
+            : 'Restored reminder markers were not preserved',
+        );
+      }
+      record(activePhase, 'passed', timeline.httpStatus, eventTitles.length, {
+        allMarkersOnce: true,
+      });
+      for (const [index, title] of eventTitles.entries()) {
+        const deliveredAt = timeline.markerTimestamps[index];
+        if (deliveredAt !== null && deliveredAt !== undefined) {
+          priorReminderReadbackReferences.set(title, { deliveredAt });
+        }
+      }
+    }
+
     if (eventTitles.length > 0) {
       activePhase = 'reminder-ui-readback';
       const existingReadback = await readBackReminderMarkers(
         frame,
         eventTitles,
+        priorReminderReadbackReferences,
       );
       if (
         !existingReadback.relativeAlarmReadback ||
@@ -3616,73 +3686,33 @@ test('Element Web delivers room-timed and selected-member all-day reminders acro
         targetSettingsReadback: existingReadback.targetSettingsReadback,
         allDayScheduleReadback: existingReadback.allDayScheduleReadback,
       });
-
-      activePhase =
-        flow === 'restart'
-          ? 'reminder-restart-prior-state'
-          : 'reminder-restore-prior-state';
-      if (flow === 'restart') {
-        const timeline = await inspectReminderTimeline(eventTitles);
-        const markersOnce =
-          timeline.complete &&
-          timeline.markerCounts.every((count) => count === 1) &&
-          timeline.markerTargetsMatch.every(Boolean);
-        if (timeline.httpStatus !== 200 || !markersOnce) {
-          record(
-            activePhase,
-            'failed',
-            timeline.httpStatus ?? undefined,
-            eventTitles.length,
-            {
-              allMarkersOnce: markersOnce,
-            },
-          );
-          failureAlreadyRecorded = true;
-          throw new Error('Restarted reminder markers were not preserved');
-        }
-        record(activePhase, 'passed', timeline.httpStatus, eventTitles.length, {
-          allMarkersOnce: true,
-        });
-      }
-
-      if (flow === 'restore') {
-        activePhase = 'reminder-restore-prior-state';
-        const timeline = await inspectReminderTimeline(eventTitles);
-        const markersOnce =
-          timeline.complete &&
-          timeline.markerCounts.every((count) => count === 1) &&
-          timeline.markerTargetsMatch.every(Boolean);
-        if (timeline.httpStatus !== 200 || !markersOnce) {
-          record(
-            activePhase,
-            'failed',
-            timeline.httpStatus ?? undefined,
-            eventTitles.length,
-            {
-              allMarkersOnce: markersOnce,
-            },
-          );
-          failureAlreadyRecorded = true;
-          throw new Error('Restored reminder markers were not preserved');
-        }
-        record(activePhase, 'passed', timeline.httpStatus, eventTitles.length, {
-          allMarkersOnce: true,
-        });
-      }
     }
 
     const markerTitle = `Reminder acceptance ${randomUUID()}`;
     const markerPlan = reminderPlanForMarkerIndex(eventTitles.length);
-    const dueAt = await createAndConfigureReminder(
+    const createdReminder = await createAndConfigureReminder(
       frame,
       page,
       markerTitle,
       markerPlan,
     );
+    const dueAt = createdReminder.dueAt;
     eventTitles.push(markerTitle);
 
+    const reminderReadbackReferences = new Map(priorReminderReadbackReferences);
+    reminderReadbackReferences.set(markerTitle, {
+      expectedDueAt: dueAt,
+      expectedAlarmLeadMinutes: createdReminder.alarmLeadMinutes,
+      ...(createdReminder.allDayEventDate
+        ? { expectedAllDayEventDate: createdReminder.allDayEventDate }
+        : {}),
+    });
     activePhase = 'reminder-ui-readback';
-    const allReadback = await readBackReminderMarkers(frame, eventTitles);
+    const allReadback = await readBackReminderMarkers(
+      frame,
+      eventTitles,
+      reminderReadbackReferences,
+    );
     if (
       !allReadback.relativeAlarmReadback ||
       !allReadback.reminderEnabled ||
@@ -5436,7 +5466,7 @@ async function createAndConfigureReminder(
   page: Page,
   title: string,
   markerPlan: ReminderPlan,
-): Promise<number> {
+): Promise<ReminderCreationResult> {
   activePhase = 'reminder-event-create-dialog';
   record(activePhase, 'started');
   await frame
@@ -5445,20 +5475,25 @@ async function createAndConfigureReminder(
   const editor = frame.getByRole('dialog').last();
   await expect(editor).toBeVisible({ timeout: 15_000 });
 
-  const dueAt =
-    Math.ceil((Date.now() + REMINDER_START_LEAD_MS) / 60_000) * 60_000;
-  const startAt = markerPlan.allDay ? dueAt : dueAt + REMINDER_ALARM_OFFSET_MS;
-  const startValue = localDateTimeInput(startAt, REMINDER_ALL_DAY_TIMEZONE);
-  const endValue = localDateTimeInput(
-    startAt + 60 * 60_000,
-    REMINDER_ALL_DAY_TIMEZONE,
-  );
-  const eventStartDate = markerPlan.allDay
-    ? addCalendarDays(startValue.slice(0, 10), 1)
+  const fixtureNow = Date.now();
+  const timedPlan = markerPlan.allDay
+    ? undefined
+    : planReminderTimedEvent(fixtureNow, REMINDER_TIMED_TIMEZONE);
+  const allDayPlan = markerPlan.allDay
+    ? planReminderAllDayEvent(
+        fixtureNow,
+        markerPlan.allDayTimezone ?? REMINDER_ALL_DAY_TIMEZONE,
+      )
     : undefined;
-  const eventEndDate = eventStartDate
-    ? addCalendarDays(eventStartDate, 1)
-    : undefined;
+  const dueAt = timedPlan?.dueAt ?? allDayPlan!.dueAt;
+  const startValue = timedPlan?.startValue ?? allDayPlan!.scheduleLocalDateTime;
+  const endValue = timedPlan?.endValue ?? '';
+  const eventStartDate = allDayPlan?.eventStartDate;
+  const eventEndDate = allDayPlan?.eventEndDate;
+  const alarmLeadMinutes =
+    timedPlan?.alarmLeadMinutes ??
+    markerPlan.caldavAlarmLeadMinutes ??
+    REMINDER_ALL_DAY_CALDAV_ALARM_LEAD_MINUTES;
   const completePlan: ReminderPlan = {
     ...markerPlan,
     ...(eventStartDate ? { allDayEventDate: eventStartDate } : {}),
@@ -5478,7 +5513,7 @@ async function createAndConfigureReminder(
     await editor.getByRole('textbox', { name: 'End' }).fill(endValue);
     await editor
       .getByRole('textbox', { name: 'Time zone' })
-      .fill(REMINDER_ALL_DAY_TIMEZONE);
+      .fill(REMINDER_TIMED_TIMEZONE);
   }
   record(activePhase, 'passed');
 
@@ -5528,10 +5563,20 @@ async function createAndConfigureReminder(
     frame,
     page,
     title,
+    alarmLeadMinutes,
     alarmObservation,
   );
   const alarmReadback =
-    alarmSaved && (await readBackRelativeAlarm(frame, title, alarmObservation));
+    alarmSaved &&
+    (await readBackRelativeAlarm(
+      frame,
+      title,
+      {
+        expectedDueAt: markerPlan.allDay ? undefined : dueAt,
+        expectedAlarmLeadMinutes: alarmLeadMinutes,
+      },
+      alarmObservation,
+    ));
   if (!alarmReadback) {
     record(
       activePhase,
@@ -5564,7 +5609,11 @@ async function createAndConfigureReminder(
   const titles = readReminderEventTitles();
   titles.push(title);
   writeReminderEventTitles(titles);
-  return markerPlan.allDay ? reminderConfiguration.dueAt! : dueAt;
+  return {
+    dueAt: markerPlan.allDay ? reminderConfiguration.dueAt! : dueAt,
+    alarmLeadMinutes,
+    ...(eventStartDate ? { allDayEventDate: eventStartDate } : {}),
+  };
 }
 
 function addCalendarDays(date: string, days: number): string {
@@ -5577,27 +5626,10 @@ function addCalendarDays(date: string, days: number): string {
   ].join('-');
 }
 
-function localDateTimeInput(
-  epochMilliseconds: number,
-  timeZone: string,
-): string {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(new Date(epochMilliseconds));
-  const part = (type: Intl.DateTimeFormatPartTypes) =>
-    parts.find((candidate) => candidate.type === type)?.value ?? '';
-  return `${part('year')}-${part('month')}-${part('day')}T${part('hour')}:${part('minute')}`;
-}
-
 async function readBackRelativeAlarm(
   frame: FrameLocator,
   title: string,
+  readbackReference?: ReminderReadbackReference,
   observation: Pick<
     ReminderAlarmUiObservation,
     | 'alarmUiStep'
@@ -5651,10 +5683,65 @@ async function readBackRelativeAlarm(
       .getByRole('radio', { name: 'Before the event' })
       .isChecked();
     observation.alarmUiStep = 'readback-offset';
-    observation.alarmUiOffsetReadback =
-      (await editor
+    const allDayEvent = await editor.getByLabel('All day').isChecked();
+    const leadMinutes = Number(
+      await editor
         .getByRole('spinbutton', { name: 'Minutes before' })
-        .inputValue()) === '1';
+        .inputValue(),
+    );
+    const expectedLeadMinutes = readbackReference?.expectedAlarmLeadMinutes;
+    let timedRangeMatches = allDayEvent;
+    let dueMatchesReference = allDayEvent;
+    if (!allDayEvent) {
+      const startValue = await editor
+        .getByRole('textbox', { name: 'Start' })
+        .inputValue();
+      const endValue = await editor
+        .getByRole('textbox', { name: 'End' })
+        .inputValue();
+      const timezone = await editor
+        .getByRole('textbox', { name: 'Time zone' })
+        .inputValue();
+      const startAt = reminderFixtureLocalDateTimeToUnixMillis(
+        startValue,
+        timezone,
+      );
+      const endAt = reminderFixtureLocalDateTimeToUnixMillis(
+        endValue,
+        timezone,
+      );
+      const dueAt =
+        startAt !== undefined && Number.isSafeInteger(leadMinutes)
+          ? startAt - leadMinutes * 60_000
+          : undefined;
+      const expectedStartAt =
+        readbackReference?.expectedDueAt !== undefined &&
+        expectedLeadMinutes !== undefined
+          ? readbackReference.expectedDueAt + expectedLeadMinutes * 60_000
+          : undefined;
+      timedRangeMatches =
+        startAt !== undefined &&
+        endAt !== undefined &&
+        endAt - startAt === 60 * 60_000 &&
+        timezone === REMINDER_TIMED_TIMEZONE &&
+        (expectedStartAt === undefined || startAt === expectedStartAt);
+      dueMatchesReference =
+        dueAt !== undefined &&
+        (readbackReference?.expectedDueAt !== undefined
+          ? dueAt === readbackReference.expectedDueAt
+          : readbackReference?.deliveredAt !== undefined &&
+            readbackReference.deliveredAt >= dueAt &&
+            readbackReference.deliveredAt - dueAt <=
+              REMINDER_POST_DUE_SCAN_ALLOWANCE_MS);
+    }
+    observation.alarmUiOffsetReadback =
+      Number.isSafeInteger(leadMinutes) &&
+      leadMinutes > 0 &&
+      leadMinutes <= 48 * 60 + 1 &&
+      (expectedLeadMinutes === undefined ||
+        leadMinutes === expectedLeadMinutes);
+    observation.alarmUiOffsetReadback &&=
+      timedRangeMatches && dueMatchesReference;
     observation.alarmUiStep = 'readback-editor-cancelled';
     await editor.getByRole('button', { name: 'Cancel', exact: true }).click();
     observation.alarmUiStep = 'readback-editor-hidden';
@@ -5683,6 +5770,7 @@ async function addCalDavAlarmFromReminderSettings(
   frame: FrameLocator,
   page: Page,
   title: string,
+  leadMinutes: number,
   observation: Pick<
     ReminderAlarmUiObservation,
     | 'alarmUiStep'
@@ -5727,7 +5815,9 @@ async function addCalDavAlarmFromReminderSettings(
     observation.alarmUiStep = 'relative-option-selected';
     await editor.getByRole('radio', { name: 'Before the event' }).check();
     observation.alarmUiStep = 'offset-entered';
-    await editor.getByRole('spinbutton', { name: 'Minutes before' }).fill('1');
+    await editor
+      .getByRole('spinbutton', { name: 'Minutes before' })
+      .fill(String(leadMinutes));
     const saveResponse = page.waitForResponse(
       (response) => {
         const url = new URL(response.url());
@@ -6578,20 +6668,28 @@ async function setRoomReminder(
     observation.recipientSelectionStep = 'complete';
 
     if (plan.allDay && plan.allDayEventDate) {
-      dueAt =
-        Math.ceil((Date.now() + REMINDER_START_LEAD_MS) / 60_000) * 60_000;
-      const scheduleValue = localDateTimeInput(
-        dueAt,
-        REMINDER_ALL_DAY_TIMEZONE,
+      const timezone = plan.allDayTimezone ?? REMINDER_ALL_DAY_TIMEZONE;
+      const refreshedSchedule = planReminderAllDaySchedule(
+        Date.now(),
+        plan.allDayEventDate,
+        timezone,
       );
+      dueAt = refreshedSchedule.dueAt;
+      const scheduleValue = refreshedSchedule.scheduleLocalDateTime;
+      const localDate = scheduleValue.slice(0, 10);
       const schedule = {
-        daysBefore: 1,
-        localTime: scheduleValue.slice(11, 16),
-        timezone: REMINDER_ALL_DAY_TIMEZONE,
+        daysBefore: refreshedSchedule.daysBefore,
+        localTime: refreshedSchedule.localTime,
+        timezone,
       };
+      const reconstructedDueAt = reminderFixtureLocalDateTimeToUnixMillis(
+        `${addCalendarDays(plan.allDayEventDate, -schedule.daysBefore)}T${schedule.localTime}`,
+        timezone,
+      );
       if (
         addCalendarDays(plan.allDayEventDate, -schedule.daysBefore) !==
-        scheduleValue.slice(0, 10)
+          localDate ||
+        reconstructedDueAt !== dueAt
       ) {
         throw new Error('All-day reminder schedule date is no longer future');
       }
@@ -6656,15 +6754,41 @@ async function setRoomReminder(
         )
         .isVisible()
         .catch(() => false));
+    const savedDaysBefore = Number(
+      await details
+        .getByRole('spinbutton', { name: 'Days before event' })
+        .inputValue()
+        .catch(() => ''),
+    );
+    const savedLocalTime = await details
+      .getByLabel('Local time')
+      .inputValue()
+      .catch(() => '');
+    const savedTimezone = await details
+      .getByRole('textbox', { name: 'Time zone (IANA)' })
+      .inputValue()
+      .catch(() => '');
+    const savedScheduleDate = effectivePlan.allDayEventDate
+      ? addCalendarDays(effectivePlan.allDayEventDate, -savedDaysBefore)
+      : undefined;
+    const savedScheduleDueAt =
+      savedScheduleDate && /^\d{2}:\d{2}$/u.test(savedLocalTime)
+        ? reminderFixtureLocalDateTimeToUnixMillis(
+            `${savedScheduleDate}T${savedLocalTime}`,
+            savedTimezone,
+          )
+        : undefined;
     const savedScheduleMatches = effectivePlan.allDay
-      ? (await details
-          .getByRole('spinbutton', { name: 'Days before event' })
-          .inputValue()) === String(effectivePlan.allDaySchedule?.daysBefore) &&
-        (await details.getByLabel('Local time').inputValue()) ===
-          effectivePlan.allDaySchedule?.localTime &&
-        (await details
-          .getByRole('textbox', { name: 'Time zone (IANA)' })
-          .inputValue()) === effectivePlan.allDaySchedule?.timezone
+      ? dueAt !== undefined &&
+        savedDaysBefore === effectivePlan.allDaySchedule?.daysBefore &&
+        savedLocalTime === effectivePlan.allDaySchedule?.localTime &&
+        savedTimezone === effectivePlan.allDaySchedule?.timezone &&
+        savedScheduleDate ===
+          addCalendarDays(
+            effectivePlan.allDayEventDate!,
+            -effectivePlan.allDaySchedule!.daysBefore,
+          ) &&
+        savedScheduleDueAt === dueAt
       : true;
     observation.reminderTargetMatches &&= savedTargetMatches;
     observation.allDayScheduleMatches &&= savedScheduleMatches;
@@ -6700,6 +6824,10 @@ async function setRoomReminder(
 async function readBackReminderMarkers(
   frame: FrameLocator,
   titles: readonly string[],
+  readbackReferences: ReadonlyMap<
+    string,
+    ReminderReadbackReference
+  > = new Map(),
 ): Promise<{
   count: number;
   relativeAlarmReadback: boolean;
@@ -6713,9 +6841,21 @@ async function readBackReminderMarkers(
   let allDayScheduleReadback = true;
   for (const [index, title] of titles.entries()) {
     const plan = reminderPlanForMarkerIndex(index);
+    const readbackReference = {
+      ...readbackReferences.get(title),
+      ...(plan.caldavAlarmLeadMinutes === undefined
+        ? {}
+        : { expectedAlarmLeadMinutes: plan.caldavAlarmLeadMinutes }),
+    };
     relativeAlarmReadback =
-      (await readBackRelativeAlarm(frame, title)) && relativeAlarmReadback;
-    const settings = await readBackMatrixReminder(frame, title, plan);
+      (await readBackRelativeAlarm(frame, title, readbackReference)) &&
+      relativeAlarmReadback;
+    const settings = await readBackMatrixReminder(
+      frame,
+      title,
+      plan,
+      readbackReference,
+    );
     reminderEnabled = settings.enabled && reminderEnabled;
     targetSettingsReadback = settings.targetMatches && targetSettingsReadback;
     allDayScheduleReadback =
@@ -6734,6 +6874,7 @@ async function readBackMatrixReminder(
   frame: FrameLocator,
   title: string,
   plan: ReminderPlan,
+  readbackReference?: ReminderReadbackReference,
 ): Promise<{
   enabled: boolean;
   targetMatches: boolean;
@@ -6744,6 +6885,26 @@ async function readBackMatrixReminder(
   await row.click();
   const details = frame.getByRole('dialog').last();
   await expect(details).toBeVisible();
+  let eventStartDate: string | undefined;
+  let eventEndDate: string | undefined;
+  let allDayEvent = !plan.allDay;
+  if (plan.allDay) {
+    await details.getByRole('button', { name: 'Edit', exact: true }).click();
+    const editor = frame.getByRole('dialog', {
+      name: 'Edit event',
+      exact: true,
+    });
+    await expect(editor.getByLabel('All day')).toBeVisible();
+    allDayEvent = await editor.getByLabel('All day').isChecked();
+    eventStartDate = await editor
+      .getByRole('textbox', { name: 'Start' })
+      .inputValue();
+    eventEndDate = await editor
+      .getByRole('textbox', { name: 'End' })
+      .inputValue();
+    await editor.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(editor).toBeHidden({ timeout: 20_000 });
+  }
   await details
     .getByRole('button', { name: 'Reminder settings', exact: true })
     .click();
@@ -6775,16 +6936,65 @@ async function readBackMatrixReminder(
     )
     .isVisible()
     .catch(() => false);
+  const daysBefore = Number(
+    await details
+      .getByRole('spinbutton', { name: 'Days before event' })
+      .inputValue()
+      .catch(() => ''),
+  );
+  const localTime = await details
+    .getByLabel('Local time')
+    .inputValue()
+    .catch(() => '');
+  const timezone = await details
+    .getByRole('textbox', { name: 'Time zone (IANA)' })
+    .inputValue()
+    .catch(() => '');
+  const scheduleDate = eventStartDate
+    ? addCalendarDays(eventStartDate, -daysBefore)
+    : undefined;
+  const scheduleDueAt =
+    scheduleDate && /^\d{2}:\d{2}$/u.test(localTime)
+      ? reminderFixtureLocalDateTimeToUnixMillis(
+          `${scheduleDate}T${localTime}`,
+          timezone,
+        )
+      : undefined;
+  const expectedScheduleLocalDateTime =
+    readbackReference?.expectedDueAt !== undefined
+      ? reminderFixtureLocalDateTimeInput(
+          readbackReference.expectedDueAt,
+          timezone,
+        )
+      : undefined;
+  const expectedDaysBefore =
+    eventStartDate && expectedScheduleLocalDateTime
+      ? (Date.parse(`${eventStartDate}T00:00:00Z`) -
+          Date.parse(
+            `${expectedScheduleLocalDateTime.slice(0, 10)}T00:00:00Z`,
+          )) /
+        (24 * 60 * 60_000)
+      : undefined;
+  const deliveryMatchesDue =
+    scheduleDueAt !== undefined &&
+    (readbackReference?.expectedDueAt !== undefined
+      ? scheduleDueAt === readbackReference.expectedDueAt &&
+        expectedScheduleLocalDateTime?.slice(11, 16) === localTime
+      : readbackReference?.deliveredAt !== undefined &&
+        readbackReference.deliveredAt >= scheduleDueAt &&
+        readbackReference.deliveredAt - scheduleDueAt <=
+          REMINDER_POST_DUE_SCAN_ALLOWANCE_MS);
   const allDayScheduleMatches = plan.allDay
-    ? (await details
-        .getByRole('spinbutton', { name: 'Days before event' })
-        .inputValue()) === '1' &&
-      /^\d{2}:\d{2}$/u.test(
-        await details.getByLabel('Local time').inputValue(),
-      ) &&
-      (await details
-        .getByRole('textbox', { name: 'Time zone (IANA)' })
-        .inputValue()) === REMINDER_ALL_DAY_TIMEZONE
+    ? allDayEvent &&
+      Boolean(eventStartDate && /^\d{4}-\d{2}-\d{2}$/u.test(eventStartDate)) &&
+      (readbackReference?.expectedAllDayEventDate === undefined ||
+        eventStartDate === readbackReference.expectedAllDayEventDate) &&
+      eventEndDate === eventStartDate &&
+      Number.isSafeInteger(daysBefore) &&
+      /^\d{2}:\d{2}$/u.test(localTime) &&
+      timezone === plan.allDayTimezone &&
+      (expectedDaysBefore === undefined || daysBefore === expectedDaysBefore) &&
+      deliveryMatchesDue
     : true;
   await details
     .getByRole('button', { name: 'Close reminder settings', exact: true })

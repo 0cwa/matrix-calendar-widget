@@ -73,3 +73,31 @@ test('records one detailed alarm failure and rejects the old outer fallback row'
     { message: 'invalid element acceptance summary' },
   );
 });
+
+test('reminder producer uses planned timed values and the computed UI alarm lead', () => {
+  const producerSource = readFileSync(
+    new URL('../e2e/src/elementCalendarAcceptance.spec.ts', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(
+    producerSource,
+    /planReminderTimedEvent\(fixtureNow, REMINDER_TIMED_TIMEZONE\)/u,
+  );
+  assert.match(
+    producerSource,
+    /addCalDavAlarmFromReminderSettings\(\s*frame,\s*page,\s*title,\s*alarmLeadMinutes,/u,
+  );
+  assert.match(
+    producerSource,
+    /getByRole\('spinbutton', \{ name: 'Minutes before' \}\)\s*\.fill\(String\(leadMinutes\)\)/u,
+  );
+  assert.match(
+    producerSource,
+    /expectedDueAt: markerPlan\.allDay \? undefined : dueAt/u,
+  );
+  assert.doesNotMatch(
+    producerSource,
+    /getByRole\('spinbutton', \{ name: 'Minutes before' \}\)\s*\.fill\('1'\)/u,
+  );
+});
