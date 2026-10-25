@@ -25,6 +25,24 @@ export const DESKTOP_JOURNEY_PHASES = Object.freeze([
   'canonical-edit-read',
   'web-http-route-enforcement',
 ]);
+
+export function desktopRouteEnforcementOutcome({
+  failed,
+  recorded,
+  observedHttpRequests,
+  blockedHttpRequests,
+}) {
+  if (
+    failed ||
+    !DESKTOP_JOURNEY_PHASES.slice(0, -1).every((phase) => recorded.has(phase))
+  ) {
+    return undefined;
+  }
+  return observedHttpRequests > 0 && blockedHttpRequests === 0
+    ? 'passed'
+    : 'failed';
+}
+
 export const DESKTOP_A_REFRESH_FAILURE_POINTS = Object.freeze([
   'desktop-refresh-widget-frame',
   'desktop-refresh-gateway-read',

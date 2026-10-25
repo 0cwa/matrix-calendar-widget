@@ -12,6 +12,7 @@ import {
   PRIVATE_UI_RESULT_PHASE,
 } from './element-acceptance-private-ui-checkpoints.mjs';
 import { ROOM_RENDER_DIAGNOSTIC_FIELDS } from './element-room-context-observation.mjs';
+import { isReminderDeliverySnapshot } from './reminder-delivery-snapshot.mjs';
 
 const RUNTIME_DEPENDENCIES = loadRuntimeDependencyAllowlist(
   resolve(dirname(fileURLToPath(import.meta.url)), '..'),
@@ -786,7 +787,6 @@ const REMINDER_DELIVERY_PHASES = new Set([
   'restore-delivery-row',
 ]);
 const REMINDER_DELIVERY_SUCCESS_COUNTS = new Map([
-  ['reminder-delivery-snapshot', 1],
   ['reminder-restart-delivery-row', 2],
   ['restore-delivery-row', 3],
 ]);
@@ -3792,15 +3792,16 @@ export function sanitizeElementAcceptance(
           typeof record.checksum !== 'string' ||
           !/^[a-f0-9]{64}$/u.test(record.checksum))) ||
       (record.status === 'passed' &&
+        record.phase === 'reminder-delivery-snapshot' &&
+        !isReminderDeliverySnapshot(record)) ||
+      (record.status === 'passed' &&
         REMINDER_DELIVERY_PHASES.has(record.phase) &&
+        record.phase !== 'reminder-delivery-snapshot' &&
         (!Number.isSafeInteger(record.attemptCount) ||
           record.attemptCount <
             REMINDER_DELIVERY_SUCCESS_COUNTS.get(record.phase) ||
           record.count !==
             REMINDER_DELIVERY_SUCCESS_COUNTS.get(record.phase))) ||
-      (record.status === 'passed' &&
-        record.phase === 'reminder-delivery-snapshot' &&
-        record.configurationCount !== record.count) ||
       (record.status === 'passed' &&
         PRIVATE_CHECKSUM_PHASES.has(record.phase) &&
         !Object.hasOwn(record, 'checksum'))

@@ -38,9 +38,10 @@ import {
   isPrivateArtifactPath,
   isSafeRestoreTargetPlan,
   parseReminderConfigurationSnapshotOutput,
-  sameReminderConfigurationSnapshots,
+  preservesReminderConfigurationSnapshots,
   sameReminderDeliverySnapshots,
 } from './element-acceptance-reminder-restore-guards.mjs';
+import { createReminderDeliverySnapshot } from './reminder-delivery-snapshot.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ACCEPTANCE_OVERRIDES = loadElementAcceptanceOverrides(process.env, ROOT);
@@ -1154,14 +1155,14 @@ async function verifyReminderConfiguration(database, requireSnapshot = false) {
       configurations.length !== titles.length ||
       (requireSnapshot && !snapshot) ||
       (snapshot &&
-        !sameReminderConfigurationSnapshots(snapshot, configurations))
+        !preservesReminderConfigurationSnapshots(snapshot, configurations))
     ) {
       throw new StageFailure('reminder-configuration-stored', {
         count: configurations.length,
         snapshotCompared: Boolean(snapshot),
         metadataUnchanged:
           !snapshot ||
-          sameReminderConfigurationSnapshots(snapshot, configurations),
+          preservesReminderConfigurationSnapshots(snapshot, configurations),
       });
     }
     return {
@@ -1193,6 +1194,12 @@ async function snapshotDelivery() {
     if (!summary.complete || configurations.length !== titles.length) {
       throw new StageFailure('reminder-delivery-snapshot', details);
     }
+    let snapshot;
+    try {
+      snapshot = createReminderDeliverySnapshot(details);
+    } catch {
+      throw new StageFailure('reminder-delivery-snapshot', details);
+    }
     writeFileSync(
       reminderConfigurationFile,
       `${JSON.stringify(configurations)}\n`,
@@ -1210,7 +1217,7 @@ async function snapshotDelivery() {
       )}\n`,
       { encoding: 'utf8', mode: 0o600 },
     );
-    return details;
+    return snapshot;
   });
 }
 
