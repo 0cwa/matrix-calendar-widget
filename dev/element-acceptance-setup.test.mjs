@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import https from 'node:https';
+import { createServer as createTcpServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { createPrivateAcceptanceTlsFixture } from './element-acceptance-private-tls.mjs';
 import {
   assertAcceptancePrincipalBootstrap,
+  buildPrivateHttpsContainerListenerProbe,
   createPrincipalOpenIdRequest,
   getAcceptanceReadinessEndpoints,
   readPrivateHttpsServiceDiagnostic,
@@ -80,15 +83,23 @@ test('private HTTPS startup diagnostics retain only bounded container state', ()
     composeFiles: [],
     execute(command, args) {
       calls.push({ command, args });
-      return args[0] === 'compose'
-        ? '0123456789ab\n'
-        : JSON.stringify({
-            Status: 'exited',
-            Health: null,
-            ExitCode: 1,
-            OOMKilled: false,
-            Error: 'synthetic-private-runtime-detail',
-          });
+      if (args[0] === 'compose' && args.includes('ps')) {
+        return '0123456789ab\n';
+      }
+      if (args[0] === 'inspect') {
+        return JSON.stringify({
+          Status: 'exited',
+          Health: null,
+          ExitCode: 1,
+          OOMKilled: false,
+          Error: 'synthetic-private-runtime-detail',
+        });
+      }
+      if (args[0] === 'compose' && args.includes('port')) {
+        return '127.0.0.1:3001\n';
+      }
+      if (args[0] === 'exec') return 'listening\n';
+      throw new Error('unexpected synthetic diagnostic command');
     },
   });
 
@@ -98,12 +109,32 @@ test('private HTTPS startup diagnostics retain only bounded container state', ()
     containerExitCode: 1,
     containerOomKilled: false,
     containerRuntimeErrorPresent: true,
+    privateHttpsPublishedBindingMatches: true,
+    privateHttpsContainerListener: 'unknown',
   });
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
   assert.equal(calls[0].command, 'docker');
   assert.equal(calls[0].args.includes('private-gateway-https'), true);
   assert.equal(calls[0].args.includes('logs'), false);
   assert.equal(calls[1].args[0], 'inspect');
+  assert.deepEqual(calls[2].args.slice(-3), [
+    'port',
+    'private-gateway-https',
+    '3443',
+  ]);
+  assert.equal(
+    calls.some(({ args }) => args[0] === 'exec'),
+    false,
+  );
+  assert.deepEqual(
+    calls.map(({ args }) => args[0]),
+    ['compose', 'inspect', 'compose'],
+  );
+  assert.equal(
+    calls[0].args[calls[0].args.indexOf('-p') + 1],
+    'matrix-acceptance-test',
+  );
+  assert.equal(calls[1].args.at(-1), '0123456789ab');
   assert.equal(
     JSON.stringify(diagnostic).includes('synthetic-private-runtime-detail'),
     false,
@@ -124,7 +155,12 @@ test('private HTTPS diagnostics fail closed for unsafe compose inputs and IDs', 
       runnerTemp: '/tmp/runner',
       execute,
     }),
-    { containerState: 'unavailable', containerHealth: 'unavailable' },
+    {
+      containerState: 'unavailable',
+      containerHealth: 'unavailable',
+      privateHttpsPublishedBindingMatches: 'unknown',
+      privateHttpsContainerListener: 'unknown',
+    },
   );
   assert.equal(calls, 0);
   assert.deepEqual(
@@ -136,9 +172,173 @@ test('private HTTPS diagnostics fail closed for unsafe compose inputs and IDs', 
       composeFiles: [],
       execute,
     }),
-    { containerState: 'unavailable', containerHealth: 'unavailable' },
+    {
+      containerState: 'unavailable',
+      containerHealth: 'unavailable',
+      privateHttpsPublishedBindingMatches: 'unknown',
+      privateHttpsContainerListener: 'unknown',
+    },
   );
   assert.equal(calls, 1);
+});
+
+test('private HTTPS listener diagnostics retain only closed outcomes', () => {
+  const commands = [];
+  const diagnostic = readPrivateHttpsServiceDiagnostic({
+    projectName: 'matrix-acceptance-test',
+    serverEnvFile: '/tmp/runner/server.env',
+    privateUiEnvFile: '/tmp/runner/private-ui.env',
+    runnerTemp: '/tmp/runner',
+    composeFiles: [],
+    execute(command, args) {
+      commands.push(args);
+      if (args[0] === 'compose' && args.includes('ps')) {
+        return '0123456789ab\n';
+      }
+      if (args[0] === 'inspect') {
+        return JSON.stringify({ Status: 'running', Health: null });
+      }
+      if (args[0] === 'compose' && args.includes('port')) {
+        return 'synthetic-sensitive-host:3443\n';
+      }
+      if (args[0] === 'exec') return 'synthetic-sensitive-output\n';
+      throw new Error('unexpected synthetic diagnostic command');
+    },
+  });
+
+  assert.equal(diagnostic.privateHttpsPublishedBindingMatches, false);
+  assert.equal(diagnostic.privateHttpsContainerListener, 'unknown');
+  assert.equal(
+    JSON.stringify(diagnostic).includes('synthetic-sensitive'),
+    false,
+  );
+  assert.equal(commands[2].includes('private-gateway-https'), true);
+  assert.equal(commands[3][0], 'exec');
+  assert.equal(commands[3][1], '0123456789ab');
+  assert.deepEqual(
+    commands.map((args) => args[0]),
+    ['compose', 'inspect', 'compose', 'exec'],
+  );
+  assert.equal(
+    commands.some((args) => args.includes('logs')),
+    false,
+  );
+});
+
+test('private HTTPS diagnostics recognize the expected port and live listener', () => {
+  const diagnostic = readPrivateHttpsServiceDiagnostic({
+    projectName: 'matrix-acceptance-test',
+    serverEnvFile: '/tmp/runner/server.env',
+    privateUiEnvFile: '/tmp/runner/private-ui.env',
+    runnerTemp: '/tmp/runner',
+    composeFiles: [],
+    execute(_command, args) {
+      if (args[0] === 'compose' && args.includes('ps')) {
+        return '0123456789ab\n';
+      }
+      if (args[0] === 'inspect') {
+        return JSON.stringify({ Status: 'running', Health: null });
+      }
+      if (args[0] === 'compose' && args.includes('port')) {
+        return '127.0.0.1:3001\n';
+      }
+      if (args[0] === 'exec') return 'listening\n';
+      throw new Error('unexpected synthetic diagnostic command');
+    },
+  });
+
+  assert.deepEqual(
+    {
+      publishedBindingMatches: diagnostic.privateHttpsPublishedBindingMatches,
+      containerListener: diagnostic.privateHttpsContainerListener,
+    },
+    { publishedBindingMatches: true, containerListener: 'listening' },
+  );
+});
+
+test('private HTTPS diagnostic command failures become unknown outcomes', () => {
+  const diagnostic = readPrivateHttpsServiceDiagnostic({
+    projectName: 'matrix-acceptance-test',
+    serverEnvFile: '/tmp/runner/server.env',
+    privateUiEnvFile: '/tmp/runner/private-ui.env',
+    runnerTemp: '/tmp/runner',
+    composeFiles: [],
+    execute(_command, args) {
+      if (args[0] === 'compose' && args.includes('ps')) {
+        return '0123456789ab\n';
+      }
+      if (args[0] === 'inspect') {
+        return JSON.stringify({ Status: 'running', Health: null });
+      }
+      if (args[0] === 'compose' && args.includes('port')) {
+        throw new Error('synthetic private mapping detail');
+      }
+      if (args[0] === 'exec') {
+        throw new Error('synthetic private listener detail');
+      }
+      throw new Error('unexpected synthetic diagnostic command');
+    },
+  });
+
+  assert.equal(diagnostic.privateHttpsPublishedBindingMatches, 'unknown');
+  assert.equal(diagnostic.privateHttpsContainerListener, 'unknown');
+  assert.doesNotMatch(JSON.stringify(diagnostic), /synthetic private/u);
+});
+
+test('private HTTPS listener probe reports and closes one local TCP connection', async () => {
+  const listener = createTcpServer();
+  let connectionClosed;
+  const closed = new Promise((resolve) => {
+    listener.once('connection', (socket) => {
+      socket.once('close', () => resolve(true));
+    });
+  });
+  const port = await listenLocal(listener);
+  let closeTimer;
+  try {
+    const output = execFileSync(
+      process.execPath,
+      ['-e', buildPrivateHttpsContainerListenerProbe(port)],
+      {
+        encoding: 'utf8',
+        maxBuffer: 128,
+        stdio: ['ignore', 'pipe', 'ignore'],
+        timeout: 5_000,
+      },
+    );
+    assert.equal(output, 'listening\n');
+    connectionClosed = await Promise.race([
+      closed,
+      new Promise((resolve) => {
+        closeTimer = setTimeout(() => resolve(false), 1_000);
+      }),
+    ]);
+    assert.equal(connectionClosed, true);
+
+    assert.throws(() => buildPrivateHttpsContainerListenerProbe(0), {
+      message: 'Private HTTPS listener probe port is invalid',
+    });
+  } finally {
+    clearTimeout(closeTimer);
+    await closeLocal(listener);
+  }
+});
+
+test('private HTTPS listener probe reports a refused local TCP connection', async () => {
+  const listener = createTcpServer();
+  const port = await listenLocal(listener);
+  await closeLocal(listener);
+  const output = execFileSync(
+    process.execPath,
+    ['-e', buildPrivateHttpsContainerListenerProbe(port)],
+    {
+      encoding: 'utf8',
+      maxBuffer: 128,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 5_000,
+    },
+  );
+  assert.equal(output, 'refused\n');
 });
 
 test('private HTTPS probe separates TCP, TLS trust, and HTTP response stages', async () => {

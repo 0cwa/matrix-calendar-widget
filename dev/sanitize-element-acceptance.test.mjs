@@ -4048,6 +4048,8 @@ test('emits private HTTPS readiness state with only bounded failure fields', () 
       privateHttpsTcpOutcome: 'connected',
       privateHttpsTlsOutcome: 'validated',
       privateHttpsRequestOutcome: 'timed-out',
+      privateHttpsPublishedBindingMatches: 'unknown',
+      privateHttpsContainerListener: 'refused',
     }),
     sourceSha,
   );
@@ -4056,7 +4058,7 @@ test('emits private HTTPS readiness state with only bounded failure fields', () 
     summary,
     [
       `element-acceptance source_sha=${sourceSha}`,
-      'phase=private-gateway-https-ready status=failed private_https_tcp=connected private_https_tls=validated private_https_request=timed-out container_state=exited container_health=none container_exit_code=1 container_oom_killed=false container_runtime_error_present=true',
+      'phase=private-gateway-https-ready status=failed private_https_tcp=connected private_https_tls=validated private_https_request=timed-out private_https_published_binding_matches=unknown private_https_container_listener=refused container_state=exited container_health=none container_exit_code=1 container_oom_killed=false container_runtime_error_present=true',
       '',
     ].join('\n'),
   );
@@ -4087,6 +4089,8 @@ test('emits private HTTPS readiness state with only bounded failure fields', () 
       privateHttpsTcpOutcome: 'connected',
       privateHttpsTlsOutcome: 'validated',
       privateHttpsRequestOutcome: 'response',
+      privateHttpsPublishedBindingMatches: true,
+      privateHttpsContainerListener: 'listening',
     }),
     sourceSha,
   );
@@ -4094,7 +4098,7 @@ test('emits private HTTPS readiness state with only bounded failure fields', () 
     upstreamResponse,
     [
       `element-acceptance source_sha=${sourceSha}`,
-      'phase=private-gateway-https-ready status=failed http_status=502 private_https_tcp=connected private_https_tls=validated private_https_request=response',
+      'phase=private-gateway-https-ready status=failed http_status=502 private_https_tcp=connected private_https_tls=validated private_https_request=response private_https_published_binding_matches=true private_https_container_listener=listening',
       '',
     ].join('\n'),
   );
@@ -4106,6 +4110,8 @@ test('emits private HTTPS readiness state with only bounded failure fields', () 
       privateHttpsTcpOutcome: 'connected',
       privateHttpsTlsOutcome: 'trust-rejected',
       privateHttpsRequestOutcome: 'not-attempted',
+      privateHttpsPublishedBindingMatches: false,
+      privateHttpsContainerListener: 'unknown',
     }),
     sourceSha,
   );
@@ -4113,7 +4119,7 @@ test('emits private HTTPS readiness state with only bounded failure fields', () 
     tlsRejected,
     [
       `element-acceptance source_sha=${sourceSha}`,
-      'phase=private-gateway-https-ready status=failed private_https_tcp=connected private_https_tls=trust-rejected private_https_request=not-attempted',
+      'phase=private-gateway-https-ready status=failed private_https_tcp=connected private_https_tls=trust-rejected private_https_request=not-attempted private_https_published_binding_matches=false private_https_container_listener=unknown',
       '',
     ].join('\n'),
   );
@@ -4132,6 +4138,11 @@ test('rejects unsafe or contradictory private HTTPS readiness records', () => {
       httpStatus: 403,
       containerState: 'running',
       containerHealth: 'none',
+      privateHttpsTcpOutcome: 'refused',
+      privateHttpsTlsOutcome: 'not-attempted',
+      privateHttpsRequestOutcome: 'not-attempted',
+      privateHttpsPublishedBindingMatches: true,
+      privateHttpsContainerListener: 'listening',
     },
     {
       phase: 'private-gateway-https-ready',
@@ -4143,13 +4154,6 @@ test('rejects unsafe or contradictory private HTTPS readiness records', () => {
     {
       phase: 'private-gateway-https-ready',
       status: 'failed',
-      privateHttpsTcpOutcome: 'connected',
-      privateHttpsTlsOutcome: 'password=secret',
-      privateHttpsRequestOutcome: 'not-attempted',
-    },
-    {
-      phase: 'widget-ready',
-      status: 'failed',
       privateHttpsTcpOutcome: 'refused',
       privateHttpsTlsOutcome: 'not-attempted',
       privateHttpsRequestOutcome: 'not-attempted',
@@ -4158,8 +4162,46 @@ test('rejects unsafe or contradictory private HTTPS readiness records', () => {
       phase: 'private-gateway-https-ready',
       status: 'failed',
       privateHttpsTcpOutcome: 'connected',
+      privateHttpsTlsOutcome: 'password=secret',
+      privateHttpsRequestOutcome: 'not-attempted',
+      privateHttpsPublishedBindingMatches: true,
+      privateHttpsContainerListener: 'refused',
+    },
+    {
+      phase: 'widget-ready',
+      status: 'failed',
+      privateHttpsTcpOutcome: 'refused',
+      privateHttpsTlsOutcome: 'not-attempted',
+      privateHttpsRequestOutcome: 'not-attempted',
+      privateHttpsPublishedBindingMatches: true,
+      privateHttpsContainerListener: 'refused',
+    },
+    {
+      phase: 'private-gateway-https-ready',
+      status: 'failed',
+      privateHttpsTcpOutcome: 'connected',
       privateHttpsTlsOutcome: 'validated',
       privateHttpsRequestOutcome: 'response',
+      privateHttpsPublishedBindingMatches: true,
+      privateHttpsContainerListener: 'refused',
+    },
+    {
+      phase: 'private-gateway-https-ready',
+      status: 'failed',
+      privateHttpsTcpOutcome: 'refused',
+      privateHttpsTlsOutcome: 'not-attempted',
+      privateHttpsRequestOutcome: 'not-attempted',
+      privateHttpsPublishedBindingMatches: 'true',
+      privateHttpsContainerListener: 'refused',
+    },
+    {
+      phase: 'private-gateway-https-ready',
+      status: 'failed',
+      privateHttpsTcpOutcome: 'refused',
+      privateHttpsTlsOutcome: 'not-attempted',
+      privateHttpsRequestOutcome: 'not-attempted',
+      privateHttpsPublishedBindingMatches: true,
+      privateHttpsContainerListener: 'secret=raw-command-output',
     },
   ];
 
@@ -4169,6 +4211,24 @@ test('rejects unsafe or contradictory private HTTPS readiness records', () => {
       { message: 'invalid element acceptance summary' },
     );
   }
+});
+
+test('keeps unavailable private listener outcomes as a failed readiness result', () => {
+  const summary = sanitizeElementAcceptance(
+    JSON.stringify({
+      phase: 'private-gateway-https-ready',
+      status: 'failed',
+      privateHttpsTcpOutcome: 'refused',
+      privateHttpsTlsOutcome: 'not-attempted',
+      privateHttpsRequestOutcome: 'not-attempted',
+      privateHttpsPublishedBindingMatches: 'unknown',
+      privateHttpsContainerListener: 'unknown',
+    }),
+    sourceSha,
+  );
+  assert.match(summary, /private_https_published_binding_matches=unknown/u);
+  assert.match(summary, /private_https_container_listener=unknown/u);
+  assert.match(summary, /status=failed/u);
 });
 
 test('emits only fixed Radicale readiness state after an unanswered probe', () => {

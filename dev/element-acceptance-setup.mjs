@@ -61,6 +61,28 @@ const PRIVATE_HTTPS_REQUEST_ERROR_OUTCOMES = new Map([
   ['EPIPE', 'connection-failed'],
   ['ETIMEDOUT', 'timed-out'],
 ]);
+const PRIVATE_HTTPS_CONTAINER_LISTENER_OUTCOMES = new Set([
+  'listening',
+  'refused',
+  'timed-out',
+  'unreachable',
+]);
+
+export function buildPrivateHttpsContainerListenerProbe(port = 3443) {
+  if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
+    throw new TypeError('Private HTTPS listener probe port is invalid');
+  }
+  return [
+    "const net = require('node:net')",
+    `const socket = net.createConnection({ host: '127.0.0.1', port: ${port} })`,
+    'let settled = false',
+    'let timer',
+    "const finish = (result) => { if (settled) return; settled = true; clearTimeout(timer); socket.destroy(); process.stdout.write(result + '\\n') }",
+    "timer = setTimeout(() => finish('timed-out'), 1500)",
+    "socket.once('connect', () => finish('listening'))",
+    "socket.once('error', (error) => finish(error?.code === 'ECONNREFUSED' ? 'refused' : 'unreachable'))",
+  ].join(';');
+}
 const PHASES = new Set([
   'accounts-ready',
   'service-calendar-ready',
@@ -1009,6 +1031,8 @@ export function readPrivateHttpsServiceDiagnostic({
   const unavailable = {
     containerState: 'unavailable',
     containerHealth: 'unavailable',
+    privateHttpsPublishedBindingMatches: 'unknown',
+    privateHttpsContainerListener: 'unknown',
   };
   const isRunnerTempFile = (path) =>
     typeof path === 'string' &&
@@ -1057,6 +1081,14 @@ export function readPrivateHttpsServiceDiagnostic({
       stdio: ['ignore', 'pipe', 'ignore'],
       timeout: 10_000,
     });
+  const executePrivateHttpsProbe = (arguments_) =>
+    execute('docker', arguments_, {
+      cwd: ROOT,
+      encoding: 'utf8',
+      maxBuffer: 256,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 5_000,
+    });
 
   try {
     const ids = executeDocker([
@@ -1097,7 +1129,41 @@ export function readPrivateHttpsServiceDiagnostic({
           : healthStates.has(state.Health.Status)
             ? state.Health.Status
             : 'unavailable',
+      privateHttpsPublishedBindingMatches: 'unknown',
+      privateHttpsContainerListener: 'unknown',
     };
+    try {
+      const binding = executePrivateHttpsProbe([
+        ...composeArgs,
+        'port',
+        'private-gateway-https',
+        '3443',
+      ]).trim();
+      diagnostic.privateHttpsPublishedBindingMatches =
+        binding === '127.0.0.1:3001'
+          ? true
+          : binding.length > 0
+            ? false
+            : 'unknown';
+    } catch {
+      // Keep only a fixed outcome; never retain Compose output.
+    }
+    if (diagnostic.containerState === 'running') {
+      try {
+        const listener = executePrivateHttpsProbe([
+          'exec',
+          ids[0],
+          'node',
+          '-e',
+          buildPrivateHttpsContainerListenerProbe(),
+        ]).trim();
+        if (PRIVATE_HTTPS_CONTAINER_LISTENER_OUTCOMES.has(listener)) {
+          diagnostic.privateHttpsContainerListener = listener;
+        }
+      } catch {
+        // Keep only a fixed outcome; never retain container command output.
+      }
+    }
     if (
       Number.isInteger(state.ExitCode) &&
       state.ExitCode >= 0 &&

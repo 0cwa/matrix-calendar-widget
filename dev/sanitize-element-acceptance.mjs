@@ -966,6 +966,13 @@ const PRIVATE_HTTPS_REQUEST_OUTCOMES = new Set([
   'other-failure',
   'not-attempted',
 ]);
+const PRIVATE_HTTPS_CONTAINER_LISTENER_OUTCOMES = new Set([
+  'listening',
+  'refused',
+  'timed-out',
+  'unreachable',
+  'unknown',
+]);
 const RESTORE_RADICALE_PROBE_OUTCOMES = new Set(['no-response', 'http-status']);
 const RESTORE_RADICALE_CONTAINER_HTTP_OUTCOMES = new Set([
   'unavailable',
@@ -1601,6 +1608,8 @@ const ALLOWED_KEYS = new Set([
   'privateHttpsTcpOutcome',
   'privateHttpsTlsOutcome',
   'privateHttpsRequestOutcome',
+  'privateHttpsPublishedBindingMatches',
+  'privateHttpsContainerListener',
   'restoreRadicaleProbeOutcome',
   'restoreRadicaleContainerHttpOutcome',
   'restoreRadicaleContainerHttpStatus',
@@ -3703,6 +3712,8 @@ export function sanitizeElementAcceptance(
       'privateHttpsTcpOutcome',
       'privateHttpsTlsOutcome',
       'privateHttpsRequestOutcome',
+      'privateHttpsPublishedBindingMatches',
+      'privateHttpsContainerListener',
     ];
     const hasPrivateHttpsObservation = privateHttpsObservationFields.some(
       (key) => Object.hasOwn(record, key),
@@ -3721,6 +3732,11 @@ export function sanitizeElementAcceptance(
           !PRIVATE_HTTPS_TLS_OUTCOMES.has(record.privateHttpsTlsOutcome) ||
           !PRIVATE_HTTPS_REQUEST_OUTCOMES.has(
             record.privateHttpsRequestOutcome,
+          ) ||
+          (typeof record.privateHttpsPublishedBindingMatches !== 'boolean' &&
+            record.privateHttpsPublishedBindingMatches !== 'unknown') ||
+          !PRIVATE_HTTPS_CONTAINER_LISTENER_OUTCOMES.has(
+            record.privateHttpsContainerListener,
           ) ||
           (record.privateHttpsTcpOutcome !== 'connected' &&
             (record.privateHttpsTlsOutcome !== 'not-attempted' ||
@@ -4990,6 +5006,8 @@ export function sanitizeElementAcceptance(
         `private_https_tcp=${record.privateHttpsTcpOutcome}`,
         `private_https_tls=${record.privateHttpsTlsOutcome}`,
         `private_https_request=${record.privateHttpsRequestOutcome}`,
+        `private_https_published_binding_matches=${record.privateHttpsPublishedBindingMatches}`,
+        `private_https_container_listener=${record.privateHttpsContainerListener}`,
       );
     }
     if (Object.hasOwn(record, 'teamRoomMatches')) {
