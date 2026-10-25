@@ -64,6 +64,7 @@ import {
   planOwnedCleanup,
   removeOwnedResources,
   runTask,
+  stableContainer,
   taskEnvironment,
   validateComposeModel,
   validateLocalManifestContract,
@@ -2437,6 +2438,23 @@ else if (args[0] === 'inspect') {
   if (state.healthLogDrift && inspectedContainer?.State?.Health?.Log?.[0]) {
     inspectedContainer.State.Health.Log[0].Output = 'changed health log';
   }
+  if (
+    state.mountMutation?.kind === 'reverse' &&
+    Array.isArray(inspectedContainer?.Mounts)
+  ) {
+    inspectedContainer.Mounts.reverse();
+  } else if (
+    state.mountMutation?.kind === 'remove-duplicate' &&
+    Array.isArray(inspectedContainer?.Mounts)
+  ) {
+    inspectedContainer.Mounts.splice(1, 1);
+  } else if (
+    state.mountMutation?.kind === 'field' &&
+    Array.isArray(inspectedContainer?.Mounts)
+  ) {
+    inspectedContainer.Mounts[0][state.mountMutation.key] =
+      state.mountMutation.value;
+  }
   output = JSON.stringify(args.slice(1).map(inspect));
 }
 else if (args[0] === 'container' && args[1] === 'stop') {
@@ -2499,6 +2517,15 @@ process.stdout.write(output);
     Mode: 'rw',
     RW: true,
     Propagation: '',
+    FutureDockerField: { nested: { z: 2, a: 1 }, values: ['one', 'two'] },
+  };
+  const secondaryMount = {
+    ...mount,
+    Name: `${volumeName}-secondary`,
+    Source: `/var/lib/docker/volumes/${volumeName}-secondary/_data`,
+    Destination: '/secondary-data',
+    Mode: 'ro',
+    RW: false,
   };
   const container = {
     Id: containerId,
@@ -2526,7 +2553,7 @@ process.stdout.write(output);
         Log: [{ Output: 'initial health log' }],
       },
     },
-    Mounts: [mount],
+    Mounts: [mount, mount, secondaryMount],
     HostConfig: {
       NetworkMode: networkName,
       PortBindings: null,
@@ -2552,40 +2579,6 @@ process.stdout.write(output);
       },
     },
   };
-  const stableContainer = (value) => ({
-    Id: value.Id,
-    Name: value.Name,
-    Image: value.Image,
-    Config: {
-      Image: value.Config.Image,
-      Labels: value.Config.Labels,
-      Env: value.Config.Env,
-      Cmd: value.Config.Cmd,
-      Entrypoint: value.Config.Entrypoint,
-      WorkingDir: value.Config.WorkingDir,
-      User: value.Config.User,
-    },
-    State: {
-      Status: value.State.Status,
-      Running: value.State.Running,
-      Paused: value.State.Paused,
-      Restarting: value.State.Restarting,
-      OOMKilled: value.State.OOMKilled,
-      Dead: value.State.Dead,
-      ExitCode: value.State.ExitCode,
-      Health: value.State.Health ? { Status: value.State.Health.Status } : null,
-    },
-    Mounts: value.Mounts,
-    HostConfig: {
-      NetworkMode: value.HostConfig.NetworkMode,
-      PortBindings: value.HostConfig.PortBindings,
-      RestartPolicy: value.HostConfig.RestartPolicy,
-    },
-    NetworkSettings: {
-      Ports: value.NetworkSettings.Ports,
-      Networks: value.NetworkSettings.Networks,
-    },
-  });
   const volume = {
     Name: volumeName,
     Driver: 'local',
@@ -2640,7 +2633,11 @@ process.stdout.write(output);
     taskDir,
   };
 
-  function runCleanup(foreignAttached, healthLogDrift = false) {
+  function runCleanup(
+    foreignAttached,
+    healthLogDrift = false,
+    mountMutation = null,
+  ) {
     const attachments = { [containerId]: ownedAttachment };
     const containers = { [containerId]: container };
     if (foreignAttached) {
@@ -2664,6 +2661,7 @@ process.stdout.write(output);
         networks: { [networkId]: network(attachments) },
         volumes: { [volumeName]: volume },
         healthLogDrift,
+        mountMutation,
         calls: [],
       }),
       { mode: 0o600 },
@@ -2706,6 +2704,68 @@ process.stdout.write(output);
     prefix: 'success',
   });
   assert.deepEqual(healthLogDriftCleaned, baseline);
+
+  const originalMounts = structuredClone(container.Mounts);
+  const mountOrderDrift = runCleanup(false, false, { kind: 'reverse' });
+  const mountOrderCleaned = removeOwnedResources({
+    plan: mountOrderDrift.plan,
+    context,
+    baseline,
+    runId,
+    project,
+    prefix: 'success',
+  });
+  assert.deepEqual(mountOrderCleaned, baseline);
+  assert.deepEqual(container.Mounts, originalMounts);
+  assert.equal(
+    mountOrderDrift.plan.containers[0].Mounts.filter(
+      (record) => canonicalLocalJson(record) === canonicalLocalJson(mount),
+    ).length,
+    2,
+  );
+
+  for (const mutation of [
+    { kind: 'field', key: 'Source', value: '/changed/source' },
+    { kind: 'field', key: 'Destination', value: '/changed/destination' },
+    { kind: 'field', key: 'Mode', value: 'ro' },
+    { kind: 'field', key: 'RW', value: false },
+    {
+      kind: 'field',
+      key: 'FutureDockerField',
+      value: { nested: { z: 9, a: 1 }, values: ['one', 'two'] },
+    },
+    { kind: 'remove-duplicate' },
+  ]) {
+    const changedMount = runCleanup(false, false, mutation);
+    assert.throws(
+      () =>
+        removeOwnedResources({
+          plan: changedMount.plan,
+          context,
+          baseline,
+          runId,
+          project,
+          prefix: 'success',
+        }),
+      (error) => {
+        assert.equal(error.stage, 'success-cleanup');
+        assert.equal(error.code, 'inventory-postcondition-failed');
+        assert.equal(error.cleanupCheckpoint, 'container-plan');
+        assert.equal(error.cleanupServiceRole, 'radicale');
+        assert.equal(error.cleanupMismatchCategory, 'mounts');
+        return true;
+      },
+    );
+    const changedState = JSON.parse(
+      readFileSync(changedMount.callsPath, 'utf8'),
+    );
+    assert.equal(
+      changedState.calls.some(
+        (args) => args[0] === 'container' && ['stop', 'rm'].includes(args[1]),
+      ),
+      false,
+    );
+  }
 
   const configurationDrift = runCleanup(false);
   const driftedState = JSON.parse(
