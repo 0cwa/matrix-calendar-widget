@@ -340,3 +340,35 @@ export function roomContextObservationForPhase(observation, phase) {
   }
   return phaseObservation;
 }
+
+function roomContextResultObservationForPhase(result, phase) {
+  const hasObservation =
+    result?.observation !== undefined ||
+    result?.roomReadinessTimeline !== undefined ||
+    result?.roomNavigationReadiness !== undefined;
+  if (!hasObservation) return undefined;
+
+  const observation = { ...(result.observation ?? {}) };
+  if (result.roomReadinessTimeline !== undefined) {
+    observation.roomReadinessTimeline = result.roomReadinessTimeline;
+  }
+  if (result.roomNavigationReadiness !== undefined) {
+    observation.roomNavigationReadiness = result.roomNavigationReadiness;
+  }
+  return roomContextObservationForPhase(observation, phase);
+}
+
+export function createMemberRoomContextRecord(
+  result,
+  phase,
+  reminderWidgetContext,
+) {
+  const observation = roomContextResultObservationForPhase(result, phase);
+  return {
+    phase,
+    status: result.failureCode ? 'failed' : 'passed',
+    ...(result.failureCode ? { failureCode: result.failureCode } : {}),
+    ...(observation ?? {}),
+    ...(reminderWidgetContext ?? {}),
+  };
+}

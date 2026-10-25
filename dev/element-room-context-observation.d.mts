@@ -119,3 +119,14 @@ export function roomContextObservationForPhase<T extends object>(
       | 'roomReadinessTimeline'
       | 'roomNavigationReadiness'
     >;
+
+export function createMemberRoomContextRecord<T extends object>(
+  result: {
+    failureCode?: string;
+    observation?: T;
+    roomReadinessTimeline?: RoomReadinessTimeline;
+    roomNavigationReadiness?: RoomNavigationReadinessObservation;
+  },
+  phase: MemberRoomContextPhase,
+  reminderWidgetContext?: object,
+): Record<string, unknown>;

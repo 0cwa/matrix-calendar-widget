@@ -113,8 +113,8 @@ import {
 import {
   ROOM_READINESS_SAMPLE_TIMEOUT_MS,
   collectRoomReadinessTimeline,
+  createMemberRoomContextRecord,
   createRoomNavigationReadinessObservation,
-  roomContextObservationForPhase,
   unavailableRoomReadinessTimeline,
   type RoomReadinessSnapshot,
   type RoomReadinessTimeline,
@@ -11020,31 +11020,11 @@ function recordMemberARoomObservation(
 ) {
   const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;
   if (!stageFile) throw new Error('Element acceptance fixture unavailable');
-  const observation = result.observation
-    ? roomContextObservationForPhase(
-        {
-          ...result.observation,
-          ...(result.roomReadinessTimeline
-            ? { roomReadinessTimeline: result.roomReadinessTimeline }
-            : {}),
-        },
-        phase,
-      )
-    : result.roomReadinessTimeline
-      ? roomContextObservationForPhase(
-          { roomReadinessTimeline: result.roomReadinessTimeline },
-          phase,
-        )
-      : undefined;
   appendFileSync(
     stageFile,
-    `${JSON.stringify({
-      phase,
-      status: result.failureCode ? 'failed' : 'passed',
-      ...(result.failureCode ? { failureCode: result.failureCode } : {}),
-      ...(observation ?? {}),
-      ...(reminderWidgetContext ?? {}),
-    })}\n`,
+    `${JSON.stringify(
+      createMemberRoomContextRecord(result, phase, reminderWidgetContext),
+    )}\n`,
     { encoding: 'utf8', mode: 0o600 },
   );
 }

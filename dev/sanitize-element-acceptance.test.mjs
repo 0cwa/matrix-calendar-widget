@@ -15,6 +15,7 @@ import {
   failReminderFlowDiagnostic,
 } from './element-reminder-flow-diagnostics.mjs';
 import {
+  createMemberRoomContextRecord,
   createRoomNavigationReadinessObservation,
   roomContextObservationForPhase,
 } from './element-room-context-observation.mjs';
@@ -6157,19 +6158,15 @@ test('accepts bounded G6 member B room-render diagnostics and rejects raw fields
       roomId: '!private:example.org',
     },
   );
-  const roomRecord = {
-    phase: 'g6-member-b-room-context',
-    status: 'failed',
-    failureCode: 'element-room-heading-not-present',
-    ...roomContextObservationForPhase(
-      {
-        ...callbackObservation,
-        roomReadinessTimeline,
-        roomNavigationReadiness,
-      },
-      'g6-member-b-room-context',
-    ),
-  };
+  const roomRecord = createMemberRoomContextRecord(
+    {
+      failureCode: 'element-room-heading-not-present',
+      observation: callbackObservation,
+      roomReadinessTimeline,
+      roomNavigationReadiness,
+    },
+    'g6-member-b-room-context',
+  );
   const summary = sanitizeElementAcceptance(
     JSON.stringify(roomRecord),
     sourceSha,
@@ -6191,27 +6188,40 @@ test('accepts bounded G6 member B room-render diagnostics and rejects raw fields
     summary,
     /room_navigation_before=first_sync_complete=false:ready=true:page_type=other-page:room_matches=false:sync=SYNCING room_navigation_after_route=first_sync_complete=true:ready=true:page_type=other-page:room_matches=true:sync=SYNCING/u,
   );
-  const unknownTerminalGate = {
-    ...roomRecord,
-    matrixChatFirstSyncComplete: null,
-  };
+  const unknownTerminalGate = createMemberRoomContextRecord(
+    {
+      failureCode: 'element-room-heading-not-present',
+      observation: {
+        ...callbackObservation,
+        matrixChatFirstSyncComplete: null,
+      },
+      roomReadinessTimeline,
+      roomNavigationReadiness,
+    },
+    'g6-member-b-room-context',
+  );
   assert.match(
     sanitizeElementAcceptance(JSON.stringify(unknownTerminalGate), sourceSha),
     /matrix_chat_first_sync_complete=unknown/u,
   );
-  const unavailableNavigationGate = {
-    ...roomRecord,
-    roomNavigationReadiness: createRoomNavigationReadinessObservation(
-      undefined,
-      {
-        firstSyncComplete: 'false',
-        ready: 'true',
-        pageType: 'private-value',
-        currentRoomMatches: 'yes',
-        matrixSyncState: 'private-value',
-      },
-    ),
-  };
+  const unavailableNavigationGate = createMemberRoomContextRecord(
+    {
+      failureCode: 'element-room-heading-not-present',
+      observation: callbackObservation,
+      roomReadinessTimeline,
+      roomNavigationReadiness: createRoomNavigationReadinessObservation(
+        undefined,
+        {
+          firstSyncComplete: 'false',
+          ready: 'true',
+          pageType: 'private-value',
+          currentRoomMatches: 'yes',
+          matrixSyncState: 'private-value',
+        },
+      ),
+    },
+    'g6-member-b-room-context',
+  );
   assert.match(
     sanitizeElementAcceptance(
       JSON.stringify(unavailableNavigationGate),
