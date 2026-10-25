@@ -92,9 +92,17 @@ export async function selectPrivateAcceptanceCalendar({
           }),
         { timeout: PRIVATE_CLIENT_LIST_TIMEOUT_MS },
       );
+      const selectedListResponseOutcome = selectedListResponse.then(
+        (response) => ({ response }),
+        (error) => ({ error }),
+      );
       await targetCalendarOption.click();
       observation.clickCompleted = true;
-      const response = await selectedListResponse;
+      const responseOutcome = await selectedListResponseOutcome;
+      if (Object.hasOwn(responseOutcome, 'error')) {
+        throw responseOutcome.error;
+      }
+      const response = responseOutcome.response;
       observation.httpStatus = response.status();
       result = observation.httpStatus === 200;
     }

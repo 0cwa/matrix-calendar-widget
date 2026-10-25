@@ -275,30 +275,45 @@ test('an unknown response status cannot pass or replace the selection failure', 
   }
 });
 
-test('selection cleanup diagnostics do not mask a click failure', async () => {
+test('waiter rejection after click failure preserves the first failure', async () => {
   const primaryFailure = new Error('synthetic click failure');
-  let observation;
-  await assert.rejects(
-    selectPrivateAcceptanceCalendar({
-      ...expected,
-      page: { waitForResponse: () => new Promise(() => undefined) },
-      calendarPicker: { press: async () => undefined },
-      targetCalendarOption: {
-        getAttribute: async () => 'false',
-        click: async () => {
-          throw primaryFailure;
-        },
-      },
-      recordObservation: (value) => {
-        observation = value;
-        throw new Error('synthetic diagnostic failure');
-      },
-    }),
-    (error) => error === primaryFailure,
-  );
-  assert.deepEqual(observation, {
-    branch: 'changed',
-    clickCompleted: false,
-    httpStatus: null,
+  const waiterFailure = new Error('synthetic response waiter failure');
+  const unhandledRejections = [];
+  let rejectWaiter;
+  const pendingResponse = new Promise((resolve, reject) => {
+    rejectWaiter = reject;
   });
+  const onUnhandledRejection = (error) => unhandledRejections.push(error);
+  let observation;
+  process.on('unhandledRejection', onUnhandledRejection);
+  try {
+    await assert.rejects(
+      selectPrivateAcceptanceCalendar({
+        ...expected,
+        page: { waitForResponse: () => pendingResponse },
+        calendarPicker: { press: async () => undefined },
+        targetCalendarOption: {
+          getAttribute: async () => 'false',
+          click: async () => {
+            throw primaryFailure;
+          },
+        },
+        recordObservation: (value) => {
+          observation = value;
+          throw new Error('synthetic diagnostic failure');
+        },
+      }),
+      (error) => error === primaryFailure,
+    );
+    rejectWaiter(waiterFailure);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(unhandledRejections, []);
+    assert.deepEqual(observation, {
+      branch: 'changed',
+      clickCompleted: false,
+      httpStatus: null,
+    });
+  } finally {
+    process.off('unhandledRejection', onUnhandledRejection);
+  }
 });
