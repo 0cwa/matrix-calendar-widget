@@ -1,11 +1,9 @@
 import assert from 'node:assert/strict';
 import { chmodSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { createServer as createHttpServer } from 'node:http';
 import https from 'node:https';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { createPrivateAcceptanceHttpsProxy } from './element-acceptance-private-https-proxy.mjs';
 import { createPrivateAcceptanceTlsFixture } from './element-acceptance-private-tls.mjs';
 import {
   assertAcceptancePrincipalBootstrap,
@@ -153,28 +151,23 @@ test('private HTTPS probe separates TCP, TLS trust, and HTTP response stages', a
     directory: join(directory, 'untrusted'),
   });
   let responseCount = 0;
-  let backend;
-  let proxy;
+  let readinessServer;
   let closedListener;
   let stalledServer;
   try {
-    const proxyPort = 3001;
-    backend = createHttpServer((_request, response) => {
-      responseCount += 1;
-      response.writeHead(403);
-      response.end();
-    });
-    const backendPort = await listenLocal(backend);
-    proxy = createPrivateAcceptanceHttpsProxy({
-      key: readFileSync(certificateFixture.serverKeyPath),
-      cert: readFileSync(certificateFixture.serverCertPath),
-      upstreamHost: '127.0.0.1',
-      upstreamPort: backendPort,
-      listenHost: '127.0.0.1',
-      listenPort: proxyPort,
-    });
-    await listenLocal(proxy, proxyPort);
-    const origin = `https://127.0.0.1:${proxyPort}`;
+    readinessServer = https.createServer(
+      {
+        key: readFileSync(certificateFixture.serverKeyPath),
+        cert: readFileSync(certificateFixture.serverCertPath),
+      },
+      (_request, response) => {
+        responseCount += 1;
+        response.writeHead(403);
+        response.end();
+      },
+    );
+    const readinessPort = await listenLocal(readinessServer);
+    const origin = `https://127.0.0.1:${readinessPort}`;
 
     const untrusted = await requestPrivateHttpsReadiness(origin, {
       ca: readFileSync(otherCaFixture.caCertPath),
@@ -234,8 +227,7 @@ test('private HTTPS probe separates TCP, TLS trust, and HTTP response stages', a
   } finally {
     await closeLocal(closedListener);
     await closeLocal(stalledServer);
-    await closeLocal(proxy);
-    await closeLocal(backend);
+    await closeLocal(readinessServer);
     rmSync(directory, { recursive: true, force: true });
   }
 });
