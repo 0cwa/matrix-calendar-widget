@@ -75,6 +75,7 @@ export type PrivateUiCalendarListTransportObservation =
 export declare const PRIVATE_UI_CHECKPOINT_PHASES: readonly PrivateUiCheckpointPhase[];
 export declare const PRIVATE_UI_RESULT_PHASE: 'private-ui-test-result';
 export declare const PRIVATE_UI_CALENDAR_LIST_TRANSPORT_PHASE: 'private-ui-calendar-list-transport';
+export declare const PRIVATE_UI_ROOM_READINESS_PHASE: 'private-ui-room-readiness';
 export declare const PRIVATE_UI_CALENDAR_LIST_ENDPOINTS: readonly PrivateUiCalendarListEndpoint[];
 export declare const PRIVATE_UI_CALENDAR_LIST_METHODS: readonly PrivateUiCalendarListMethod[];
 export declare const PRIVATE_UI_CALENDAR_LIST_FAILURE_CATEGORIES: readonly PrivateUiCalendarListFailureCategory[];
@@ -97,6 +98,10 @@ export interface PrivateUiCheckpointJournal {
   ): Promise<T | undefined>;
   recordCalendarListTransport(
     observations: readonly PrivateUiCalendarListTransportObservation[],
+  ): void;
+  recordRoomReadinessObservation(
+    observation: unknown,
+    blockedRequestSeen: boolean,
   ): void;
   finish(testStatus: string | undefined): void;
 }

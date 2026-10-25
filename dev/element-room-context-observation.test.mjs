@@ -2,8 +2,79 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   collectRoomReadinessTimeline,
+  normalizePrivateUiRoomReadinessObservation,
+  PRIVATE_UI_ROOM_READINESS_FIELDS,
+  projectPrivateUiRoomReadinessObservation,
   roomContextObservationForPhase,
 } from './element-room-context-observation.mjs';
+
+const AbortController = globalThis.AbortController;
+
+test('projects the existing room observer into a closed private readiness receipt', () => {
+  const observation = {
+    matrixUserMatches: true,
+    matrixRoomKnown: true,
+    matrixRoomJoined: true,
+    matrixSyncState: 'SYNCING',
+    roomNavigationCompleted: true,
+    roomHeadingReady: false,
+    roomHeadingPresent: false,
+    roomNameMatches: false,
+    roomIdMatches: true,
+    outerRenderBucket: 'room-page',
+    matrixChatShellPresent: true,
+    roomViewWrapperPresent: true,
+    roomViewRendererPresent: true,
+    matrixChatStateAvailable: true,
+    matrixChatViewBucket: 'logged-in',
+    matrixChatReady: true,
+    matrixChatPageTypeBucket: 'other-page',
+    matrixChatCurrentRoomMatches: false,
+    roomRenderStateAvailable: true,
+    roomViewShellVisible: true,
+    roomViewBodyVisible: true,
+    roomPreviewVisible: false,
+    roomPreviewLoadingVisible: false,
+    roomHeaderVisible: false,
+    roomHeaderHeadingVisible: false,
+    roomErrorBoundaryVisible: false,
+    blockedExternalRequestCount: 3,
+    homeserverHttpErrorCount: 2,
+    roomName: 'synthetic private room name',
+    roomId: '!synthetic:example.invalid',
+    error: 'synthetic private error text',
+  };
+  const projected = projectPrivateUiRoomReadinessObservation(observation, true);
+
+  assert.deepEqual(Object.keys(projected), [
+    ...PRIVATE_UI_ROOM_READINESS_FIELDS,
+  ]);
+  assert.equal(projected.matrixSyncState, 'SYNCING');
+  assert.equal(projected.matrixChatCurrentRoomMatches, false);
+  assert.equal(projected.blockedRequestSeen, true);
+  assert.doesNotMatch(
+    JSON.stringify(projected),
+    /synthetic private|example\.invalid|error text|RequestCount/u,
+  );
+  assert.equal(
+    normalizePrivateUiRoomReadinessObservation({
+      ...projected,
+      roomId: '!raw:example.invalid',
+    }),
+    undefined,
+  );
+  assert.equal(
+    projectPrivateUiRoomReadinessObservation(
+      { ...observation, matrixSyncState: 'PRIVATE_STATE' },
+      false,
+    ),
+    undefined,
+  );
+  assert.equal(
+    projectPrivateUiRoomReadinessObservation(observation, 'yes'),
+    undefined,
+  );
+});
 
 test('cancels a hanging room snapshot without waiting for its result', async () => {
   const controller = new AbortController();

@@ -11,9 +11,14 @@ import {
   PRIVATE_UI_CALENDAR_LIST_TRANSPORT_PHASE,
   PRIVATE_UI_CHECKPOINT_PHASES,
   PRIVATE_UI_RESULT_PHASE,
+  PRIVATE_UI_ROOM_READINESS_PHASE,
   normalizePrivateUiCalendarListTransportObservations,
 } from './element-acceptance-private-ui-checkpoints.mjs';
-import { ROOM_RENDER_DIAGNOSTIC_FIELDS } from './element-room-context-observation.mjs';
+import {
+  PRIVATE_UI_ROOM_READINESS_FIELDS,
+  ROOM_RENDER_DIAGNOSTIC_FIELDS,
+  normalizePrivateUiRoomReadinessObservation,
+} from './element-room-context-observation.mjs';
 import { isReminderDeliverySnapshot } from './reminder-delivery-snapshot.mjs';
 
 const RUNTIME_DEPENDENCIES = loadRuntimeDependencyAllowlist(
@@ -3329,10 +3334,16 @@ export function sanitizeElementAcceptance(
       typeof record === 'object' &&
       !Array.isArray(record) &&
       record.phase === PRIVATE_UI_CALENDAR_LIST_TRANSPORT_PHASE;
+    const privateUiRoomReadiness =
+      record !== null &&
+      typeof record === 'object' &&
+      !Array.isArray(record) &&
+      record.phase === PRIVATE_UI_ROOM_READINESS_PHASE;
     if (
       privateUiCheckpoint ||
       privateUiResult ||
-      privateUiCalendarListTransport
+      privateUiCalendarListTransport ||
+      privateUiRoomReadiness
     ) {
       const exactKeys = (keys) =>
         Object.keys(record).length === keys.length &&
@@ -3344,8 +3355,11 @@ export function sanitizeElementAcceptance(
         record.profile === 'normal-bot';
       if (
         !sourceAndProfileMatch ||
-        (!privateUiCalendarListTransport && !STATUSES.has(record.status)) ||
-        (privateUiCalendarListTransport && record.status !== 'observed') ||
+        (!privateUiCalendarListTransport &&
+          !privateUiRoomReadiness &&
+          !STATUSES.has(record.status)) ||
+        ((privateUiCalendarListTransport || privateUiRoomReadiness) &&
+          record.status !== 'observed') ||
         (privateUiCheckpoint &&
           (!exactKeys(['phase', 'status', 'sourceSha', 'profile']) ||
             !['started', 'passed', 'failed'].includes(record.status)))
@@ -3385,6 +3399,29 @@ export function sanitizeElementAcceptance(
           throw new SummaryValidationError(rejectionCategory, 'unknown');
         }
         phases.set(record.phase, record);
+        continue;
+      }
+
+      if (privateUiRoomReadiness) {
+        const observation = normalizePrivateUiRoomReadinessObservation(
+          record.observation,
+        );
+        if (
+          !exactKeys([
+            'phase',
+            'status',
+            'observation',
+            'sourceSha',
+            'profile',
+          ]) ||
+          observation === undefined ||
+          phases.get('private-ui-member-a-room')?.status !== 'failed' ||
+          phases.has(record.phase) ||
+          phases.has(PRIVATE_UI_RESULT_PHASE)
+        ) {
+          throw new SummaryValidationError(rejectionCategory, 'unknown');
+        }
+        phases.set(record.phase, { ...record, observation });
         continue;
       }
 
@@ -4687,6 +4724,25 @@ export function sanitizeElementAcceptance(
           ].join(' '),
         );
       }
+      continue;
+    }
+    if (phase === PRIVATE_UI_ROOM_READINESS_PHASE) {
+      const observation = record.observation;
+      lines.push(
+        [
+          `phase=${phase}`,
+          'status=observed',
+          'profile=normal-bot',
+          ...PRIVATE_UI_ROOM_READINESS_FIELDS.map((field) => {
+            const label = field.replace(
+              /[A-Z]/gu,
+              (letter) => `_${letter.toLowerCase()}`,
+            );
+            const value = observation[field];
+            return `${label}=${value === null ? 'unavailable' : value}`;
+          }),
+        ].join(' '),
+      );
       continue;
     }
     if (phase === PRIVATE_UI_RESULT_PHASE) {

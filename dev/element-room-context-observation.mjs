@@ -15,6 +15,8 @@
  * limitations under the License.
  */
 
+import { performance } from 'node:perf_hooks';
+
 const ROOM_CONTEXT_PHASES = new Set([
   'member-a-room-context',
   'reminder-room-context',
@@ -46,6 +48,71 @@ export const ROOM_RENDER_DIAGNOSTIC_FIELDS = Object.freeze([
   'roomHeaderHeadingVisible',
   'roomErrorBoundaryVisible',
 ]);
+export const PRIVATE_UI_ROOM_READINESS_FIELDS = Object.freeze([
+  'matrixUserMatches',
+  'matrixRoomKnown',
+  'matrixRoomJoined',
+  'matrixSyncState',
+  'roomNavigationCompleted',
+  'roomHeadingReady',
+  'roomHeadingPresent',
+  'roomNameMatches',
+  'roomIdMatches',
+  'outerRenderBucket',
+  'matrixChatShellPresent',
+  'roomViewWrapperPresent',
+  'roomViewRendererPresent',
+  'matrixChatStateAvailable',
+  'matrixChatViewBucket',
+  'matrixChatReady',
+  'matrixChatPageTypeBucket',
+  'matrixChatCurrentRoomMatches',
+  'roomRenderStateAvailable',
+  'roomViewShellVisible',
+  'roomViewBodyVisible',
+  'roomPreviewVisible',
+  'roomPreviewLoadingVisible',
+  'roomHeaderVisible',
+  'roomHeaderHeadingVisible',
+  'roomErrorBoundaryVisible',
+  'blockedRequestSeen',
+]);
+const PRIVATE_UI_ROOM_RENDER_FIELDS = Object.freeze([
+  'roomViewShellVisible',
+  'roomViewBodyVisible',
+  'roomPreviewVisible',
+  'roomPreviewLoadingVisible',
+  'roomHeaderVisible',
+  'roomHeaderHeadingVisible',
+  'roomErrorBoundaryVisible',
+]);
+const PRIVATE_UI_ROOM_SYNC_STATES = new Set([
+  'ERROR',
+  'PREPARED',
+  'RECONNECTING',
+  'STOPPED',
+  'SYNCING',
+  'CATCHUP',
+  'UNKNOWN',
+]);
+const PRIVATE_UI_ROOM_OUTER_RENDER_BUCKETS = new Set([
+  'room-page',
+  'other-page',
+  'no-shell',
+  'inconsistent',
+  'unavailable',
+]);
+const PRIVATE_UI_ROOM_CHAT_VIEW_BUCKETS = new Set([
+  'logged-in',
+  'other-view',
+  'unavailable',
+]);
+const PRIVATE_UI_ROOM_CHAT_PAGE_TYPE_BUCKETS = new Set([
+  'room-view',
+  'other-page',
+  'missing',
+  'unavailable',
+]);
 const ROOM_READINESS_SYNC_STATES = new Set([
   'ERROR',
   'PREPARED',
@@ -62,6 +129,129 @@ export const ROOM_READINESS_SAMPLE_MAX_COUNT =
   ROOM_READINESS_SAMPLE_OFFSETS_MS.length;
 export const ROOM_READINESS_SAMPLE_MAX_DURATION_MS = 15_000;
 export const ROOM_READINESS_SAMPLE_TIMEOUT_MS = 350;
+
+function isBooleanOrNull(value) {
+  return typeof value === 'boolean' || value === null;
+}
+
+function validPrivateUiRoomReadinessObservation(value) {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.keys(value).length !== PRIVATE_UI_ROOM_READINESS_FIELDS.length ||
+    PRIVATE_UI_ROOM_READINESS_FIELDS.some(
+      (field) => !Object.hasOwn(value, field),
+    )
+  ) {
+    return false;
+  }
+
+  const outerPresence = [
+    value.matrixChatShellPresent,
+    value.roomViewWrapperPresent,
+    value.roomViewRendererPresent,
+  ];
+  const roomRenderState = PRIVATE_UI_ROOM_RENDER_FIELDS.map(
+    (field) => value[field],
+  );
+  const outerPresenceValid =
+    value.outerRenderBucket === 'unavailable'
+      ? outerPresence.every((field) => field === null)
+      : outerPresence.every((field) => typeof field === 'boolean') &&
+        ((value.outerRenderBucket === 'room-page' &&
+          outerPresence.every(Boolean)) ||
+          (value.outerRenderBucket === 'other-page' &&
+            outerPresence[0] &&
+            outerPresence[1] &&
+            !outerPresence[2]) ||
+          (value.outerRenderBucket === 'no-shell' &&
+            outerPresence.every((field) => !field)) ||
+          (value.outerRenderBucket === 'inconsistent' &&
+            !(
+              outerPresence.every(Boolean) ||
+              (outerPresence[0] && outerPresence[1] && !outerPresence[2]) ||
+              outerPresence.every((field) => !field)
+            )));
+  const chatStateValid =
+    typeof value.matrixChatStateAvailable === 'boolean' &&
+    PRIVATE_UI_ROOM_CHAT_VIEW_BUCKETS.has(value.matrixChatViewBucket) &&
+    isBooleanOrNull(value.matrixChatReady) &&
+    PRIVATE_UI_ROOM_CHAT_PAGE_TYPE_BUCKETS.has(
+      value.matrixChatPageTypeBucket,
+    ) &&
+    isBooleanOrNull(value.matrixChatCurrentRoomMatches) &&
+    (value.matrixChatStateAvailable ||
+      (value.matrixChatViewBucket === 'unavailable' &&
+        value.matrixChatReady === null &&
+        value.matrixChatPageTypeBucket === 'unavailable' &&
+        value.matrixChatCurrentRoomMatches === null));
+  const roomRenderValid =
+    typeof value.roomRenderStateAvailable === 'boolean' &&
+    (value.roomRenderStateAvailable
+      ? roomRenderState.every((field) => typeof field === 'boolean') &&
+        (!value.roomViewBodyVisible || value.roomViewShellVisible) &&
+        (!value.roomPreviewVisible || value.roomViewShellVisible) &&
+        (!value.roomPreviewLoadingVisible || value.roomPreviewVisible) &&
+        (!value.roomHeaderVisible || value.roomViewShellVisible) &&
+        (!value.roomHeaderHeadingVisible || value.roomHeaderVisible) &&
+        (!value.roomErrorBoundaryVisible || value.roomViewShellVisible)
+      : roomRenderState.every((field) => field === null));
+
+  return (
+    [
+      'matrixUserMatches',
+      'matrixRoomKnown',
+      'matrixRoomJoined',
+      'roomNavigationCompleted',
+      'roomHeadingReady',
+      'roomHeadingPresent',
+      'roomNameMatches',
+      'roomIdMatches',
+      'blockedRequestSeen',
+    ].every((field) => typeof value[field] === 'boolean') &&
+    PRIVATE_UI_ROOM_SYNC_STATES.has(value.matrixSyncState) &&
+    PRIVATE_UI_ROOM_OUTER_RENDER_BUCKETS.has(value.outerRenderBucket) &&
+    outerPresenceValid &&
+    chatStateValid &&
+    roomRenderValid
+  );
+}
+
+export function normalizePrivateUiRoomReadinessObservation(value) {
+  if (!validPrivateUiRoomReadinessObservation(value)) return undefined;
+  return Object.fromEntries(
+    PRIVATE_UI_ROOM_READINESS_FIELDS.map((field) => [field, value[field]]),
+  );
+}
+
+/**
+ * Project the existing member-A room observer into its closed private receipt.
+ * The observer's numeric counters and all other fields are deliberately omitted.
+ *
+ * @param {unknown} observation
+ * @param {unknown} blockedRequestSeen
+ */
+export function projectPrivateUiRoomReadinessObservation(
+  observation,
+  blockedRequestSeen,
+) {
+  if (
+    observation === null ||
+    typeof observation !== 'object' ||
+    Array.isArray(observation) ||
+    typeof blockedRequestSeen !== 'boolean'
+  ) {
+    return undefined;
+  }
+  const projected = Object.fromEntries(
+    PRIVATE_UI_ROOM_READINESS_FIELDS.filter(
+      (field) => field !== 'blockedRequestSeen',
+    ).map((field) => [field, observation[field]]),
+  );
+  projected.blockedRequestSeen = blockedRequestSeen;
+  return normalizePrivateUiRoomReadinessObservation(projected);
+}
 
 function unavailableRoomReadinessSample(elapsedMs) {
   return {

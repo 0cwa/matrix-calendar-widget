@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { createPrivateUiCheckpointJournal } from './element-acceptance-private-ui-checkpoints.mjs';
 import {
   classifyRadicaleStartupLogs,
   createRadicaleFilesystemEvidence,
@@ -16,6 +17,126 @@ import {
 } from './sanitize-element-acceptance.mjs';
 
 const sourceSha = 'a'.repeat(40);
+
+test('sanitizes the produced private room observation without replacing the first failure', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'private-ui-room-summary-'));
+  const stageFile = join(directory, 'stage.jsonl');
+  try {
+    const journal = createPrivateUiCheckpointJournal({
+      stageFile,
+      sourceSha,
+      profile: 'normal-bot',
+    });
+    const observation = {
+      matrixUserMatches: true,
+      matrixRoomKnown: true,
+      matrixRoomJoined: true,
+      matrixSyncState: 'SYNCING',
+      roomNavigationCompleted: true,
+      roomHeadingReady: false,
+      roomHeadingPresent: false,
+      roomNameMatches: false,
+      roomIdMatches: true,
+      outerRenderBucket: 'room-page',
+      matrixChatShellPresent: true,
+      roomViewWrapperPresent: true,
+      roomViewRendererPresent: true,
+      matrixChatStateAvailable: true,
+      matrixChatViewBucket: 'logged-in',
+      matrixChatReady: true,
+      matrixChatPageTypeBucket: 'other-page',
+      matrixChatCurrentRoomMatches: false,
+      roomRenderStateAvailable: true,
+      roomViewShellVisible: true,
+      roomViewBodyVisible: true,
+      roomPreviewVisible: false,
+      roomPreviewLoadingVisible: false,
+      roomHeaderVisible: false,
+      roomHeaderHeadingVisible: false,
+      roomErrorBoundaryVisible: false,
+      blockedExternalRequestCount: 2,
+      homeserverHttpErrorCount: 0,
+      roomName: 'private room text sentinel',
+      roomId: '!private-room:example.invalid',
+    };
+
+    await assert.rejects(
+      journal.run('private-ui-member-a-room', () => {
+        throw new Error('primary private room failure');
+      }),
+    );
+    journal.recordRoomReadinessObservation(observation, true);
+    await journal.cleanup('private-ui-context-cleanup', () => undefined);
+    journal.finish('failed');
+
+    const receipt = readFileSync(stageFile, 'utf8');
+    const summary = sanitizeElementAcceptance(receipt, sourceSha, {
+      privateUiEnabled: true,
+      profile: 'normal-bot',
+    });
+    assert.match(
+      summary,
+      /phase=private-ui-room-readiness status=observed profile=normal-bot matrix_user_matches=true matrix_room_known=true matrix_room_joined=true matrix_sync_state=SYNCING room_navigation_completed=true room_heading_ready=false room_heading_present=false room_name_matches=false room_id_matches=true/u,
+    );
+    assert.match(
+      summary,
+      /matrix_chat_current_room_matches=false room_render_state_available=true room_view_shell_visible=true room_view_body_visible=true room_preview_visible=false room_preview_loading_visible=false room_header_visible=false room_header_heading_visible=false room_error_boundary_visible=false blocked_request_seen=true/u,
+    );
+    assert.match(
+      summary,
+      /phase=private-ui-test-result status=failed profile=normal-bot test_status=failed last_entered=private-ui-context-cleanup last_completed=private-ui-context-cleanup failure_phase=private-ui-member-a-room/u,
+    );
+    assert.doesNotMatch(
+      summary,
+      /private room text|private-room|example\.invalid|error text|https?:\/\//u,
+    );
+
+    const records = receipt
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    const readiness = records.find(
+      (record) => record.phase === 'private-ui-room-readiness',
+    );
+    const tamperedRecords = records.map((record) =>
+      record === readiness
+        ? {
+            ...record,
+            observation: {
+              ...readiness.observation,
+              rawDomText: 'private room text sentinel',
+            },
+          }
+        : record,
+    );
+    assert.throws(
+      () =>
+        sanitizeElementAcceptance(
+          tamperedRecords.map((record) => JSON.stringify(record)).join('\n'),
+          sourceSha,
+          { privateUiEnabled: true, profile: 'normal-bot' },
+        ),
+      { message: 'invalid element acceptance summary' },
+    );
+    const roomPassedRecords = records.map((record) =>
+      record.phase === 'private-ui-member-a-room' && record.status === 'failed'
+        ? { ...record, status: 'passed' }
+        : record,
+    );
+    assert.throws(
+      () =>
+        sanitizeElementAcceptance(
+          roomPassedRecords.map((record) => JSON.stringify(record)).join('\n'),
+          sourceSha,
+          { privateUiEnabled: true, profile: 'normal-bot' },
+        ),
+      { message: 'invalid element acceptance summary' },
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 const g6PassedTitleDiagnostic = {
   neighborEditedRowVisible: true,
   neighborPatchTitleOutcome: 'matched',

@@ -1,5 +1,6 @@
 import { appendFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
+import { projectPrivateUiRoomReadinessObservation } from './element-room-context-observation.mjs';
 
 export const PRIVATE_UI_CHECKPOINT_PHASES = Object.freeze([
   'private-ui-fixture-ready',
@@ -45,6 +46,7 @@ export const PRIVATE_UI_CHECKPOINT_PHASES = Object.freeze([
 export const PRIVATE_UI_RESULT_PHASE = 'private-ui-test-result';
 export const PRIVATE_UI_CALENDAR_LIST_TRANSPORT_PHASE =
   'private-ui-calendar-list-transport';
+export const PRIVATE_UI_ROOM_READINESS_PHASE = 'private-ui-room-readiness';
 export const PRIVATE_UI_CALENDAR_LIST_ENDPOINTS = Object.freeze([
   'personal-list',
   'room-context',
@@ -225,6 +227,7 @@ export function createPrivateUiCheckpointJournal({
   let cleanupFailed = false;
   let finished = false;
   let calendarListTransportRecorded = false;
+  let roomReadinessRecorded = false;
 
   const writeRecord = (record) => {
     try {
@@ -367,6 +370,43 @@ export function createPrivateUiCheckpointJournal({
         observations: sanitizedObservations,
       });
       calendarListTransportRecorded = true;
+    },
+
+    /**
+     * Preserve the bounded existing member-A room observation after the
+     * private room checkpoint has failed. This record never changes the
+     * checkpoint or first-failure state.
+     *
+     * @param {unknown} observation
+     * @param {boolean} blockedRequestSeen
+     */
+    recordRoomReadinessObservation(observation, blockedRequestSeen) {
+      if (finished) {
+        throw new Error('Private acceptance checkpoints are complete');
+      }
+      if (
+        roomReadinessRecorded ||
+        lastEnteredPhase !== 'private-ui-member-a-room' ||
+        failurePhase !== 'private-ui-member-a-room'
+      ) {
+        throw new Error('Private acceptance checkpoint is invalid');
+      }
+      const normalizedObservation = projectPrivateUiRoomReadinessObservation(
+        observation,
+        blockedRequestSeen,
+      );
+      if (normalizedObservation === undefined) {
+        throw new Error('Private acceptance checkpoint is invalid');
+      }
+
+      writeRecord({
+        phase: PRIVATE_UI_ROOM_READINESS_PHASE,
+        status: 'observed',
+        observation: normalizedObservation,
+        sourceSha: boundSourceSha,
+        profile: 'normal-bot',
+      });
+      roomReadinessRecorded = true;
     },
 
     /**

@@ -7,6 +7,7 @@ import {
   classifyPrivateUiCalendarListNetworkFailure,
   createPrivateUiCheckpointJournal,
   PRIVATE_UI_RESULT_PHASE,
+  PRIVATE_UI_ROOM_READINESS_PHASE,
 } from './element-acceptance-private-ui-checkpoints.mjs';
 
 const sourceSha = 'b'.repeat(40);
@@ -516,6 +517,103 @@ test('rejects raw, duplicate, excessive, or invalid calendar-list observations',
       });
     }
     assert.throws(() => readFileSync(stageFile, 'utf8'), { code: 'ENOENT' });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('records room readiness only after that phase fails and preserves its first failure', async () => {
+  const { directory, stageFile } = createStageFile();
+  try {
+    const journal = createPrivateUiCheckpointJournal({
+      stageFile,
+      sourceSha,
+      profile: 'normal-bot',
+    });
+    const observation = {
+      matrixUserMatches: true,
+      matrixRoomKnown: true,
+      matrixRoomJoined: true,
+      matrixSyncState: 'SYNCING',
+      roomNavigationCompleted: true,
+      roomHeadingReady: false,
+      roomHeadingPresent: false,
+      roomNameMatches: false,
+      roomIdMatches: true,
+      outerRenderBucket: 'room-page',
+      matrixChatShellPresent: true,
+      roomViewWrapperPresent: true,
+      roomViewRendererPresent: true,
+      matrixChatStateAvailable: true,
+      matrixChatViewBucket: 'logged-in',
+      matrixChatReady: true,
+      matrixChatPageTypeBucket: 'other-page',
+      matrixChatCurrentRoomMatches: false,
+      roomRenderStateAvailable: true,
+      roomViewShellVisible: true,
+      roomViewBodyVisible: true,
+      roomPreviewVisible: false,
+      roomPreviewLoadingVisible: false,
+      roomHeaderVisible: false,
+      roomHeaderHeadingVisible: false,
+      roomErrorBoundaryVisible: false,
+      blockedExternalRequestCount: 1,
+      homeserverHttpErrorCount: 0,
+      roomId: '!raw-room:example.invalid',
+      error: 'raw observer failure text',
+    };
+
+    assert.throws(
+      () => journal.recordRoomReadinessObservation(observation, true),
+      { message: 'Private acceptance checkpoint is invalid' },
+    );
+    await assert.rejects(
+      journal.run('private-ui-member-a-room', () => {
+        throw new Error('primary-room-failure-sentinel');
+      }),
+    );
+    journal.recordRoomReadinessObservation(observation, true);
+    assert.throws(
+      () => journal.recordRoomReadinessObservation(observation, false),
+      { message: 'Private acceptance checkpoint is invalid' },
+    );
+    const cleanupResult = await journal.cleanup(
+      'private-ui-context-cleanup',
+      () => {
+        throw new Error('cleanup-failure-sentinel');
+      },
+    );
+    assert.equal(cleanupResult, undefined);
+    assert.throws(
+      () => journal.recordRoomReadinessObservation(observation, true),
+      { message: 'Private acceptance checkpoint is invalid' },
+    );
+    journal.finish('failed');
+
+    const receipt = readFileSync(stageFile, 'utf8');
+    const records = receipt
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    const readinessRecord = records.find(
+      (record) => record.phase === PRIVATE_UI_ROOM_READINESS_PHASE,
+    );
+    assert.equal(readinessRecord.status, 'observed');
+    assert.equal(readinessRecord.observation.blockedRequestSeen, true);
+    assert.equal(readinessRecord.observation.matrixSyncState, 'SYNCING');
+    assert.equal(records.at(-1).failurePhase, 'private-ui-member-a-room');
+    assert.equal(records.at(-1).lastEnteredPhase, 'private-ui-context-cleanup');
+    assert.doesNotMatch(
+      receipt,
+      /raw-room|example\.invalid|failure-sentinel|blockedExternalRequestCount|homeserverHttpErrorCount/u,
+    );
+
+    const immutableReceipt = receipt;
+    assert.throws(
+      () => journal.recordRoomReadinessObservation(observation, true),
+      /Private acceptance checkpoints are complete/u,
+    );
+    assert.equal(readFileSync(stageFile, 'utf8'), immutableReceipt);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

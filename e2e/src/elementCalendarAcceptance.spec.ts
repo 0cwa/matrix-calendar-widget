@@ -7804,15 +7804,32 @@ async function openFixtureRoom(
   page: Page,
   roomName: string,
   roomId: string,
+  onFailure?: (state: {
+    navigationCompleted: boolean;
+    roomHeadingReady: boolean;
+  }) => void,
 ): Promise<ElementWebPage> {
   const roomUrl = new URL(fixture.elementUrl);
   roomUrl.hash = `/room/${roomId}`;
-  await page.goto(roomUrl.href);
+  let navigationCompleted = false;
+  let roomHeadingReady = false;
+  try {
+    await page.goto(roomUrl.href);
+    navigationCompleted = true;
 
-  const element = new ElementWebPage(page);
-  await expect(getPinnedElementRoomNameHeading(page)).toHaveText(roomName);
-  expect(element.getCurrentRoomId()).toBe(roomId);
-  return element;
+    const element = new ElementWebPage(page);
+    await expect(getPinnedElementRoomNameHeading(page)).toHaveText(roomName);
+    roomHeadingReady = true;
+    expect(element.getCurrentRoomId()).toBe(roomId);
+    return element;
+  } catch (error) {
+    try {
+      onFailure?.({ navigationCompleted, roomHeadingReady });
+    } catch {
+      // Preserve the original room navigation failure.
+    }
+    throw error;
+  }
 }
 
 function getPinnedElementRoomNameHeading(page: Page): Locator {
@@ -11015,9 +11032,43 @@ if (process.env.ELEMENT_ACCEPTANCE_PRIVATE_UI === 'true') {
             return { contextA, pageA };
           },
         );
-        const teamRoomA = await checkpoint.run('private-ui-member-a-room', () =>
-          openFixtureRoom(pageA, fixture.roomName, fixture.teamRoomId),
-        );
+        let memberARoomNavigationCompleted = false;
+        let memberARoomHeadingReady = false;
+        const blockedRequestsBeforeRoom = blockedExternalRequests;
+        let teamRoomA: ElementWebPage;
+        try {
+          teamRoomA = await checkpoint.run('private-ui-member-a-room', () =>
+            openFixtureRoom(
+              pageA,
+              fixture.roomName,
+              fixture.teamRoomId,
+              (state) => {
+                memberARoomNavigationCompleted = state.navigationCompleted;
+                memberARoomHeadingReady = state.roomHeadingReady;
+              },
+            ),
+          );
+        } catch (error) {
+          try {
+            const roomObservation = await observeMemberARoom(
+              pageA,
+              new ElementWebPage(pageA),
+              fixture.roomName,
+              fixture.teamRoomId,
+              fixture.users.memberA.userId,
+              memberARoomNavigationCompleted,
+              memberARoomHeadingReady,
+              false,
+            );
+            checkpoint.recordRoomReadinessObservation(
+              roomObservation,
+              blockedExternalRequests > blockedRequestsBeforeRoom,
+            );
+          } catch {
+            // Keep the original room failure and first-failure receipt.
+          }
+          throw error;
+        }
         calendarListRequestObserver = createPrivateCalendarListRequestObserver(
           pageA,
           fixture.teamRoomId,
