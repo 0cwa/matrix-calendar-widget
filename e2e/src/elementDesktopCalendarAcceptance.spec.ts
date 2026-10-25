@@ -47,6 +47,7 @@ import {
   classifyDesktopLoginFailure,
   classifyDesktopRoomNavigationClickFailure,
   collectWebBEventTitleMatches,
+  desktopRouteEnforcementOutcome,
   desktopWidgetIsReady,
   enterDesktopPasswordLogin,
   findUniqueWebBEventId,
@@ -1256,19 +1257,24 @@ test('Element Desktop room event journey', async ({ browser }) => {
       webHttpRoute &&
       !recorded.has('web-http-route-enforcement')
     ) {
-      const routePolicyEnforced =
-        webHttpRoute.observedHttpRequests > 0 &&
-        webHttpRoute.blockedHttpRequests === 0;
-      if (!routePolicyEnforced) failed = true;
-      if (
-        !safeRecordPhase(
-          evidence,
-          recorded,
-          'web-http-route-enforcement',
-          routePolicyEnforced ? 'passed' : 'failed',
-        )
-      ) {
-        failed = true;
+      const routeOutcome = desktopRouteEnforcementOutcome({
+        failed,
+        recorded,
+        observedHttpRequests: webHttpRoute.observedHttpRequests,
+        blockedHttpRequests: webHttpRoute.blockedHttpRequests,
+      });
+      if (routeOutcome !== undefined) {
+        if (routeOutcome === 'failed') failed = true;
+        if (
+          !safeRecordPhase(
+            evidence,
+            recorded,
+            'web-http-route-enforcement',
+            routeOutcome,
+          )
+        ) {
+          failed = true;
+        }
       }
     }
   }

@@ -18,12 +18,6 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import ElementDesktopAcceptanceResultReporter from '../e2e/src/elementDesktopAcceptanceResultReporter.mjs';
 import {
-  DESKTOP_A_REFRESH_FAILURE_POINTS,
-  DESKTOP_JOURNEY_FAILURE_POINTS,
-  DESKTOP_JOURNEY_PHASES,
-  DESKTOP_LOGIN_ENTRIES,
-  DESKTOP_LOGIN_FAILURE_REASONS,
-  DESKTOP_LOGIN_STEPS,
   appendDesktopChildCompletion,
   appendDesktopJourneyOutcome,
   appendDesktopJourneyProgress,
@@ -36,6 +30,13 @@ import {
   classifyDesktopJourneyEvidenceState,
   classifyDesktopLoginFailure,
   classifyDesktopRoomNavigationClickFailure,
+  DESKTOP_A_REFRESH_FAILURE_POINTS,
+  DESKTOP_JOURNEY_FAILURE_POINTS,
+  DESKTOP_JOURNEY_PHASES,
+  DESKTOP_LOGIN_ENTRIES,
+  DESKTOP_LOGIN_FAILURE_REASONS,
+  DESKTOP_LOGIN_STEPS,
+  desktopRouteEnforcementOutcome,
   desktopWidgetIsReady,
   enterDesktopPasswordLogin,
   findUniqueWebBEventId,
@@ -54,6 +55,54 @@ import {
   writeDesktopJourneyParentDiagnostic,
   writeSyntheticDesktopCredentials,
 } from './element-desktop-journey.mjs';
+
+test('route enforcement finalization preserves journey and route policy outcomes', () => {
+  const routePhaseIndex = DESKTOP_JOURNEY_PHASES.indexOf(
+    'web-http-route-enforcement',
+  );
+  const passedPhases = new Set(
+    DESKTOP_JOURNEY_PHASES.slice(0, routePhaseIndex),
+  );
+
+  assert.equal(
+    desktopRouteEnforcementOutcome({
+      failed: false,
+      recorded: passedPhases,
+      observedHttpRequests: 1,
+      blockedHttpRequests: 0,
+    }),
+    'passed',
+  );
+  assert.equal(
+    desktopRouteEnforcementOutcome({
+      failed: false,
+      recorded: new Set(
+        [...passedPhases].filter((phase) => phase !== 'desktop-a-refresh'),
+      ),
+      observedHttpRequests: 1,
+      blockedHttpRequests: 0,
+    }),
+    undefined,
+  );
+  assert.equal(
+    desktopRouteEnforcementOutcome({
+      failed: true,
+      recorded: passedPhases,
+      observedHttpRequests: 1,
+      blockedHttpRequests: 0,
+    }),
+    undefined,
+  );
+  assert.equal(
+    desktopRouteEnforcementOutcome({
+      failed: false,
+      recorded: passedPhases,
+      observedHttpRequests: 1,
+      blockedHttpRequests: 1,
+    }),
+    'failed',
+  );
+});
 
 function withTempDirectory(run) {
   const runnerTemp = mkdtempSync(join(tmpdir(), 'mcw-desktop-journey-test-'));

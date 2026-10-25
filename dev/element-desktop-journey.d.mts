@@ -16,6 +16,13 @@ export type DesktopJourneyPhase =
 
 export type DesktopJourneyOutcome = 'passed' | 'failed';
 
+export function desktopRouteEnforcementOutcome(input: {
+  failed: boolean;
+  recorded: ReadonlySet<DesktopJourneyPhase>;
+  observedHttpRequests: number;
+  blockedHttpRequests: number;
+}): DesktopJourneyOutcome | undefined;
+
 export type DesktopRoomWidgetFailurePoint =
   | 'room-navigation'
   | 'room-heading'
