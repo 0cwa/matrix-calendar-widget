@@ -18,6 +18,10 @@ import {
   validDesktopSummary,
 } from './element-desktop-evidence.mjs';
 import {
+  captureOuterStartupFailure,
+  captureStartupFailure,
+  createStartupRecord,
+  runStartupLifecycle,
   startupExceptionDiagnostic,
   summarizeUidLifecycleObservation,
 } from './element-desktop-startup.mjs';
@@ -732,6 +736,69 @@ test('startup failure diagnostics project the producer category and reject raw f
   const rawFields = structuredClone(failedStartup);
   rawFields[1].exceptionMessage = 'private URL and token=synthetic-secret';
   assert.throws(() => sanitizeDesktopStages(rawFields, sourceSha));
+});
+
+test('passing startup records and summaries require null failure diagnostics', () => {
+  const startupRecord = stages();
+  startupRecord[1] = {
+    ...startupRecord[1],
+    failurePhase: 'desktop-connection',
+    failureExceptionClass: 'type-error',
+  };
+  assert.throws(() => sanitizeDesktopStages(startupRecord, sourceSha));
+
+  const explicitNulls = stages();
+  explicitNulls[1] = {
+    ...explicitNulls[1],
+    failurePhase: null,
+    failureExceptionClass: null,
+  };
+  const summary = sanitizeDesktopStages(explicitNulls, sourceSha);
+  assert.equal(summary.status, 'passed');
+  assert.equal(validDesktopSummary(summary), true);
+
+  const contradictorySummary = {
+    ...summary,
+    startupFailurePhase: 'desktop-connection',
+    startupFailureExceptionClass: 'type-error',
+  };
+  assert.equal(validDesktopSummary(contradictorySummary), false);
+});
+
+test('producer lifecycle emits and projects the first failure after async failure and cleanup rejection', async () => {
+  const originalError = new TypeError('private URL and token=synthetic-secret');
+  const cleanupError = new Error('private cleanup stack');
+  let emitted;
+
+  await runStartupLifecycle(
+    async () => {
+      await Promise.resolve();
+      throw originalError;
+    },
+    (error) => captureStartupFailure(error, 'desktop-connection'),
+    async () => {
+      throw cleanupError;
+    },
+  ).catch((error) => {
+    captureOuterStartupFailure(error, 'cleanup-app');
+    emitted = createStartupRecord(null, sourceSha);
+  });
+
+  assert.equal(emitted.phase, 'desktop-startup');
+  assert.equal(emitted.status, 'failed');
+  assert.equal(emitted.failureCode, 'probe-internal-error');
+  assert.equal(emitted.failurePhase, 'desktop-connection');
+  assert.equal(emitted.failureExceptionClass, 'type-error');
+  const sanitized = sanitizeDesktopStages(
+    [{ ...stages()[1], ...emitted }],
+    sourceSha,
+  );
+  assert.equal(sanitized.startupFailurePhase, 'desktop-connection');
+  assert.equal(sanitized.startupFailureExceptionClass, 'type-error');
+  assert.doesNotMatch(
+    JSON.stringify({ emitted, sanitized }),
+    /synthetic-secret|private URL|private cleanup stack/u,
+  );
 });
 
 test('cleanup reports the deny policy retained when account removal is unproven', () => {

@@ -2543,6 +2543,10 @@ function validateStartup(record, sourceSha) {
     (hasFailureDiagnostic &&
       record.failureCode === 'probe-internal-error' &&
       record.failurePhase === null) ||
+    (record.status === 'passed' &&
+      hasFailureDiagnostic &&
+      (record.failurePhase !== null ||
+        record.failureExceptionClass !== null)) ||
     record.sourceSha !== sourceSha ||
     record.origin !== ORIGIN ||
     (record.rendererCount !== null &&
@@ -3439,6 +3443,9 @@ export function validDesktopSummary(value) {
       ? value.startupFailureExceptionClass === null
       : STARTUP_FAILURE_PHASES.has(value.startupFailurePhase) &&
         STARTUP_EXCEPTION_CLASS_SET.has(value.startupFailureExceptionClass)) &&
+    (value.status !== 'passed' ||
+      (value.startupFailurePhase === null &&
+        value.startupFailureExceptionClass === null)) &&
     hasKeys(value.package, ['version', 'architecture', 'sha256']) &&
     hasKeys(value.runtime, [
       'probeNode',
