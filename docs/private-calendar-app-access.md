@@ -2,8 +2,11 @@
 
 Private external CalDAV access is optional and disabled by default. Ask the
 operator whether it has been enabled and qualified for this installation.
-The branch validation record describes local checks and remaining acceptance
-gates; it is not a deployment qualification. See the [validation record](./private-calendar-app-access-validation.md).
+The feature is merged and source-qualified, including Element Web/Desktop and
+native public/private client profiles. This source evidence does not establish
+the configuration or acceptance of any installation. Operators must complete
+their own installation acceptance before enabling it. See the [validation
+record](./private-calendar-app-access-validation.md).
 
 The widget lets a user create a separate CalDAV credential for one personal or
 room calendar. It does not reveal or store the user's Matrix password. When

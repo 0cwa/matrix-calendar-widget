@@ -26,7 +26,7 @@ To refresh the images after UI changes, open [Refresh README gallery](https://gi
 | I want to…                                 | Read                                                                                                                              |
 | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
 | Use a calendar in my Matrix room           | [User guide](./docs/user-guide.md) and [room setup / bot commands](./docs/bot-calendar.md)                                        |
-| Connect an external calendar app           | [Private calendar app access](./docs/private-calendar-app-access.md) (in development; default-off pending operator qualification) |
+| Connect an external calendar app           | [Private calendar app access](./docs/private-calendar-app-access.md) (optional and default-off) |
 | Run the code and make a first contribution | [Development guide](./docs/DEVELOPMENT.md) and [contributing](./CONTRIBUTING.md)                                                  |
 | Understand how the code fits together      | [Architecture](./docs/ARCHITECTURE.md) and [data model](./docs/data-model.md)                                                     |
 | Configure or operate an installation       | [Deployment guide](./docs/deployment-docker.md) and [configuration reference](./docs/configuration.md)                            |
@@ -40,11 +40,11 @@ To refresh the images after UI changes, open [Refresh README gallery](https://gi
 - **Connect calendars to Matrix rooms** with server-enforced membership and permissions. Operators can enable a moderator-led `!calendar setup` flow.
 - **Configure room reminders** for supported alarms in unencrypted rooms. Reminder configuration, delivery, event writes, and room setup are independently enabled by the operator.
 - **Publish an optional public subscription feed** for an event-only calendar. Anyone with the link can read its events; unpublishing stops future reads. Public subscriptions are read-only.
-- **Use bot commands** to list, inspect, create, and delete events when the widget is unavailable.
+- **Use bot commands** to list, inspect, create, and delete events when the widget is unavailable. Listing IDs are hidden unless explicitly requested for follow-up commands.
 
 Supported edits preserve unrecognized iCalendar data and use ETags to detect concurrent changes. The widget displays a bounded projection of the source calendar: unsupported recurrence or timezone forms may be absent from the view, so it is not a complete export.
 
-Private external CalDAV editing, arbitrary recurrence authoring, attendee/email workflows, and mobile-client certification remain outside the current supported scope. Selected-member and all-day Matrix reminder delivery is being developed separately; it is not included in the documented `main` baseline. See [feature status and limits](./docs/STATUS.md#implemented-on-main).
+Optional private CalDAV app access and selected-member/all-day Matrix reminders are implemented on `main` and qualified on their recorded source. Private access remains default-off, and reminder configuration and delivery remain operator-controlled. Source qualification does not establish that an installation has enabled, configured, or accepted these features. Arbitrary recurrence authoring, attendee/email workflows, and mobile-client certification remain outside the current supported scope. See [feature status and limits](./docs/STATUS.md#implemented-on-main).
 
 ## Run locally
 

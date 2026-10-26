@@ -2,7 +2,7 @@
 
 [Documentation](./README.md) · [Current status](./STATUS.md) · [Roadmap](./ROADMAP.md) · [Release evidence](./RELEASE.md)
 
-_Reviewed 24 October 2026 against `main` at `817854b`._
+_Reviewed 26 October 2026 against `main` at `c5e1f18`._
 
 This is the milestone and follow-up index. The [roadmap](./ROADMAP.md) owns priority and dependency order; the [release ledger](./RELEASE.md) owns source-specific qualification. Detailed checkboxes, test counts, and earlier attempts are preserved in the [implementation history](./archive/implementation-history.md). A completed source milestone does not certify a target deployment.
 
@@ -44,9 +44,9 @@ Use the [recurrence and event decision index](./adrs/README.md#calendar-semantic
 
 ## M6 — Matrix team features and reminders
 
-**Implemented:** room membership/power checks, exact room bindings, selected server-side principal modes, authorized room event operations, independent reminder configuration/delivery gates, persistent scheduling, and room action notices. Moderator setup can create durable dynamic bindings under its own default-off gate. Current `main` reminders target the whole room for supported timed alarms in unencrypted rooms.
+**Implemented:** room membership/power checks, exact room bindings, selected server-side principal modes, authorized room event operations, independent reminder configuration/delivery gates, persistent scheduling, room action notices, and selected-member/all-day reminder delivery. Moderator setup can create durable dynamic bindings under its own default-off gate. Reminder delivery requires an unencrypted room.
 
-**In progress:** selected-member and all-day Matrix reminder delivery in [PR #384](https://github.com/0cwa/matrix-calendar-widget/pull/384), under [#382](https://github.com/0cwa/matrix-calendar-widget/issues/382). The event-editor source now saves the canonical event before reopening Matrix settings against refreshed alarm options. Full acceptance and deployment qualification remain pending; do not count the open PR as completed baseline support. See [bot/setup guidance](./bot-calendar.md), [configuration](./configuration.md), and the [Matrix decision index](./adrs/README.md#matrix-identity-rooms-and-reminders).
+**Implemented:** selected-member and all-day Matrix reminder delivery merged in [PR #404](https://github.com/0cwa/matrix-calendar-widget/pull/404). The editor saves the canonical event before reopening Matrix settings against refreshed alarm options. Selected recipients use the complete joined-member roster returned by the gateway; current membership is enforced when saving and delivering. See the [source qualification](./STATUS.md#in-development-and-deferred), [bot/setup guidance](./bot-calendar.md), [configuration](./configuration.md), and [ADR047](./adrs/adr047-authoritative-reminder-recipient-roster.md).
 
 **Browser contract:** [#399](https://github.com/0cwa/matrix-calendar-widget/issues/399) adds a focused check that a room manager can search full Matrix IDs, keep the filtered option stable through a member-state update, and save the exact selected recipient through the real reminder control.
 
@@ -60,7 +60,7 @@ Use the [recurrence and event decision index](./adrs/README.md#calendar-semantic
 
 **Implemented:** process-local request/command limits, bounded CalDAV responses and redirect refusal, source security reviews, synthetic layout/accessibility and performance coverage, build/archive tooling, and recovery procedures. The accepted frozen source has the recorded application and hosted rehearsal evidence.
 
-**Open:** qualify replacement sources and complete target operator readiness, live room/calendar canaries, off-server backup and isolated recovery, rollback, and daily backup activation. [#9](https://github.com/0cwa/matrix-calendar-widget/issues/9) and [#251](https://github.com/0cwa/matrix-calendar-widget/issues/251) remain open. Use [RELEASE.md](./RELEASE.md) and [beta scope](./beta-scope.md) for the current gates.
+**Follow-up:** qualify replacement sources as needed; each installation has its own configuration, acceptance, backup/recovery, and rollback requirements. Source evidence does not satisfy operator acceptance. See [RELEASE.md](./RELEASE.md) and [beta scope](./beta-scope.md).
 
 ## Current product follow-ups
 
@@ -68,8 +68,8 @@ Tracked in [#382](https://github.com/0cwa/matrix-calendar-widget/issues/382):
 
 - [x] Readable bot event listings and optional identifiers: merged #383.
 - [x] Opt-in public VEVENT calendar subscriptions: merged #385; operational ingress, log redaction, and signing-key/share-store recovery remain installation requirements.
-- [ ] Independently revocable private credentials for external CalDAV read/write access; in development on a dedicated source branch and not merged to main. The source adds a gated live-Synapse policy contract for both principal modes and a separate manual Element Web UI plus real CalDAV lifecycle; the new UI path is not yet run. Hosted execution, native-client protocol proof, and restore-epoch proof remain open. See [status](./STATUS.md) for the remaining acceptance gates.
-- [ ] Selected joined-member and all-day Matrix reminder delivery: open #384.
+- [x] Independently revocable private credentials for external CalDAV read/write access; merged in #404, default-off, with Element Web/Desktop and native public/private client profiles qualified on the recorded source. Installation enablement and operator acceptance remain local to each deployment.
+- [x] Selected joined-member and all-day Matrix reminder delivery: merged in #404 and source-qualified; configuration and delivery remain separate operator gates.
 - [ ] Human pilot-room command/setup validation and relevant actual-client journeys.
 
 ## Repository maintainability
