@@ -23,15 +23,15 @@ To refresh the images after UI changes, open [Refresh README gallery](https://gi
 
 ## Start here
 
-| I want to…                                 | Read                                                                                                                              |
-| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
-| Use a calendar in my Matrix room           | [User guide](./docs/user-guide.md) and [room setup / bot commands](./docs/bot-calendar.md)                                        |
-| Connect an external calendar app           | [Private calendar app access](./docs/private-calendar-app-access.md) (optional and default-off) |
-| Run the code and make a first contribution | [Development guide](./docs/DEVELOPMENT.md) and [contributing](./CONTRIBUTING.md)                                                  |
-| Understand how the code fits together      | [Architecture](./docs/ARCHITECTURE.md) and [data model](./docs/data-model.md)                                                     |
-| Configure or operate an installation       | [Deployment guide](./docs/deployment-docker.md) and [configuration reference](./docs/configuration.md)                            |
-| Find supported features and upcoming work  | [Current status](./docs/STATUS.md) and [roadmap](./docs/ROADMAP.md)                                                               |
-| Browse all documentation                   | [Documentation index](./docs/README.md)                                                                                           |
+| I want to…                                 | Read                                                                                                   |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| Use a calendar in my Matrix room           | [User guide](./docs/user-guide.md) and [room setup / bot commands](./docs/bot-calendar.md)             |
+| Connect an external calendar app           | [Private calendar app access](./docs/private-calendar-app-access.md) (optional and default-off)        |
+| Run the code and make a first contribution | [Development guide](./docs/DEVELOPMENT.md) and [contributing](./CONTRIBUTING.md)                       |
+| Understand how the code fits together      | [Architecture](./docs/ARCHITECTURE.md) and [data model](./docs/data-model.md)                          |
+| Configure or operate an installation       | [Deployment guide](./docs/deployment-docker.md) and [configuration reference](./docs/configuration.md) |
+| Find supported features and upcoming work  | [Current status](./docs/STATUS.md) and [roadmap](./docs/ROADMAP.md)                                    |
+| Browse all documentation                   | [Documentation index](./docs/README.md)                                                                |
 
 ## What it does
 
