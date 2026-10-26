@@ -68,7 +68,7 @@ Tracked in [#382](https://github.com/0cwa/matrix-calendar-widget/issues/382):
 
 - [x] Readable bot event listings and optional identifiers: merged #383.
 - [x] Opt-in public VEVENT calendar subscriptions: merged #385; operational ingress, log redaction, and signing-key/share-store recovery remain installation requirements.
-- [x] Independently revocable private credentials for external CalDAV read/write access; merged in #404, default-off, with Element Web/Desktop and native public/private client profiles qualified on the recorded source. Installation enablement and operator acceptance remain local to each deployment.
+- [x] Independently revocable private credentials for external CalDAV read/write access; merged in #404, default-off, with Element Web/Desktop acceptance, a native public ICS import profile, and a native private protocol/server-side revocation check (post-revocation DAV 401 with canonical data unchanged) qualified on the recorded source. Client-visible post-revocation behavior remains unverified. Installation enablement and operator acceptance remain local to each deployment.
 - [x] Selected joined-member and all-day Matrix reminder delivery: merged in #404 and source-qualified; configuration and delivery remain separate operator gates.
 - [ ] Human pilot-room command/setup validation and relevant actual-client journeys.
 
