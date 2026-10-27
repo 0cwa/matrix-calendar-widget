@@ -64,6 +64,11 @@ jobs:
             -f deploy/etke-sidecar.pilot-images.compose.yaml \
             config --quiet
 
+      - name: Check Nest runtime major compatibility
+        run: |
+          node --test scripts/check-nest-major.test.mjs
+          node scripts/check-nest-major.mjs
+
       - name: Install dependencies
         run: yarn install --frozen-lockfile
 
