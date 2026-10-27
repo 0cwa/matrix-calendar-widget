@@ -14,7 +14,9 @@ const serverPackage = JSON.parse(
 );
 
 function nestDependencies(version = '11.1.28') {
-  return Object.fromEntries(NEST_RUNTIME_PACKAGES.map((name) => [name, version]));
+  return Object.fromEntries(
+    NEST_RUNTIME_PACKAGES.map((name) => [name, version]),
+  );
 }
 
 test('current server production Nest runtime packages are aligned', () => {
@@ -50,7 +52,7 @@ test('accepts a coordinated runtime major upgrade', () => {
   assert.equal(checkNestMajorAlignment(nestDependencies('12.2.0')), 12);
 });
 
-test('does not equate the config package major with the framework major', () => {
+test('allows an independent @nestjs/config major', () => {
   assert.equal(
     checkNestMajorAlignment({
       ...nestDependencies(),
