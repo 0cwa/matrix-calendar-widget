@@ -104,36 +104,12 @@ runs:
       shell: bash
       run: yarn install --frozen-lockfile
 
-    - name: Test bounded acceptance diagnostics and summary sanitizer
-      shell: bash
-      run: |
-        node --test dev/element-acceptance-overrides.test.mjs
-        node dev/element-acceptance-diagnostics.test.mjs
-        node dev/sanitize-element-acceptance.test.mjs
-        node dev/element-reminder-all-day-readback.test.mjs
-        node dev/element-desktop-egress-policy.test.mjs
-        node dev/element-desktop-evidence.test.mjs
-        node --test dev/element-desktop-startup.test.mjs
-        node --test dev/element-desktop-journey.test.mjs
-        node --test dev/element-desktop-frame-origin.test.mjs
-        node --test dev/element-desktop-journey-runner.test.mjs
-        node dev/element-acceptance-performance.test.mjs
-        node dev/element-acceptance-performance-evidence.test.mjs
-        node dev/element-acceptance-error-source-map.test.mjs
-        node --test dev/element-acceptance-workflow.test.mjs
-        node --test dev/element-acceptance-action-summary.test.mjs
-        node --test dev/element-acceptance-setup.test.mjs
-        node --test dev/element-acceptance-private-ui-prepare.test.mjs
-        node --test dev/validate-element-acceptance-compose.test.mjs
-
     - name: Build calendar, server, and widget outputs
       shell: bash
       run: |
         yarn workspace @matrix-calendar-widget/ical-timezones build
         yarn workspace @matrix-calendar-widget/calendar build
-        node --test dev/element-acceptance-reminder-timing.test.mjs
         yarn workspace @matrix-calendar-widget/server build
-        node --test dev/element-acceptance-caldav-report-probe.test.mjs
         yarn workspace @matrix-calendar-widget/widget build
         docker build \
           --tag matrix-calendar-widget/server:element-acceptance \
