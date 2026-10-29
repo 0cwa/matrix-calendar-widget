@@ -44,7 +44,7 @@ To refresh the images after UI changes, open [Refresh README gallery](https://gi
 
 Supported edits preserve unrecognized iCalendar data and use ETags to detect concurrent changes. The widget displays a bounded projection of the source calendar: unsupported recurrence or timezone forms may be absent from the view, so it is not a complete export.
 
-Optional private CalDAV app access and selected-member/all-day Matrix reminders are implemented on `main` and qualified on their recorded source. Private access remains default-off, and reminder configuration and delivery remain operator-controlled. Source qualification does not establish that an installation has enabled, configured, or accepted these features. Arbitrary recurrence authoring, attendee/email workflows, and mobile-client certification remain outside the current supported scope. See [feature status and limits](./docs/STATUS.md#implemented-on-main).
+The pilot is live for one organization (Element Web/Desktop, one server replica, project-owned Radicale, separate app PostgreSQL). Arbitrary recurrence authoring, attendee/email workflows, and mobile clients are out of scope. See [current status and limits](./docs/STATUS.md).
 
 ## Run locally
 
