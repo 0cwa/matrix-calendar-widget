@@ -141,4 +141,4 @@ An accepted fork ADR overrides this file for the specific decision it covers. If
 
 ## Historical handoffs
 
-The [6 October 2026 continuation](./handoffs/2026-10-06/README.md) and its [exact delivered-slice ledger](./handoffs/2026-10-06/ledger.json) are historical execution records. They do not override current repository state, current user authorization, or the release ledger. Re-read live refs and checks before resuming any old task.
+Earlier continuation handoffs are available in git history.
