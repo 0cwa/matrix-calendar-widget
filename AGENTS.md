@@ -1,6 +1,6 @@
 # Agent instructions
 
-This file is the authoritative agent policy. If `docs/agents/README.md` or any other doc disagrees with it, this file wins. Humans: see [CONTRIBUTING.md](./CONTRIBUTING.md), [docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md), and [docs/README.md](./docs/README.md).
+This file is the authoritative agent policy. If any other doc disagrees with it, this file wins. Humans: see [CONTRIBUTING.md](./CONTRIBUTING.md), [docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md), and [docs/README.md](./docs/README.md).
 
 ## Current goal
 
