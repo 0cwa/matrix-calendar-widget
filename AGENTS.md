@@ -12,7 +12,7 @@ A fast Matrix team-calendar widget with Radicale/CalDAV as the canonical calenda
 
 ## Authority and PR limits
 
-- Agents may open pull requests. A human approves and merges. Agents never merge.
+- Agents may merge their own pull request when it is safe: all required checks pass on the final head, the PR is scoped to one issue or task, and it does not change authorization, credential handling, iCalendar serialization, database migrations, or deployment configuration. PRs touching those areas need human approval before merge.
 - At most 2 agent PRs open at a time. Finish or close one before opening another.
 - No force-pushes, no changes to other repositories, no bypassing branch protection.
 - Keep PRs small and reviewable; do not mix renames, architecture changes, and features.
