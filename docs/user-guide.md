@@ -32,7 +32,7 @@ Deletion requires confirmation and is limited to source resources the applicatio
 
 The editor makes the choice between a selected occurrence and the series explicit where the operation is supported. The current subset includes common daily, weekly, monthly, and yearly rules, selected-occurrence timing and text changes, and skip/restore operations. Some following-occurrence timing edits are supported only for finite series of at most 128 members and have further restrictions.
 
-Arbitrary recurrence rules, general series splitting, and every possible occurrence property are not supported. If a particular edit is unavailable, keep the original data and ask the operator to inspect it with authorized tooling rather than simplifying the rule just to make the widget accept it. The [implementation plan](./PLAN.md#m5--recurrence-and-icalendar-completeness) links to the precise supported boundaries.
+Arbitrary recurrence rules, general series splitting, and every possible occurrence property are not supported. If a particular edit is unavailable, keep the original data and ask the operator to inspect it with authorized tooling rather than simplifying the rule just to make the widget accept it. The [architecture decisions](./adrs/) record the precise supported boundaries.
 
 ## Manage calendars
 

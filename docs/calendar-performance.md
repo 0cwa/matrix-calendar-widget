@@ -237,10 +237,6 @@ Node 22, and Headless Chromium 149.0.7827.55. The fixture initializes locale
 with the production helper and gives the month grid the production viewport
 height chain. It exercises a normal pointer click on the overflow link.
 
-The [retained JSON](./evidence/calendar-browser-20261006.json) includes the
-warm-up, five raw samples per view, environment, counts, horizontal dimensions,
-and optional long-task summaries from artifact `11421332275`.
-
 | View  | Median mount ms | Maximum mount ms | Maximum sampled long task ms |
 | ----- | --------------: | ---------------: | ---------------------------: |
 | List  |          947.30 |          1044.50 |                          586 |

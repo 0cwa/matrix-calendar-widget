@@ -799,8 +799,7 @@ Issue #255’s sanitized current-candidate evidence index is [docs/RELEASE.md](.
   - [x] Measure prepared 1,000-event list/month rendering at 1280×800 with
         five samples per view, exact counts, overflow checks, and a real month
         overflow-link interaction (PR #216; twelve hosted browser cases pass
-        at tree `911027044f96463a06e7d42cd2371ecf333662f7`). Retain raw numeric
-        evidence in `docs/evidence/calendar-browser-20261006.json`. Month
+        at tree `911027044f96463a06e7d42cd2371ecf333662f7`). Month
         samples include long tasks up to 2.63 seconds; combined recurring
         projection/rendering, memory, CalDAV latency, and capacity remain open.
   - [x] Reuse exact timezone transition instants and local boundaries during
