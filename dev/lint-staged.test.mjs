@@ -31,7 +31,7 @@ test('staged lint runs configured ESLint on supplied paths and reports defects',
   const validTool = resolve(temporaryDirectory, 'valid tool.mjs');
   const invalidTool = resolve(temporaryDirectory, 'invalid tool.mjs');
   const invalidSyntaxTool = resolve(temporaryDirectory, 'invalid syntax.mjs');
-  const toolingPath = 'dev/element-acceptance-workflow.test.mjs';
+  const toolingPath = 'dev/element-acceptance-event-observation.test.mjs';
   const workspacePath = resolve(
     ROOT,
     'matrix-calendar-widget/src/AppContainer.test.tsx',
@@ -69,7 +69,7 @@ test('staged lint handles TypeScript files from multiple workspaces in one proce
     ROOT,
     'matrix-calendar-widget/src/AppContainer.test.tsx',
   );
-  const toolingFile = 'dev/element-acceptance-workflow.test.mjs';
+  const toolingFile = 'dev/element-acceptance-event-observation.test.mjs';
 
   try {
     writeFileSync(

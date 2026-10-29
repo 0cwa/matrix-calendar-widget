@@ -8,18 +8,8 @@ on:
         type: boolean
         required: true
         default: false
-  pull_request:
-    paths:
-      - '.github/actions/element-acceptance/action.yml'
-      - '.github/workflows/element-acceptance.yml'
-      - 'dev/**'
-      - 'e2e/**'
-      - 'matrix-calendar-server/**'
-      - 'matrix-calendar-widget/**'
-      - 'packages/calendar/**'
-      - 'packages/ical-timezones/**'
-      - 'package.json'
-      - 'yarn.lock'
+  schedule:
+    - cron: '41 5 * * 1'
 
 permissions:
   contents: read
