@@ -13,4 +13,4 @@ These records retain earlier implementation details, measurements, and design co
 | [Initial calendar-domain seam](../M1_DOMAIN_SEAM.md)            | Historical M1 design and its relationship to the implemented interfaces                                                            |
 | [Cleanup measurements](../cleanup-baseline.md)                  | Source-bound 19 October baseline; not a current performance promise                                                                |
 
-Inherited ADR001–ADR003 remain in the [decision index](../adrs/README.md) with their historical status visible. Agent continuation records live separately under [agent handoffs](../agents/README.md#historical-handoffs).
+Inherited ADR001–ADR003 remain in the [decision index](../adrs/README.md) with their historical status visible. Agent continuation records live separately under [agent handoffs](../agents/README.md).
