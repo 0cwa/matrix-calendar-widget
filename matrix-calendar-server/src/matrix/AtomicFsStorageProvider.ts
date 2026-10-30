@@ -228,6 +228,7 @@ export function writeJsonAtomically(
   const temporaryPath = `${filename}.${process.pid}.${randomUUID()}.tmp`;
   const contents = JSON.stringify(value, null, 2);
   let descriptor: number | undefined;
+  let targetReplaced = false;
 
   try {
     descriptor = fileSystem.openSync(temporaryPath, 'wx', 0o600);
@@ -236,6 +237,7 @@ export function writeJsonAtomically(
     fileSystem.closeSync(descriptor);
     descriptor = undefined;
     fileSystem.renameSync(temporaryPath, filename);
+    targetReplaced = true;
 
     const directoryDescriptor = fileSystem.openSync(directory, 'r');
     try {
@@ -250,6 +252,19 @@ export function writeJsonAtomically(
     } catch {
       // The temporary file may not have been created or may already be renamed.
     }
+    if (targetReplaced) {
+      throw new AtomicJsonWriteError(error);
+    }
     throw error;
+  }
+}
+
+/** The rename succeeded, but the directory entry could not be confirmed durable. */
+export class AtomicJsonWriteError extends Error {
+  readonly targetReplaced = true;
+
+  constructor(readonly underlyingError: unknown) {
+    super('The JSON file was replaced, but the directory could not be synced.');
+    this.name = 'AtomicJsonWriteError';
   }
 }

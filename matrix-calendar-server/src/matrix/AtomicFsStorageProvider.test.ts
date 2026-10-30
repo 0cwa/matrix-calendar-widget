@@ -102,6 +102,78 @@ describe('AtomicFsStorageProvider', () => {
     expect(fs.readdirSync(directory)).toEqual(['bot.json']);
   });
 
+  it.each(['write', 'file fsync'])(
+    'keeps the old file and removes the temporary file when %s fails',
+    (failurePoint) => {
+      const storage = new AtomicFsStorageProvider(filename);
+      storage.setSyncToken('previous-token');
+      const previousContents = readFileSync(filename, 'utf8');
+      const fileSystem = {
+        ...fs,
+        ...(failurePoint === 'write'
+          ? {
+              writeFileSync: () => {
+                throw new Error('synthetic write failure');
+              },
+            }
+          : {
+              fsyncSync: () => {
+                throw new Error('synthetic fsync failure');
+              },
+            }),
+      };
+
+      expect(() =>
+        writeJsonAtomically(
+          filename,
+          {
+            ...JSON.parse(previousContents),
+            syncToken: 'next-token',
+          },
+          fileSystem,
+        ),
+      ).toThrow(failurePoint === 'write' ? 'write failure' : 'fsync failure');
+      expect(readFileSync(filename, 'utf8')).toBe(previousContents);
+      expect(fs.readdirSync(directory)).toEqual(['bot.json']);
+    },
+  );
+
+  it('reports when directory sync fails after the replacement is installed', () => {
+    const storage = new AtomicFsStorageProvider(filename);
+    storage.setSyncToken('previous-token');
+    const previousContents = readFileSync(filename, 'utf8');
+    let syncCount = 0;
+    const fileSystem = {
+      ...fs,
+      fsyncSync: (descriptor: number) => {
+        syncCount += 1;
+        if (syncCount === 2)
+          throw new Error('synthetic directory fsync failure');
+        fs.fsyncSync(descriptor);
+      },
+    };
+
+    expect(() =>
+      writeJsonAtomically(
+        filename,
+        {
+          ...JSON.parse(previousContents),
+          syncToken: 'next-token',
+        },
+        fileSystem,
+      ),
+    ).toThrow(
+      expect.objectContaining({
+        name: 'AtomicJsonWriteError',
+        targetReplaced: true,
+      }),
+    );
+    expect(JSON.parse(readFileSync(filename, 'utf8')).syncToken).toBe(
+      'next-token',
+    );
+    expect(fs.readdirSync(directory)).toEqual(['bot.json']);
+  });
+
   it('allows a reader at rename time to see only the old or new JSON document', () => {
     const storage = new AtomicFsStorageProvider(filename);
     storage.setSyncToken('previous-token');
