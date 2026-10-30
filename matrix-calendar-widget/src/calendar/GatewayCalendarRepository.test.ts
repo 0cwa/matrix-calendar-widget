@@ -155,6 +155,21 @@ describe('GatewayCalendarRepository', () => {
     ]);
   });
 
+  it('accepts a server-truncated display label without a trailing separator', async () => {
+    const displayName = 'x'.repeat(255);
+    const repository = createRepository(
+      mockFetch(
+        jsonResponse({
+          recipients: [{ userId: '@alice:example.test', displayName }],
+        }),
+      ),
+    );
+
+    await expect(repository.listRoomReminderRecipients()).resolves.toEqual([
+      { userId: '@alice:example.test', displayName },
+    ]);
+  });
+
   it('rejects recipient responses containing extra or malformed profile data', async () => {
     const fetchMock = mockFetch(
       jsonResponse({
