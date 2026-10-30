@@ -50,7 +50,7 @@ export function normalizeRoomMentionDisplayName(value: unknown): string | null {
     .replace(/\s+/g, ' ')
     .trim();
   if (!normalized) return null;
-  return Array.from(normalized).slice(0, 256).join('');
+  return Array.from(normalized).slice(0, 256).join('').trimEnd();
 }
 
 function isRoomMentionControlCodePoint(codePoint: number): boolean {

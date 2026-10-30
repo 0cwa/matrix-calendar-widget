@@ -19,6 +19,7 @@ import { RoomCalendarPrincipalIdentity } from '../service/RoomCalendarPrincipalI
 import {
   authorizeRoomMentionDelivery,
   authorizeRoomMentionScheduling,
+  normalizeRoomMentionDisplayName,
   RoomMentionMatrixState,
 } from './RoomMentionPolicy';
 
@@ -35,6 +36,16 @@ const botAccountIdentity: RoomCalendarPrincipalIdentity = Object.freeze({
   userId: '@normal-bot:example.test',
 });
 const configuredBindings = [{ roomId, calendarId }];
+
+describe('normalizeRoomMentionDisplayName', () => {
+  it('does not leave trailing whitespace when truncation reaches a separator', () => {
+    const normalized = normalizeRoomMentionDisplayName(`${'x'.repeat(255)} y`);
+
+    expect(normalized).toBe('x'.repeat(255));
+    expect(normalized).toBe(normalized?.trim());
+    expect(Array.from(normalized ?? '')).toHaveLength(255);
+  });
+});
 
 describe('authorizeRoomMentionScheduling', () => {
   let state: jest.Mocked<RoomMentionMatrixState>;
