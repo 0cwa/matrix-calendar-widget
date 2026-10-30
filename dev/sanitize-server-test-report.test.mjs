@@ -194,22 +194,22 @@ test('reports health controller failures using fixed IDs only', () => {
   const privateSentinel =
     'secret-like token, homeserver response body, and execution stack';
   const cases = [
-    ['maps liveness to the health live route', 'health-live-route'],
+    ['maps liveness and readiness to their health subroutes', 'health-routes'],
     [
-      'reports process liveness without contacting the homeserver',
-      'health-live-no-upstream',
+      'serves local health and liveness over HTTP without contacting the homeserver',
+      'health-local-no-upstream',
     ],
     [
-      'preserves the dependency-aware homeserver health response',
-      'health-dependency-response',
+      'checks the homeserver on readiness and preserves its failure status',
+      'health-ready-status',
     ],
     [
-      'keeps liveness available when the homeserver is down',
-      'health-live-on-upstream-failure',
+      'keeps local health available when the homeserver is down',
+      'health-local-with-upstream-failure',
     ],
     [
-      'preserves status and response body when health fails',
-      'health-failure-status-body',
+      'preserves status and response body when readiness fails',
+      'health-ready-failure-status-body',
     ],
   ];
 

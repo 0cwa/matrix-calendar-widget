@@ -286,24 +286,24 @@ const CASE_IDS = new Map([
     'calendar-gateway-body-limit-before-auth',
   ],
   [
-    'health-check-controller\0maps liveness to the health live route',
-    'health-live-route',
+    'health-check-controller\0maps liveness and readiness to their health subroutes',
+    'health-routes',
   ],
   [
-    'health-check-controller\0reports process liveness without contacting the homeserver',
-    'health-live-no-upstream',
+    'health-check-controller\0serves local health and liveness over HTTP without contacting the homeserver',
+    'health-local-no-upstream',
   ],
   [
-    'health-check-controller\0preserves the dependency-aware homeserver health response',
-    'health-dependency-response',
+    'health-check-controller\0checks the homeserver on readiness and preserves its failure status',
+    'health-ready-status',
   ],
   [
-    'health-check-controller\0keeps liveness available when the homeserver is down',
-    'health-live-on-upstream-failure',
+    'health-check-controller\0keeps local health available when the homeserver is down',
+    'health-local-with-upstream-failure',
   ],
   [
-    'health-check-controller\0preserves status and response body when health fails',
-    'health-failure-status-body',
+    'health-check-controller\0preserves status and response body when readiness fails',
+    'health-ready-failure-status-body',
   ],
 ]);
 
