@@ -21,7 +21,6 @@ import {
   IStorageProvider,
   MatrixClient,
   RustSdkCryptoStorageProvider,
-  SimpleFsStorageProvider,
   UserID,
 } from 'matrix-bot-sdk';
 import { LoggerModule } from 'nestjs-pino';
@@ -55,6 +54,7 @@ import { initializeI18next } from './i18n';
 import { IAppConfiguration } from './IAppConfiguration';
 import { RoomMatrixEventsReader } from './io/RoomMatrixEventsReader';
 import { WidgetLayoutConfigReader } from './io/WidgetLayoutConfigReader';
+import { AtomicFsStorageProvider } from './matrix/AtomicFsStorageProvider';
 import { MatrixClientProxyHandler } from './matrix/MatrixClientProxyHandler';
 import {
   AutojoinRoomsMixin,
@@ -290,7 +290,7 @@ const matrixClientFactoryHelper = {
   createStorageProvider: async (
     appConfig: IAppConfiguration,
   ): Promise<IStorageProvider> => {
-    const storage = new SimpleFsStorageProvider(
+    const storage = new AtomicFsStorageProvider(
       path.join(appConfig.data_path, appConfig.data_filename),
     );
 
