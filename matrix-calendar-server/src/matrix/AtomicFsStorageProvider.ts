@@ -164,7 +164,9 @@ export class AtomicFsStorageProvider
     try {
       this.writeDatabase();
     } catch (error) {
-      if (key === MATRIX_CHECKPOINT_STATE_STORAGE_KEY) {
+      const targetWasReplaced =
+        error instanceof AtomicJsonWriteError && error.targetReplaced;
+      if (key === MATRIX_CHECKPOINT_STATE_STORAGE_KEY && !targetWasReplaced) {
         if (previousValue === undefined) {
           delete this.database.kvStore[key];
         } else {

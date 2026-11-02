@@ -166,6 +166,42 @@ describe('AtomicFsStorageProvider', () => {
     );
   });
 
+  it('keeps the replaced pending latch in memory when directory sync fails', () => {
+    let failDirectorySync = false;
+    const fileSystem: Parameters<typeof writeJsonAtomically>[2] = {
+      ...fs,
+      fsyncSync: (descriptor) => {
+        if (failDirectorySync && fs.fstatSync(descriptor).isDirectory()) {
+          throw new Error('synthetic directory fsync failure');
+        }
+        fs.fsyncSync(descriptor);
+      },
+    };
+    const storage = new AtomicFsStorageProvider(filename, true, 20, fileSystem);
+    storage.storeValue(
+      MATRIX_CHECKPOINT_STATE_STORAGE_KEY,
+      MATRIX_CHECKPOINT_STATE_SAFE,
+    );
+    failDirectorySync = true;
+
+    expect(() =>
+      storage.storeValue(MATRIX_CHECKPOINT_STATE_STORAGE_KEY, 'pending'),
+    ).toThrow(
+      expect.objectContaining({
+        name: 'AtomicJsonWriteError',
+        targetReplaced: true,
+      }),
+    );
+    expect(storage.readValue(MATRIX_CHECKPOINT_STATE_STORAGE_KEY)).toBe(
+      'pending',
+    );
+    expect(
+      new AtomicFsStorageProvider(filename).readValue(
+        MATRIX_CHECKPOINT_STATE_STORAGE_KEY,
+      ),
+    ).toBe('pending');
+  });
+
   it('keeps the previous complete file when writing the replacement fails', () => {
     const storage = new AtomicFsStorageProvider(filename);
     storage.setSyncToken('previous-token');

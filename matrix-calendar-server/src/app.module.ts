@@ -51,6 +51,10 @@ import { WelcomeWorkflowController } from './controller/WelcomeWorkflowControlle
 import { WidgetController } from './controller/WidgetController';
 import { EventContentRenderer } from './EventContentRenderer';
 import { LegacyMeetingDisabledGuard } from './guard/LegacyMeetingDisabledGuard';
+import {
+  REQUEST_LOG_REDACT_PATHS,
+  shouldIgnoreRequestLog,
+} from './http/MatrixCheckpointRequestLogging';
 import { initializeI18next } from './i18n';
 import { IAppConfiguration } from './IAppConfiguration';
 import { RoomMatrixEventsReader } from './io/RoomMatrixEventsReader';
@@ -94,7 +98,6 @@ import {
 import { PostgresRoomCalendarBindingStore } from './service/PostgresRoomCalendarBindingStore';
 import { PrivateCalendarClientCallbackGateway } from './service/private-client/PrivateCalendarClientCallbackGateway';
 import { PrivateCalendarClientDavGateway } from './service/private-client/PrivateCalendarClientDavGateway';
-import { isPrivateCalendarClientDavPath } from './service/private-client/PrivateCalendarClientPath';
 import { PrivateCalendarClientPolicy } from './service/private-client/PrivateCalendarClientPolicy';
 import { PrivateCalendarClientService } from './service/private-client/PrivateCalendarClientService';
 import { PublicCalendarFeedService } from './service/public-feed/PublicCalendarFeedService';
@@ -403,21 +406,11 @@ const i18nFactory: FactoryProvider<void> = {
         genReqId(_req) {
           return uuiv4();
         },
-        redact: ['req.headers.authorization', 'matrix_event.content'],
+        redact: REQUEST_LOG_REDACT_PATHS,
         autoLogging: {
           // Publication queries contain canonical CalDAV hrefs; public URLs
           // contain bearer capabilities. Neither path belongs in access logs.
-          ignore: (request) => {
-            const path = request.url ?? '';
-            return (
-              path.startsWith('/v1/calendar-feeds/') ||
-              path.startsWith('/v1/public-calendar-feeds/') ||
-              path.startsWith('/v1/calendar/private-clients') ||
-              path.startsWith('/v1/private-calendar-client-callback/') ||
-              path.startsWith('/v1/internal/backup-checkpoint') ||
-              isPrivateCalendarClientDavPath(path)
-            );
-          },
+          ignore: shouldIgnoreRequestLog,
         },
       },
     }),

@@ -19,18 +19,24 @@ import { ConfigModule } from '@nestjs/config';
 import type { NextFunction, Request, Response } from 'express';
 import fetch from 'jest-fetch-mock';
 import { MatrixClient, MemoryStorageProvider } from 'matrix-bot-sdk';
+import { LoggerModule } from 'nestjs-pino';
 import { request as httpRequest } from 'node:http';
 import { AddressInfo } from 'node:net';
 import { IAppConfiguration } from '../IAppConfiguration';
 import { ModuleProviderToken } from '../ModuleProviderToken';
 import { MatrixCheckpointController } from '../controller/MatrixCheckpointController';
 import { createCalendarGatewayHttpApplication } from '../http/CalendarGatewayHttpApplication';
+import {
+  REQUEST_LOG_REDACT_PATHS,
+  shouldIgnoreRequestLog,
+} from '../http/MatrixCheckpointRequestLogging';
 import { CheckpointMatrixClient } from '../matrix/CheckpointMatrixClient';
 import { MatrixAuthMiddleware } from '../middleware/MatrixAuthMiddleware';
 import { PrivateCalendarClientCallbackGateway } from '../service/private-client/PrivateCalendarClientCallbackGateway';
 import { PrivateCalendarClientDavGateway } from '../service/private-client/PrivateCalendarClientDavGateway';
 
 const checkpointToken = 'synthetic-control-token-with-at-least-32-characters';
+const capturedRequestLogs: string[] = [];
 const appConfig = {
   homeserver_url: 'https://matrix.example.test',
   checkpoint_control_token: checkpointToken,
@@ -58,6 +64,16 @@ jest.spyOn(matrixClient, 'pauseAtSyncBoundary').mockResolvedValue(lease);
     ConfigModule.forRoot({
       ignoreEnvFile: true,
       load: [() => ({ config: appConfig })],
+    }),
+    LoggerModule.forRoot({
+      pinoHttp: [
+        {
+          level: 'info',
+          redact: REQUEST_LOG_REDACT_PATHS,
+          autoLogging: { ignore: shouldIgnoreRequestLog },
+        },
+        { write: (line) => capturedRequestLogs.push(line) },
+      ],
     }),
   ],
   controllers: [MatrixCheckpointController],
@@ -88,6 +104,7 @@ describe('Matrix checkpoint HTTP contract', () => {
   beforeEach(async () => {
     fetch.resetMocks();
     fetch.enableMocks();
+    capturedRequestLogs.length = 0;
     lease.assertActive.mockClear();
     lease.release.mockClear();
     jest.spyOn(matrixClient, 'pauseAtSyncBoundary').mockResolvedValue(lease);
@@ -114,7 +131,7 @@ describe('Matrix checkpoint HTTP contract', () => {
     };
     const acquired = await send(
       'POST',
-      '/v1/internal/backup-checkpoint/acquire',
+      '/V1/INTERNAL/BACKUP-CHECKPOINT/ACQUIRE',
       headers,
     );
 
@@ -125,7 +142,7 @@ describe('Matrix checkpoint HTTP contract', () => {
 
     const verified = await send(
       'POST',
-      `/v1/internal/backup-checkpoint/${leaseId}/verify`,
+      `/V1/INTERNAL/BACKUP-CHECKPOINT/${leaseId}/VERIFY`,
       headers,
     );
     expect(verified.statusCode).toBe(201);
@@ -134,12 +151,13 @@ describe('Matrix checkpoint HTTP contract', () => {
 
     const released = await send(
       'POST',
-      `/v1/internal/backup-checkpoint/${leaseId}/release`,
+      `/V1/INTERNAL/BACKUP-CHECKPOINT/${leaseId}/RELEASE`,
       headers,
     );
     expect(released.statusCode).toBe(201);
     expect(JSON.parse(released.body)).toEqual({ released: true });
     expect(fetch).not.toHaveBeenCalled();
+    expect(capturedRequestLogs).toHaveLength(0);
   });
 
   it('rejects the wrong control token without Matrix authentication I/O', async () => {
@@ -164,6 +182,17 @@ describe('Matrix checkpoint HTTP contract', () => {
     expect(rejected.statusCode).toBe(404);
     expect(fetch).toHaveBeenCalled();
     expect(matrixClient.pauseAtSyncBoundary).not.toHaveBeenCalled();
+  });
+
+  it('redacts the checkpoint control header from ordinary HTTP request logs', async () => {
+    const rejected = await send('GET', '/v1/not-a-route', {
+      'X-Matrix-Checkpoint-Token': checkpointToken,
+    });
+
+    expect(rejected.statusCode).toBe(404);
+    const logOutput = capturedRequestLogs.join('');
+    expect(logOutput).toContain('[Redacted]');
+    expect(logOutput).not.toContain(checkpointToken);
   });
 
   function send(

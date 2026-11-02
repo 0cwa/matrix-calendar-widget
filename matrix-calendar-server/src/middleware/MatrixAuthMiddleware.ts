@@ -51,7 +51,7 @@ export class MatrixAuthMiddleware implements NestMiddleware {
    */
   async use(request: Request, _response: Response, next: NextFunction) {
     if (
-      /^\/v1\/internal\/backup-checkpoint\/(?:acquire|[^/]+\/(?:verify|release))\/?$/u.test(
+      /^\/v1\/internal\/backup-checkpoint\/(?:acquire|[^/]+\/(?:verify|release))\/?$/iu.test(
         request.path,
       )
     ) {

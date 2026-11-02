@@ -22,7 +22,16 @@ import {
 import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import type { Request } from 'express';
 import { MemoryStorageProvider } from 'matrix-bot-sdk';
+import * as fs from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { IAppConfiguration } from '../IAppConfiguration';
+import {
+  AtomicFsStorageProvider,
+  MATRIX_CHECKPOINT_STATE_SAFE,
+  MATRIX_CHECKPOINT_STATE_STORAGE_KEY,
+  writeJsonAtomically,
+} from '../matrix/AtomicFsStorageProvider';
 import { CheckpointMatrixClient } from '../matrix/CheckpointMatrixClient';
 import { MatrixCheckpointController } from './MatrixCheckpointController';
 
@@ -151,5 +160,55 @@ describe('MatrixCheckpointController', () => {
       controller.verify(acquired.leaseId, auth, localRequest()),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(lease.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses acquisition when a replaced pending latch has uncertain directory durability', async () => {
+    const directory = fs.mkdtempSync(path.join(tmpdir(), 'checkpoint-test-'));
+    const filename = path.join(directory, 'bot.json');
+    let failDirectorySync = false;
+    const fileSystem: Parameters<typeof writeJsonAtomically>[2] = {
+      ...fs,
+      fsyncSync: (descriptor) => {
+        if (failDirectorySync && fs.fstatSync(descriptor).isDirectory()) {
+          throw new Error('synthetic directory fsync failure');
+        }
+        fs.fsyncSync(descriptor);
+      },
+    };
+    try {
+      const storage = new AtomicFsStorageProvider(
+        filename,
+        true,
+        20,
+        fileSystem,
+      );
+      storage.storeValue(
+        MATRIX_CHECKPOINT_STATE_STORAGE_KEY,
+        MATRIX_CHECKPOINT_STATE_SAFE,
+      );
+      const client = new CheckpointMatrixClient(
+        'https://matrix.example.org',
+        'test-token',
+        storage,
+      );
+      const pause = jest.spyOn(client, 'pauseAtSyncBoundary');
+      failDirectorySync = true;
+
+      expect(() =>
+        storage.storeValue(MATRIX_CHECKPOINT_STATE_STORAGE_KEY, 'pending'),
+      ).toThrow(
+        expect.objectContaining({
+          name: 'AtomicJsonWriteError',
+          targetReplaced: true,
+        }),
+      );
+      const controller = new MatrixCheckpointController(config(), client);
+      await expect(controller.acquire(auth, localRequest())).rejects.toThrow(
+        'Matrix checkpoint is not known safe; operator review is required',
+      );
+      expect(pause).not.toHaveBeenCalled();
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
   });
 });
