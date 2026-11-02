@@ -1176,6 +1176,7 @@ export async function waitForEndpoint(
       failureClass = 'http-status';
     } catch (error) {
       // The listener may still be starting. No raw error text is retained.
+      lastStatus = undefined;
       failureClass = classifyReadinessFailure(error);
     }
     await delay(Math.min(pollIntervalMs, Math.max(0, deadline - now())));
