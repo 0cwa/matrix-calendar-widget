@@ -768,7 +768,14 @@ async function waitForHealth(service) {
       const state = inspectContainer(service);
       if (state.status === 'running' && state.healthStatus === 'healthy') {
         await waitForPostgresTcpAt(
-          () => queryPostgres('postgres', 'SELECT 1', 'reminder_bootstrap'),
+          (timeoutMs) =>
+            queryPostgres(
+              'postgres',
+              'SELECT 1',
+              'reminder_bootstrap',
+              'reminder-postgres-ready',
+              timeoutMs,
+            ),
           Math.max(0, deadline - Date.now()),
         );
         return;
@@ -789,14 +796,16 @@ export async function waitForPostgresTcpAt(
 ) {
   const deadline = now() + timeoutMs;
   while (now() < deadline) {
+    const remaining = deadline - now();
+    if (remaining <= 0) break;
     try {
-      if ((await probe()) === '1') return;
+      if ((await probe(remaining)) === '1') return;
     } catch {
       // A healthy container can still be between PostgreSQL startup phases.
     }
-    const remaining = deadline - now();
-    if (remaining <= 0) break;
-    await delay(Math.min(pollIntervalMs, remaining));
+    const delayRemaining = deadline - now();
+    if (delayRemaining <= 0) break;
+    await delay(Math.min(pollIntervalMs, delayRemaining));
   }
   throw new StageFailure('reminder-postgres-ready');
 }
@@ -834,31 +843,35 @@ function queryPostgres(
   query,
   user = 'reminder_bootstrap',
   phase = 'reminder-role-verified',
+  timeout = 30_000,
 ) {
   const output = requireSuccess(
-    compose([
-      'exec',
-      '-T',
-      'postgres',
-      'sh',
-      '-ec',
-      'PGPASSWORD="$POSTGRES_PASSWORD" exec psql "$@"',
-      'psql',
-      '--host=127.0.0.1',
-      '--port=5432',
-      '--username',
-      user,
-      '--dbname',
-      database,
-      '--no-align',
-      '--tuples-only',
-      '--field-separator',
-      '|',
-      '--set',
-      'ON_ERROR_STOP=1',
-      '--command',
-      query,
-    ]),
+    compose(
+      [
+        'exec',
+        '-T',
+        'postgres',
+        'sh',
+        '-ec',
+        'PGPASSWORD="$POSTGRES_PASSWORD" exec psql "$@"',
+        'psql',
+        '--host=127.0.0.1',
+        '--port=5432',
+        '--username',
+        user,
+        '--dbname',
+        database,
+        '--no-align',
+        '--tuples-only',
+        '--field-separator',
+        '|',
+        '--set',
+        'ON_ERROR_STOP=1',
+        '--command',
+        query,
+      ],
+      { timeout },
+    ),
     phase,
   );
   return output.toString('utf8').trim();

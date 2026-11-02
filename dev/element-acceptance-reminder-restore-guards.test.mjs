@@ -114,6 +114,33 @@ test('PostgreSQL readiness fails when no TCP query succeeds by the deadline', as
   assert.equal(attempts, 2);
 });
 
+test('PostgreSQL readiness bounds a slow probe to the remaining deadline', async () => {
+  let now = 0;
+  const probeBudgets = [];
+
+  await assert.rejects(
+    waitForPostgresTcpAt(
+      async (timeoutMs) => {
+        probeBudgets.push(timeoutMs);
+        now += timeoutMs;
+        throw new Error('TCP query timed out');
+      },
+      25,
+      {
+        now: () => now,
+        delay: async (milliseconds) => {
+          now += milliseconds;
+        },
+        pollIntervalMs: 10,
+      },
+    ),
+    (error) => error.phase === 'reminder-postgres-ready',
+  );
+
+  assert.deepEqual(probeBudgets, [25]);
+  assert.equal(now, 25);
+});
+
 const PYTHON_ACCOUNT = [
   'import json,os,pwd',
   'account=pwd.getpwuid(os.geteuid())',
