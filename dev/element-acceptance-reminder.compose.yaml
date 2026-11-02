@@ -79,7 +79,11 @@ services:
       MATRIX_CALENDAR_REMINDER_DATABASE_URL: ${ELEMENT_ACCEPTANCE_REMINDER_RESTORE_DATABASE_URL:?}
     ports:
       - '127.0.0.1:3000:3000'
+    volumes:
+      - reminder-restore-server-data:/app/storage
 
 volumes:
+  reminder-restore-server-data:
+    name: ${ELEMENT_ACCEPTANCE_RESTORE_SERVER_VOLUME_NAME:?}
   reminder-restore-radicale-data:
     name: ${ELEMENT_ACCEPTANCE_RESTORE_VOLUME_NAME:?}

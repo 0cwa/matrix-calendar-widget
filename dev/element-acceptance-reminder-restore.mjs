@@ -25,6 +25,11 @@ import {
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  createSyntheticCaptureDirectory,
+  createSyntheticColdCapture,
+  verifySyntheticColdCapture,
+} from './element-acceptance-cold-capture.mjs';
+import {
   appendComposeOverrideFiles,
   hasLocalComposeResourceOwnership,
   loadElementAcceptanceOverrides,
@@ -41,6 +46,12 @@ import {
   preservesReminderConfigurationSnapshots,
   sameReminderDeliverySnapshots,
 } from './element-acceptance-reminder-restore-guards.mjs';
+import {
+  createServerDataMarkerCleanupScript,
+  createServerDataMarkerWriterProgram,
+  createSyntheticServerDataMarker,
+  SERVER_DATA_MARKER_NAME_PATTERN,
+} from './element-acceptance-server-data-marker.mjs';
 import { createReminderDeliverySnapshot } from './reminder-delivery-snapshot.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -72,6 +83,26 @@ export const RADICALE_EXTRACT_TAR = [
   '   archive.extract(member,destination,numeric_owner=True,filter=safe)',
   '  else:',
   '   archive.extract(safe(member,destination),destination,numeric_owner=True)',
+].join('\n');
+export const SERVER_EXTRACT_TAR = [
+  'import os,posixpath,sys,tarfile',
+  'destination=sys.argv[1]',
+  'def safe(member,dest):',
+  ' name=posixpath.normpath(member.name)',
+  " if member.name.startswith('/') or name=='..' or name.startswith('../'): raise ValueError()",
+  " if name=='.' and member.name not in ('.','./'): raise ValueError()",
+  ' target=os.path.realpath(os.path.join(dest,name))',
+  ' base=os.path.realpath(dest)',
+  ' if os.path.commonpath((base,target))!=base: raise ValueError()',
+  ' if member.issym() or member.islnk() or not (member.isdir() or member.isfile()): raise ValueError()',
+  ' if member.uid!=101 or member.gid!=0: raise ValueError()',
+  ' if not isinstance(member.mode,int) or member.mode<0 or member.mode>0o777 or member.mode&0o002: raise ValueError()',
+  ' member.name=name',
+  ' return member',
+  "with tarfile.open(fileobj=sys.stdin.buffer,mode='r|*') as archive:",
+  ' for member in archive:',
+  '  if sys.version_info >= (3,12): archive.extract(member,destination,numeric_owner=True,filter=safe)',
+  '  else: archive.extract(safe(member,destination),destination,numeric_owner=True)',
 ].join('\n');
 export const RADICALE_FILESYSTEM_PROBE = [
   'import json,os,pwd,stat,sys',
@@ -149,7 +180,11 @@ const PHASES = new Set([
   'reminder-restart-delivery-row',
   'restore-quiesced',
   'restore-radicale-backup',
+  'restore-server-backup',
+  'restore-server-data-verified',
+  'restore-server-marker-cleanup',
   'restore-postgres-backup',
+  'restore-capture-verified',
   'restore-targets-prepared',
   'restore-radicale-ready',
   'restore-postgres-role-ready',
@@ -163,6 +198,7 @@ const RESTORE_TARGET_STEPS = new Set([
   'target-database-check',
   'target-plan-check',
   'volume-create',
+  'server-volume-create',
   'volume-empty-check',
   'database-create',
   'archive-extract',
@@ -313,7 +349,11 @@ let reminderConfigurationFile;
 let runnerTemp;
 let radicaleArchivePath;
 let postgresDumpPath;
+let serverArchivePath;
+let captureDirectory;
+let restoreServerVolumeName;
 let restoreVolumeName;
+let serverVolumeName;
 let commonComposeArgs;
 let failureStageRecorded = false;
 let sourceRadicaleFilesystemProbe;
@@ -361,13 +401,14 @@ function initializeConfiguration() {
   if (new Set(privatePaths).size !== privatePaths.length) {
     throw new StageFailure('reminder-compose-validation');
   }
-  radicaleArchivePath = resolve(runnerTemp, 'element-acceptance-radicale.tar');
-  postgresDumpPath = resolve(
-    runnerTemp,
-    'element-acceptance-reminder.pgcustom',
-  );
   restoreVolumeName = required('ELEMENT_ACCEPTANCE_RESTORE_VOLUME_NAME');
+  restoreServerVolumeName = required(
+    'ELEMENT_ACCEPTANCE_RESTORE_SERVER_VOLUME_NAME',
+  );
   if (restoreVolumeName !== `${projectName}_radicale-restore`) {
+    throw new StageFailure('reminder-compose-validation');
+  }
+  if (restoreServerVolumeName !== `${projectName}_server-restore`) {
     throw new StageFailure('reminder-compose-validation');
   }
   if (ACCEPTANCE_OVERRIDES.localPrebuilt && !ACCEPTANCE_OVERRIDES.skipElement) {
@@ -446,7 +487,9 @@ function run(
       );
     } else if (args[0] === 'volume' && args[1] === 'create') {
       const nameIndex = args.indexOf('--name');
-      const expectedName = `${projectName}_radicale-restore`;
+      const expectedName = args.includes(`${projectName}_radicale-restore`)
+        ? `${projectName}_radicale-restore`
+        : `${projectName}_server-restore`;
       if (
         nameIndex === -1 ||
         args[nameIndex + 1] !== expectedName ||
@@ -464,7 +507,7 @@ function run(
               '--label',
               `com.docker.compose.project=${projectName}`,
               '--label',
-              'com.docker.compose.volume=reminder-restore-radicale-data',
+              `com.docker.compose.volume=${expectedName === `${projectName}_radicale-restore` ? 'reminder-restore-radicale-data' : 'reminder-restore-server-data'}`,
             ]
           : []),
         ...args.slice(2),
@@ -1327,6 +1370,36 @@ function inspectRadicaleVolume() {
   return dataMounts[0].Name;
 }
 
+function inspectServerVolume() {
+  const id = serviceContainerId('gateway', 'restore-quiesced');
+  const output = requireSuccess(
+    run('docker', ['inspect', '--format', '{{json .Mounts}}', id]),
+    'restore-quiesced',
+  );
+  let mounts;
+  try {
+    mounts = JSON.parse(output.toString('utf8'));
+  } catch {
+    throw new StageFailure('restore-quiesced');
+  }
+  const storageMounts = Array.isArray(mounts)
+    ? mounts.filter((mount) => mount?.Destination === '/app/storage')
+    : [];
+  if (
+    storageMounts.length !== 1 ||
+    storageMounts[0].Type !== 'volume' ||
+    storageMounts[0].Name !== `${projectName}_server-data`
+  ) {
+    throw new StageFailure('restore-quiesced');
+  }
+  verifyLocalVolumeOwnership(
+    storageMounts[0].Name,
+    'server-data',
+    'restore-quiesced',
+  );
+  return storageMounts[0].Name;
+}
+
 function stoppedState(service) {
   return inspectStoppedContainerState(
     inspectContainer(service, 'restore-quiesced'),
@@ -1360,6 +1433,7 @@ async function quiesceWriters() {
     );
     const observedStates = Object.values(states);
     radicaleVolume = inspectRadicaleVolume();
+    serverVolumeName = inspectServerVolume();
     const gatewayStoppedGracefully =
       states.gateway.stopped && states.gateway.gracefulExit;
     const radicaleStoppedGracefully =
@@ -1391,7 +1465,100 @@ async function quiesceWriters() {
     }
     return details;
   });
-  return radicaleVolume;
+  return { radicaleVolume, serverVolume: serverVolumeName };
+}
+
+async function writeSyntheticServerDataMarker() {
+  const id = serviceContainerId('gateway', 'restore-quiesced');
+  const marker = createSyntheticServerDataMarker();
+  try {
+    requireSuccess(
+      run('docker', [
+        'exec',
+        id,
+        'node',
+        '-e',
+        createServerDataMarkerWriterProgram('/app/storage', marker.contents),
+        marker.name,
+      ]),
+      'restore-quiesced',
+    );
+  } catch (error) {
+    if (error instanceof StageFailure && error.details.processExitCode === 73) {
+      throw error;
+    }
+    try {
+      await removeSyntheticServerDataMarkerFile(marker, true);
+    } catch {
+      throw new StageFailure('restore-server-marker-cleanup');
+    }
+    throw error;
+  }
+  return marker;
+}
+
+async function verifyRestoredServerData(marker) {
+  await withStage('restore-server-data-verified', async () => {
+    const id = serviceContainerId(
+      'restore-gateway',
+      'restore-server-data-verified',
+    );
+    const result = requireSuccess(
+      run('docker', [
+        'exec',
+        id,
+        'node',
+        '-e',
+        `const fs=require('node:fs');const path=require('node:path');const name=process.argv[1];if(!(new RegExp(${JSON.stringify(SERVER_DATA_MARKER_NAME_PATTERN)})).test(name))process.exit(2);process.stdout.write(fs.readFileSync(path.join('/app/storage',name), 'utf8'))`,
+        marker.name,
+      ]),
+      'restore-server-data-verified',
+    ).toString('utf8');
+    if (result !== marker.contents) {
+      throw new StageFailure('restore-server-data-verified');
+    }
+    return { markerRestored: true };
+  });
+}
+
+async function removeSyntheticServerDataMarkerFile(marker, allowMissing) {
+  const output = requireSuccess(
+    run('docker', [
+      'run',
+      '--rm',
+      '--network',
+      'none',
+      '--user',
+      '0:0',
+      '--mount',
+      `type=volume,src=${serverVolumeName},dst=/data`,
+      '--entrypoint',
+      '/app/bin/python',
+      ACCEPTANCE_OVERRIDES.radicaleImage,
+      '-c',
+      createServerDataMarkerCleanupScript(marker.contents),
+      '/data',
+      marker.name,
+      '101',
+      '0',
+    ]),
+    'restore-server-marker-cleanup',
+  )
+    .toString('utf8')
+    .trim();
+  if (output === 'removed') return true;
+  if (allowMissing && output === 'absent') return false;
+  throw new StageFailure('restore-server-marker-cleanup');
+}
+
+async function removeSyntheticServerDataMarker(marker) {
+  await withStage('restore-server-marker-cleanup', async () => {
+    const markerRemoved = await removeSyntheticServerDataMarkerFile(
+      marker,
+      false,
+    );
+    return { markerRemoved };
+  });
 }
 
 function hash(buffer) {
@@ -1441,6 +1608,36 @@ function backupRadicale(volumeName) {
   });
 }
 
+function backupServer(volumeName) {
+  return withStage('restore-server-backup', async () => {
+    const archive = requireSuccess(
+      run(
+        'docker',
+        [
+          'run',
+          '--rm',
+          '--network',
+          'none',
+          '--user',
+          '0:0',
+          '--mount',
+          `type=volume,src=${volumeName},dst=/data,readonly`,
+          '--entrypoint',
+          '/app/bin/python',
+          ACCEPTANCE_OVERRIDES.radicaleImage,
+          '-c',
+          RADICALE_CREATE_TAR,
+        ],
+        { timeout: 120_000 },
+      ),
+      'restore-server-backup',
+    );
+    if (archive.length === 0) throw new StageFailure('restore-server-backup');
+    savePrivateArtifact(serverArchivePath, archive, 'restore-server-backup');
+    return { checksum: hash(archive) };
+  });
+}
+
 function backupPostgres() {
   return withStage('restore-postgres-backup', async () => {
     const dump = requireSuccess(
@@ -1470,6 +1667,53 @@ function backupPostgres() {
   });
 }
 
+async function assembleAndVerifyCapture() {
+  return withStage('restore-capture-verified', async () => {
+    const pgDumpVersion = requireSuccess(
+      compose(['exec', '-T', 'postgres', 'pg_dump', '--version']),
+      'restore-capture-verified',
+    )
+      .toString('utf8')
+      .trim();
+    const pgRestoreVersion = requireSuccess(
+      compose(['exec', '-T', 'postgres', 'pg_restore', '--version']),
+      'restore-capture-verified',
+    )
+      .toString('utf8')
+      .trim();
+    const restoreInput = {
+      name: 'synthetic-public-feed-key',
+      sourcePath: '/synthetic-fixture/public-feed-signing-key',
+      contents: Buffer.from('synthetic-only-signing-key-fixture\n'),
+    };
+    await createSyntheticColdCapture(captureDirectory, {
+      postgresDump: {
+        enabled: true,
+        format: 'custom',
+        transport: 'container-exec',
+        pgDumpVersion,
+        pgRestoreVersion,
+      },
+      restoreInputs: [restoreInput],
+    });
+    const manifest = await verifySyntheticColdCapture(captureDirectory);
+    requireSuccess(
+      run(process.execPath, [
+        'scripts/matrix-calendar-verify-restore.mjs',
+        '--capture-dir',
+        captureDirectory,
+      ]),
+      'restore-capture-verified',
+    );
+    return {
+      archiveCount: 2,
+      restoreInputCount: manifest.restoreInputs?.length ?? 0,
+      postgresDumpEnabled: manifest.postgresDump.enabled,
+      offlineVerifierPassed: true,
+    };
+  });
+}
+
 function verifyVolumeAbsentAndCreate(sourceVolumeName, diagnostics) {
   diagnostics.restoreStep = 'target-volume-check';
   const listedVolumes = requireSuccess(
@@ -1487,7 +1731,23 @@ function verifyVolumeAbsentAndCreate(sourceVolumeName, diagnostics) {
     .split(/\r?\n/u)
     .filter(Boolean);
   const restoreVolumeExists = listedVolumes.length !== 0;
+  const listedServerVolumes = requireSuccess(
+    run('docker', [
+      'volume',
+      'ls',
+      '--quiet',
+      '--filter',
+      `name=${restoreServerVolumeName}`,
+    ]),
+    'restore-targets-prepared',
+  )
+    .toString('utf8')
+    .trim()
+    .split(/\r?\n/u)
+    .filter(Boolean);
+  const restoreServerVolumeExists = listedServerVolumes.length !== 0;
   diagnostics.restoreVolumeExists = restoreVolumeExists;
+  diagnostics.restoreServerVolumeExists = restoreServerVolumeExists;
   diagnostics.restoreStep = 'target-database-check';
   const databaseExists = queryPostgres(
     'postgres',
@@ -1498,6 +1758,7 @@ function verifyVolumeAbsentAndCreate(sourceVolumeName, diagnostics) {
   if (databaseExists !== '0' && databaseExists !== '1') {
     throw new StageFailure('restore-targets-prepared', {
       freshVolume: !restoreVolumeExists,
+      freshServerVolume: !restoreServerVolumeExists,
       freshDatabase: false,
     });
   }
@@ -1509,6 +1770,9 @@ function verifyVolumeAbsentAndCreate(sourceVolumeName, diagnostics) {
     sourceVolumeName,
     restoreVolumeName,
     restoreVolumeExists,
+    sourceServerVolumeName: serverVolumeName,
+    restoreServerVolumeName,
+    restoreServerVolumeExists,
     sourceDatabase: 'matrix_calendar_test',
     restoreDatabase: 'matrix_calendar_restored',
     restoreDatabaseExists: freshDatabaseExists,
@@ -1517,6 +1781,7 @@ function verifyVolumeAbsentAndCreate(sourceVolumeName, diagnostics) {
   if (!targetPlanIsSafe) {
     throw new StageFailure('restore-targets-prepared', {
       freshVolume: !restoreVolumeExists,
+      freshServerVolume: !restoreServerVolumeExists,
       freshDatabase: !freshDatabaseExists,
     });
   }
@@ -1537,6 +1802,27 @@ function verifyVolumeAbsentAndCreate(sourceVolumeName, diagnostics) {
   verifyLocalVolumeOwnership(
     restoreVolumeName,
     'reminder-restore-radicale-data',
+    'restore-targets-prepared',
+  );
+  diagnostics.restoreStep = 'server-volume-create';
+  const serverCreated = requireSuccess(
+    run('docker', ['volume', 'create', '--name', restoreServerVolumeName]),
+    'restore-targets-prepared',
+  )
+    .toString('utf8')
+    .trim();
+  diagnostics.restoreServerVolumeCreated =
+    serverCreated === restoreServerVolumeName;
+  if (!diagnostics.restoreServerVolumeCreated) {
+    throw new StageFailure('restore-targets-prepared', {
+      freshVolume: false,
+      freshServerVolume: false,
+      freshDatabase: false,
+    });
+  }
+  verifyLocalVolumeOwnership(
+    restoreServerVolumeName,
+    'reminder-restore-server-data',
     'restore-targets-prepared',
   );
   diagnostics.restoreStep = 'volume-empty-check';
@@ -1567,6 +1853,34 @@ function verifyVolumeAbsentAndCreate(sourceVolumeName, diagnostics) {
       freshDatabase: false,
     });
   }
+  const serverEmptyCheck = requireSuccess(
+    run('docker', [
+      'run',
+      '--rm',
+      '--network',
+      'none',
+      '--user',
+      '0:0',
+      '--mount',
+      `type=volume,src=${restoreServerVolumeName},dst=/data,volume-nocopy`,
+      '--entrypoint',
+      '/app/bin/python',
+      ACCEPTANCE_OVERRIDES.radicaleImage,
+      '-c',
+      RADICALE_EMPTY_DIRECTORY_CHECK,
+    ]),
+    'restore-targets-prepared',
+  )
+    .toString('utf8')
+    .trim();
+  diagnostics.restoreServerVolumeEmpty = serverEmptyCheck === 'empty';
+  if (!diagnostics.restoreServerVolumeEmpty) {
+    throw new StageFailure('restore-targets-prepared', {
+      freshVolume: true,
+      freshServerVolume: false,
+      freshDatabase: false,
+    });
+  }
 
   diagnostics.restoreStep = 'database-create';
   requireSuccess(
@@ -1591,12 +1905,16 @@ function verifyVolumeAbsentAndCreate(sourceVolumeName, diagnostics) {
     'restore-targets-prepared',
   );
   diagnostics.restoreDatabaseCreated = true;
-  return { freshVolume: true, freshDatabase: true };
+  return {
+    freshVolume: true,
+    freshServerVolume: true,
+    freshDatabase: true,
+  };
 }
 
 function restoreRadicaleArchive(diagnostics) {
   diagnostics.restoreStep = 'archive-extract';
-  const archive = readFileSync(radicaleArchivePath);
+  const archive = readFileSync(resolve(captureDirectory, 'radicale-data.tar'));
   requireSuccess(
     run(
       'docker',
@@ -1662,9 +1980,64 @@ function restoreRadicaleArchive(diagnostics) {
     captureRadicaleFilesystemProbe(restoreVolumeName);
 }
 
+function restoreServerArchive(diagnostics) {
+  diagnostics.restoreStep = 'server-archive-extract';
+  const archive = readFileSync(resolve(captureDirectory, 'server-data.tar'));
+  requireSuccess(
+    run(
+      'docker',
+      [
+        'run',
+        '--rm',
+        '-i',
+        '--network',
+        'none',
+        '--user',
+        '0:0',
+        '--mount',
+        `type=volume,src=${restoreServerVolumeName},dst=/data,volume-nocopy`,
+        '--entrypoint',
+        '/app/bin/python',
+        ACCEPTANCE_OVERRIDES.radicaleImage,
+        '-c',
+        SERVER_EXTRACT_TAR,
+        '/data',
+      ],
+      { input: archive, timeout: 120_000 },
+    ),
+    'restore-targets-prepared',
+  );
+  diagnostics.restoreServerArchiveExtracted = true;
+  const count = requireSuccess(
+    run('docker', [
+      'run',
+      '--rm',
+      '--network',
+      'none',
+      '--user',
+      '0:0',
+      '--mount',
+      `type=volume,src=${restoreServerVolumeName},dst=/data,readonly`,
+      '--entrypoint',
+      '/app/bin/python',
+      ACCEPTANCE_OVERRIDES.radicaleImage,
+      '-c',
+      RADICALE_ENTRY_COUNT_CHECK,
+    ]),
+    'restore-targets-prepared',
+  )
+    .toString('utf8')
+    .trim();
+  if (!/^[012]$/u.test(count) || count === '0') {
+    throw new StageFailure('restore-targets-prepared');
+  }
+}
+
 function restorePostgresDump(diagnostics) {
   diagnostics.restoreStep = 'postgres-restore';
-  const dump = readFileSync(postgresDumpPath);
+  const dump = readFileSync(
+    resolve(captureDirectory, 'reminder-postgresql.dump'),
+  );
   // Omit the archive filename operand so pg_restore reads the supplied stdin.
   requireSuccess(
     compose(
@@ -1878,115 +2251,134 @@ function readRadicaleStartupLogs(containerId) {
 
 async function restoreStores() {
   await validateCompose();
-  const sourceVolume = await quiesceWriters();
-  await backupRadicale(sourceVolume);
-  await backupPostgres();
-  await withStage('restore-targets-prepared', async () => {
-    const diagnostics = { restoreStep: 'target-volume-check' };
-    try {
-      const details = verifyVolumeAbsentAndCreate(sourceVolume, diagnostics);
-      restoreRadicaleArchive(diagnostics);
-      restorePostgresDump(diagnostics);
-      diagnostics.restoreStep = 'complete';
-      return { ...details, ...diagnostics };
-    } catch (error) {
-      if (error instanceof StageFailure) {
-        error.details = { ...diagnostics, ...error.details };
-        throw error;
+  captureDirectory = await createSyntheticCaptureDirectory(dirname(stageFile));
+  radicaleArchivePath = resolve(captureDirectory, 'radicale-data.tar');
+  serverArchivePath = resolve(captureDirectory, 'server-data.tar');
+  postgresDumpPath = resolve(captureDirectory, 'reminder-postgresql.dump');
+  serverVolumeName = inspectServerVolume();
+  const marker = await writeSyntheticServerDataMarker();
+  try {
+    const { radicaleVolume, serverVolume } = await quiesceWriters();
+    await backupRadicale(radicaleVolume);
+    await backupServer(serverVolume);
+    await backupPostgres();
+    await assembleAndVerifyCapture();
+    await withStage('restore-targets-prepared', async () => {
+      const diagnostics = { restoreStep: 'target-volume-check' };
+      try {
+        const details = verifyVolumeAbsentAndCreate(
+          radicaleVolume,
+          diagnostics,
+        );
+        restoreRadicaleArchive(diagnostics);
+        restoreServerArchive(diagnostics);
+        restorePostgresDump(diagnostics);
+        diagnostics.restoreStep = 'complete';
+        return { ...details, ...diagnostics };
+      } catch (error) {
+        if (error instanceof StageFailure) {
+          error.details = { ...diagnostics, ...error.details };
+          throw error;
+        }
+        throw new StageFailure('restore-targets-prepared', diagnostics);
       }
-      throw new StageFailure('restore-targets-prepared', diagnostics);
-    }
-  });
-  await withStage('restore-radicale-ready', async () => {
-    requireSuccess(
-      compose(['up', '--no-build', '-d', 'restore-radicale']),
-      'restore-radicale-ready',
-    );
-    try {
+    });
+    await withStage('restore-radicale-ready', async () => {
+      requireSuccess(
+        compose(['up', '--no-build', '-d', 'restore-radicale']),
+        'restore-radicale-ready',
+      );
+      try {
+        return {
+          httpStatus: await waitForRestoreRadicale(),
+          ...createRadicaleFilesystemEvidence(
+            sourceRadicaleFilesystemProbe,
+            restoredRadicaleFilesystemProbe,
+          ),
+        };
+      } catch (error) {
+        if (
+          !(error instanceof StageFailure) ||
+          error.phase !== 'restore-radicale-ready'
+        ) {
+          throw error;
+        }
+        throw new StageFailure('restore-radicale-ready', {
+          ...error.details,
+          restoreRadicaleProbeOutcome: Number.isInteger(
+            error.details.httpStatus,
+          )
+            ? 'http-status'
+            : 'no-response',
+          ...inspectRestoreRadicaleReadiness(),
+        });
+      }
+    });
+    await withStage('restore-postgres-role-ready', async () => {
+      verifyRestrictedRole(
+        'matrix_calendar_restored',
+        'restore-postgres-role-ready',
+      );
+      return { rolePolicyVerified: true };
+    });
+    await withStage('restore-gateway-ready', async () => {
+      requireSuccess(
+        compose(['up', '--no-build', '-d', 'restore-gateway']),
+        'restore-gateway-ready',
+      );
       return {
-        httpStatus: await waitForRestoreRadicale(),
-        ...createRadicaleFilesystemEvidence(
-          sourceRadicaleFilesystemProbe,
-          restoredRadicaleFilesystemProbe,
+        httpStatus: await waitForHttp(
+          'http://127.0.0.1:3000/v1/calendar/context',
+          (status) => status >= 400 && status < 500,
+          'restore-gateway-ready',
         ),
       };
-    } catch (error) {
-      if (
-        !(error instanceof StageFailure) ||
-        error.phase !== 'restore-radicale-ready'
-      ) {
-        throw error;
-      }
-      throw new StageFailure('restore-radicale-ready', {
-        ...error.details,
-        restoreRadicaleProbeOutcome: Number.isInteger(error.details.httpStatus)
-          ? 'http-status'
-          : 'no-response',
-        ...inspectRestoreRadicaleReadiness(),
+    });
+    await verifyRestoredServerData(marker);
+    if (ACCEPTANCE_OVERRIDES.skipElement) {
+      await withStage('restore-widget-ready', async () => {
+        requireSuccess(
+          compose(['up', '--no-build', '-d', 'widget']),
+          'restore-widget-ready',
+        );
+        const widgetStatus = await waitForHttp(
+          'http://127.0.0.1:8080/',
+          (status) => status === 200,
+          'restore-widget-ready',
+        );
+        return {
+          count: widgetStatus === 200 ? 1 : 0,
+          httpStatus: widgetStatus,
+        };
       });
+      return;
     }
-  });
-  await withStage('restore-postgres-role-ready', async () => {
-    verifyRestrictedRole(
-      'matrix_calendar_restored',
-      'restore-postgres-role-ready',
-    );
-    return { rolePolicyVerified: true };
-  });
-  await withStage('restore-gateway-ready', async () => {
-    requireSuccess(
-      compose(['up', '--no-build', '-d', 'restore-gateway']),
-      'restore-gateway-ready',
-    );
-    return {
-      httpStatus: await waitForHttp(
-        'http://127.0.0.1:3000/v1/calendar/context',
-        (status) => status >= 400 && status < 500,
-        'restore-gateway-ready',
-      ),
-    };
-  });
-  if (ACCEPTANCE_OVERRIDES.skipElement) {
-    await withStage('restore-widget-ready', async () => {
+
+    await withStage('restore-element-ready', async () => {
       requireSuccess(
-        compose(['up', '--no-build', '-d', 'widget']),
-        'restore-widget-ready',
+        compose(['up', '--no-build', '-d', 'widget', 'element']),
+        'restore-element-ready',
       );
-      const widgetStatus = await waitForHttp(
-        'http://127.0.0.1:8080/',
-        (status) => status === 200,
-        'restore-widget-ready',
-      );
+      const statuses = await Promise.all([
+        waitForHttp(
+          'http://127.0.0.1:8080/',
+          (status) => status === 200,
+          'restore-element-ready',
+        ),
+        waitForHttp(
+          'http://127.0.0.1:8090/',
+          (status) => status === 200,
+          'restore-element-ready',
+        ),
+      ]);
       return {
-        count: widgetStatus === 200 ? 1 : 0,
-        httpStatus: widgetStatus,
+        count: statuses.filter((status) => status === 200).length,
+        httpStatus: statuses[1],
       };
     });
-    return;
+  } finally {
+    await removeSyntheticServerDataMarker(marker);
   }
-
-  await withStage('restore-element-ready', async () => {
-    requireSuccess(
-      compose(['up', '--no-build', '-d', 'widget', 'element']),
-      'restore-element-ready',
-    );
-    const statuses = await Promise.all([
-      waitForHttp(
-        'http://127.0.0.1:8080/',
-        (status) => status === 200,
-        'restore-element-ready',
-      ),
-      waitForHttp(
-        'http://127.0.0.1:8090/',
-        (status) => status === 200,
-        'restore-element-ready',
-      ),
-    ]);
-    return {
-      count: statuses.filter((status) => status === 200).length,
-      httpStatus: statuses[1],
-    };
-  });
 }
 
 async function main() {

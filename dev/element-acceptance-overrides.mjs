@@ -36,7 +36,9 @@ export const LOCAL_REHEARSAL_SERVICES = Object.freeze([
 export const LOCAL_REHEARSAL_VOLUMES = Object.freeze([
   'synapse-data',
   'radicale-data',
+  'server-data',
   'postgres-data',
+  'reminder-restore-server-data',
   'reminder-restore-radicale-data',
 ]);
 

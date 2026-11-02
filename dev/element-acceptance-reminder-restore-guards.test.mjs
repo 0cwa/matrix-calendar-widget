@@ -188,6 +188,9 @@ const safePlan = {
   sourceVolumeName: 'matrix-calendar-element-123-1_radicale-data',
   restoreVolumeName: 'matrix-calendar-element-123-1_radicale-restore',
   restoreVolumeExists: false,
+  sourceServerVolumeName: 'matrix-calendar-element-123-1_server-data',
+  restoreServerVolumeName: 'matrix-calendar-element-123-1_server-restore',
+  restoreServerVolumeExists: false,
   sourceDatabase: 'matrix_calendar_test',
   restoreDatabase: 'matrix_calendar_restored',
   restoreDatabaseExists: false,
@@ -408,6 +411,10 @@ test('restore target plan uses distinct, absent destinations', () => {
     false,
   );
   assert.equal(
+    isSafeRestoreTargetPlan({ ...safePlan, restoreServerVolumeExists: true }),
+    false,
+  );
+  assert.equal(
     isSafeRestoreTargetPlan({ ...safePlan, restoreDatabaseExists: true }),
     false,
   );
@@ -415,6 +422,13 @@ test('restore target plan uses distinct, absent destinations', () => {
     isSafeRestoreTargetPlan({
       ...safePlan,
       restoreVolumeName: safePlan.sourceVolumeName,
+    }),
+    false,
+  );
+  assert.equal(
+    isSafeRestoreTargetPlan({
+      ...safePlan,
+      restoreServerVolumeName: safePlan.sourceServerVolumeName,
     }),
     false,
   );

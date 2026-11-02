@@ -172,10 +172,13 @@ export function hasLocalPrebuiltOwnershipLabels(model, runId, projectName) {
   }
 
   const restoreVolume = volumes['reminder-restore-radicale-data'];
+  const restoreServerVolume = volumes['reminder-restore-server-data'];
   const postgresVolumes = services.postgres?.volumes;
   return (
     restoreVolume?.name === `${projectName}_radicale-restore` &&
     restoreVolume.external !== true &&
+    restoreServerVolume?.name === `${projectName}_server-restore` &&
+    restoreServerVolume.external !== true &&
     Array.isArray(postgresVolumes) &&
     postgresVolumes.some(
       (volume) =>

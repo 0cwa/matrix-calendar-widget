@@ -49,7 +49,7 @@ const MAX_COMPOSE_FILES = 16;
 const CAPTURE_MANIFEST_NAME = 'capture-manifest.json';
 const CHECKSUM_NAME = 'SHA256SUMS';
 const CAPTURE_MARKER_NAME = '.capture-complete';
-const COLD_CAPTURE_MARKER_CONTENT =
+export const COLD_CAPTURE_MARKER_CONTENT =
   'Cold capture verified and services resumed.\n';
 const ONLINE_CAPTURE_MARKER_CONTENT =
   'Online capture verified while services remained running.\n';
@@ -2933,19 +2933,23 @@ async function verifyRestoreInputSources(inputs) {
   }
 }
 
-async function writeCaptureManifest(
-  captureDirectory,
-  postgresDump,
-  restoreInputs,
-) {
+export function serializeCaptureManifest(postgresDump, restoreInputs) {
   const manifest = {
     schemaVersion: 1,
     postgresDump,
     ...(restoreInputs.length > 0 ? { restoreInputs } : {}),
   };
+  return `${JSON.stringify(manifest, null, 2)}\n`;
+}
+
+async function writeCaptureManifest(
+  captureDirectory,
+  postgresDump,
+  restoreInputs,
+) {
   await createOutputFile(
     join(captureDirectory, CAPTURE_MANIFEST_NAME),
-    `${JSON.stringify(manifest, null, 2)}\n`,
+    serializeCaptureManifest(postgresDump, restoreInputs),
     'verification',
   );
 }

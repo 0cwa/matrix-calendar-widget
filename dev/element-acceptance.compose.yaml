@@ -36,6 +36,8 @@ services:
       LOG_LEVEL: error
     ports:
       - '127.0.0.1:3000:3000'
+    volumes:
+      - server-data:/app/storage
 
   widget:
     image: matrix-calendar-widget/widget:element-acceptance
@@ -56,3 +58,6 @@ services:
       - '127.0.0.1:8090:80'
     volumes:
       - ./element-acceptance-config.json:/app/config.json:ro
+
+volumes:
+  server-data:

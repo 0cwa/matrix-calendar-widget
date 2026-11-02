@@ -53,7 +53,9 @@ const SERVICES = Object.freeze([
 const VOLUMES = Object.freeze([
   'synapse-data',
   'radicale-data',
+  'server-data',
   'postgres-data',
+  'reminder-restore-server-data',
   'reminder-restore-radicale-data',
 ]);
 // Config.Volumes on the pinned widget-server and Radicale base images. Keep
@@ -387,7 +389,9 @@ const FOREIGN_VOLUME_ASSOCIATIONS = new Set([
   'radicale-data',
   'radicale-other-mount',
   'postgres-data',
+  'server-data',
   'postgres-other-mount',
+  'restore-server-data',
   'restore-radicale-data',
   'restore-radicale-other-mount',
   'gateway-other-mount',
@@ -403,6 +407,8 @@ const FOREIGN_VOLUME_MOUNT_CLASSES = new Map([
   ['radicale|/data', 'radicale-data'],
   ['restore-radicale|/data', 'restore-radicale-data'],
   ['postgres|/var/lib/postgresql/data', 'postgres-data'],
+  ['gateway|/app/storage', 'server-data'],
+  ['restore-gateway|/app/storage', 'restore-server-data'],
 ]);
 const FOREIGN_VOLUME_OTHER_MOUNT_CLASSES = new Map(
   SERVICES.map((service) => [service, `${service}-other-mount`]),
@@ -2763,6 +2769,7 @@ export function taskEnvironment(taskDir, dockerConfig, runId, project, paths) {
     ELEMENT_ACCEPTANCE_REMINDER_EVENT_FILE: paths.eventFile,
     ELEMENT_ACCEPTANCE_REMINDER_DELIVERY_FILE: paths.deliveryFile,
     ELEMENT_ACCEPTANCE_RESTORE_VOLUME_NAME: `${project}_radicale-restore`,
+    ELEMENT_ACCEPTANCE_RESTORE_SERVER_VOLUME_NAME: `${project}_server-restore`,
     OPERATOR_REHEARSAL_TASK_DIR: taskDir,
   };
   return env;
@@ -2856,6 +2863,7 @@ function writeInitialComposeEnv(file, project, restoreVolume, radicaleImage) {
       'postgresql://local:local@postgres:5432/matrix_calendar_restored',
     ELEMENT_ACCEPTANCE_ROOM_BINDING: '[]',
     ELEMENT_ACCEPTANCE_RESTORE_VOLUME_NAME: restoreVolume,
+    ELEMENT_ACCEPTANCE_RESTORE_SERVER_VOLUME_NAME: `${project}_server-restore`,
     ELEMENT_ACCEPTANCE_RADICALE_IMAGE: radicaleImage,
     MATRIX_CALENDAR_DEV_APPSERVICE_REGISTRATION: 'disabled',
     MATRIX_CALENDAR_DEV_SYNAPSE_PORT_MAPPING: '127.0.0.1:8008:8008',
@@ -3139,8 +3147,11 @@ function assertVolumes(
   const expectedNames = [
     `${project}_synapse-data`,
     `${project}_radicale-data`,
+    `${project}_server-data`,
     `${project}_postgres-data`,
-    ...(pairedRestore ? [`${project}_radicale-restore`] : []),
+    ...(pairedRestore
+      ? [`${project}_radicale-restore`, `${project}_server-restore`]
+      : []),
   ].sort();
   if (
     JSON.stringify([...byName.keys()].sort()) !==
@@ -3421,8 +3432,11 @@ export function validateComposeModel(model, lock, runId, project) {
     model.networks?.default?.labels?.[LOCAL_LABEL] !== runId ||
     model.volumes?.['synapse-data']?.labels?.[LOCAL_LABEL] !== runId ||
     model.volumes?.['radicale-data']?.labels?.[LOCAL_LABEL] !== runId ||
+    model.volumes?.['server-data']?.labels?.[LOCAL_LABEL] !== runId ||
     model.volumes?.['postgres-data']?.labels?.[LOCAL_LABEL] !== runId ||
     model.volumes?.['reminder-restore-radicale-data']?.labels?.[LOCAL_LABEL] !==
+      runId ||
+    model.volumes?.['reminder-restore-server-data']?.labels?.[LOCAL_LABEL] !==
       runId ||
     project !== `mcw-p0-${runId}`
   ) {
@@ -3605,7 +3619,9 @@ export function planOwnedCleanup(
     const expectedVolumes = new Map([
       [`${project}_synapse-data`, 'synapse-data'],
       [`${project}_radicale-data`, 'radicale-data'],
+      [`${project}_server-data`, 'server-data'],
       [`${project}_postgres-data`, 'postgres-data'],
+      [`${project}_server-restore`, 'reminder-restore-server-data'],
       [`${project}_radicale-restore`, 'reminder-restore-radicale-data'],
     ]);
     volumes = inventory.volumes.filter(
