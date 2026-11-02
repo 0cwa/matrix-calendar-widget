@@ -382,6 +382,20 @@ export type DesktopRoomNavigationDiagnostic = {
   legacyTreeItem: DesktopRoomNavigationTargetObservation;
   roomsReady: DesktopRoomsReadyDiagnostic;
   clickProgress: DesktopRoomNavigationClickProgress;
+  clickFailureClass:
+    | 'not_observed'
+    | DesktopRefreshRoomNavigationDiagnostic['clickFailureClass'];
+  clickTargetCountCapped: 0 | 1 | 2 | null;
+  centerHitWithinTarget: boolean | null;
+  centerHitRole:
+    | 'button'
+    | 'row'
+    | 'option'
+    | 'treeitem'
+    | 'link'
+    | 'listbox'
+    | 'other'
+    | 'unavailable';
 };
 
 export type DesktopGatewayReadFailureDiagnostic = {
@@ -422,7 +436,7 @@ export type DesktopJourneyFailureObservation =
   | null;
 
 export type DesktopJourneySummary = {
-  schemaVersion: 19;
+  schemaVersion: 20;
   sourceSha: string | null;
   status: 'passed' | 'failed' | 'incomplete' | 'unavailable';
   desktopChildCompletion: DesktopChildCompletionSummary;

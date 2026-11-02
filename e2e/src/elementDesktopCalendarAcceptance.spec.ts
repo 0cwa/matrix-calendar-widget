@@ -81,7 +81,11 @@ import {
   type WebBEventListReadDiagnostic,
 } from '../../dev/element-desktop-journey.mjs';
 import { resolveDesktopViewportSize } from '../../dev/element-desktop-viewport.mjs';
-import { ElementWebPage, getMainRoomListLocator } from './pages/elementWebPage';
+import {
+  ElementWebPage,
+  getMainRoomListLocator,
+  type RoomNavigationHitTestObservation,
+} from './pages/elementWebPage';
 
 type FixtureUser = {
   userId: string;
@@ -1148,6 +1152,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
           roomsReadyIdentity?.roomId ?? null,
           roomsReadyIdentity?.memberAId ?? null,
           roomNavigationClickProgress,
+          error,
         );
       }
       let webBEditSaveDiagnostic: WebBEditSaveFailureDiagnostic | undefined;
@@ -3219,6 +3224,10 @@ function unavailableDesktopRoomNavigationDiagnostic(): DesktopRoomNavigationDiag
     legacyTreeItem: unavailableTarget,
     roomsReady: unavailableDesktopRoomsReadyDiagnostic(),
     clickProgress: unavailableDesktopRoomNavigationClickProgress(),
+    clickFailureClass: 'not_observed',
+    clickTargetCountCapped: null,
+    centerHitWithinTarget: null,
+    centerHitRole: 'unavailable',
   };
 }
 
@@ -3228,6 +3237,7 @@ async function observeDesktopRoomNavigationFailure(
   expectedRoomId: string | null,
   expectedMemberAId: string | null,
   clickProgress: DesktopRoomNavigationClickProgress,
+  error: unknown,
 ): Promise<DesktopRoomNavigationDiagnostic> {
   const unavailable = unavailableDesktopRoomNavigationDiagnostic();
   if (!page) {
@@ -3260,10 +3270,32 @@ async function observeDesktopRoomNavigationFailure(
   } catch {
     roomsReady = unavailableDesktopRoomsReadyDiagnostic();
   }
+  let clickHitTest: RoomNavigationHitTestObservation = {
+    targetCountCapped: null,
+    centerHitObserved: null,
+    centerHitWithinTarget: null,
+    centerHitRole: 'unavailable',
+  };
+  if (roomName !== undefined && !clickProgress.clickResolved) {
+    try {
+      clickHitTest = await new ElementWebPage(
+        page,
+      ).observeRoomNavigationHitTest(roomName);
+    } catch {
+      // Keep click-time observations unavailable without retaining raw errors.
+    }
+  }
   return {
     ...targets,
     roomsReady,
     clickProgress: { ...clickProgress },
+    clickFailureClass:
+      clickProgress.clickStarted && !clickProgress.clickResolved
+        ? classifyDesktopRoomNavigationClickFailure(error)
+        : 'not_observed',
+    clickTargetCountCapped: clickHitTest.targetCountCapped,
+    centerHitWithinTarget: clickHitTest.centerHitWithinTarget,
+    centerHitRole: clickHitTest.centerHitRole,
   };
 }
 

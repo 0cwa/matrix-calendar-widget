@@ -269,7 +269,11 @@ const ROOM_NAVIGATION_TARGET_KEYS = Object.freeze(
 );
 const ROOM_NAVIGATION_DIAGNOSTIC_KEYS = Object.freeze(
   [
+    'centerHitRole',
+    'centerHitWithinTarget',
     'clickProgress',
+    'clickFailureClass',
+    'clickTargetCountCapped',
     'currentOption',
     'currentRow',
     'legacyTreeItem',
@@ -323,6 +327,10 @@ const DESKTOP_REFRESH_ROOM_NAVIGATION_HIT_ROLES = new Set([
   'listbox',
   'other',
   'unavailable',
+]);
+const ROOM_NAVIGATION_CLICK_FAILURE_CLASSES = new Set([
+  'not_observed',
+  ...DESKTOP_REFRESH_ROOM_NAVIGATION_CLICK_FAILURE_CLASSES,
 ]);
 const DESKTOP_REFRESH_ROOM_NAVIGATION_ELAPSED_BUCKETS = new Set([
   'not_started',
@@ -1190,7 +1198,11 @@ function validRoomNavigationDiagnostic(value, failurePoint) {
     validRoomNavigationTargetObservation(value.currentRow) &&
     validRoomNavigationTargetObservation(value.legacyTreeItem) &&
     validRoomsReadyDiagnostic(value.roomsReady) &&
-    validRoomNavigationClickProgress(value.clickProgress, failurePoint)
+    validRoomNavigationClickProgress(value.clickProgress, failurePoint) &&
+    ROOM_NAVIGATION_CLICK_FAILURE_CLASSES.has(value.clickFailureClass) &&
+    [null, 0, 1, 2].includes(value.clickTargetCountCapped) &&
+    [null, true, false].includes(value.centerHitWithinTarget) &&
+    DESKTOP_REFRESH_ROOM_NAVIGATION_HIT_ROLES.has(value.centerHitRole)
   );
 }
 
@@ -2963,7 +2975,7 @@ export function summarizeDesktopJourneyEvidence(
     childCompletedSuccessfully &&
     playwrightResult === 'passed';
   return {
-    schemaVersion: 19,
+    schemaVersion: 20,
     sourceSha,
     status: failed ? 'failed' : journeyEvidencePassed ? 'passed' : 'incomplete',
     desktopChildCompletion,
@@ -2985,7 +2997,7 @@ export function summarizeDesktopJourneyEvidence(
 
 function unavailableDesktopJourneySummary(sourceSha) {
   return {
-    schemaVersion: 19,
+    schemaVersion: 20,
     sourceSha,
     status: 'unavailable',
     desktopChildCompletion: {
