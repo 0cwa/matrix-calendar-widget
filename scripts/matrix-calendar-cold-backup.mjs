@@ -1438,10 +1438,10 @@ for (const key of keys) {
   try { parsed = new URL(value); } catch { process.exit(2); }
   if (!['postgres:', 'postgresql:'].includes(parsed.protocol) || !parsed.hostname || !parsed.pathname || parsed.pathname === '/') process.exit(2);
   if (parsed.hostname.includes(',') || parsed.searchParams.has('target_session_attrs') || process.env.PGTARGETSESSIONATTRS) process.exit(2);
-  let database;
-  try { database = decodeURIComponent(parsed.pathname.slice(1)); } catch { process.exit(2); }
-  if (!database || parsed.pathname.slice(1).includes('/')) process.exit(2);
-  databases.push({ key, host: parsed.hostname.toLowerCase(), port: parsed.port || '5432', database });
+  const database = parsed.pathname.slice(1);
+  const port = parsed.port || process.env.PGPORT || '5432';
+  if (!database || database.includes('/') || !/^\\d{1,5}$/u.test(port) || Number(port) < 1 || Number(port) > 65535) process.exit(2);
+  databases.push({ key, host: parsed.hostname.toLowerCase(), port: String(Number(port)), database });
 }
 const known = new Set(keys);
 const unknownDatabaseSettings = Object.keys(process.env).filter((key) => /DATABASE_URL$/u.test(key) && !known.has(key));

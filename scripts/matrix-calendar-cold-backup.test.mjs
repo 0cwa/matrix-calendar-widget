@@ -3000,6 +3000,26 @@ test('online inventory rejects PostgreSQL URL routing and multihost targets', as
   ]);
 });
 
+test('online inventory follows postgres.js PGPORT and raw database path parsing', async () => {
+  const inheritedPort = await runNodeSnippet(ONLINE_STORE_INVENTORY_SCRIPT, {
+    MATRIX_CALENDAR_REMINDER_DATABASE_URL:
+      'postgres://db.example.invalid/calendar',
+    PGPORT: '6433',
+  });
+  assert.equal(inheritedPort.code, 0);
+  assert.equal(JSON.parse(inheritedPort.stdout).databases[0].port, '6433');
+
+  const encodedDatabase = await runNodeSnippet(ONLINE_STORE_INVENTORY_SCRIPT, {
+    MATRIX_CALENDAR_REMINDER_DATABASE_URL:
+      'postgres://db.example.invalid/calendar%2Farchive',
+  });
+  assert.equal(encodedDatabase.code, 0);
+  assert.equal(
+    JSON.parse(encodedDatabase.stdout).databases[0].database,
+    'calendar%2Farchive',
+  );
+});
+
 test('online capture requires and captures the exact public-feed signing key', async (t) => {
   const key = Buffer.alloc(32, 7);
   const encodedKey = key.toString('base64url');
