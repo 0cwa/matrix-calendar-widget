@@ -355,6 +355,22 @@ export function withLocalNoPullComposeArgs(args, localPrebuilt) {
   return result;
 }
 
+export function withBoundedDockerRunArgs(args) {
+  if (args[0] !== 'run') return args;
+  if (
+    args.some((argument) =>
+      ['--memory', '--memory-swap', '--cpus'].some(
+        (option) => argument === option || argument.startsWith(`${option}=`),
+      ),
+    )
+  ) {
+    throw new TypeError(
+      'Docker helper resource limits are controlled by the fixture',
+    );
+  }
+  return ['run', '--memory=2g', '--cpus=2', ...args.slice(1)];
+}
+
 export function withLocalOwnedDockerRunArgs(args, controls, runCounter) {
   if (!controls.localPrebuilt || args[0] !== 'run') return args;
   if (
@@ -377,8 +393,10 @@ export function withLocalOwnedDockerRunArgs(args, controls, runCounter) {
     );
   }
   const name = `${controls.projectName}-local-${controls.runId}-${runCounter}`;
+  const resourceLimitedArgs = withBoundedDockerRunArgs(args);
   return [
     'run',
+    ...resourceLimitedArgs.slice(1, 3),
     '--pull=never',
     '--label',
     `${LOCAL_REHEARSAL_LABEL}=${controls.runId}`,

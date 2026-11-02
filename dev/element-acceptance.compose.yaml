@@ -1,6 +1,8 @@
 services:
   gateway:
     image: matrix-calendar-widget/server:element-acceptance
+    mem_limit: 2g
+    cpus: 2
     build:
       context: ..
       dockerfile: matrix-calendar-server/Dockerfile
@@ -41,6 +43,8 @@ services:
 
   widget:
     image: matrix-calendar-widget/widget:element-acceptance
+    mem_limit: 2g
+    cpus: 2
     build:
       context: ../matrix-calendar-widget
       dockerfile: Dockerfile
@@ -54,6 +58,8 @@ services:
 
   element:
     image: ghcr.io/element-hq/element-web:v1.12.30@sha256:9189d2871ecc9ba8a79a1a94c29c4696648fbaa7a6979092919d9b18d0f1ae09
+    mem_limit: 2g
+    cpus: 2
     ports:
       - '127.0.0.1:8090:80'
     volumes:

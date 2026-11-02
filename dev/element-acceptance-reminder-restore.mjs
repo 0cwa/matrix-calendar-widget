@@ -34,6 +34,7 @@ import {
   hasLocalComposeResourceOwnership,
   loadElementAcceptanceOverrides,
   LOCAL_REHEARSAL_LABEL,
+  withBoundedDockerRunArgs,
   withLocalNoPullComposeArgs,
   withLocalOwnedDockerRunArgs,
 } from './element-acceptance-overrides.mjs';
@@ -469,6 +470,13 @@ function run(
   args,
   { input, timeout = 30_000, maxBuffer = MAX_COMMAND_BUFFER } = {},
 ) {
+  if (
+    command === 'docker' &&
+    args[0] === 'run' &&
+    !ACCEPTANCE_OVERRIDES.localPrebuilt
+  ) {
+    args = withBoundedDockerRunArgs(args);
+  }
   if (command === 'docker' && ACCEPTANCE_OVERRIDES.localPrebuilt) {
     if (
       args.some(
