@@ -29,7 +29,9 @@ import test from 'node:test';
 import {
   createSyntheticCaptureDirectory,
   createSyntheticColdCapture,
+  removeSyntheticCaptureDirectory,
   verifySyntheticColdCapture,
+  withSyntheticCaptureDirectory,
 } from './element-acceptance-cold-capture.mjs';
 
 test('synthetic capture directories are unique across repeated restore stages', async (t) => {
@@ -40,6 +42,39 @@ test('synthetic capture directories are unique across repeated restore stages', 
   assert.notEqual(first, second);
   assert.equal((await stat(first)).mode & 0o777, 0o700);
   assert.equal((await stat(second)).mode & 0o777, 0o700);
+});
+
+test('synthetic capture cleanup removes only its private directory on success and failure', async (t) => {
+  const root = await mkdtemp(
+    join(tmpdir(), 'matrix-calendar-capture-cleanup-'),
+  );
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const unrelated = join(root, 'keep.txt');
+  await writeFile(unrelated, 'preserve');
+
+  let successfulDirectory;
+  await withSyntheticCaptureDirectory(root, async (directory) => {
+    successfulDirectory = directory;
+    await writeFile(join(directory, 'server-data.tar'), 'sensitive fixture');
+  });
+  await assert.rejects(stat(successfulDirectory), { code: 'ENOENT' });
+
+  let failedDirectory;
+  await assert.rejects(
+    withSyntheticCaptureDirectory(root, async (directory) => {
+      failedDirectory = directory;
+      await writeFile(join(directory, 'reminder-postgresql.dump'), 'fixture');
+      throw new Error('restore failed');
+    }),
+    /restore failed/u,
+  );
+  await assert.rejects(stat(failedDirectory), { code: 'ENOENT' });
+  assert.equal(await readFile(unrelated, 'utf8'), 'preserve');
+
+  await assert.rejects(
+    removeSyntheticCaptureDirectory(root, root),
+    /synthetic capture verification failed/u,
+  );
 });
 
 async function makeCapture(t) {

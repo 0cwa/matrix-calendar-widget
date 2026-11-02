@@ -21,9 +21,10 @@ import {
   open,
   readdir,
   readFile,
+  rm,
   writeFile,
 } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import {
   COLD_CAPTURE_MARKER_CONTENT,
   serializeCaptureManifest,
@@ -59,6 +60,44 @@ export async function createSyntheticCaptureDirectory(parentDirectory) {
   return await mkdtemp(
     join(resolve(parentDirectory), 'synthetic-cold-capture-'),
   );
+}
+
+export async function removeSyntheticCaptureDirectory(
+  parentDirectory,
+  captureDirectory,
+) {
+  const parent = resolve(parentDirectory);
+  const directory = resolve(captureDirectory);
+  if (
+    dirname(directory) !== parent ||
+    !basename(directory).startsWith('synthetic-cold-capture-')
+  )
+    fail();
+
+  let directoryInfo;
+  try {
+    directoryInfo = await lstat(directory);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return;
+    fail();
+  }
+  if (
+    !directoryInfo.isDirectory() ||
+    directoryInfo.isSymbolicLink() ||
+    (directoryInfo.mode & 0o077) !== 0
+  )
+    fail();
+
+  await rm(directory, { recursive: true });
+}
+
+export async function withSyntheticCaptureDirectory(parentDirectory, callback) {
+  const directory = await createSyntheticCaptureDirectory(parentDirectory);
+  try {
+    return await callback(directory);
+  } finally {
+    await removeSyntheticCaptureDirectory(parentDirectory, directory);
+  }
 }
 
 export async function createSyntheticColdCapture(

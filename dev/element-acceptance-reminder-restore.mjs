@@ -25,9 +25,9 @@ import {
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  createSyntheticCaptureDirectory,
   createSyntheticColdCapture,
   verifySyntheticColdCapture,
+  withSyntheticCaptureDirectory,
 } from './element-acceptance-cold-capture.mjs';
 import {
   appendComposeOverrideFiles,
@@ -2259,134 +2259,144 @@ function readRadicaleStartupLogs(containerId) {
 
 async function restoreStores() {
   await validateCompose();
-  captureDirectory = await createSyntheticCaptureDirectory(dirname(stageFile));
-  radicaleArchivePath = resolve(captureDirectory, 'radicale-data.tar');
-  serverArchivePath = resolve(captureDirectory, 'server-data.tar');
-  postgresDumpPath = resolve(captureDirectory, 'reminder-postgresql.dump');
-  serverVolumeName = inspectServerVolume();
-  const marker = await writeSyntheticServerDataMarker();
-  try {
-    const { radicaleVolume, serverVolume } = await quiesceWriters();
-    await backupRadicale(radicaleVolume);
-    await backupServer(serverVolume);
-    await backupPostgres();
-    await assembleAndVerifyCapture();
-    await withStage('restore-targets-prepared', async () => {
-      const diagnostics = { restoreStep: 'target-volume-check' };
+  await withSyntheticCaptureDirectory(dirname(stageFile), async (directory) => {
+    captureDirectory = directory;
+    try {
+      radicaleArchivePath = resolve(captureDirectory, 'radicale-data.tar');
+      serverArchivePath = resolve(captureDirectory, 'server-data.tar');
+      postgresDumpPath = resolve(captureDirectory, 'reminder-postgresql.dump');
+      serverVolumeName = inspectServerVolume();
+      const marker = await writeSyntheticServerDataMarker();
       try {
-        const details = verifyVolumeAbsentAndCreate(
-          radicaleVolume,
-          diagnostics,
-        );
-        restoreRadicaleArchive(diagnostics);
-        restoreServerArchive(diagnostics);
-        restorePostgresDump(diagnostics);
-        diagnostics.restoreStep = 'complete';
-        return { ...details, ...diagnostics };
-      } catch (error) {
-        if (error instanceof StageFailure) {
-          error.details = { ...diagnostics, ...error.details };
-          throw error;
-        }
-        throw new StageFailure('restore-targets-prepared', diagnostics);
-      }
-    });
-    await withStage('restore-radicale-ready', async () => {
-      requireSuccess(
-        compose(['up', '--no-build', '-d', 'restore-radicale']),
-        'restore-radicale-ready',
-      );
-      try {
-        return {
-          httpStatus: await waitForRestoreRadicale(),
-          ...createRadicaleFilesystemEvidence(
-            sourceRadicaleFilesystemProbe,
-            restoredRadicaleFilesystemProbe,
-          ),
-        };
-      } catch (error) {
-        if (
-          !(error instanceof StageFailure) ||
-          error.phase !== 'restore-radicale-ready'
-        ) {
-          throw error;
-        }
-        throw new StageFailure('restore-radicale-ready', {
-          ...error.details,
-          restoreRadicaleProbeOutcome: Number.isInteger(
-            error.details.httpStatus,
-          )
-            ? 'http-status'
-            : 'no-response',
-          ...inspectRestoreRadicaleReadiness(),
+        const { radicaleVolume, serverVolume } = await quiesceWriters();
+        await backupRadicale(radicaleVolume);
+        await backupServer(serverVolume);
+        await backupPostgres();
+        await assembleAndVerifyCapture();
+        await withStage('restore-targets-prepared', async () => {
+          const diagnostics = { restoreStep: 'target-volume-check' };
+          try {
+            const details = verifyVolumeAbsentAndCreate(
+              radicaleVolume,
+              diagnostics,
+            );
+            restoreRadicaleArchive(diagnostics);
+            restoreServerArchive(diagnostics);
+            restorePostgresDump(diagnostics);
+            diagnostics.restoreStep = 'complete';
+            return { ...details, ...diagnostics };
+          } catch (error) {
+            if (error instanceof StageFailure) {
+              error.details = { ...diagnostics, ...error.details };
+              throw error;
+            }
+            throw new StageFailure('restore-targets-prepared', diagnostics);
+          }
         });
-      }
-    });
-    await withStage('restore-postgres-role-ready', async () => {
-      verifyRestrictedRole(
-        'matrix_calendar_restored',
-        'restore-postgres-role-ready',
-      );
-      return { rolePolicyVerified: true };
-    });
-    await withStage('restore-gateway-ready', async () => {
-      requireSuccess(
-        compose(['up', '--no-build', '-d', 'restore-gateway']),
-        'restore-gateway-ready',
-      );
-      return {
-        httpStatus: await waitForHttp(
-          'http://127.0.0.1:3000/v1/calendar/context',
-          (status) => status >= 400 && status < 500,
-          'restore-gateway-ready',
-        ),
-      };
-    });
-    await verifyRestoredServerData(marker);
-    if (ACCEPTANCE_OVERRIDES.skipElement) {
-      await withStage('restore-widget-ready', async () => {
-        requireSuccess(
-          compose(['up', '--no-build', '-d', 'widget']),
-          'restore-widget-ready',
-        );
-        const widgetStatus = await waitForHttp(
-          'http://127.0.0.1:8080/',
-          (status) => status === 200,
-          'restore-widget-ready',
-        );
-        return {
-          count: widgetStatus === 200 ? 1 : 0,
-          httpStatus: widgetStatus,
-        };
-      });
-      return;
-    }
+        await withStage('restore-radicale-ready', async () => {
+          requireSuccess(
+            compose(['up', '--no-build', '-d', 'restore-radicale']),
+            'restore-radicale-ready',
+          );
+          try {
+            return {
+              httpStatus: await waitForRestoreRadicale(),
+              ...createRadicaleFilesystemEvidence(
+                sourceRadicaleFilesystemProbe,
+                restoredRadicaleFilesystemProbe,
+              ),
+            };
+          } catch (error) {
+            if (
+              !(error instanceof StageFailure) ||
+              error.phase !== 'restore-radicale-ready'
+            ) {
+              throw error;
+            }
+            throw new StageFailure('restore-radicale-ready', {
+              ...error.details,
+              restoreRadicaleProbeOutcome: Number.isInteger(
+                error.details.httpStatus,
+              )
+                ? 'http-status'
+                : 'no-response',
+              ...inspectRestoreRadicaleReadiness(),
+            });
+          }
+        });
+        await withStage('restore-postgres-role-ready', async () => {
+          verifyRestrictedRole(
+            'matrix_calendar_restored',
+            'restore-postgres-role-ready',
+          );
+          return { rolePolicyVerified: true };
+        });
+        await withStage('restore-gateway-ready', async () => {
+          requireSuccess(
+            compose(['up', '--no-build', '-d', 'restore-gateway']),
+            'restore-gateway-ready',
+          );
+          return {
+            httpStatus: await waitForHttp(
+              'http://127.0.0.1:3000/v1/calendar/context',
+              (status) => status >= 400 && status < 500,
+              'restore-gateway-ready',
+            ),
+          };
+        });
+        await verifyRestoredServerData(marker);
+        if (ACCEPTANCE_OVERRIDES.skipElement) {
+          await withStage('restore-widget-ready', async () => {
+            requireSuccess(
+              compose(['up', '--no-build', '-d', 'widget']),
+              'restore-widget-ready',
+            );
+            const widgetStatus = await waitForHttp(
+              'http://127.0.0.1:8080/',
+              (status) => status === 200,
+              'restore-widget-ready',
+            );
+            return {
+              count: widgetStatus === 200 ? 1 : 0,
+              httpStatus: widgetStatus,
+            };
+          });
+          return;
+        }
 
-    await withStage('restore-element-ready', async () => {
-      requireSuccess(
-        compose(['up', '--no-build', '-d', 'widget', 'element']),
-        'restore-element-ready',
-      );
-      const statuses = await Promise.all([
-        waitForHttp(
-          'http://127.0.0.1:8080/',
-          (status) => status === 200,
-          'restore-element-ready',
-        ),
-        waitForHttp(
-          'http://127.0.0.1:8090/',
-          (status) => status === 200,
-          'restore-element-ready',
-        ),
-      ]);
-      return {
-        count: statuses.filter((status) => status === 200).length,
-        httpStatus: statuses[1],
-      };
-    });
-  } finally {
-    await removeSyntheticServerDataMarker(marker);
-  }
+        await withStage('restore-element-ready', async () => {
+          requireSuccess(
+            compose(['up', '--no-build', '-d', 'widget', 'element']),
+            'restore-element-ready',
+          );
+          const statuses = await Promise.all([
+            waitForHttp(
+              'http://127.0.0.1:8080/',
+              (status) => status === 200,
+              'restore-element-ready',
+            ),
+            waitForHttp(
+              'http://127.0.0.1:8090/',
+              (status) => status === 200,
+              'restore-element-ready',
+            ),
+          ]);
+          return {
+            count: statuses.filter((status) => status === 200).length,
+            httpStatus: statuses[1],
+          };
+        });
+      } finally {
+        await removeSyntheticServerDataMarker(marker);
+      }
+    } finally {
+      captureDirectory = undefined;
+      radicaleArchivePath = undefined;
+      serverArchivePath = undefined;
+      postgresDumpPath = undefined;
+      serverVolumeName = undefined;
+    }
+  });
 }
 
 async function main() {
