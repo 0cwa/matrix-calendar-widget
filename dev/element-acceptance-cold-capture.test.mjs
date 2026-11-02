@@ -82,14 +82,33 @@ test('capture cleanup failure preserves a restore error and surfaces after succe
   const root = await mkdtemp(join(tmpdir(), 'matrix-calendar-capture-error-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const restoreError = new Error('restore failed');
+  const warnings = [];
+  const captureWarning = (warning) => {
+    if (warning.code === 'MCW_SYNTHETIC_CAPTURE_CLEANUP') {
+      warnings.push(warning);
+    }
+  };
+  process.on('warning', captureWarning);
 
-  await assert.rejects(
-    withSyntheticCaptureDirectory(root, async (directory) => {
-      await chmod(directory, 0o755);
-      throw restoreError;
-    }),
-    (error) => error === restoreError,
+  try {
+    await assert.rejects(
+      withSyntheticCaptureDirectory(root, async (directory) => {
+        await chmod(directory, 0o755);
+        throw restoreError;
+      }),
+      (error) => error === restoreError,
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+  } finally {
+    process.off('warning', captureWarning);
+  }
+
+  assert.equal(warnings.length, 1);
+  assert.equal(
+    warnings[0].message,
+    'Synthetic restore capture cleanup failed after an earlier error.',
   );
+  assert.equal(warnings[0].message.includes(root), false);
 
   await assert.rejects(
     withSyntheticCaptureDirectory(root, async (directory) => {

@@ -104,6 +104,10 @@ export async function withSyntheticCaptureDirectory(parentDirectory, callback) {
       await removeSyntheticCaptureDirectory(parentDirectory, directory);
     } catch (cleanupError) {
       if (!callbackFailed) throw cleanupError;
+      process.emitWarning(
+        'Synthetic restore capture cleanup failed after an earlier error.',
+        { code: 'MCW_SYNTHETIC_CAPTURE_CLEANUP' },
+      );
     }
   }
 }
