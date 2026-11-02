@@ -423,7 +423,7 @@ docker compose --project-name "$PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FIL
 Confirm all three services are stopped and that no other container or host
 process writes to either volume. If a service will not stop cleanly, do not
 archive a live volume and call the result consistent; resolve the shutdown
-problem first. If the optional reminder PostgreSQL store is enabled, coordinate
+problem first. If any application PostgreSQL store is configured, coordinate
 its backup in this same maintenance window as described below. Stop the calendar
 server while the database dump is made, and keep the custom-format dump inside
 `BACKUP_DIR` so the volume archives and database dump enter the same Restic
@@ -434,19 +434,26 @@ directory.
 
 While all writers remain stopped, capture the app-owned PostgreSQL database
 before archiving the volumes. Set `REMINDER_DB_BACKUP_ENABLED` explicitly to
-`true` when either the reminder or binding store is configured and this dump is
-to include its database; set it to `false` only when neither store is configured.
-The private libpq service named by `PG_SERVICE` must resolve the app-owned
-database containing the configured store state, without putting a URL or
-password in this shell, command line, or log. For a binding-only installation,
-point `PG_SERVICE` at the binding database and enable this dump explicitly.
+`true` when any configured store uses PostgreSQL: reminder
+(`MATRIX_CALENDAR_REMINDER_DATABASE_URL`), room binding
+(`MATRIX_CALENDAR_BINDING_DATABASE_URL`), or private CalDAV clients
+(`MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_URL`). Set it to `false` only when
+none of those stores is configured. The private libpq service named by
+`PG_SERVICE` must resolve to the app-owned database containing the state being
+captured, without putting a URL or password in this shell, command line, or
+log.
 
-The binding and reminder stores may share one PostgreSQL database. In that
-case, one configured dump includes both owned schemas. This procedure captures
-the database selected by `PG_SERVICE`; configuring either URL does not make the
-database appear in a capture automatically. If the stores use different
-databases, capture each database with a separate protected dump and restore
-procedure before relying on both stores.
+These stores may share one PostgreSQL database, using separate schemas
+(`matrix_calendar`, `matrix_calendar_bindings`, and
+`matrix_calendar_private_clients`). A full dump of that database must include
+every configured store's schema and migration state. This manual example
+captures only the database selected by `PG_SERVICE`; configured URLs do not
+make databases appear in the capture automatically. The shipped coordinator
+also captures only one database and does not discover configured store URLs.
+If the configured stores use different databases, capture each database with a
+separate protected dump in the same stopped-writer maintenance window, then
+restore and verify each one before relying on the stores. A successful
+coordinator run proves coverage of only its selected database.
 
 ```bash
 case "$REMINDER_DB_BACKUP_ENABLED" in
@@ -685,20 +692,22 @@ Radicale service or its data.
 
 ## Optional external PostgreSQL store
 
-Inventory both configured database URLs before a backup. The reminder store
-uses `MATRIX_CALENDAR_REMINDER_DATABASE_URL`; dynamic room setup uses
-`MATRIX_CALENDAR_BINDING_DATABASE_URL`. They may share one application-owned
-database, with separate `matrix_calendar` and `matrix_calendar_bindings`
-schemas. A full dump of that database must include both schemas and their
-migration ledgers. Verify the dump inventory and restore both before enabling
-their features.
+Inventory all configured application database URLs before a backup. The
+reminder store uses `MATRIX_CALENDAR_REMINDER_DATABASE_URL`; dynamic room setup
+uses `MATRIX_CALENDAR_BINDING_DATABASE_URL`; and private CalDAV clients use
+`MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_URL` when enabled. They may share one
+application-owned database, with separate `matrix_calendar`,
+`matrix_calendar_bindings`, and `matrix_calendar_private_clients` schemas. A
+full dump of a shared database must include each configured schema and its
+migration state. Verify dump contents and restore every configured store before
+enabling its feature.
 
 The shipped coordinator captures one PostgreSQL database and calls the archive
-`reminder-postgresql.dump`; it does not automatically discover or capture a
-second binding database. If the stores use different databases, arrange an
-explicit, rehearsed capture/restore of the additional database in the same
-stopped-writer maintenance window. Do not treat the coordinator's successful
-single-database result as proof of complete binding recovery.
+`reminder-postgresql.dump`; it does not inspect the configured store URLs or
+automatically capture a second or third database. If stores use different
+databases, arrange an explicit, rehearsed capture and restore for each database
+in the same stopped-writer maintenance window. Do not treat the coordinator's
+successful single-database result as proof of complete store recovery.
 
 The optional reminder database configured by
 `MATRIX_CALENDAR_REMINDER_DATABASE_URL` is external to the Compose volumes. The
@@ -712,8 +721,11 @@ documentation](https://www.postgresql.org/docs/current/app-pgdump.html) and
 Keep database credentials and dumps protected. The application does not provide
 a single atomic transaction across CalDAV files and PostgreSQL.
 
-Restore PostgreSQL into an isolated staging database before restoring or
-starting the sidecar against it. The production server requires verified TLS
+Restore each PostgreSQL database into an isolated staging database before
+restoring or starting the sidecar against it. When restoring private-client
+state, keep the capability disabled and rotate its separately held epoch key
+before reopening ingress; restored credentials then require reissue. The
+production server requires verified TLS
 by default; configure the staging endpoint and its certificate according to
 the deployment's normal secret and CA handling. Do not reuse Synapse's database,
 role, schema, or credentials. See [Docker deployment notes](./deployment-docker.md#optional-application-postgresql-stores)
