@@ -673,6 +673,30 @@ mkdir -m 0700 "$RESTORE_STAGING_DIR"
 restic restore "$SNAPSHOT_ID" --target "$RESTORE_STAGING_DIR"
 ```
 
+Before using the restored files, run the local offline verifier against the
+captured directory found below `RESTORE_STAGING_DIR`:
+
+```bash
+node scripts/matrix-calendar-verify-restore.mjs \
+  --capture-dir "$RESTORE_STAGING_DIR/path/to/capture-directory"
+```
+
+The verifier requires the exact checksummed file inventory, validates the
+capture manifest and completion marker, checks every restore-input size and
+SHA-256 (including `public-feed-signing-key` when present), validates both tar
+archives, and extracts them only into new private temporary directories. The
+capture directory must have no group or other permissions. It rejects archive
+links and non-file entries, limits each staged archive or dump to 2 GiB and
+each archive to one million entries, caps expanded data at 2 GiB total across
+both archives, and removes its temporary data on success or failure. If the
+manifest includes PostgreSQL, it also requires `pg_restore` and validates the
+custom-format dump list. It prints no input
+contents or private paths. It does not connect to Docker, Matrix, Radicale, or
+PostgreSQL, and it does not test service startup or calendar behavior. A pass
+is an offline byte and archive check, not an isolated recovery rehearsal or
+production recovery acceptance; continue with the isolated Compose and
+application checks below.
+
 Restic restores the snapshot's saved paths below the target directory. Locate
 the captured backup directory there, then run the checksum and isolated-volume
 steps below against that directory.
