@@ -16,6 +16,7 @@
 
 import assert from 'node:assert/strict';
 import {
+  chmod,
   mkdir,
   mkdtemp,
   readFile,
@@ -73,6 +74,27 @@ test('synthetic capture cleanup removes only its private directory on success an
 
   await assert.rejects(
     removeSyntheticCaptureDirectory(root, root),
+    /synthetic capture verification failed/u,
+  );
+});
+
+test('capture cleanup failure preserves a restore error and surfaces after success', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'matrix-calendar-capture-error-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const restoreError = new Error('restore failed');
+
+  await assert.rejects(
+    withSyntheticCaptureDirectory(root, async (directory) => {
+      await chmod(directory, 0o755);
+      throw restoreError;
+    }),
+    (error) => error === restoreError,
+  );
+
+  await assert.rejects(
+    withSyntheticCaptureDirectory(root, async (directory) => {
+      await chmod(directory, 0o755);
+    }),
     /synthetic capture verification failed/u,
   );
 });

@@ -93,10 +93,18 @@ export async function removeSyntheticCaptureDirectory(
 
 export async function withSyntheticCaptureDirectory(parentDirectory, callback) {
   const directory = await createSyntheticCaptureDirectory(parentDirectory);
+  let callbackFailed = false;
   try {
     return await callback(directory);
+  } catch (error) {
+    callbackFailed = true;
+    throw error;
   } finally {
-    await removeSyntheticCaptureDirectory(parentDirectory, directory);
+    try {
+      await removeSyntheticCaptureDirectory(parentDirectory, directory);
+    } catch (cleanupError) {
+      if (!callbackFailed) throw cleanupError;
+    }
   }
 }
 
