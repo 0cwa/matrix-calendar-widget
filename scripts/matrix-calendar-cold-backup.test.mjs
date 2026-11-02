@@ -164,6 +164,18 @@ function fakeCommands({
   onlineInventory = {
     databases: [
       {
+        key: 'MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_URL',
+        host: 'db.example.invalid',
+        port: '5432',
+        database: 'calendar',
+      },
+      {
+        key: 'MATRIX_CALENDAR_BINDING_DATABASE_URL',
+        host: 'db.example.invalid',
+        port: '5432',
+        database: 'calendar',
+      },
+      {
         key: 'MATRIX_CALENDAR_REMINDER_DATABASE_URL',
         host: 'db.example.invalid',
         port: '5432',
@@ -176,6 +188,7 @@ function fakeCommands({
   },
   failCheckpointVerifyAt,
   delayedRadicaleLock = false,
+  reusedRadicalePid = false,
   waitForContainerDumpAbort = false,
   failDump = false,
   warningDump = false,
@@ -438,13 +451,20 @@ function fakeCommands({
       }
     }
     if (name === 'docker' && args[0] === 'exec' && args.includes('python3')) {
+      const script = args[args.indexOf('-c') + 1];
+      if (script.includes('mode, pid_text, expected_start_time')) {
+        const mode = args[args.indexOf('-c') + 2];
+        if (reusedRadicalePid) return { status: 1, stdout: '' };
+        if (mode === 'signal') lockActive = false;
+        return { status: mode === 'check' && !lockActive ? 1 : 0, stdout: '' };
+      }
       return { status: 0, stdout: '' };
     }
     if (name === 'docker' && args[0] === 'exec' && args.includes('cat')) {
       if (cancelRequested) return { status: 1, stdout: '' };
       return delayedRadicaleLock
-        ? { status: 0, stdout: 'waiting:4321\n' }
-        : { status: 0, stdout: 'locked:4321:1:42\n' };
+        ? { status: 0, stdout: 'waiting:4321:6543:1:42:5\n' }
+        : { status: 0, stdout: 'locked:4321:1:42:6543:5\n' };
     }
     if (name === 'docker' && args[0] === 'exec' && args.includes('touch')) {
       cancelRequested = true;
@@ -2812,6 +2832,34 @@ test('opt-in online capture checkpoints the app and holds the Radicale lock with
       (call) => call.name === 'restic' && call.args[0] === 'backup',
     ),
   );
+  const radicaleExecs = fake.calls.filter(
+    (call) =>
+      call.name === 'docker' &&
+      call.args[0] === 'exec' &&
+      call.args.includes(containerIds.radicale),
+  );
+  assert.ok(radicaleExecs.length > 0);
+  assert.ok(
+    radicaleExecs.every((call) => {
+      const containerIndex = call.args.indexOf(containerIds.radicale);
+      return (
+        call.args[containerIndex - 2] === '--user' &&
+        call.args[containerIndex - 1] === '0'
+      );
+    }),
+  );
+  const radicaleArchive = fake.calls.find(
+    (call) =>
+      call.name === 'docker' &&
+      call.args[0] === 'run' &&
+      call.args.includes('tar'),
+  );
+  assert.ok(radicaleArchive.args.includes('--exclude=.Radicale.cache'));
+  assert.ok(radicaleArchive.args.includes('--exclude=.Radicale.tmp-*'));
+  assert.equal(
+    radicaleArchive.args.some((arg) => String(arg).includes('token')),
+    false,
+  );
 });
 
 test('online capture rejects distinct database targets before acquiring the checkpoint', async (t) => {
@@ -2860,6 +2908,49 @@ test('online capture rejects distinct database targets before acquiring the chec
     false,
   );
   assert.deepEqual(await readdir(fixture.captureRoot), []);
+});
+
+test('online capture rejects unhandled PostgreSQL target selectors before checkpoint acquisition', async (t) => {
+  for (const setting of [
+    'hostaddr=203.0.113.9',
+    'target_session_attrs=primary',
+    'load_balance_hosts=random',
+    'service=other-service',
+  ]) {
+    await t.test(setting.split('=')[0], async (subtest) => {
+      const fixture = await makeFixture();
+      subtest.after(fixture.cleanup);
+      fixture.config.captureMode = 'online';
+      await writeFile(
+        fixture.pgServiceFile,
+        `[matrix-calendar-reminder]\nhost=db.example.invalid\nport=5432\ndbname=calendar\nuser=calendar\n${setting}\n`,
+        { mode: 0o600 },
+      );
+      const fake = fakeCommands();
+      await assert.rejects(
+        runColdBackup(fixture.config, {
+          command: fake.command,
+          env: fixture.env,
+        }),
+        (error) =>
+          error instanceof ColdBackupFailure && error.stage === 'preflight',
+      );
+      assert.equal(
+        fake.calls.some(
+          (call) =>
+            call.name === 'docker' &&
+            String(call.args.at(-1)).includes('/checkpoint/acquire'),
+        ),
+        false,
+      );
+      assert.equal(
+        fake.calls.some(
+          (call) => call.name === 'restic' && call.args[0] === 'backup',
+        ),
+        false,
+      );
+    });
+  }
 });
 
 test('online capture requires and captures the exact public-feed signing key', async (t) => {
@@ -2937,7 +3028,7 @@ test('expired online checkpoint invalidates capture, releases the lock, and remo
       (call) =>
         call.name === 'docker' &&
         call.args[0] === 'exec' &&
-        call.args.includes('kill'),
+        call.args.includes('signal'),
     ),
     true,
   );
@@ -2971,6 +3062,52 @@ test('late Radicale lock startup receives a persistent cancellation sentinel', a
   assert.equal(
     fake.calls.some(
       (call) => call.name === 'restic' && call.args[0] === 'backup',
+    ),
+    false,
+  );
+  assert.deepEqual(await readdir(fixture.captureRoot), []);
+});
+
+test('reused Radicale PID is rejected before the process can be signaled', async (t) => {
+  const fixture = await makeFixture();
+  t.after(fixture.cleanup);
+  fixture.config.captureMode = 'online';
+  const fake = fakeCommands({ reusedRadicalePid: true });
+
+  await assert.rejects(
+    runColdBackup(fixture.config, {
+      command: fake.command,
+      env: fixture.env,
+      id: () => 'synthetic-run-id',
+    }),
+    (error) =>
+      error instanceof ColdBackupFailure && error.stage === 'radicale-lock',
+  );
+  const processControl = fake.calls.filter(
+    (call) =>
+      call.name === 'docker' &&
+      call.args[0] === 'exec' &&
+      call.args.includes('python3') &&
+      call.args.includes('signal'),
+  );
+  assert.ok(processControl.length > 0);
+  assert.ok(
+    processControl.every((call) => {
+      const script = call.args[call.args.indexOf('-c') + 1];
+      return (
+        script.includes('os.pidfd_open') &&
+        script.includes('fields[19] != expected_start_time') &&
+        script.includes('/proc/%s/fd/%s') &&
+        script.includes('signal.pidfd_send_signal')
+      );
+    }),
+  );
+  assert.equal(
+    fake.calls.some(
+      (call) =>
+        call.name === 'docker' &&
+        call.args[0] === 'exec' &&
+        call.args.includes('kill'),
     ),
     false,
   );

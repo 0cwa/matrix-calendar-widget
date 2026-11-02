@@ -57,7 +57,10 @@ binding, and reminder database URLs, and proceeds only when all configured
 stores share the exact target selected by the existing `pgService` dump.
 Unknown database URL settings and distinct database targets fail closed.
 When public feeds are enabled, a named restore input must match the running
-signing key. The established cold path remains the default.
+signing key. The online Radicale archive excludes only recreatable
+`.Radicale.cache` and `.Radicale.tmp-*` entries; canonical collection and
+share-token data remain included. The established cold path remains the
+default.
 
 This coordinator path is not yet a qualified recovery protocol. It does not
 fence database writers or Radicale writers that bypass the application and

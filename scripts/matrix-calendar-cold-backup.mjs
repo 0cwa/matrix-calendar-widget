@@ -547,6 +547,9 @@ async function readPostgresServiceTarget(path, serviceName) {
   for (const rawLine of contents.split(/\r?\n/u)) {
     const line = rawLine.trim();
     if (line === '' || line.startsWith('#') || line.startsWith(';')) continue;
+    if (/^(?:include|include_if_exists|include_dir)\s*=/iu.test(line)) {
+      fail('preflight');
+    }
     const section = /^\[([^\]]+)\]$/u.exec(line);
     if (section) {
       inService = section[1] === serviceName;
@@ -560,7 +563,20 @@ async function readPostgresServiceTarget(path, serviceName) {
   const host = values.get('host');
   const port = values.get('port') ?? '5432';
   const database = values.get('dbname');
+  const supportedOptions = new Set([
+    'host',
+    'port',
+    'dbname',
+    'user',
+    'sslmode',
+    'sslrootcert',
+    'sslcert',
+    'sslkey',
+    'connect_timeout',
+    'application_name',
+  ]);
   if (
+    [...values.keys()].some((key) => !supportedOptions.has(key)) ||
     !host ||
     !/^\d{1,5}$/u.test(port) ||
     Number(port) < 1 ||
@@ -1627,20 +1643,32 @@ import fcntl, os, signal, stat, sys, time
 lock_path, marker_path, cancel_path = sys.argv[1:4]
 timeout_ms = int(sys.argv[4])
 deadline = time.monotonic() + timeout_ms / 1000
-if os.path.exists(cancel_path): sys.exit(3)
+def cancel_requested():
+    if not os.path.exists(cancel_path): return False
+    for path in (marker_path, cancel_path):
+        try: os.unlink(path)
+        except FileNotFoundError: pass
+    return True
+if cancel_requested(): sys.exit(3)
 fd = os.open(lock_path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
 if not stat.S_ISREG(os.fstat(fd).st_mode): sys.exit(2)
+def process_start_time(pid):
+    raw = open('/proc/%d/stat' % pid, encoding='ascii').read()
+    fields = raw[raw.rfind(')') + 2:].split()
+    return fields[19]
+start_time = process_start_time(os.getpid())
 with open(marker_path, 'x', encoding='ascii') as marker:
-    marker.write('waiting:%d\\n' % os.getpid())
+    opened = os.fstat(fd)
+    marker.write('waiting:%d:%s:%d:%d:%d\\n' % (os.getpid(), start_time, opened.st_dev, opened.st_ino, fd))
     marker.flush()
 while True:
-    if os.path.exists(cancel_path) or time.monotonic() >= deadline: sys.exit(3)
+    if cancel_requested() or time.monotonic() >= deadline: sys.exit(3)
     try:
         fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
         break
     except BlockingIOError:
         time.sleep(0.1)
-if os.path.exists(cancel_path): sys.exit(3)
+if cancel_requested(): sys.exit(3)
 opened = os.fstat(fd)
 named = os.stat(lock_path, follow_symlinks=False)
 if (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino):
@@ -1650,10 +1678,45 @@ if remaining <= 0: sys.exit(3)
 signal.signal(signal.SIGALRM, lambda _signum, _frame: sys.exit(3))
 signal.setitimer(signal.ITIMER_REAL, remaining)
 with open(marker_path, 'w', encoding='ascii') as marker:
-    marker.write('locked:%d:%d:%d\\n' % (os.getpid(), opened.st_dev, opened.st_ino))
+    marker.write('locked:%d:%d:%d:%s:%d\\n' % (os.getpid(), opened.st_dev, opened.st_ino, start_time, fd))
     marker.flush()
 while True:
     signal.pause()
+`;
+
+const RADICALE_PROCESS_CONTROL_SCRIPT = `
+import os, signal, sys
+mode, pid_text, expected_start_time, expected_dev, expected_ino, expected_fd = sys.argv[1:7]
+try:
+    pidfd = os.pidfd_open(int(pid_text), 0)
+except ProcessLookupError:
+    sys.exit(1)
+except OSError:
+    sys.exit(2)
+try:
+    try:
+        raw = open('/proc/%s/stat' % pid_text, encoding='ascii').read()
+    except FileNotFoundError:
+        sys.exit(1)
+    except OSError:
+        sys.exit(2)
+    fields = raw[raw.rfind(')') + 2:].split()
+    if fields[19] != expected_start_time:
+        sys.exit(1)
+    try:
+        fd_info = os.stat('/proc/%s/fd/%s' % (pid_text, expected_fd))
+    except FileNotFoundError:
+        sys.exit(1)
+    except OSError:
+        sys.exit(2)
+    if str(fd_info.st_dev) != expected_dev or str(fd_info.st_ino) != expected_ino:
+        sys.exit(1)
+    if mode == 'signal':
+        signal.pidfd_send_signal(pidfd, int(sys.argv[7]))
+    elif mode != 'check':
+        sys.exit(2)
+finally:
+    os.close(pidfd)
 `;
 
 const RADICALE_LOCK_VERIFY_SCRIPT = `
@@ -1662,6 +1725,33 @@ path, expected_dev, expected_ino = sys.argv[1:4]
 info = os.stat(path, follow_symlinks=False)
 if (str(info.st_dev), str(info.st_ino)) != (expected_dev, expected_ino): sys.exit(2)
 `;
+
+function radicaleRootExecArgs(radicaleId, ...args) {
+  return ['exec', '--user', '0', radicaleId, ...args];
+}
+
+function radicaleProcessControlArgs(
+  radicaleId,
+  mode,
+  pid,
+  startTime,
+  identity,
+  lockFd,
+  signal,
+) {
+  return radicaleRootExecArgs(
+    radicaleId,
+    'python3',
+    '-c',
+    RADICALE_PROCESS_CONTROL_SCRIPT,
+    mode,
+    pid,
+    startTime,
+    ...identity.split(':'),
+    lockFd,
+    ...(signal === undefined ? [] : [String(signal)]),
+  );
+}
 
 async function acquireRadicaleSharedLock(
   config,
@@ -1704,7 +1794,7 @@ async function acquireRadicaleSharedLock(
     );
   } catch {
     await deps
-      .command('docker', ['exec', radicaleId, 'touch', cancel], {
+      .command('docker', radicaleRootExecArgs(radicaleId, 'touch', cancel), {
         cwd: paths.projectDirectory,
         env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
         timeoutMs: COMMAND_TIMEOUT_MS,
@@ -1716,9 +1806,12 @@ async function acquireRadicaleSharedLock(
     Date.now() + (deps.radicaleLockStartupTimeoutMs ?? COMMAND_TIMEOUT_MS);
   let pid;
   let identity;
+  let holderStartTime;
+  let holderFd;
+  let acquired = false;
   while (Date.now() < deadline) {
     const result = await deps
-      .command('docker', ['exec', radicaleId, 'cat', marker], {
+      .command('docker', radicaleRootExecArgs(radicaleId, 'cat', marker), {
         cwd: paths.projectDirectory,
         env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
         signal,
@@ -1726,54 +1819,98 @@ async function acquireRadicaleSharedLock(
       })
       .catch(() => ({ status: 1, stdout: '' }));
     const line = result?.stdout?.trim() ?? '';
-    const waiting = /^waiting:(\d+)$/u.exec(line);
-    const locked = /^locked:(\d+):(\d+):(\d+)$/u.exec(line);
-    if (waiting) pid = waiting[1];
+    const waiting = /^waiting:(\d+):(\d+):(\d+):(\d+):(\d+)$/u.exec(line);
+    const locked = /^locked:(\d+):(\d+):(\d+):(\d+):(\d+)$/u.exec(line);
+    let startTime;
+    if (waiting) {
+      pid = waiting[1];
+      startTime = waiting[2];
+      identity = `${waiting[3]}:${waiting[4]}`;
+      holderFd = waiting[5];
+    }
     if (locked) {
       pid = locked[1];
       identity = `${locked[2]}:${locked[3]}`;
+      startTime = locked[4];
+      holderStartTime = startTime;
+      holderFd = locked[5];
+      acquired = true;
       break;
     }
+    if (startTime) holderStartTime = startTime;
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
   }
-  if (!pid || !identity) {
+  if (!acquired) {
     const cancelResult = await deps
-      .command('docker', ['exec', radicaleId, 'touch', cancel], {
+      .command('docker', radicaleRootExecArgs(radicaleId, 'touch', cancel), {
         cwd: paths.projectDirectory,
         env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
         timeoutMs: COMMAND_TIMEOUT_MS,
       })
       .catch(() => ({ status: 1 }));
-    if (pid) {
-      await deps
-        .command('docker', ['exec', radicaleId, 'kill', '-TERM', pid], {
-          cwd: paths.projectDirectory,
-          env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
-        })
-        .catch(() => undefined);
-    }
-    if (isSuccess(cancelResult) && pid) {
+    if (
+      isSuccess(cancelResult) &&
+      pid &&
+      identity &&
+      holderStartTime &&
+      holderFd
+    ) {
       const cancelDeadline = Date.now() + CHILD_KILL_GRACE_MS;
       let exited = false;
       while (Date.now() < cancelDeadline) {
-        const stillRunning = await deps
-          .command('docker', ['exec', radicaleId, 'kill', '-0', pid], {
-            cwd: paths.projectDirectory,
-            env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
-          })
-          .catch(() => ({ status: 1 }));
-        if (!isSuccess(stillRunning)) {
+        const control = await deps
+          .command(
+            'docker',
+            radicaleProcessControlArgs(
+              radicaleId,
+              'check',
+              pid,
+              holderStartTime,
+              identity,
+              holderFd,
+            ),
+            {
+              cwd: paths.projectDirectory,
+              env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
+            },
+          )
+          .catch(() => ({ status: 2 }));
+        if (control.status === 1) {
           exited = true;
           break;
         }
+        if (control.status !== 0) break;
+        const signaled = await deps
+          .command(
+            'docker',
+            radicaleProcessControlArgs(
+              radicaleId,
+              'signal',
+              pid,
+              holderStartTime,
+              identity,
+              holderFd,
+              15,
+            ),
+            {
+              cwd: paths.projectDirectory,
+              env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
+            },
+          )
+          .catch(() => ({ status: 2 }));
+        if (signaled.status !== 0 && signaled.status !== 1) break;
         await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
       }
       if (exited) {
         await deps
-          .command('docker', ['exec', radicaleId, 'rm', '-f', marker, cancel], {
-            cwd: paths.projectDirectory,
-            env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
-          })
+          .command(
+            'docker',
+            radicaleRootExecArgs(radicaleId, 'rm', '-f', marker, cancel),
+            {
+              cwd: paths.projectDirectory,
+              env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
+            },
+          )
           .catch(() => undefined);
       }
     }
@@ -1784,7 +1921,14 @@ async function acquireRadicaleSharedLock(
       await runCommand(
         deps,
         'docker',
-        ['exec', radicaleId, 'kill', '-0', pid],
+        radicaleProcessControlArgs(
+          radicaleId,
+          'check',
+          pid,
+          holderStartTime,
+          identity,
+          holderFd,
+        ),
         {
           cwd: paths.projectDirectory,
           env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
@@ -1794,27 +1938,31 @@ async function acquireRadicaleSharedLock(
       const markerContents = await runCommand(
         deps,
         'docker',
-        ['exec', radicaleId, 'cat', marker],
+        radicaleRootExecArgs(radicaleId, 'cat', marker),
         {
           cwd: paths.projectDirectory,
           env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
         },
         'radicale-lock',
       );
-      if (markerContents.trim() !== `locked:${pid}:${identity}`) {
+      if (
+        markerContents.trim() !==
+        `locked:${pid}:${identity}:${holderStartTime}:${holderFd}`
+      ) {
         fail('radicale-lock');
       }
       await runCommand(
         deps,
         'docker',
         [
-          'exec',
-          radicaleId,
-          'python3',
-          '-c',
-          RADICALE_LOCK_VERIFY_SCRIPT,
-          '/data/collections/.Radicale.lock',
-          ...identity.split(':'),
+          ...radicaleRootExecArgs(
+            radicaleId,
+            'python3',
+            '-c',
+            RADICALE_LOCK_VERIFY_SCRIPT,
+            '/data/collections/.Radicale.lock',
+            ...identity.split(':'),
+          ),
         ],
         {
           cwd: paths.projectDirectory,
@@ -1824,36 +1972,88 @@ async function acquireRadicaleSharedLock(
       );
     },
     async release() {
-      await runCommand(
-        deps,
-        'docker',
-        ['exec', radicaleId, 'kill', '-TERM', pid],
-        {
-          cwd: paths.projectDirectory,
-          env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
-        },
-        'radicale-lock',
-      );
+      const signalResult = await deps
+        .command(
+          'docker',
+          radicaleProcessControlArgs(
+            radicaleId,
+            'signal',
+            pid,
+            holderStartTime,
+            identity,
+            holderFd,
+            15,
+          ),
+          {
+            cwd: paths.projectDirectory,
+            env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
+          },
+        )
+        .catch(() => ({ status: 2 }));
+      if (signalResult.status === 1) {
+        const processState = await deps
+          .command(
+            'docker',
+            radicaleProcessControlArgs(
+              radicaleId,
+              'check',
+              pid,
+              holderStartTime,
+              identity,
+              holderFd,
+            ),
+            {
+              cwd: paths.projectDirectory,
+              env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
+            },
+          )
+          .catch(() => ({ status: 2 }));
+        if (processState.status !== 1) fail('radicale-lock');
+        await runCommand(
+          deps,
+          'docker',
+          radicaleRootExecArgs(radicaleId, 'rm', '-f', marker, cancel),
+          {
+            cwd: paths.projectDirectory,
+            env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
+          },
+          'radicale-lock',
+        );
+        fail('radicale-lock');
+      }
+      if (!isSuccess(signalResult)) fail('radicale-lock');
       const deadline = Date.now() + COMMAND_TIMEOUT_MS;
       let exited = false;
       while (Date.now() < deadline) {
         const check = await deps
-          .command('docker', ['exec', radicaleId, 'kill', '-0', pid], {
-            cwd: paths.projectDirectory,
-            env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
-          })
-          .catch(() => ({ status: 1 }));
-        if (!isSuccess(check)) {
+          .command(
+            'docker',
+            radicaleProcessControlArgs(
+              radicaleId,
+              'check',
+              pid,
+              holderStartTime,
+              identity,
+              holderFd,
+            ),
+            {
+              cwd: paths.projectDirectory,
+              env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
+            },
+          )
+          .catch(() => ({ status: 2 }));
+        if (check.status === 1) {
           exited = true;
           break;
         }
+        if (check.status !== 0) fail('radicale-lock');
         await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
       }
       if (!exited) fail('radicale-lock');
       await runCommand(
         deps,
         'docker',
-        ['exec', radicaleId, 'rm', '-f', marker],
+        radicaleRootExecArgs(radicaleId, 'rm', '-f', marker, cancel),
         {
           cwd: paths.projectDirectory,
           env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
@@ -2519,7 +2719,11 @@ async function capturePostgres(
   };
 }
 
-function archiveCommand(config, volumeName) {
+function archiveCommand(config, volumeName, captureMode = 'cold') {
+  const excludes =
+    captureMode === 'online' && volumeName.endsWith('_radicale-data')
+      ? ['--exclude=.Radicale.cache', '--exclude=.Radicale.tmp-*']
+      : [];
   return [
     'run',
     '--rm',
@@ -2536,6 +2740,7 @@ function archiveCommand(config, volumeName) {
     config.helperImage,
     '-cpf',
     '-',
+    ...excludes,
     '.',
   ];
 }
@@ -2548,13 +2753,14 @@ async function captureArchive(
   captureDirectory,
   volumeName,
   archiveName,
+  captureMode,
   signal,
 ) {
   const partialPath = join(captureDirectory, `${archiveName}.partial`);
   await runCommand(
     deps,
     'docker',
-    archiveCommand(config, volumeName),
+    archiveCommand(config, volumeName, captureMode),
     {
       cwd: paths.projectDirectory,
       env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
@@ -3057,6 +3263,7 @@ export async function runColdBackup(configInput, dependencies = {}) {
           captureDirectory,
           volumeName,
           ARCHIVE_NAMES[index],
+          'online',
           onlineSignal,
         );
         await checkpointRequest(
@@ -3167,6 +3374,7 @@ export async function runColdBackup(configInput, dependencies = {}) {
           captureDirectory,
           volumeName,
           ARCHIVE_NAMES[index],
+          'cold',
           signal,
         );
       }

@@ -262,6 +262,11 @@ successfully receives the completion marker. There is no automatic cold
 fallback; a failed online run must be reviewed and, if needed, rerun explicitly
 in cold mode.
 
+Online Radicale archives omit only `.Radicale.cache` and `.Radicale.tmp-*`
+entries. Radicale may change collection caches during shared-lock reads; the
+caches are recreated after restore. Canonical collections and share-token data
+remain included.
+
 Online mode inventories the three supported application PostgreSQL URL
 settings (private-client, room-binding, and reminder stores). It uses the
 existing configured `pgService` dump only when every enabled URL identifies
