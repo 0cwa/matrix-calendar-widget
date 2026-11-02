@@ -99,12 +99,20 @@ describe('AppWriteFenceService', () => {
       expect(() => lease.assertActive()).toThrow(
         'Application write fence lease is no longer active',
       );
-      const resumedWrite = fence.admitWrite();
-      expect(resumedWrite).toBeDefined();
-      resumedWrite?.release();
+      expect(fence.admitWrite()).toBeUndefined();
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it('latches shutdown before a fence is active', async () => {
+    const fence = new AppWriteFenceService();
+    fence.onModuleDestroy();
+
+    expect(fence.admitWrite()).toBeUndefined();
+    await expect(
+      fence.acquireCheckpointFence(1_000, 5_000, jest.fn()),
+    ).rejects.toThrow('Application write fence is shutting down');
   });
 
   it('cancels a pending drain and its timeout during module shutdown', async () => {
@@ -129,9 +137,7 @@ describe('AppWriteFenceService', () => {
       );
       expect(jest.getTimerCount()).toBe(0);
       expect(releaseMatrixPause).toHaveBeenCalledTimes(1);
-      const resumedWrite = fence.admitWrite();
-      expect(resumedWrite).toBeDefined();
-      resumedWrite?.release();
+      expect(fence.admitWrite()).toBeUndefined();
     } finally {
       existingWrite?.release();
       jest.useRealTimers();

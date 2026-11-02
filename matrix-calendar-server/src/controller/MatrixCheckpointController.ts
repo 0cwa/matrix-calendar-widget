@@ -82,16 +82,29 @@ export class MatrixCheckpointController {
 
     const client = this.getCheckpointClient();
     await client.assertCheckpointSafe();
+    const boundaryDeadline = Date.now() + CHECKPOINT_BOUNDARY_TIMEOUT_MS;
+    const pauseTimeoutMs = boundaryDeadline - Date.now();
+    if (pauseTimeoutMs <= 0) {
+      throw new ServiceUnavailableException(
+        'Timed out reaching the Matrix checkpoint boundary',
+      );
+    }
     const syncLease = await client.pauseAtSyncBoundary(
-      CHECKPOINT_BOUNDARY_TIMEOUT_MS,
+      pauseTimeoutMs,
       CHECKPOINT_LEASE_TIMEOUT_MS + 1_000,
     );
     let writeLease: AppWriteFenceLease | undefined;
     try {
       syncLease.assertActive();
       await client.assertCheckpointSafe();
+      const drainTimeoutMs = boundaryDeadline - Date.now();
+      if (drainTimeoutMs <= 0) {
+        throw new ServiceUnavailableException(
+          'Timed out reaching the Matrix checkpoint boundary',
+        );
+      }
       writeLease = await this.writeFence.acquireCheckpointFence(
-        CHECKPOINT_BOUNDARY_TIMEOUT_MS,
+        drainTimeoutMs,
         CHECKPOINT_LEASE_TIMEOUT_MS,
         () => syncLease.release(),
       );
@@ -110,6 +123,7 @@ export class MatrixCheckpointController {
       };
       lease.assertActive();
       await client.assertCheckpointSafe();
+      lease.assertActive();
       const leaseId = randomUUID();
       this.leases.set(leaseId, lease);
       return {

@@ -114,7 +114,7 @@ describe('MatrixCheckpointController', () => {
     await expect(
       controller.verify(acquired.leaseId, auth, localRequest()),
     ).resolves.toEqual({ active: true });
-    expect(lease.assertActive).toHaveBeenCalledTimes(4);
+    expect(lease.assertActive).toHaveBeenCalledTimes(5);
     expect(controller.release(acquired.leaseId, auth, localRequest())).toEqual({
       released: true,
     });
@@ -172,11 +172,99 @@ describe('MatrixCheckpointController', () => {
     resumedWrite?.release();
   });
 
+  it('rechecks lease expiry after the final checkpoint safety await', async () => {
+    jest.useFakeTimers();
+    try {
+      const client = safeClient();
+      const syncLease = { assertActive: jest.fn(), release: jest.fn() };
+      jest.spyOn(client, 'pauseAtSyncBoundary').mockResolvedValue(syncLease);
+      let beginFinalSafetyCheck!: () => void;
+      const finalSafetyStarted = new Promise<void>((resolve) => {
+        beginFinalSafetyCheck = resolve;
+      });
+      let completeFinalSafetyCheck!: () => void;
+      const finalSafety = new Promise<void>((resolve) => {
+        completeFinalSafetyCheck = resolve;
+      });
+      jest
+        .spyOn(client, 'assertCheckpointSafe')
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(undefined)
+        .mockImplementationOnce(() => {
+          beginFinalSafetyCheck();
+          return finalSafety;
+        });
+      const controller = new MatrixCheckpointController(
+        config(),
+        client,
+        new AppWriteFenceService(),
+      );
+
+      const acquiring = controller.acquire(auth, localRequest());
+      await finalSafetyStarted;
+      await jest.advanceTimersByTimeAsync(120_000);
+      completeFinalSafetyCheck();
+
+      await expect(acquiring).rejects.toThrow(
+        'Application write fence lease is no longer active',
+      );
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('shares one 30-second deadline between Matrix pause and app write drain', async () => {
+    jest.useFakeTimers();
+    try {
+      const client = safeClient();
+      const syncLease = { assertActive: jest.fn(), release: jest.fn() };
+      let completePause!: (lease: typeof syncLease) => void;
+      let notifyPauseStarted!: () => void;
+      const pauseStarted = new Promise<void>((resolve) => {
+        notifyPauseStarted = resolve;
+      });
+      const pause = jest
+        .spyOn(client, 'pauseAtSyncBoundary')
+        .mockImplementation(
+          () =>
+            new Promise((resolve) => {
+              completePause = resolve;
+              notifyPauseStarted();
+            }),
+        );
+      const writeFence = new AppWriteFenceService();
+      const acquireFence = jest.spyOn(writeFence, 'acquireCheckpointFence');
+      const controller = new MatrixCheckpointController(
+        config(),
+        client,
+        writeFence,
+      );
+
+      const acquiring = controller.acquire(auth, localRequest());
+      await pauseStarted;
+      expect(pause).toHaveBeenCalledWith(30_000, 121_000);
+      await jest.advanceTimersByTimeAsync(20_000);
+      completePause(syncLease);
+      const acquired = await acquiring;
+
+      expect(acquireFence).toHaveBeenCalledWith(
+        10_000,
+        120_000,
+        expect.any(Function),
+      );
+      controller.release(acquired.leaseId, auth, localRequest());
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('rejects an expired or invalid lease before backup proceeds', async () => {
     const client = safeClient();
     const lease = {
       assertActive: jest
         .fn()
+        .mockImplementationOnce(() => undefined)
+        .mockImplementationOnce(() => undefined)
         .mockImplementationOnce(() => undefined)
         .mockImplementationOnce(() => undefined)
         .mockImplementation(() => {

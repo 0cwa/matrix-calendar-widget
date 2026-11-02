@@ -30,6 +30,7 @@ export interface AppWriteFenceLease {
 export class AppWriteFenceService implements OnModuleDestroy {
   private generation = 0;
   private closedGeneration: number | undefined;
+  private shuttingDown = false;
   private activeWrites = 0;
   private leaseTimer: ReturnType<typeof setTimeout> | undefined;
   private onLeaseEnd: (() => void) | undefined;
@@ -39,6 +40,7 @@ export class AppWriteFenceService implements OnModuleDestroy {
 
   /** Release an active checkpoint fence during application shutdown. */
   onModuleDestroy(): void {
+    this.shuttingDown = true;
     const generation = this.closedGeneration;
     if (generation === undefined) return;
 
@@ -50,7 +52,9 @@ export class AppWriteFenceService implements OnModuleDestroy {
 
   /** Admit one write until the owning HTTP response or scheduler run completes. */
   admitWrite(): AppWriteAdmission | undefined {
-    if (this.closedGeneration !== undefined) return undefined;
+    if (this.shuttingDown || this.closedGeneration !== undefined) {
+      return undefined;
+    }
 
     this.activeWrites += 1;
     let active = true;
@@ -76,6 +80,9 @@ export class AppWriteFenceService implements OnModuleDestroy {
     leaseTimeoutMs: number,
     onExpire: () => void,
   ): Promise<AppWriteFenceLease> {
+    if (this.shuttingDown) {
+      throw new Error('Application write fence is shutting down');
+    }
     if (this.closedGeneration !== undefined) {
       throw new Error('Application write fence is already active');
     }
@@ -170,7 +177,7 @@ export class AppWriteFenceService implements OnModuleDestroy {
   }
 
   private waitUntilOpen(signal: AbortSignal): Promise<boolean> {
-    if (signal.aborted) return Promise.resolve(false);
+    if (signal.aborted || this.shuttingDown) return Promise.resolve(false);
     if (this.closedGeneration === undefined) return Promise.resolve(true);
 
     return new Promise<boolean>((resolve) => {
