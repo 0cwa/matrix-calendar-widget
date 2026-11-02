@@ -57,14 +57,14 @@ export class AppWriteAdmissionMiddleware {
       admission.release();
     };
     const originalEnd = response.end;
-    response.end = (function (
+    response.end = function (
       this: Response,
       ...args: Parameters<Response['end']>
     ) {
       const result = originalEnd.apply(this, args);
       if (closedBeforeEnd) release();
       return result;
-    }) as Response['end'];
+    } as Response['end'];
     const onClose = () => {
       response.off('close', onClose);
       if (response.writableEnded) {
