@@ -35,6 +35,11 @@ type StorageDatabase = {
   kvStore?: Record<string, string | null | undefined>;
 };
 
+export const MATRIX_CHECKPOINT_STATE_STORAGE_KEY =
+  'matrix_calendar_checkpoint_state';
+export const MATRIX_CHECKPOINT_STATE_PROCESSED = 'processed';
+export const MATRIX_CHECKPOINT_STATE_SAFE = 'safe';
+
 function createDefaultDatabase(): Required<StorageDatabase> {
   return {
     syncToken: null,
@@ -60,6 +65,7 @@ export class AtomicFsStorageProvider
     private readonly filename: string,
     private readonly trackTransactionsInMemory = true,
     private readonly maxInMemoryTransactions = 20,
+    private readonly fileSystem: AtomicFileSystem = fs,
   ) {
     mkdirSync(dirname(filename), { recursive: true, mode: 0o700 });
     this.database = this.readDatabase();
@@ -67,8 +73,28 @@ export class AtomicFsStorageProvider
   }
 
   setSyncToken(token: string | null): void {
+    const previousToken = this.database.syncToken;
+    const commitsCheckpoint =
+      this.database.kvStore[MATRIX_CHECKPOINT_STATE_STORAGE_KEY] ===
+      MATRIX_CHECKPOINT_STATE_PROCESSED;
     this.database.syncToken = token;
-    this.writeDatabase();
+    if (commitsCheckpoint) {
+      this.database.kvStore[MATRIX_CHECKPOINT_STATE_STORAGE_KEY] =
+        MATRIX_CHECKPOINT_STATE_SAFE;
+    }
+    try {
+      this.writeDatabase();
+    } catch (error) {
+      if (commitsCheckpoint) {
+        // Do not let the live provider report safety after an unconfirmed
+        // cursor-and-marker replacement. The previous disk file is either
+        // processed (safe refusal) or the new safe file is fully committed.
+        this.database.syncToken = previousToken;
+        this.database.kvStore[MATRIX_CHECKPOINT_STATE_STORAGE_KEY] =
+          MATRIX_CHECKPOINT_STATE_PROCESSED;
+      }
+      throw error;
+    }
   }
 
   getSyncToken(): string | null {
@@ -133,8 +159,20 @@ export class AtomicFsStorageProvider
   }
 
   storeValue(key: string, value: string | null): void {
+    const previousValue = this.database.kvStore[key];
     this.database.kvStore[key] = value;
-    this.writeDatabase();
+    try {
+      this.writeDatabase();
+    } catch (error) {
+      if (key === MATRIX_CHECKPOINT_STATE_STORAGE_KEY) {
+        if (previousValue === undefined) {
+          delete this.database.kvStore[key];
+        } else {
+          this.database.kvStore[key] = previousValue;
+        }
+      }
+      throw error;
+    }
   }
 
   storageForUser(userId: string): IStorageProvider {
@@ -164,7 +202,7 @@ export class AtomicFsStorageProvider
   }
 
   private writeDatabase(): void {
-    writeJsonAtomically(this.filename, this.database);
+    writeJsonAtomically(this.filename, this.database, this.fileSystem);
   }
 
   private hash(value: string): string {

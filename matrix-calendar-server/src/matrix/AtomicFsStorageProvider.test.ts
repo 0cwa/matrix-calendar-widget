@@ -20,6 +20,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
   AtomicFsStorageProvider,
+  MATRIX_CHECKPOINT_STATE_PROCESSED,
+  MATRIX_CHECKPOINT_STATE_SAFE,
+  MATRIX_CHECKPOINT_STATE_STORAGE_KEY,
   writeJsonAtomically,
 } from './AtomicFsStorageProvider';
 
@@ -77,6 +80,90 @@ describe('AtomicFsStorageProvider', () => {
       appserviceTransactions: {},
       kvStore: { key: 'value' },
     });
+  });
+
+  it('commits a processed checkpoint and the next sync cursor in one atomic file replacement', () => {
+    const storage = new AtomicFsStorageProvider(filename);
+    storage.storeValue(MATRIX_CHECKPOINT_STATE_STORAGE_KEY, 'pending');
+    storage.setSyncToken('unprocessed-cursor');
+    expect(storage.readValue(MATRIX_CHECKPOINT_STATE_STORAGE_KEY)).toBe(
+      'pending',
+    );
+
+    storage.storeValue(
+      MATRIX_CHECKPOINT_STATE_STORAGE_KEY,
+      MATRIX_CHECKPOINT_STATE_PROCESSED,
+    );
+    storage.setSyncToken('processed-cursor');
+
+    const reopened = new AtomicFsStorageProvider(filename);
+    expect(reopened.getSyncToken()).toBe('processed-cursor');
+    expect(reopened.readValue(MATRIX_CHECKPOINT_STATE_STORAGE_KEY)).toBe(
+      MATRIX_CHECKPOINT_STATE_SAFE,
+    );
+  });
+
+  it('keeps the live provider unsafe when the cursor-and-safe replacement fails', () => {
+    let failRename = false;
+    const fileSystem: Parameters<typeof writeJsonAtomically>[2] = {
+      ...fs,
+      renameSync: (temporaryPath, targetPath) => {
+        if (failRename) throw new Error('synthetic cursor replacement failure');
+        fs.renameSync(temporaryPath, targetPath);
+      },
+    };
+    const storage = new AtomicFsStorageProvider(filename, true, 20, fileSystem);
+    storage.setSyncToken('previous-token');
+    storage.storeValue(MATRIX_CHECKPOINT_STATE_STORAGE_KEY, 'pending');
+    storage.storeValue(
+      MATRIX_CHECKPOINT_STATE_STORAGE_KEY,
+      MATRIX_CHECKPOINT_STATE_PROCESSED,
+    );
+    failRename = true;
+
+    expect(() => storage.setSyncToken('next-token')).toThrow(
+      'synthetic cursor replacement failure',
+    );
+    expect(storage.getSyncToken()).toBe('previous-token');
+    expect(storage.readValue(MATRIX_CHECKPOINT_STATE_STORAGE_KEY)).toBe(
+      MATRIX_CHECKPOINT_STATE_PROCESSED,
+    );
+
+    const reopened = new AtomicFsStorageProvider(filename);
+    expect(reopened.getSyncToken()).toBe('previous-token');
+    expect(reopened.readValue(MATRIX_CHECKPOINT_STATE_STORAGE_KEY)).toBe(
+      MATRIX_CHECKPOINT_STATE_PROCESSED,
+    );
+  });
+
+  it('keeps a prior safe checkpoint state when writing the pending latch fails', () => {
+    let failRename = false;
+    const fileSystem: Parameters<typeof writeJsonAtomically>[2] = {
+      ...fs,
+      renameSync: (temporaryPath, targetPath) => {
+        if (failRename)
+          throw new Error('synthetic pending replacement failure');
+        fs.renameSync(temporaryPath, targetPath);
+      },
+    };
+    const storage = new AtomicFsStorageProvider(filename, true, 20, fileSystem);
+    storage.setSyncToken('previous-token');
+    storage.storeValue(
+      MATRIX_CHECKPOINT_STATE_STORAGE_KEY,
+      MATRIX_CHECKPOINT_STATE_SAFE,
+    );
+    failRename = true;
+
+    expect(() =>
+      storage.storeValue(MATRIX_CHECKPOINT_STATE_STORAGE_KEY, 'pending'),
+    ).toThrow('synthetic pending replacement failure');
+    expect(storage.readValue(MATRIX_CHECKPOINT_STATE_STORAGE_KEY)).toBe(
+      MATRIX_CHECKPOINT_STATE_SAFE,
+    );
+    const reopened = new AtomicFsStorageProvider(filename);
+    expect(reopened.readValue(MATRIX_CHECKPOINT_STATE_STORAGE_KEY)).toBe(
+      MATRIX_CHECKPOINT_STATE_SAFE,
+    );
   });
 
   it('keeps the previous complete file when writing the replacement fails', () => {

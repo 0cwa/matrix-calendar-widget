@@ -40,6 +40,7 @@ import { CommandController } from './controller/CommandController';
 import { ConfigurationController } from './controller/ConfigurationController';
 import { GuestMemberController } from './controller/GuestMemberController';
 import { HealthCheckController } from './controller/HealthCheckController';
+import { MatrixCheckpointController } from './controller/MatrixCheckpointController';
 import { MeetingController } from './controller/MeetingController';
 import { PrivateCalendarClientController } from './controller/PrivateCalendarClientController';
 import { PublicCalendarFeedController } from './controller/PublicCalendarFeedController';
@@ -55,6 +56,7 @@ import { IAppConfiguration } from './IAppConfiguration';
 import { RoomMatrixEventsReader } from './io/RoomMatrixEventsReader';
 import { WidgetLayoutConfigReader } from './io/WidgetLayoutConfigReader';
 import { AtomicFsStorageProvider } from './matrix/AtomicFsStorageProvider';
+import { CheckpointMatrixClient } from './matrix/CheckpointMatrixClient';
 import { MatrixClientProxyHandler } from './matrix/MatrixClientProxyHandler';
 import {
   AutojoinRoomsMixin,
@@ -120,6 +122,7 @@ const appControllers = [
   CommandController,
   ConfigurationController,
   HealthCheckController,
+  MatrixCheckpointController,
   MeetingController,
   RoomReminderConfigurationController,
   RoomReminderAlarmOptionsController,
@@ -337,7 +340,7 @@ const matrixClientFactory: FactoryProvider<Promise<MatrixClient>> = {
     // create server object
     const server = matrixClientFactoryHelper.getServer(appConfig);
     // create matrix client
-    const client = new MatrixClient(
+    const client = new CheckpointMatrixClient(
       server.url,
       server.accessToken,
       storage,
@@ -411,6 +414,7 @@ const i18nFactory: FactoryProvider<void> = {
               path.startsWith('/v1/public-calendar-feeds/') ||
               path.startsWith('/v1/calendar/private-clients') ||
               path.startsWith('/v1/private-calendar-client-callback/') ||
+              path.startsWith('/v1/internal/backup-checkpoint') ||
               isPrivateCalendarClientDavPath(path)
             );
           },
