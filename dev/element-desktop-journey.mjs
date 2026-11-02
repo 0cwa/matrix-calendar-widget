@@ -1188,6 +1188,9 @@ function validRoomNavigationTargetObservation(value) {
 }
 
 function validRoomNavigationDiagnostic(value, failurePoint) {
+  const clickFailureWasObserved =
+    value?.clickProgress?.clickStarted === true &&
+    value?.clickProgress?.clickResolved === false;
   return (
     value !== null &&
     typeof value === 'object' &&
@@ -1200,6 +1203,8 @@ function validRoomNavigationDiagnostic(value, failurePoint) {
     validRoomsReadyDiagnostic(value.roomsReady) &&
     validRoomNavigationClickProgress(value.clickProgress, failurePoint) &&
     ROOM_NAVIGATION_CLICK_FAILURE_CLASSES.has(value.clickFailureClass) &&
+    (value.clickFailureClass === 'not_observed') ===
+      !clickFailureWasObserved &&
     [null, 0, 1, 2].includes(value.clickTargetCountCapped) &&
     [null, true, false].includes(value.centerHitWithinTarget) &&
     DESKTOP_REFRESH_ROOM_NAVIGATION_HIT_ROLES.has(value.centerHitRole)
