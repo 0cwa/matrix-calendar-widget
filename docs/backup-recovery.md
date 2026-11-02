@@ -30,13 +30,23 @@ the Radicale volume without its matching key, or the key without the matching
 volume, does not preserve those URLs. Keep the signing key in separate secret
 custody from the Restic repository password and object-store credentials.
 
-The volume capture below is a cold, consistent copy. The recommended off-host
-storage layer is a Restic repository on S3-compatible storage. Restic encrypts
-and deduplicates the captured files; the repository password must be kept
-separately from the repository. The project now ships a host-local coordinator
-and generic systemd service/timer templates. The templates are examples only:
-they are not installed or enabled by the project. No S3 provider, scheduled
-run, or production recovery path has been validated here. No live etke
+The operator owns backup scheduling, destination, encryption, retention, and
+recovery validation. This project does not run or monitor an external backup
+service. The shipped host-local coordinator is an optional helper for making a
+cold capture and uploading it to a configured Restic repository; the generic
+systemd service and timer are examples only and are not installed or enabled by
+the project. The operator may use another backup system, but it must preserve
+the capture requirements below.
+
+The established recovery path is a cold capture of both complete project-owned
+volumes, `radicale-data` and `server-data`. If reminder, binding, or private
+client state is stored in external PostgreSQL, include every database that
+contains that state in the same stopped-writer maintenance window. Quiesce
+writers while capturing, then resume the project; paired files and database
+captures are coordinated but are not one atomic transaction. Restore only into
+fresh isolated volumes and databases, and validate the recovered copy before
+considering production recovery. Neither the configured backup destination and
+schedule nor a production restore has been validated here. No live etke
 deployment or etke data recovery path has been verified.
 
 **On this page**
@@ -464,8 +474,8 @@ esac
 ```
 
 If the enabled branch fails, stop the capture: do not mark it complete or upload
-a Restic snapshot. The coordinator must keep its restart trap active across
-this check and restart the services on failure. For a manual run, restart the
+a Restic snapshot. The coordinator keeps its restart cleanup active across this
+check and restarts the services on failure. For a manual run, restart the
 normal project after aborting the capture. The unique `BACKUP_DIR` and explicit
 no-database branch prevent an earlier dump or partial file from being mistaken
 for the current run's paired backup.
