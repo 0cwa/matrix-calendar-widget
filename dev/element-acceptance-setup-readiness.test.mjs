@@ -71,7 +71,7 @@ test('readiness failure records the latest HTTP status without response details'
         delay: async (milliseconds) => {
           now += milliseconds;
         },
-        timeoutMs: 1,
+        timeoutMs: 2,
         pollIntervalMs: 1,
       },
     ),
@@ -122,6 +122,7 @@ test('readiness failure classifies a missing HTTP response without retaining the
   });
 
   let now = 0;
+  let requests = 0;
   await assert.rejects(
     waitForEndpoint(
       'element-ready',
@@ -129,19 +130,27 @@ test('readiness failure classifies a missing HTTP response without retaining the
       (status) => status === 200,
       {
         fetchImpl: async () => {
+          requests += 1;
+          if (requests === 1) {
+            return {
+              status: 503,
+              body: { cancel: async () => undefined },
+            };
+          }
           throw new TypeError('synthetic private connection detail');
         },
         now: () => now,
         delay: async (milliseconds) => {
           now += milliseconds;
         },
-        timeoutMs: 1,
+        timeoutMs: 2,
         pollIntervalMs: 1,
       },
     ),
     (error) =>
       error.httpStatus === undefined &&
-      error.failureClass === 'connection-error',
+      error.failureClass === 'connection-error' &&
+      requests === 2,
   );
 
   const sanitized = sanitizeElementAcceptance(
