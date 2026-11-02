@@ -767,6 +767,10 @@ async function waitForHealth(service) {
     try {
       const state = inspectContainer(service);
       if (state.status === 'running' && state.healthStatus === 'healthy') {
+        await waitForPostgresTcpAt(
+          () => queryPostgres('postgres', 'SELECT 1', 'reminder_bootstrap'),
+          Math.max(0, deadline - Date.now()),
+        );
         return;
       }
       if (state.status === 'exited' || state.status === 'dead') break;
@@ -774,6 +778,25 @@ async function waitForHealth(service) {
       // Compose may not have created the container yet.
     }
     await sleep(1_000);
+  }
+  throw new StageFailure('reminder-postgres-ready');
+}
+
+export async function waitForPostgresTcpAt(
+  probe,
+  timeoutMs = MAX_WAIT_MS,
+  { now = Date.now, delay = sleep, pollIntervalMs = 1_000 } = {},
+) {
+  const deadline = now() + timeoutMs;
+  while (now() < deadline) {
+    try {
+      if ((await probe()) === '1') return;
+    } catch {
+      // A healthy container can still be between PostgreSQL startup phases.
+    }
+    const remaining = deadline - now();
+    if (remaining <= 0) break;
+    await delay(Math.min(pollIntervalMs, remaining));
   }
   throw new StageFailure('reminder-postgres-ready');
 }
@@ -817,7 +840,12 @@ function queryPostgres(
       'exec',
       '-T',
       'postgres',
+      'sh',
+      '-ec',
+      'PGPASSWORD="$POSTGRES_PASSWORD" exec psql "$@"',
       'psql',
+      '--host=127.0.0.1',
+      '--port=5432',
       '--username',
       user,
       '--dbname',
