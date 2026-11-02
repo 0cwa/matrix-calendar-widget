@@ -1422,7 +1422,7 @@ async function dockerPreflight(config, paths, deps, runtimeEnv, signal) {
   return postgresPreflight;
 }
 
-const ONLINE_STORE_INVENTORY_SCRIPT = `
+export const ONLINE_STORE_INVENTORY_SCRIPT = `
 const { createHash } = require('node:crypto');
 const { readFileSync } = require('node:fs');
 const keys = [
@@ -1437,6 +1437,7 @@ for (const key of keys) {
   let parsed;
   try { parsed = new URL(value); } catch { process.exit(2); }
   if (!['postgres:', 'postgresql:'].includes(parsed.protocol) || !parsed.hostname || !parsed.pathname || parsed.pathname === '/') process.exit(2);
+  if (parsed.hostname.includes(',') || parsed.searchParams.has('target_session_attrs') || process.env.PGTARGETSESSIONATTRS) process.exit(2);
   let database;
   try { database = decodeURIComponent(parsed.pathname.slice(1)); } catch { process.exit(2); }
   if (!database || parsed.pathname.slice(1).includes('/')) process.exit(2);
@@ -1638,7 +1639,7 @@ fetch('http://127.0.0.1:3000/v1/internal/backup-checkpoint/${suffix}', { method:
   }
 }
 
-const RADICALE_LOCK_SCRIPT = `
+export const RADICALE_LOCK_SCRIPT = `
 import fcntl, os, signal, stat, sys, time
 lock_path, marker_path, cancel_path = sys.argv[1:4]
 timeout_ms = int(sys.argv[4])
@@ -1681,7 +1682,10 @@ with open(marker_path, 'w', encoding='ascii') as marker:
     marker.write('locked:%d:%d:%d:%s:%d\\n' % (os.getpid(), opened.st_dev, opened.st_ino, start_time, fd))
     marker.flush()
 while True:
-    signal.pause()
+    if cancel_requested(): sys.exit(3)
+    remaining = deadline - time.monotonic()
+    if remaining <= 0: sys.exit(3)
+    time.sleep(min(0.1, remaining))
 `;
 
 const RADICALE_PROCESS_CONTROL_SCRIPT = `

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   access,
@@ -17,6 +18,8 @@ import { join } from 'node:path';
 import test from 'node:test';
 import {
   ColdBackupFailure,
+  ONLINE_STORE_INVENTORY_SCRIPT,
+  RADICALE_LOCK_SCRIPT,
   defaultCommand,
   runColdBackup,
 } from './matrix-calendar-cold-backup.mjs';
@@ -37,6 +40,22 @@ const captureMarkerContent = 'Cold capture verified and services resumed.\n';
 const fakeSnapshotId = 'b'.repeat(64);
 const realResticBinary = process.env.COLD_BACKUP_TEST_RESTIC_BINARY;
 const realResticTestRoot = process.env.COLD_BACKUP_TEST_RESTIC_ROOT;
+
+function runNodeSnippet(script, env = {}) {
+  return new Promise((resolveRun, rejectRun) => {
+    const child = spawn(process.execPath, ['-e', script], {
+      env: { PATH: process.env.PATH, ...env },
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    let stdout = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk;
+    });
+    child.once('error', rejectRun);
+    child.once('close', (code, signal) => resolveRun({ code, signal, stdout }));
+  });
+}
 
 async function makeFixture({
   databaseEnabled = true,
@@ -2953,6 +2972,34 @@ test('online capture rejects unhandled PostgreSQL target selectors before checkp
   }
 });
 
+test('online inventory rejects PostgreSQL URL routing and multihost targets', async () => {
+  const rejectedUrls = [
+    'postgres://db.example.invalid/calendar?target_session_attrs=primary',
+    'postgres://db-one.example.invalid,db-two.example.invalid/calendar',
+  ];
+  for (const databaseUrl of rejectedUrls) {
+    const result = await runNodeSnippet(ONLINE_STORE_INVENTORY_SCRIPT, {
+      MATRIX_CALENDAR_REMINDER_DATABASE_URL: databaseUrl,
+    });
+    assert.equal(result.code, 2);
+    assert.equal(result.stdout, '');
+  }
+
+  const valid = await runNodeSnippet(ONLINE_STORE_INVENTORY_SCRIPT, {
+    MATRIX_CALENDAR_REMINDER_DATABASE_URL:
+      'postgres://db.example.invalid/calendar',
+  });
+  assert.equal(valid.code, 0);
+  assert.deepEqual(JSON.parse(valid.stdout).databases, [
+    {
+      key: 'MATRIX_CALENDAR_REMINDER_DATABASE_URL',
+      host: 'db.example.invalid',
+      port: '5432',
+      database: 'calendar',
+    },
+  ]);
+});
+
 test('online capture requires and captures the exact public-feed signing key', async (t) => {
   const key = Buffer.alloc(32, 7);
   const encodedKey = key.toString('base64url');
@@ -3066,6 +3113,64 @@ test('late Radicale lock startup receives a persistent cancellation sentinel', a
     false,
   );
   assert.deepEqual(await readdir(fixture.captureRoot), []);
+});
+
+test('Radicale lock helper releases a late-acquired lock when cancellation arrives before observation', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'matrix-calendar-radicale-lock-'));
+  const lockPath = join(root, 'Radicale.lock');
+  const markerPath = join(root, 'holder');
+  const cancelPath = join(root, 'cancel');
+  await writeFile(lockPath, '');
+  let helper;
+  t.after(async () => {
+    if (helper?.exitCode === null) helper.kill('SIGKILL');
+    await rm(root, { recursive: true, force: true });
+  });
+
+  helper = spawn(
+    'python3',
+    ['-c', RADICALE_LOCK_SCRIPT, lockPath, markerPath, cancelPath, '10000'],
+    { stdio: 'ignore' },
+  );
+  const helperExit = new Promise((resolveExit) => {
+    helper.once('exit', (code, signal) => resolveExit({ code, signal }));
+    helper.once('error', (error) => resolveExit({ error }));
+  });
+
+  let lockedMarker;
+  const markerDeadline = Date.now() + 3000;
+  while (Date.now() < markerDeadline) {
+    try {
+      const marker = await readFile(markerPath, 'utf8');
+      if (marker.startsWith('locked:')) {
+        lockedMarker = marker;
+        break;
+      }
+    } catch {
+      // The helper has not created its marker yet.
+    }
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 10));
+  }
+  assert.match(lockedMarker ?? '', /^locked:/u);
+
+  // Simulate the caller's startup timeout landing after the helper acquired
+  // the lock but before the caller has observed the locked marker.
+  await writeFile(cancelPath, '', { flag: 'wx' });
+  assert.match(lockedMarker, /^locked:/u);
+  const ended = await Promise.race([
+    helperExit,
+    new Promise((resolveTimeout) =>
+      setTimeout(() => resolveTimeout(null), 1500),
+    ),
+  ]);
+  assert.ok(
+    ended,
+    'helper should notice cancellation before its 10-second alarm',
+  );
+  assert.equal(ended.error, undefined);
+  assert.equal(ended.code, 3);
+  await assert.rejects(readFile(markerPath));
+  await assert.rejects(readFile(cancelPath));
 });
 
 test('reused Radicale PID is rejected before the process can be signaled', async (t) => {
