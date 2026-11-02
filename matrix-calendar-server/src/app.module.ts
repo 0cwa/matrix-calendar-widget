@@ -82,6 +82,7 @@ import {
 } from './reminder/ReminderDatabaseConnection';
 import { createRoomReminderModuleProviders } from './reminder/RoomReminderModuleProviders';
 import { MatrixServer } from './rpc/MatrixServer';
+import { AppWriteFenceService } from './service/AppWriteFenceService';
 import { CalendarCommandService } from './service/CalendarCommandService';
 import { CommandService } from './service/CommandService';
 import { ConfiguredRoomCalendarPrincipalIdentityProvider } from './service/ConfiguredRoomCalendarPrincipalIdentityProvider';
@@ -419,6 +420,7 @@ const i18nFactory: FactoryProvider<void> = {
 
   providers: [
     appConfigurationFactory,
+    AppWriteFenceService,
     roomReminderStoreFactory,
     roomCalendarBindingStoreFactory,
     privateCalendarClientStoreFactory,

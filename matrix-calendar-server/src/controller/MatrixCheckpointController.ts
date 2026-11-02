@@ -35,6 +35,10 @@ import {
   CheckpointMatrixClient,
   MatrixSyncPauseLease,
 } from '../matrix/CheckpointMatrixClient';
+import {
+  AppWriteFenceLease,
+  AppWriteFenceService,
+} from '../service/AppWriteFenceService';
 
 const CHECKPOINT_BOUNDARY_TIMEOUT_MS = 30_000;
 const CHECKPOINT_LEASE_TIMEOUT_MS = 120_000;
@@ -42,8 +46,8 @@ const CHECKPOINT_TOKEN_HEADER = 'x-matrix-checkpoint-token';
 
 /**
  * Internal control surface for a host-side online backup coordinator.
- * Disabled unless a dedicated bearer token is configured. This controls only
- * Matrix sync; it does not fence HTTP or database writes.
+ * Disabled unless a dedicated control token is configured. It pauses Matrix
+ * sync and drains app-owned writes before exposing a checkpoint lease.
  */
 @Controller({ path: 'internal/backup-checkpoint', version: ['1'] })
 export class MatrixCheckpointController {
@@ -53,6 +57,8 @@ export class MatrixCheckpointController {
     @Inject(ModuleProviderToken.APP_CONFIGURATION)
     private readonly appConfig: IAppConfiguration,
     private readonly matrixClient: MatrixClient,
+    @Inject(AppWriteFenceService)
+    private readonly writeFence: AppWriteFenceService = new AppWriteFenceService(),
   ) {}
 
   @Post('acquire')
@@ -76,18 +82,46 @@ export class MatrixCheckpointController {
 
     const client = this.getCheckpointClient();
     await client.assertCheckpointSafe();
-    const lease = await client.pauseAtSyncBoundary(
+    const syncLease = await client.pauseAtSyncBoundary(
       CHECKPOINT_BOUNDARY_TIMEOUT_MS,
-      CHECKPOINT_LEASE_TIMEOUT_MS,
+      CHECKPOINT_LEASE_TIMEOUT_MS + 1_000,
     );
+    let writeLease: AppWriteFenceLease | undefined;
     try {
+      syncLease.assertActive();
+      await client.assertCheckpointSafe();
+      writeLease = await this.writeFence.acquireCheckpointFence(
+        CHECKPOINT_BOUNDARY_TIMEOUT_MS,
+        CHECKPOINT_LEASE_TIMEOUT_MS,
+        () => syncLease.release(),
+      );
+      const lease: MatrixSyncPauseLease = {
+        assertActive: () => {
+          syncLease.assertActive();
+          writeLease?.assertActive();
+        },
+        release: () => {
+          try {
+            syncLease.release();
+          } finally {
+            writeLease?.release();
+          }
+        },
+      };
       lease.assertActive();
       await client.assertCheckpointSafe();
       const leaseId = randomUUID();
       this.leases.set(leaseId, lease);
-      return { leaseId, leaseTimeoutMs: CHECKPOINT_LEASE_TIMEOUT_MS };
+      return {
+        leaseId,
+        leaseTimeoutMs: Math.max(0, writeLease.expiresAt - Date.now()),
+      };
     } catch (error) {
-      lease.release();
+      try {
+        syncLease.release();
+      } finally {
+        writeLease?.release();
+      }
       throw error;
     }
   }
@@ -178,6 +212,7 @@ export class MatrixCheckpointController {
         lease.assertActive();
       } catch {
         this.leases.delete(leaseId);
+        lease.release();
       }
     }
   }

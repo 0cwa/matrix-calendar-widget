@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { Module, VersioningType } from '@nestjs/common';
+import { Controller, Module, Post, Res, VersioningType } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import type { NextFunction, Request, Response } from 'express';
 import fetch from 'jest-fetch-mock';
@@ -32,6 +32,7 @@ import {
 } from '../http/MatrixCheckpointRequestLogging';
 import { CheckpointMatrixClient } from '../matrix/CheckpointMatrixClient';
 import { MatrixAuthMiddleware } from '../middleware/MatrixAuthMiddleware';
+import { AppWriteFenceService } from '../service/AppWriteFenceService';
 import { PrivateCalendarClientCallbackGateway } from '../service/private-client/PrivateCalendarClientCallbackGateway';
 import { PrivateCalendarClientDavGateway } from '../service/private-client/PrivateCalendarClientDavGateway';
 
@@ -58,6 +59,22 @@ const matrixClient = new CheckpointMatrixClient(
 );
 const lease = { assertActive: jest.fn(), release: jest.fn() };
 jest.spyOn(matrixClient, 'pauseAtSyncBoundary').mockResolvedValue(lease);
+let notifyWriteProbeStarted: (() => void) | undefined;
+let notifyWriteProbeClosed: (() => void) | undefined;
+let releaseWriteProbe: (() => void) | undefined;
+
+@Controller({ path: 'write-probe', version: ['1'] })
+class MatrixCheckpointWriteProbeController {
+  @Post()
+  async write(@Res() response: Response): Promise<void> {
+    notifyWriteProbeStarted?.();
+    response.once('close', () => notifyWriteProbeClosed?.());
+    await new Promise<void>((resolve) => {
+      releaseWriteProbe = resolve;
+    });
+    response.status(201).json({ written: true });
+  }
+}
 
 @Module({
   imports: [
@@ -76,10 +93,14 @@ jest.spyOn(matrixClient, 'pauseAtSyncBoundary').mockResolvedValue(lease);
       ],
     }),
   ],
-  controllers: [MatrixCheckpointController],
+  controllers: [
+    MatrixCheckpointController,
+    MatrixCheckpointWriteProbeController,
+  ],
   providers: [
     { provide: ModuleProviderToken.APP_CONFIGURATION, useValue: appConfig },
     { provide: MatrixClient, useValue: matrixClient },
+    AppWriteFenceService,
     {
       provide: PrivateCalendarClientCallbackGateway,
       useValue: gatewayPassThrough,
@@ -107,7 +128,13 @@ describe('Matrix checkpoint HTTP contract', () => {
     capturedRequestLogs.length = 0;
     lease.assertActive.mockClear();
     lease.release.mockClear();
-    jest.spyOn(matrixClient, 'pauseAtSyncBoundary').mockResolvedValue(lease);
+    notifyWriteProbeStarted = undefined;
+    notifyWriteProbeClosed = undefined;
+    releaseWriteProbe = undefined;
+    jest
+      .spyOn(matrixClient, 'pauseAtSyncBoundary')
+      .mockClear()
+      .mockResolvedValue(lease);
     const application = await createCalendarGatewayHttpApplication(
       MatrixCheckpointHttpContractModule,
       MatrixAuthMiddleware,
@@ -158,6 +185,126 @@ describe('Matrix checkpoint HTTP contract', () => {
     expect(JSON.parse(released.body)).toEqual({ released: true });
     expect(fetch).not.toHaveBeenCalled();
     expect(capturedRequestLogs).toHaveLength(0);
+  });
+
+  it('pauses Matrix and drains an admitted HTTP mutation before returning a checkpoint lease', async () => {
+    const writeFence = app.get(AppWriteFenceService);
+    let notifyStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      notifyStarted = resolve;
+    });
+    notifyWriteProbeStarted = notifyStarted;
+    const finishHeldWrite = () => releaseWriteProbe?.();
+
+    let leaseId: string | undefined;
+    try {
+      const inFlight = send('POST', '/v1/write-probe', {});
+      await started;
+      const acquire = send('POST', '/V1/INTERNAL/BACKUP-CHECKPOINT/ACQUIRE', {
+        'X-Matrix-Checkpoint-Token': checkpointToken,
+      });
+
+      let fenceClosed = false;
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const probe = writeFence.admitWrite();
+        if (!probe) {
+          fenceClosed = true;
+          break;
+        }
+        probe.release();
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+      expect(fenceClosed).toBe(true);
+      expect(matrixClient.pauseAtSyncBoundary).toHaveBeenCalledTimes(1);
+
+      const newWrite = await send('POST', '/v1/write-probe', {});
+      expect(newWrite.statusCode).toBe(503);
+
+      finishHeldWrite();
+      const completedWrite = await inFlight;
+      expect(completedWrite.statusCode).toBe(201);
+      const acquired = await acquire;
+      expect(acquired.statusCode).toBe(201);
+      leaseId = (JSON.parse(acquired.body) as { leaseId: string }).leaseId;
+      expect(writeFence.admitWrite()).toBeUndefined();
+    } finally {
+      finishHeldWrite();
+      if (leaseId) {
+        await send(
+          'POST',
+          `/v1/internal/backup-checkpoint/${leaseId}/release`,
+          { 'X-Matrix-Checkpoint-Token': checkpointToken },
+        );
+      }
+    }
+  });
+
+  it('keeps a disconnected async mutation admitted until its handler ends', async () => {
+    const writeFence = app.get(AppWriteFenceService);
+    let notifyStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      notifyStarted = resolve;
+    });
+    let notifyClosed!: () => void;
+    const closed = new Promise<void>((resolve) => {
+      notifyClosed = resolve;
+    });
+    notifyWriteProbeStarted = notifyStarted;
+    notifyWriteProbeClosed = notifyClosed;
+
+    const request = httpRequest(`${baseUrl}/v1/write-probe`, {
+      method: 'POST',
+    });
+    request.on('error', () => undefined);
+    request.end();
+
+    let acquire: Promise<HttpResult> | undefined;
+    let leaseId: string | undefined;
+    const finishHeldWrite = () => releaseWriteProbe?.();
+    try {
+      await started;
+      request.destroy();
+      await closed;
+
+      acquire = send('POST', '/v1/internal/backup-checkpoint/acquire', {
+        'X-Matrix-Checkpoint-Token': checkpointToken,
+      });
+      let fenceClosed = false;
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const probe = writeFence.admitWrite();
+        if (!probe) {
+          fenceClosed = true;
+          break;
+        }
+        probe.release();
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+      expect(fenceClosed).toBe(true);
+      // Matrix sync pauses before the controller waits for admitted writes to
+      // drain. The disconnected handler must still keep the app fence closed.
+      expect(matrixClient.pauseAtSyncBoundary).toHaveBeenCalledTimes(1);
+
+      finishHeldWrite();
+      const acquired = await acquire;
+      expect(acquired.statusCode).toBe(201);
+      leaseId = (JSON.parse(acquired.body) as { leaseId: string }).leaseId;
+      expect(matrixClient.pauseAtSyncBoundary).toHaveBeenCalledTimes(1);
+    } finally {
+      finishHeldWrite();
+      if (acquire) {
+        const acquired = await acquire.catch(() => undefined);
+        if (!leaseId && acquired?.statusCode === 201) {
+          leaseId = (JSON.parse(acquired.body) as { leaseId: string }).leaseId;
+        }
+      }
+      if (leaseId) {
+        await send(
+          'POST',
+          `/v1/internal/backup-checkpoint/${leaseId}/release`,
+          { 'X-Matrix-Checkpoint-Token': checkpointToken },
+        );
+      }
+    }
   });
 
   it('rejects the wrong control token without Matrix authentication I/O', async () => {

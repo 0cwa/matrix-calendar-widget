@@ -16,6 +16,7 @@
 
 import { IAppConfiguration } from '../IAppConfiguration';
 import type { RoomCalendarBinding } from '../model/IRoomCalendarBinding';
+import { AppWriteFenceService } from '../service/AppWriteFenceService';
 import { DisabledRoomCalendarBindingStore } from '../service/DisabledRoomCalendarBindingStore';
 import type { RoomCalendarBindingRegistry } from '../service/IRoomCalendarBindingRegistry';
 import { RoomCalendarBindingRegistryAdapter } from '../service/RoomCalendarBindingRegistryAdapter';
@@ -310,6 +311,36 @@ describe('RoomReminderSchedulerLifecycle', () => {
     await stopped;
     await jest.runOnlyPendingTimersAsync();
     expect(scheduler.runOnce).toHaveBeenCalledTimes(1);
+  });
+
+  it('waits for an active checkpoint fence before starting or completing a scheduler run', async () => {
+    jest.useFakeTimers();
+    const writeFence = new AppWriteFenceService();
+    const checkpointLease = await writeFence.acquireCheckpointFence(
+      1_000,
+      5_000,
+      jest.fn(),
+    );
+    const scheduler = { runOnce: jest.fn(async () => ({})) } as unknown as Pick<
+      RoomReminderScheduler,
+      'runOnce'
+    >;
+    const lifecycle = new RoomReminderSchedulerLifecycle(
+      configuration(),
+      store(true),
+      scheduler,
+      1_000,
+      writeFence,
+    );
+
+    lifecycle.start();
+    await jest.advanceTimersByTimeAsync(0);
+    expect(scheduler.runOnce).not.toHaveBeenCalled();
+
+    checkpointLease.release();
+    await jest.advanceTimersByTimeAsync(0);
+    expect(scheduler.runOnce).toHaveBeenCalledTimes(1);
+    await lifecycle.stop();
   });
 
   it('starts bot-account delivery readiness without application-service credentials', async () => {

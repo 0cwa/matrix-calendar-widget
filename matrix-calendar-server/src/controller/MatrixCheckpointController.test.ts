@@ -33,6 +33,7 @@ import {
   writeJsonAtomically,
 } from '../matrix/AtomicFsStorageProvider';
 import { CheckpointMatrixClient } from '../matrix/CheckpointMatrixClient';
+import { AppWriteFenceService } from '../service/AppWriteFenceService';
 import { MatrixCheckpointController } from './MatrixCheckpointController';
 
 const token = 'synthetic-checkpoint-token-that-is-long-enough';
@@ -108,11 +109,12 @@ describe('MatrixCheckpointController', () => {
     const controller = new MatrixCheckpointController(config(), client);
 
     const acquired = await controller.acquire(auth, localRequest());
-    expect(acquired.leaseTimeoutMs).toBe(120_000);
+    expect(acquired.leaseTimeoutMs).toBeGreaterThan(0);
+    expect(acquired.leaseTimeoutMs).toBeLessThanOrEqual(120_000);
     await expect(
       controller.verify(acquired.leaseId, auth, localRequest()),
     ).resolves.toEqual({ active: true });
-    expect(lease.assertActive).toHaveBeenCalledTimes(3);
+    expect(lease.assertActive).toHaveBeenCalledTimes(4);
     expect(controller.release(acquired.leaseId, auth, localRequest())).toEqual({
       released: true,
     });
@@ -122,11 +124,60 @@ describe('MatrixCheckpointController', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
+  it('holds app write admission closed for the acquired Matrix lease', async () => {
+    const client = safeClient();
+    const syncLease = { assertActive: jest.fn(), release: jest.fn() };
+    jest.spyOn(client, 'pauseAtSyncBoundary').mockResolvedValue(syncLease);
+    const writeFence = new AppWriteFenceService();
+    const controller = new MatrixCheckpointController(
+      config(),
+      client,
+      writeFence,
+    );
+
+    const acquired = await controller.acquire(auth, localRequest());
+    expect(writeFence.admitWrite()).toBeUndefined();
+
+    expect(controller.release(acquired.leaseId, auth, localRequest())).toEqual({
+      released: true,
+    });
+    expect(syncLease.release).toHaveBeenCalledTimes(1);
+    const resumedWrite = writeFence.admitWrite();
+    expect(resumedWrite).toBeDefined();
+    resumedWrite?.release();
+  });
+
+  it('unwinds the Matrix pause and write fence if final checkpoint validation fails', async () => {
+    const client = safeClient();
+    const syncLease = { assertActive: jest.fn(), release: jest.fn() };
+    jest.spyOn(client, 'pauseAtSyncBoundary').mockResolvedValue(syncLease);
+    jest
+      .spyOn(client, 'assertCheckpointSafe')
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('checkpoint state changed'));
+    const writeFence = new AppWriteFenceService();
+    const controller = new MatrixCheckpointController(
+      config(),
+      client,
+      writeFence,
+    );
+
+    await expect(controller.acquire(auth, localRequest())).rejects.toThrow(
+      'checkpoint state changed',
+    );
+    expect(syncLease.release).toHaveBeenCalledTimes(1);
+    const resumedWrite = writeFence.admitWrite();
+    expect(resumedWrite).toBeDefined();
+    resumedWrite?.release();
+  });
+
   it('rejects an expired or invalid lease before backup proceeds', async () => {
     const client = safeClient();
     const lease = {
       assertActive: jest
         .fn()
+        .mockImplementationOnce(() => undefined)
         .mockImplementationOnce(() => undefined)
         .mockImplementation(() => {
           throw new Error('expired');
