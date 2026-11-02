@@ -853,6 +853,16 @@ const PINNED_WIDGET_PANEL_PHASES = new Set([
   'widget-a-extension-row',
 ]);
 const STATUSES = new Set(['started', 'passed', 'failed', 'unavailable']);
+const READINESS_FAILURE_CLASSES = new Set([
+  'connection-error',
+  'http-status',
+  'timeout',
+]);
+const READINESS_PHASES = new Set([
+  'gateway-ready',
+  'widget-ready',
+  'element-ready',
+]);
 const PRIVATE_UI_PHASES = new Set(PRIVATE_UI_CHECKPOINT_PHASES);
 const PRIVATE_UI_TEST_STATUSES = new Set([
   'passed',
@@ -1543,6 +1553,7 @@ const ALLOWED_KEYS = new Set([
   'homeserverHttpErrorCount',
   'homeserverLastHttpErrorStatus',
   'failureCode',
+  'failureClass',
   'performanceReport',
   'missingModuleKind',
   'missingDependency',
@@ -4171,6 +4182,15 @@ export function sanitizeElementAcceptance(
       throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
 
+    if (
+      Object.hasOwn(record, 'failureClass') &&
+      (record.status !== 'failed' ||
+        !READINESS_PHASES.has(record.phase) ||
+        !READINESS_FAILURE_CLASSES.has(record.failureClass))
+    ) {
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+    }
+
     const hasMissingModuleDiagnostic =
       Object.hasOwn(record, 'missingModuleKind') ||
       Object.hasOwn(record, 'missingDependency');
@@ -4961,6 +4981,9 @@ export function sanitizeElementAcceptance(
     const fields = [`phase=${phase}`, `status=${record.status}`];
     if (Object.hasOwn(record, 'httpStatus')) {
       fields.push(`http_status=${record.httpStatus}`);
+    }
+    if (Object.hasOwn(record, 'failureClass')) {
+      fields.push(`failure_class=${record.failureClass}`);
     }
     if (Object.hasOwn(record, 'teamRoomMatches')) {
       fields.push(`team_room_matches=${record.teamRoomMatches}`);

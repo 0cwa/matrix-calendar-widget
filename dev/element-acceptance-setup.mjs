@@ -58,6 +58,7 @@ class FixtureSetupError extends Error {
     failureCode,
     processExitCode,
     serviceDiagnostic,
+    failureClass,
   ) {
     super('Element acceptance fixture setup failed');
     this.phase = phase;
@@ -65,6 +66,7 @@ class FixtureSetupError extends Error {
     this.failureCode = failureCode;
     this.processExitCode = processExitCode;
     this.serviceDiagnostic = serviceDiagnostic;
+    this.failureClass = failureClass;
   }
 }
 
@@ -117,6 +119,9 @@ async function runPhase(phase, operation, summarizeSuccess = () => ({})) {
             ...(typeof error.failureCode === 'string'
               ? { failureCode: error.failureCode }
               : {}),
+            ...(READINESS_FAILURE_CLASSES.has(error.failureClass)
+              ? { failureClass: error.failureClass }
+              : {}),
           }
         : {};
     recordStage(phase, 'failed', details);
@@ -125,6 +130,8 @@ async function runPhase(phase, operation, summarizeSuccess = () => ({})) {
       details.httpStatus,
       details.failureCode,
       details.processExitCode,
+      undefined,
+      details.failureClass,
     );
   }
 }
@@ -1125,13 +1132,38 @@ async function prepareReminderRoom() {
   process.stdout.write('Reminder sender joined the synthetic team room.\n');
 }
 
-async function waitForEndpoint(phase, url, expectedStatus) {
+const READINESS_FAILURE_CLASSES = new Set([
+  'connection-error',
+  'http-status',
+  'timeout',
+]);
+
+export function classifyReadinessFailure(error) {
+  return error?.name === 'TimeoutError' || error?.name === 'AbortError'
+    ? 'timeout'
+    : 'connection-error';
+}
+
+export async function waitForEndpoint(
+  phase,
+  url,
+  expectedStatus,
+  {
+    fetchImpl = fetch,
+    now = Date.now,
+    delay = (milliseconds) =>
+      new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds)),
+    timeoutMs = 120_000,
+    pollIntervalMs = 1_000,
+  } = {},
+) {
   recordStage(phase, 'started');
-  const deadline = Date.now() + 120_000;
+  const deadline = now() + timeoutMs;
   let lastStatus;
-  while (Date.now() < deadline) {
+  let failureClass = 'timeout';
+  while (now() < deadline) {
     try {
-      const response = await fetch(url, {
+      const response = await fetchImpl(url, {
         redirect: 'error',
         signal: AbortSignal.timeout(5_000),
       });
@@ -1141,23 +1173,22 @@ async function waitForEndpoint(phase, url, expectedStatus) {
         recordStage(phase, 'passed', { httpStatus: response.status });
         return;
       }
-    } catch {
+      failureClass = 'http-status';
+    } catch (error) {
       // The listener may still be starting. No raw error text is retained.
+      failureClass = classifyReadinessFailure(error);
     }
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 1_000));
+    await delay(Math.min(pollIntervalMs, Math.max(0, deadline - now())));
   }
   const serviceDiagnostic =
     phase === 'gateway-ready' ? readComposeServiceDiagnostic('gateway') : {};
-  recordStage(phase, 'failed', {
-    ...(Number.isInteger(lastStatus) ? { httpStatus: lastStatus } : {}),
-    ...serviceDiagnostic,
-  });
   throw new FixtureSetupError(
     phase,
     lastStatus,
     undefined,
     undefined,
     serviceDiagnostic,
+    failureClass,
   );
 }
 
@@ -1236,6 +1267,9 @@ async function main() {
             ...(typeof error.failureCode === 'string'
               ? { failureCode: error.failureCode }
               : {}),
+            ...(READINESS_FAILURE_CLASSES.has(error.failureClass)
+              ? { failureClass: error.failureClass }
+              : {}),
             ...(error.serviceDiagnostic ?? {}),
           }
         : {};
@@ -1250,6 +1284,9 @@ async function main() {
         : []),
       ...(typeof details.failureCode === 'string'
         ? [`failure_code=${details.failureCode}`]
+        : []),
+      ...(READINESS_FAILURE_CLASSES.has(details.failureClass)
+        ? [`failure_class=${details.failureClass}`]
         : []),
       ...(Number.isInteger(details.processExitCode)
         ? [`process_exit_code=${details.processExitCode}`]
