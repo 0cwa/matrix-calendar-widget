@@ -1,6 +1,6 @@
 # ADR048: Persist and expose a bounded Matrix sync checkpoint for backups
 
-- Status: Accepted for the Matrix sync checkpoint slice; full online backup remains open.
+- Status: Accepted for the checkpoint control and initial opt-in online capture slice; full online backup and isolated restore remain open.
 - Date: 2026-10-30.
 - Issue: [#442](https://github.com/0cwa/matrix-calendar-widget/issues/442).
 
@@ -47,6 +47,23 @@ The server does not publish a host port for this route. A coordinator on the
 host can invoke it through `docker exec` and Node's built-in `fetch` against
 `127.0.0.1:3000` inside the server container; the secret remains in the
 container environment and never needs to appear in command arguments.
+
+The host-side coordinator now has an opt-in online capture path. It obtains,
+verifies, and releases the checkpoint lease; holds a shared `fcntl` lock on
+Radicale's documented `/data/collections/.Radicale.lock` inode while dumping
+the app database and archiving both volumes; then verifies the lease again
+before marking the capture complete. It inventories the private-client,
+binding, and reminder database URLs, and proceeds only when all configured
+stores share the exact target selected by the existing `pgService` dump.
+Unknown database URL settings and distinct database targets fail closed.
+When public feeds are enabled, a named restore input must match the running
+signing key. The established cold path remains the default.
+
+This coordinator path is not yet a qualified recovery protocol. It does not
+fence database writers or Radicale writers that bypass the application and
+shared Radicale lock, and an isolated restore has not been verified. Keep
+production recovery on the established cold path until the remaining #442
+acceptance work is complete.
 
 The control surface drains writes admitted through this server's HTTP gateway,
 including private-client DAV, and the reminder scheduler. It cannot fence

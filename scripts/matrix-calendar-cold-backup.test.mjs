@@ -160,6 +160,22 @@ function fakeCommands({
   emptyContainerDump = false,
   changePostgresContainerAfterDump = false,
   onContainerDump,
+  onArchive,
+  onlineInventory = {
+    databases: [
+      {
+        key: 'MATRIX_CALENDAR_REMINDER_DATABASE_URL',
+        host: 'db.example.invalid',
+        port: '5432',
+        database: 'calendar',
+      },
+    ],
+    unknownDatabaseSettings: [],
+    publicFeedEnabled: false,
+    publicFeedKeySha256: null,
+  },
+  failCheckpointVerifyAt,
+  delayedRadicaleLock = false,
   waitForContainerDumpAbort = false,
   failDump = false,
   warningDump = false,
@@ -186,6 +202,9 @@ function fakeCommands({
   const calls = [];
   let firstStop = true;
   let postgresContainerChanged = false;
+  let checkpointVerifyCount = 0;
+  let lockActive = true;
+  let cancelRequested = false;
 
   const command = async (name, args, options = {}) => {
     const call = { name, args: [...args], options };
@@ -357,6 +376,7 @@ function fakeCommands({
         };
       }
       if (options.stdoutPath) {
+        if (onArchive) await onArchive(options);
         await writeFile(
           options.stdoutPath,
           emptyArchive ? '' : 'synthetic-tar-content',
@@ -391,6 +411,55 @@ function fakeCommands({
       args.includes('--version')
     ) {
       return { status: 0, stdout: 'pg_dump (PostgreSQL) 16.15\n' };
+    }
+    if (name === 'docker' && args[0] === 'exec' && args.includes('node')) {
+      const script = args.at(-1);
+      if (script.includes('const keys = [')) {
+        return { status: 0, stdout: JSON.stringify(onlineInventory) };
+      }
+      if (script.includes('/v1/internal/backup-checkpoint/acquire')) {
+        return {
+          status: 0,
+          stdout: JSON.stringify({
+            leaseId: 'a'.repeat(8) + '-1234-1234-1234-123456789abc',
+            leaseTimeoutMs: 120_000,
+          }),
+        };
+      }
+      if (script.includes('/verify')) {
+        checkpointVerifyCount += 1;
+        return {
+          status: failCheckpointVerifyAt === checkpointVerifyCount ? 1 : 0,
+          stdout: JSON.stringify({ active: true }),
+        };
+      }
+      if (script.includes('/release')) {
+        return { status: 0, stdout: JSON.stringify({ released: true }) };
+      }
+    }
+    if (name === 'docker' && args[0] === 'exec' && args.includes('python3')) {
+      return { status: 0, stdout: '' };
+    }
+    if (name === 'docker' && args[0] === 'exec' && args.includes('cat')) {
+      if (cancelRequested) return { status: 1, stdout: '' };
+      return delayedRadicaleLock
+        ? { status: 0, stdout: 'waiting:4321\n' }
+        : { status: 0, stdout: 'locked:4321:1:42\n' };
+    }
+    if (name === 'docker' && args[0] === 'exec' && args.includes('touch')) {
+      cancelRequested = true;
+      lockActive = false;
+      return { status: 0, stdout: '' };
+    }
+    if (name === 'docker' && args[0] === 'exec' && args.includes('kill')) {
+      if (args.includes('-TERM')) lockActive = false;
+      return {
+        status: args.includes('-0') && !lockActive ? 1 : 0,
+        stdout: '',
+      };
+    }
+    if (name === 'docker' && args[0] === 'exec' && args.includes('rm')) {
+      return { status: 0, stdout: '' };
     }
     if (name === 'docker' && args[0] === 'exec' && args.includes('pg_dump')) {
       if (options.stdoutPath) {
@@ -507,7 +576,13 @@ function fakeCommands({
     if (name === 'restic' && args[0] === 'dump') {
       const path = args.at(-1);
       if (path.endsWith('/.capture-complete')) {
-        return { status: resticMarkerStatus, stdout: resticMarkerOutput };
+        return {
+          status: resticMarkerStatus,
+          stdout:
+            resticMarkerOutput === captureMarkerContent
+              ? await readFile(path, 'utf8')
+              : resticMarkerOutput,
+        };
       }
       if (Object.hasOwn(resticDumpOverrides, path.split('/').at(-1))) {
         if (options.stdoutPath) {
@@ -2673,4 +2748,271 @@ test('systemd examples use runtime credentials and a daily timer without enablin
   assert.match(timer, /Persistent=true/u);
   assert.match(timer, /RandomizedDelaySec=15m/u);
   assert.doesNotMatch(timer, /forget|prune/u);
+});
+
+test('opt-in online capture checkpoints the app and holds the Radicale lock without stopping services', async (t) => {
+  const fixture = await makeFixture();
+  t.after(fixture.cleanup);
+  fixture.config.captureMode = 'online';
+  const fake = fakeCommands();
+
+  const result = await runColdBackup(fixture.config, {
+    command: fake.command,
+    env: fixture.env,
+    now: () => new Date('2026-10-12T02:03:04.000Z'),
+    id: () => 'synthetic-run-id',
+  });
+
+  assert.deepEqual(
+    fake.calls.filter(
+      (call) =>
+        call.name === 'docker' &&
+        call.args[0] === 'compose' &&
+        (call.args.includes('stop') || call.args.includes('start')),
+    ),
+    [],
+  );
+  const marker = await readFile(
+    join(result.captureDirectory, '.capture-complete'),
+    'utf8',
+  );
+  assert.equal(
+    marker,
+    'Online capture verified while services remained running.\n',
+  );
+  assert.ok(
+    fake.calls.some(
+      (call) =>
+        call.name === 'docker' &&
+        call.args[0] === 'exec' &&
+        call.args.includes('/data/collections/.Radicale.lock'),
+    ),
+  );
+  assert.ok(
+    fake.calls.some(
+      (call) =>
+        call.name === 'docker' &&
+        call.args[0] === 'exec' &&
+        String(call.args.at(-1)).includes(
+          '/v1/internal/backup-checkpoint/acquire',
+        ),
+    ),
+  );
+  assert.ok(
+    fake.calls.some(
+      (call) =>
+        call.name === 'docker' &&
+        call.args[0] === 'exec' &&
+        String(call.args.at(-1)).includes('/release'),
+    ),
+  );
+  assert.ok(fake.calls.some((call) => call.name === 'pg_dump'));
+  assert.ok(
+    fake.calls.some(
+      (call) => call.name === 'restic' && call.args[0] === 'backup',
+    ),
+  );
+});
+
+test('online capture rejects distinct database targets before acquiring the checkpoint', async (t) => {
+  const fixture = await makeFixture();
+  t.after(fixture.cleanup);
+  fixture.config.captureMode = 'online';
+  const fake = fakeCommands({
+    onlineInventory: {
+      databases: [
+        {
+          key: 'MATRIX_CALENDAR_BINDING_DATABASE_URL',
+          host: 'db.example.invalid',
+          port: '5432',
+          database: 'calendar',
+        },
+        {
+          key: 'MATRIX_CALENDAR_REMINDER_DATABASE_URL',
+          host: 'other.example.invalid',
+          port: '5432',
+          database: 'reminders',
+        },
+      ],
+      unknownDatabaseSettings: [],
+      publicFeedEnabled: false,
+      publicFeedKeySha256: null,
+    },
+  });
+
+  await assert.rejects(
+    runColdBackup(fixture.config, { command: fake.command, env: fixture.env }),
+    (error) =>
+      error instanceof ColdBackupFailure && error.stage === 'preflight',
+  );
+  assert.equal(
+    fake.calls.some(
+      (call) =>
+        call.name === 'docker' &&
+        String(call.args.at(-1)).includes('/checkpoint/acquire'),
+    ),
+    false,
+  );
+  assert.equal(
+    fake.calls.some(
+      (call) => call.name === 'restic' && call.args[0] === 'backup',
+    ),
+    false,
+  );
+  assert.deepEqual(await readdir(fixture.captureRoot), []);
+});
+
+test('online capture requires and captures the exact public-feed signing key', async (t) => {
+  const key = Buffer.alloc(32, 7);
+  const encodedKey = key.toString('base64url');
+  const fixture = await makeFixture({
+    restoreInputs: [
+      { name: 'public-feed-signing-key', path: '/placeholder/public-feed.key' },
+    ],
+  });
+  t.after(fixture.cleanup);
+  const keyPath = join(fixture.root, 'public-feed.key');
+  await writeFile(keyPath, `${encodedKey}\n`, { mode: 0o600 });
+  fixture.config.restoreInputs[0].path = keyPath;
+  fixture.config.captureMode = 'online';
+  const inventory = {
+    databases: [
+      {
+        key: 'MATRIX_CALENDAR_REMINDER_DATABASE_URL',
+        host: 'db.example.invalid',
+        port: '5432',
+        database: 'calendar',
+      },
+    ],
+    unknownDatabaseSettings: [],
+    publicFeedEnabled: true,
+    publicFeedKeySha256: createHash('sha256').update(key).digest('hex'),
+  };
+  const fake = fakeCommands({ onlineInventory: inventory });
+
+  const result = await runColdBackup(fixture.config, {
+    command: fake.command,
+    env: fixture.env,
+    id: () => 'synthetic-run-id',
+  });
+  const manifest = JSON.parse(
+    await readFile(
+      join(result.captureDirectory, 'capture-manifest.json'),
+      'utf8',
+    ),
+  );
+  assert.equal(manifest.restoreInputs[0].name, 'public-feed-signing-key');
+  assert.equal(
+    await readFile(
+      join(result.captureDirectory, manifest.restoreInputs[0].archiveName),
+      'utf8',
+    ),
+    `${encodedKey}\n`,
+  );
+});
+
+test('expired online checkpoint invalidates capture, releases the lock, and removes incomplete files', async (t) => {
+  const fixture = await makeFixture();
+  t.after(fixture.cleanup);
+  fixture.config.captureMode = 'online';
+  const fake = fakeCommands({ failCheckpointVerifyAt: 4 });
+
+  await assert.rejects(
+    runColdBackup(fixture.config, {
+      command: fake.command,
+      env: fixture.env,
+      id: () => 'synthetic-run-id',
+    }),
+    (error) =>
+      error instanceof ColdBackupFailure && error.stage === 'checkpoint',
+  );
+  assert.equal(
+    fake.calls.some(
+      (call) => call.name === 'restic' && call.args[0] === 'backup',
+    ),
+    false,
+  );
+  assert.equal(
+    fake.calls.some(
+      (call) =>
+        call.name === 'docker' &&
+        call.args[0] === 'exec' &&
+        call.args.includes('kill'),
+    ),
+    true,
+  );
+  assert.deepEqual(await readdir(fixture.captureRoot), []);
+});
+
+test('late Radicale lock startup receives a persistent cancellation sentinel', async (t) => {
+  const fixture = await makeFixture();
+  t.after(fixture.cleanup);
+  fixture.config.captureMode = 'online';
+  const fake = fakeCommands({ delayedRadicaleLock: true });
+
+  await assert.rejects(
+    runColdBackup(fixture.config, {
+      command: fake.command,
+      env: fixture.env,
+      id: () => 'synthetic-run-id',
+      radicaleLockStartupTimeoutMs: 5,
+    }),
+    (error) =>
+      error instanceof ColdBackupFailure && error.stage === 'radicale-lock',
+  );
+  assert.ok(
+    fake.calls.some(
+      (call) =>
+        call.name === 'docker' &&
+        call.args[0] === 'exec' &&
+        call.args.includes('touch'),
+    ),
+  );
+  assert.equal(
+    fake.calls.some(
+      (call) => call.name === 'restic' && call.args[0] === 'backup',
+    ),
+    false,
+  );
+  assert.deepEqual(await readdir(fixture.captureRoot), []);
+});
+
+test('concurrent online coordinator is rejected while a capture owns the host lock', async (t) => {
+  const fixture = await makeFixture();
+  t.after(fixture.cleanup);
+  fixture.config.captureMode = 'online';
+  let archiveStartedResolve;
+  const archiveStarted = new Promise((resolve) => {
+    archiveStartedResolve = resolve;
+  });
+  let releaseArchiveResolve;
+  const archiveGate = new Promise((resolve) => {
+    releaseArchiveResolve = resolve;
+  });
+  let firstArchive = true;
+  const firstFake = fakeCommands({
+    onArchive: async () => {
+      if (!firstArchive) return;
+      firstArchive = false;
+      archiveStartedResolve();
+      await archiveGate;
+    },
+  });
+  const firstRun = runColdBackup(fixture.config, {
+    command: firstFake.command,
+    env: fixture.env,
+    id: () => 'concurrent-run',
+  });
+  await archiveStarted;
+  const secondFake = fakeCommands();
+  await assert.rejects(
+    runColdBackup(fixture.config, {
+      command: secondFake.command,
+      env: fixture.env,
+      id: () => 'concurrent-run',
+    }),
+    (error) => error instanceof ColdBackupFailure && error.stage === 'lock',
+  );
+  releaseArchiveResolve();
+  await firstRun;
 });
