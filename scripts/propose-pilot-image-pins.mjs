@@ -159,7 +159,29 @@ function currentValidatorPins(source) {
   return pins;
 }
 
+function validateOverlayImageMapping(overlay, currentImages) {
+  const entries = [
+    ...overlay.matchAll(
+      /^  (radicale|server|widget):\n    image: ([^\s#]+)$/gm,
+    ),
+  ];
+  if (entries.length !== Object.keys(IMAGE_REPOSITORIES).length) fail();
+
+  const imagesByService = Object.fromEntries(
+    entries.map(([, service, image]) => [service, image]),
+  );
+  if (
+    Object.keys(IMAGE_REPOSITORIES).some(
+      (service) => imagesByService[service] !== currentImages[service],
+    )
+  ) {
+    fail();
+  }
+}
+
 function updatePinsInFiles(files, current, proposed) {
+  validateOverlayImageMapping(files[TARGETS[1]], current.images);
+
   let validator = files[TARGETS[0]];
   validator = replaceCount(
     validator,

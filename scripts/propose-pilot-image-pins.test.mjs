@@ -147,10 +147,33 @@ test('proposal refuses stale or manually inconsistent pin locations', () => {
     'deploy/etke-sidecar.pilot-images.compose.yaml'
   ].replace('archive-38913010664-1', 'archive-1-1');
 
-  assert.throws(
-    () => propose(candidateManifest(), changedFiles),
-    /Could not propose pilot image pins/,
-  );
+  assert.throws(() => propose(candidateManifest(), changedFiles), {
+    message:
+      'Could not propose pilot image pins. Verify the accepted archive and its manifest SHA-256, then review the current pilot pin files.',
+  });
+});
+
+test('proposal rejects image tags assigned to the wrong Compose services', () => {
+  const changedFiles = files();
+  const overlay = changedFiles['deploy/etke-sidecar.pilot-images.compose.yaml'];
+  changedFiles['deploy/etke-sidecar.pilot-images.compose.yaml'] = overlay
+    .replace(
+      'image: matrix-calendar-widget/radicale-openid:archive-38913010664-1',
+      'image: matrix-calendar-widget/__swap__:archive-38913010664-1',
+    )
+    .replace(
+      'image: matrix-calendar-widget/server:archive-38913010664-1',
+      'image: matrix-calendar-widget/radicale-openid:archive-38913010664-1',
+    )
+    .replace(
+      'image: matrix-calendar-widget/__swap__:archive-38913010664-1',
+      'image: matrix-calendar-widget/server:archive-38913010664-1',
+    );
+
+  assert.throws(() => propose(candidateManifest(), changedFiles), {
+    message:
+      'Could not propose pilot image pins. Verify the accepted archive and its manifest SHA-256, then review the current pilot pin files.',
+  });
 });
 
 test('proposal output excludes arbitrary private fields from the manifest', () => {
