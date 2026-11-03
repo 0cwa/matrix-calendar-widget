@@ -587,6 +587,24 @@ Preserve the existing managed services and stores. Issue
 deployment, with the source/evidence ledger in
 [#255](https://github.com/0cwa/matrix-calendar-widget/issues/255).
 
+For a later, separately accepted candidate, first complete the archive
+verification steps above and copy the manifest SHA-256 from that exact Actions
+run summary. Then use the read-only proposal helper:
+
+```bash
+node scripts/propose-pilot-image-pins.mjs \
+  --manifest /private/verified-archive-manifest.json \
+  --manifest-sha256 '<manifest SHA-256 from the selected run summary>'
+```
+
+The helper checks that the supplied digest matches the manifest, that the
+manifest names the trusted `main` workflow and all three supported images on
+`linux/amd64`, and that the current validator, overlay, and documentation pins
+agree. It prints a unified patch for review; it does not change files, verify
+archive contents, read operator environment or binding files, or start
+services. Use it only after the existing archive verifier succeeds, and review
+the proposed source, workflow, run, and image pins before applying any change.
+
 ## Public calendar feed ingress and recovery
 
 Public subscriptions are available in current source under

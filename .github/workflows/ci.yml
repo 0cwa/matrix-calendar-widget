@@ -57,6 +57,9 @@ jobs:
       - name: Test selected-pilot sidecar contract (synthetic, no host)
         run: node --test scripts/validate-pilot-sidecar.test.mjs
 
+      - name: Test pilot image pin proposal (synthetic, no host)
+        run: node --test scripts/propose-pilot-image-pins.test.mjs
+
       - name: Check pilot image overlay syntax (no services started)
         run: |
           docker compose --env-file deploy/etke-sidecar.env.example \
