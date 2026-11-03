@@ -14,54 +14,112 @@
  * limitations under the License.
  */
 
-import { HttpException, RequestMethod } from '@nestjs/common';
+import {
+  HttpException,
+  Module,
+  RequestMethod,
+  VersioningType,
+} from '@nestjs/common';
 import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
+import { NestFactory } from '@nestjs/core';
+import { request } from 'http';
+import { AddressInfo } from 'net';
 import { IAppConfiguration } from '../IAppConfiguration';
+import { ModuleProviderToken } from '../ModuleProviderToken';
 import { HealthCheckController } from './HealthCheckController';
+
+@Module({
+  controllers: [HealthCheckController],
+  providers: [
+    {
+      provide: ModuleProviderToken.APP_CONFIGURATION,
+      useValue: { homeserver_url: 'https://matrix.example' },
+    },
+  ],
+})
+class HealthCheckHttpContractModule {}
 
 describe('HealthCheckController', () => {
   const controller = new HealthCheckController({
     homeserver_url: 'https://matrix.example',
   } as IAppConfiguration);
+  let app: Awaited<ReturnType<typeof NestFactory.create>>;
+  let port: number;
+
+  beforeAll(async () => {
+    app = await NestFactory.create(HealthCheckHttpContractModule, {
+      logger: false,
+    });
+    app.enableVersioning({ type: VersioningType.URI });
+    await app.listen(0, '127.0.0.1');
+    port = (app.getHttpServer().address() as AddressInfo).port;
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
 
   afterEach(() => {
     jest.restoreAllMocks();
   });
 
-  it('maps liveness to the health live route', () => {
-    const route = HealthCheckController.prototype.liveness;
+  it('maps liveness and readiness to their health subroutes', () => {
+    const liveRoute = HealthCheckController.prototype.liveness;
+    const readyRoute = HealthCheckController.prototype.readiness;
 
-    expect(Reflect.getMetadata(PATH_METADATA, route)).toBe('live');
-    expect(Reflect.getMetadata(METHOD_METADATA, route)).toBe(RequestMethod.GET);
+    expect(Reflect.getMetadata(PATH_METADATA, liveRoute)).toBe('live');
+    expect(Reflect.getMetadata(METHOD_METADATA, liveRoute)).toBe(
+      RequestMethod.GET,
+    );
+    expect(Reflect.getMetadata(PATH_METADATA, readyRoute)).toBe('ready');
+    expect(Reflect.getMetadata(METHOD_METADATA, readyRoute)).toBe(
+      RequestMethod.GET,
+    );
   });
 
-  it('reports process liveness without contacting the homeserver', async () => {
+  it('serves local health and liveness over HTTP without contacting the homeserver', async () => {
     const fetchSpy = jest.spyOn(globalThis, 'fetch');
 
-    expect(controller.liveness()).toBe('Healthy');
+    await expect(get('/v1/health')).resolves.toEqual({
+      statusCode: 200,
+      body: 'Healthy',
+    });
+    await expect(get('/v1/health/live')).resolves.toEqual({
+      statusCode: 200,
+      body: 'Healthy',
+    });
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('preserves the dependency-aware homeserver health response', async () => {
+  it('checks the homeserver on readiness and preserves its failure status', async () => {
     const fetchSpy = jest
       .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(new Response('Healthy', { status: 200 }));
+      .mockResolvedValue(
+        new Response('homeserver unavailable', { status: 503 }),
+      );
 
-    await expect(controller.health()).resolves.toBe('Healthy');
+    await expect(get('/v1/health/ready')).resolves.toEqual({
+      statusCode: 503,
+      body: JSON.stringify({
+        statusCode: 503,
+        message: 'homeserver unavailable',
+      }),
+    });
     expect(fetchSpy).toHaveBeenCalledWith('https://matrix.example/health');
   });
 
-  it('keeps liveness available when the homeserver is down', async () => {
+  it('keeps local health available when the homeserver is down', async () => {
     const fetchSpy = jest
       .spyOn(globalThis, 'fetch')
       .mockRejectedValue(new Error('homeserver unavailable'));
 
-    await expect(controller.health()).rejects.toThrow();
+    await expect(controller.readiness()).rejects.toThrow();
+    expect(controller.health()).toBe('Healthy');
     expect(controller.liveness()).toBe('Healthy');
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('preserves status and response body when health fails', async () => {
+  it('preserves status and response body when readiness fails', async () => {
     jest
       .spyOn(globalThis, 'fetch')
       .mockResolvedValue(
@@ -69,8 +127,8 @@ describe('HealthCheckController', () => {
       );
 
     try {
-      await controller.health();
-      fail('expected health check to reject');
+      await controller.readiness();
+      fail('expected readiness check to reject');
     } catch (error) {
       expect(error).toBeInstanceOf(HttpException);
       expect((error as HttpException).getStatus()).toBe(503);
@@ -79,4 +137,22 @@ describe('HealthCheckController', () => {
       );
     }
   });
+
+  function get(path: string): Promise<{ statusCode: number; body: string }> {
+    return new Promise((resolve, reject) => {
+      const outgoing = request(
+        { host: '127.0.0.1', port, path, method: 'GET' },
+        (incoming) => {
+          let body = '';
+          incoming.setEncoding('utf8');
+          incoming.on('data', (chunk: string) => (body += chunk));
+          incoming.on('end', () =>
+            resolve({ statusCode: incoming.statusCode ?? 0, body }),
+          );
+        },
+      );
+      outgoing.on('error', reject);
+      outgoing.end();
+    });
+  }
 });

@@ -23,12 +23,13 @@ pre-alpha deployment scaffolding. The controlled pilot uses the
 [operator-run Compose reference](../docs/deployment-docker.md#operator-run-compose-sidecar-example);
 see the [release ledger](../docs/RELEASE.md) for qualified source and evidence.
 
-The server chart uses `/v1/health/live` for Kubernetes liveness. This endpoint
-reports only that the server process can answer HTTP requests, so a temporary
-homeserver outage does not restart the gateway. Readiness and the chart's
-connection test use `/v1/health`, which checks the configured homeserver and
-returns its failure status when that dependency is unavailable. These probes
-do not verify a production deployment.
+The server chart uses `/v1/health/live` for Kubernetes liveness and
+`/v1/health/ready` for readiness. `/v1/health` and `/v1/health/live` report
+that the server process can answer HTTP requests without contacting the
+homeserver. `/v1/health/ready` checks the configured homeserver and returns its
+failure status when that dependency is unavailable. The chart connection test
+uses `/v1/health` to verify the server's local HTTP endpoint. These probes do
+not verify a production deployment.
 
 Render and verify the two deployment probe paths with:
 

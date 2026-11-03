@@ -128,7 +128,7 @@ spec:
               protocol: TCP
           readinessProbe:
               httpGet:
-                path: /v1/health
+                path: /v1/health/ready
                 port: http
           livenessProbe:
               httpGet:

@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 
 deployment, connection_test = sys.stdin.read().split("__HEALTH_TEST_CONNECTION__", 1)
 expectations = {
-    "readinessProbe": "/v1/health",
+    "readinessProbe": "/v1/health/ready",
     "livenessProbe": "/v1/health/live",
 }
 

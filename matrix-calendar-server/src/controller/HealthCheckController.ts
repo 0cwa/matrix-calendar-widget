@@ -28,10 +28,25 @@ export class HealthCheckController {
     private appConfig: IAppConfiguration,
   ) {}
 
-  //TODO: PB-2420 put jsdoc here with description
-  //TODO: PB-2420 test a bit more what happens if synapse not working or other cases
   @Get()
-  async health() {
+  health() {
+    return 'Healthy';
+  }
+
+  /**
+   * Reports that the server process can receive HTTP requests.
+   * Dependency availability is checked separately by `readiness()`.
+   */
+  @Get('live')
+  liveness() {
+    return this.health();
+  }
+
+  /**
+   * Checks whether the configured homeserver is available to this server.
+   */
+  @Get('ready')
+  async readiness() {
     const url = `${this.appConfig.homeserver_url}/health`;
     const response = await fetch(url);
     if (response.ok) {
@@ -39,14 +54,5 @@ export class HealthCheckController {
     } else {
       throw new HttpException(await response.text(), response.status);
     }
-  }
-
-  /**
-   * Reports that the server process can receive HTTP requests.
-   * Dependency availability is checked separately by `health()`.
-   */
-  @Get('live')
-  liveness() {
-    return 'Healthy';
   }
 }
