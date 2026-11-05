@@ -14,12 +14,7 @@
  * limitations under the License.
  */
 
-import {
-  HttpException,
-  Module,
-  RequestMethod,
-  VersioningType,
-} from '@nestjs/common';
+import { Module, RequestMethod, VersioningType } from '@nestjs/common';
 import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { NestFactory } from '@nestjs/core';
 import { request } from 'http';
@@ -91,51 +86,109 @@ describe('HealthCheckController', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('checks the homeserver on readiness and preserves its failure status', async () => {
+  it('checks Matrix Client-Server availability on readiness', async () => {
     const fetchSpy = jest
       .spyOn(globalThis, 'fetch')
       .mockResolvedValue(
-        new Response('homeserver unavailable', { status: 503 }),
+        new Response(
+          JSON.stringify({ versions: ['v1.1'], unstable_features: {} }),
+        ),
       );
 
     await expect(get('/v1/health/ready')).resolves.toEqual({
-      statusCode: 503,
-      body: JSON.stringify({
-        statusCode: 503,
-        message: 'homeserver unavailable',
-      }),
+      statusCode: 200,
+      body: 'Healthy',
     });
-    expect(fetchSpy).toHaveBeenCalledWith('https://matrix.example/health');
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'https://matrix.example/_matrix/client/versions',
+      { signal: expect.any(AbortSignal) },
+    );
   });
 
-  it('keeps local health available when the homeserver is down', async () => {
+  it('fails readiness generically when the Matrix endpoint is unavailable', async () => {
     const fetchSpy = jest
       .spyOn(globalThis, 'fetch')
-      .mockRejectedValue(new Error('homeserver unavailable'));
+      .mockResolvedValue(
+        new Response('upstream-secret-sentinel', { status: 404 }),
+      );
 
-    await expect(controller.readiness()).rejects.toThrow();
+    const result = await get('/v1/health/ready');
+    expect(result.statusCode).toBe(503);
+    expect(result.body).toContain('Homeserver is unavailable');
+    expect(result.body).not.toContain('upstream-secret-sentinel');
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['invalid JSON', new Response('not-json')],
+    [
+      'missing versions',
+      new Response(JSON.stringify({ unstable_features: {} })),
+    ],
+    ['empty versions', new Response(JSON.stringify({ versions: [] }))],
+    ['non-string versions', new Response(JSON.stringify({ versions: [1] }))],
+    ['blank versions', new Response(JSON.stringify({ versions: ['  '] }))],
+  ])(
+    'fails readiness on a successful but malformed response (%s)',
+    async (_case, response) => {
+      jest.spyOn(globalThis, 'fetch').mockResolvedValue(response);
+
+      const result = await get('/v1/health/ready');
+      expect(result.statusCode).toBe(503);
+      expect(result.body).toContain('Homeserver is unavailable');
+    },
+  );
+
+  it('fails readiness generically on network errors while keeping local health live', async () => {
+    const fetchSpy = jest
+      .spyOn(globalThis, 'fetch')
+      .mockRejectedValue(new Error('upstream-secret-sentinel'));
+
+    const result = await get('/v1/health/ready');
+    expect(result.statusCode).toBe(503);
+    expect(result.body).toContain('Homeserver is unavailable');
+    expect(result.body).not.toContain('upstream-secret-sentinel');
     expect(controller.health()).toBe('Healthy');
     expect(controller.liveness()).toBe('Healthy');
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('preserves status and response body when readiness fails', async () => {
-    jest
+  it('aborts a stalled Matrix response body at the readiness deadline', async () => {
+    const timeout = new AbortController();
+    const timeoutSpy = jest
+      .spyOn(AbortSignal, 'timeout')
+      .mockReturnValue(timeout.signal);
+    let jsonStarted: () => void = () => undefined;
+    const bodyReadStarted = new Promise<void>((resolve) => {
+      jsonStarted = resolve;
+    });
+    const fetchSpy = jest
       .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(
-        new Response('homeserver unavailable', { status: 503 }),
-      );
+      .mockImplementation(async (_url, init) => {
+        expect(init?.signal).toBe(timeout.signal);
+        return {
+          ok: true,
+          json: () => {
+            jsonStarted();
+            return new Promise((_resolve, reject) => {
+              timeout.signal.addEventListener('abort', () =>
+                reject(new Error('upstream-secret-sentinel')),
+              );
+            });
+          },
+        } as Response;
+      });
 
-    try {
-      await controller.readiness();
-      fail('expected readiness check to reject');
-    } catch (error) {
-      expect(error).toBeInstanceOf(HttpException);
-      expect((error as HttpException).getStatus()).toBe(503);
-      expect((error as HttpException).getResponse()).toBe(
-        'homeserver unavailable',
-      );
-    }
+    const resultPromise = get('/v1/health/ready');
+    await bodyReadStarted;
+    timeout.abort();
+
+    const result = await resultPromise;
+    expect(result.statusCode).toBe(503);
+    expect(result.body).toContain('Homeserver is unavailable');
+    expect(result.body).not.toContain('upstream-secret-sentinel');
+    expect(timeoutSpy).toHaveBeenCalledWith(3_000);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
   function get(path: string): Promise<{ statusCode: number; body: string }> {

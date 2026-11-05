@@ -18,6 +18,8 @@ import { Controller, Get, HttpException, Inject } from '@nestjs/common';
 import { IAppConfiguration } from '../IAppConfiguration';
 import { ModuleProviderToken } from '../ModuleProviderToken';
 
+const HOMESERVER_READINESS_TIMEOUT_MS = 3_000;
+
 @Controller({
   path: 'health',
   version: ['1'],
@@ -43,16 +45,37 @@ export class HealthCheckController {
   }
 
   /**
-   * Checks whether the configured homeserver is available to this server.
+   * Checks whether the configured homeserver serves the Matrix Client-Server API.
    */
   @Get('ready')
   async readiness() {
-    const url = `${this.appConfig.homeserver_url}/health`;
-    const response = await fetch(url);
-    if (response.ok) {
+    const url = `${this.appConfig.homeserver_url.replace(/\/+$/u, '')}/_matrix/client/versions`;
+
+    try {
+      const response = await fetch(url, {
+        signal: AbortSignal.timeout(HOMESERVER_READINESS_TIMEOUT_MS),
+      });
+      if (!response.ok) {
+        throw new Error('Matrix endpoint unavailable');
+      }
+
+      const body: unknown = await response.json();
+      if (
+        typeof body !== 'object' ||
+        body === null ||
+        !('versions' in body) ||
+        !Array.isArray(body.versions) ||
+        body.versions.length === 0 ||
+        !body.versions.every(
+          (version) => typeof version === 'string' && version.trim().length > 0,
+        )
+      ) {
+        throw new Error('Invalid Matrix versions response');
+      }
+
       return 'Healthy';
-    } else {
-      throw new HttpException(await response.text(), response.status);
+    } catch {
+      throw new HttpException('Homeserver is unavailable', 503);
     }
   }
 }
