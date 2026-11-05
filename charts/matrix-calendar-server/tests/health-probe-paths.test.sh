@@ -14,8 +14,8 @@ from urllib.parse import urlparse
 
 deployment, connection_test = sys.stdin.read().split("__HEALTH_TEST_CONNECTION__", 1)
 expectations = {
-    "readinessProbe": "/v1/health/ready",
-    "livenessProbe": "/v1/health/live",
+    "readinessProbe": ("/v1/health/ready", "5"),
+    "livenessProbe": ("/v1/health/live", None),
 }
 
 def has_expected_connection_path(rendered):
@@ -37,7 +37,7 @@ assert not has_expected_connection_path(
     f"args: [{quote}server:3000/unexpected/v1/health{quote}]"
 )
 
-for probe, expected_path in expectations.items():
+for probe, (expected_path, expected_timeout) in expectations.items():
     match = re.search(
         rf"(?ms)^ {{10}}{probe}:\n(.*?)(?=^ {{10}}[A-Za-z][A-Za-z0-9]*:|\Z)",
         deployment,
@@ -51,8 +51,16 @@ for probe, expected_path in expectations.items():
             f"{probe} rendered path {actual!r}; expected {expected_path!r}"
         )
 
+    timeout = re.search(r"(?m)^\s+timeoutSeconds:\s*(\d+)\s*$", match.group(1))
+    actual_timeout = timeout.group(1) if timeout else None
+    if actual_timeout != expected_timeout:
+        raise SystemExit(
+            f"{probe} rendered timeout {actual_timeout!r}; "
+            f"expected {expected_timeout!r}"
+        )
+
 if not has_expected_connection_path(connection_test):
     raise SystemExit("rendered chart connection test must use /v1/health")
 
-print("Helm rendered liveness, readiness, and connection-test paths are correct.")
+print("Helm rendered health paths and readiness timeout are correct.")
 '
