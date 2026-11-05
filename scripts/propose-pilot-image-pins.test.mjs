@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { createProposal } from './propose-pilot-image-pins.mjs';
+import {
+  createProposal,
+  createServerOverlay,
+} from './propose-pilot-image-pins.mjs';
 
 const targets = [
   'scripts/validate-pilot-sidecar.mjs',
@@ -72,6 +75,36 @@ function propose(manifest, inputFiles = files()) {
   });
 }
 
+test('server-only overlay selects only the verified candidate server image', () => {
+  const manifest = candidateManifest({
+    image_set: 'server-only',
+    images: [candidateManifest().images[0]],
+  });
+  const manifestBytes = Buffer.from(JSON.stringify(manifest));
+  const expectedManifestSha256 = createHash('sha256')
+    .update(manifestBytes)
+    .digest('hex');
+  assert.equal(
+    createServerOverlay({ manifestBytes, expectedManifestSha256 }),
+    'services:\n  server:\n    image: matrix-calendar-widget/server:archive-39876543210-2\n',
+  );
+  assert.throws(() =>
+    createServerOverlay({
+      manifestBytes,
+      expectedManifestSha256: '0'.repeat(64),
+    }),
+  );
+  const invalid = Buffer.from(JSON.stringify(candidateManifest()));
+  assert.throws(() =>
+    createServerOverlay({
+      manifestBytes: invalid,
+      expectedManifestSha256: createHash('sha256')
+        .update(invalid)
+        .digest('hex'),
+    }),
+  );
+});
+
 test('proposal updates the three accepted pin locations without writing files', () => {
   const before = files();
   const manifest = candidateManifest();
@@ -116,6 +149,7 @@ test('proposal rejects an unauthenticated manifest digest with a fixed error', (
 
 test('proposal rejects wrong trust identity, platform, image set, and image tags', () => {
   const cases = [
+    candidateManifest({ image_set: null }),
     candidateManifest({
       workflow: {
         ...candidateManifest().workflow,

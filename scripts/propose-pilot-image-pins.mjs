@@ -53,13 +53,18 @@ function readManifestBytes(filename) {
   }
 }
 
-function validateManifest(manifest) {
+function validateManifest(manifest, imageSet = 'all') {
+  const repositories =
+    imageSet === 'server-only'
+      ? { server: IMAGE_REPOSITORIES.server }
+      : IMAGE_REPOSITORIES;
   const sha = /^[0-9a-f]{40}$/;
   const digest = /^sha256:[0-9a-f]{64}$/;
   if (
     !isRecord(manifest) ||
     manifest.schema_version !== 2 ||
-    (manifest.image_set !== undefined && manifest.image_set !== 'all') ||
+    (manifest.image_set === undefined ? 'all' : manifest.image_set) !==
+      imageSet ||
     !isRecord(manifest.source) ||
     !sha.test(manifest.source.sha ?? '') ||
     !sha.test(manifest.source.tree ?? '') ||
@@ -77,14 +82,14 @@ function validateManifest(manifest) {
       `https://github.com/${REPOSITORY}/actions/runs/${manifest.workflow.run_id}` ||
     manifest.platform !== PLATFORM ||
     !Array.isArray(manifest.images) ||
-    manifest.images.length !== Object.keys(IMAGE_REPOSITORIES).length
+    manifest.images.length !== Object.keys(repositories).length
   ) {
     fail();
   }
 
   const tag = `archive-${manifest.workflow.run_id}-${manifest.workflow.run_attempt}`;
   const images = {};
-  for (const [name, repository] of Object.entries(IMAGE_REPOSITORIES)) {
+  for (const [name, repository] of Object.entries(repositories)) {
     const matches = manifest.images.filter((image) => image?.name === name);
     if (
       matches.length !== 1 ||
@@ -162,7 +167,7 @@ function currentValidatorPins(source) {
 function validateOverlayImageMapping(overlay, currentImages) {
   const entries = [
     ...overlay.matchAll(
-      /^  (radicale|server|widget):\n    image: ([^\s#]+)$/gm,
+      /^ {2}(radicale|server|widget):\n {4}image: ([^\s#]+)$/gm,
     ),
   ];
   if (entries.length !== Object.keys(IMAGE_REPOSITORIES).length) fail();
@@ -324,6 +329,24 @@ function makeDiff(filename, before, after) {
   return `--- a/${filename}\n+++ b/${filename}\n${hunks.join('')}`;
 }
 
+// This produces an overlay only; the archive must be verified separately.
+export function createServerOverlay({ manifestBytes, expectedManifestSha256 }) {
+  if (!/^[0-9a-f]{64}$/.test(expectedManifestSha256 ?? '')) fail();
+  if (
+    createHash('sha256').update(manifestBytes).digest('hex') !==
+    expectedManifestSha256
+  )
+    fail();
+  let manifest;
+  try {
+    manifest = JSON.parse(manifestBytes.toString('utf8'));
+  } catch {
+    fail();
+  }
+  const candidate = validateManifest(manifest, 'server-only');
+  return `services:\n  server:\n    image: ${candidate.images.server}\n`;
+}
+
 export function createProposal({
   manifestBytes,
   expectedManifestSha256,
@@ -373,6 +396,7 @@ function main(args) {
       options: {
         manifest: { type: 'string' },
         'manifest-sha256': { type: 'string' },
+        'server-only-overlay': { type: 'boolean' },
       },
       strict: true,
       allowPositionals: false,
@@ -385,6 +409,15 @@ function main(args) {
       fail();
     }
     const manifestBytes = readManifestBytes(values.manifest);
+    if (values['server-only-overlay']) {
+      process.stdout.write(
+        createServerOverlay({
+          manifestBytes,
+          expectedManifestSha256: values['manifest-sha256'],
+        }),
+      );
+      return;
+    }
     const files = Object.fromEntries(
       TARGETS.map((filename) => [
         filename,

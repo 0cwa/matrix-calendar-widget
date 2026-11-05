@@ -605,6 +605,45 @@ archive contents, read operator environment or binding files, or start
 services. Use it only after the existing archive verifier succeeds, and review
 the proposed source, workflow, run, and image pins before applying any change.
 
+### Server-only releases
+
+For a release that changes only the server image, the archive workflow also
+accepts `image_set=server-only`. Select this only after reviewing whether the
+release changes database migrations, shared storage, or compatibility with
+the running widget and Radicale. A server-only archive does not contain the
+other images, and the all-image pin proposal above must not be used for it.
+
+Follow the source-bound archive procedure above for the selected run. When
+running its verifier, set `RELEASE_IMAGE_SET=server-only` and use the verifier
+from the manifest's trusted workflow commit. Verify the downloaded manifest
+against authenticated provenance, then verify the archive and load the server
+image; compare its loaded image ID with the manifest. Retain the previous server
+image and confirm the release can be rolled back without reversing migrations.
+Skip the widget and Radicale load and inspect commands above: their archives
+are absent from a server-only artifact.
+
+After verification, generate a server-only Compose overlay for review:
+
+```bash
+node scripts/propose-pilot-image-pins.mjs \
+  --manifest /private/verified-archive-manifest.json \
+  --manifest-sha256 '<authenticated manifest SHA-256>' \
+  --server-only-overlay
+```
+
+The output contains only the server image reference. Redirect it to a new,
+operator-private file without overwriting an existing file. This helper does
+not verify the archive, inspect the live host, update an existing Compose file,
+or start services. Before applying an overlay, verify a current recoverable
+backup, the existing server image and rollback path, and that the rendered
+Compose change affects only the intended server image. Apply only the server
+with `docker compose ... up -d --no-deps server`, run the operator's health
+checks, and verify the other services remain unchanged. Synchronize the
+operator's canonical Compose configuration only after the checks succeed;
+otherwise a later normal reapply could revert the release. Recheck the rendered
+configuration after synchronization. Do not publish private Compose files or
+resolved environment values.
+
 ## Public calendar feed ingress and recovery
 
 Public subscriptions are available in current source under
