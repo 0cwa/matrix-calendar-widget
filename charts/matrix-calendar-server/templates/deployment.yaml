@@ -130,6 +130,7 @@ spec:
               httpGet:
                 path: /v1/health/ready
                 port: http
+              timeoutSeconds: 5
           livenessProbe:
               httpGet:
                 path: /v1/health/live
