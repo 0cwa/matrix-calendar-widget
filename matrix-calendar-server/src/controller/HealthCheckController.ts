@@ -20,6 +20,34 @@ import { ModuleProviderToken } from '../ModuleProviderToken';
 
 const HOMESERVER_READINESS_TIMEOUT_MS = 3_000;
 
+const cancelResponseBodyBeforeDeadline = async (
+  body: ReadableStream<Uint8Array> | null,
+  signal: AbortSignal,
+): Promise<void> => {
+  if (!body) {
+    return;
+  }
+
+  const cancellation = body.cancel();
+  let onAbort: (() => void) | undefined;
+  const aborted = new Promise<void>((resolve) => {
+    if (signal.aborted) {
+      resolve();
+    } else {
+      onAbort = () => resolve();
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+  });
+
+  try {
+    await Promise.race([cancellation, aborted]);
+  } finally {
+    if (onAbort) {
+      signal.removeEventListener('abort', onAbort);
+    }
+  }
+};
+
 @Controller({
   path: 'health',
   version: ['1'],
@@ -52,10 +80,12 @@ export class HealthCheckController {
     const url = `${this.appConfig.homeserver_url.replace(/\/+$/u, '')}/_matrix/client/versions`;
 
     try {
+      const signal = AbortSignal.timeout(HOMESERVER_READINESS_TIMEOUT_MS);
       const response = await fetch(url, {
-        signal: AbortSignal.timeout(HOMESERVER_READINESS_TIMEOUT_MS),
+        signal,
       });
       if (!response.ok) {
+        await cancelResponseBodyBeforeDeadline(response.body, signal);
         throw new Error('Matrix endpoint unavailable');
       }
 

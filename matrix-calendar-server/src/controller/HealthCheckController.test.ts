@@ -119,6 +119,29 @@ describe('HealthCheckController', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
+  it('cancels an unread error body without waiting past the readiness deadline', async () => {
+    const timeout = new AbortController();
+    const timeoutSpy = jest
+      .spyOn(AbortSignal, 'timeout')
+      .mockReturnValue(timeout.signal);
+    const body = {
+      cancel: jest.fn(() => {
+        queueMicrotask(() => timeout.abort());
+        return new Promise<void>(() => undefined);
+      }),
+    };
+    const fetchSpy = jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue({ ok: false, body } as unknown as Response);
+
+    const result = await get('/v1/health/ready');
+    expect(result.statusCode).toBe(503);
+    expect(result.body).toContain('Homeserver is unavailable');
+    expect(body.cancel).toHaveBeenCalledTimes(1);
+    expect(timeoutSpy).toHaveBeenCalledWith(3_000);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     ['invalid JSON', new Response('not-json')],
     [
