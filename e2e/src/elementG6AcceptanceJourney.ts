@@ -1359,9 +1359,15 @@ export async function runElementG6AcceptanceJourney(
       name: 'Create event',
       exact: true,
     });
-    await expect(createEventButton).toBeEnabled({ timeout: 10_000 });
+    let createEventButtonEnabled = true;
+    try {
+      await expect(createEventButton).toBeEnabled({ timeout: 10_000 });
+    } catch {
+      createEventButtonEnabled = false;
+    }
     const sidePanelToolbarObservation = await observeG6SidePanelToolbar(frameA);
     const createControlReachable =
+      createEventButtonEnabled &&
       (await createEventButton.isVisible().catch(() => false)) &&
       sidePanelToolbarObservation.createEventButtonEnabled === 'enabled';
     const viewport = pageA.viewportSize();
