@@ -141,7 +141,7 @@ test('release command deploys and recovers an unhealthy candidate', () => {
       newId = m.images[0].image_id;
     writeFileSync(
       join(bin, 'docker'),
-      `#!/usr/bin/env node\nconst fs=require('fs');const a=process.argv.slice(2),p=process.env.TEST_STATE;let s=JSON.parse(fs.readFileSync(p));function tag(){let files=[];for(let i=0;i<a.length;i++)if(a[i]=='-f')files.push(a[++i]);let t='';for(const f of files){const z=fs.readFileSync(f,'utf8').match(/image: ([^\\s]+)/);if(z)t=z[1]}return t}if(a[0]=='image'&&a[1]=='ls'){if(s.loaded)console.log(s.newId)}else if(a[0]=='image'&&a[1]=='inspect'){if(a.at(-1)!=s.old&&a.at(-1)!=s.oldId&&!s.loaded)process.exit(1);console.log(a.includes('{{.Os}}/{{.Architecture}}')?'linux/amd64':a.at(-1)==s.old?(s.retagged?'sha256:'+ 'e'.repeat(64):s.oldId):a.at(-1)==s.oldId?s.oldId:s.newId)}else if(a[0]=='image'&&a[1]=='load'){s.loaded=true;fs.writeFileSync(p,JSON.stringify(s))}else if(a[0]=='inspect')console.log(a.some(x=>x.includes('config-hash'))?(process.env.TEST_DRIFT==='yes'?'e':'d').repeat(64):s.current);else if(a.includes('config')&&a.includes('--hash'))console.log('server '+ 'd'.repeat(64));else if(a.includes('config'))console.log(JSON.stringify({services:{server:{image:tag()},widget:{image:'widget:fixed'}}}));else if(a.includes('ps')){if(process.env.TEST_NO_SERVER!=='yes')console.log('server-1')}else if(a.includes('up')){if(!a.includes('--no-deps')||a.at(-1)!=='server')process.exit(5);s.current=(tag()==s.old||tag()==s.oldId)?s.oldId:s.newId;fs.writeFileSync(p,JSON.stringify(s))}else process.exit(3);\n`,
+      `#!/usr/bin/env node\nconst fs=require('fs');const a=process.argv.slice(2),p=process.env.TEST_STATE;let s=JSON.parse(fs.readFileSync(p));function tag(){let files=[];for(let i=0;i<a.length;i++)if(a[i]=='-f')files.push(a[++i]);let t='';for(const f of files){const z=fs.readFileSync(f,'utf8').match(/image: ([^\\s]+)/);if(z)t=z[1]}return t}if(a[0]=='image'&&a[1]=='ls'){if(s.loaded)console.log(s.newId)}else if(a[0]=='image'&&a[1]=='inspect'){if(a.at(-1)!=s.old&&a.at(-1)!=s.oldId&&!s.loaded)process.exit(1);console.log(a.includes('{{.Os}}/{{.Architecture}}')?'linux/amd64':a.at(-1)==s.old?(s.retagged?'sha256:'+ 'e'.repeat(64):s.oldId):a.at(-1)==s.oldId?s.oldId:s.newId)}else if(a[0]=='image'&&a[1]=='load'){s.loaded=true;fs.writeFileSync(p,JSON.stringify(s))}else if(a[0]=='inspect')console.log(a.some(x=>x.includes('config-hash'))?(process.env.TEST_DRIFT==='yes'?'e':'d').repeat(64):s.current);else if(a.includes('config')&&a.includes('--hash'))console.log('server '+ 'd'.repeat(64));else if(a.includes('config')){if(process.env.TEST_BAD_RENDER==='yes')process.exit(4);console.log(JSON.stringify({services:{server:{image:tag()},widget:{image:'widget:fixed'}}}))}else if(a.includes('ps')){if(process.env.TEST_NO_SERVER!=='yes')console.log('server-1')}else if(a.includes('up')){if(!a.includes('--no-deps')||a.at(-1)!=='server')process.exit(5);s.current=(tag()==s.old||tag()==s.oldId)?s.oldId:s.newId;fs.writeFileSync(p,JSON.stringify(s))}else process.exit(3);\n`,
       { mode: 0o755 },
     );
     writeFileSync(
@@ -259,6 +259,16 @@ test('release command deploys and recovers an unhealthy candidate', () => {
           /Recorded phase: complete; running: unknown/,
         );
         assert.match(missing.stdout, /health: unknown/);
+        const badRender = spawnSync(
+          process.execPath,
+          [join(root, 'scripts/server-release.mjs'), 'status', configFile],
+          { encoding: 'utf8', env: { ...env, TEST_BAD_RENDER: 'yes' } },
+        );
+        assert.equal(badRender.status, 0, badRender.stderr);
+        assert.match(
+          badRender.stdout,
+          /Recorded phase: complete; running: candidate; saved: unknown; saved image resolves to: unknown/,
+        );
       }
       const disconnected = spawnSync(
         process.execPath,
@@ -377,6 +387,39 @@ for target in ('open','flock'):
       program,
       join(root, 'scripts/release/remote_server_release.py'),
       join(dir, 'compose'),
+    ]);
+    assert.equal(result.status, 0, result.stderr.toString());
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('overlapping staging and operation directories are rejected before creation', () => {
+  const parent = join(
+    homedir(),
+    'agent-scratch',
+    'matrix-calendar-widget',
+    'release-tests',
+  );
+  mkdirSync(parent, { recursive: true });
+  const dir = mkdtempSync(join(parent, 'overlap-'));
+  try {
+    const program = `import importlib.util,io,json,struct,sys
+from unittest.mock import patch
+s=importlib.util.spec_from_file_location('r',sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m)
+stage=sys.argv[2]; request=json.dumps({'action':'deploy','stageDirectory':stage,'operationDirectory':stage+'/operation'}).encode()
+sys.stdin=io.TextIOWrapper(io.BytesIO(struct.pack('!Q',len(request))+request+struct.pack('!Q',1)+b'x'))
+with patch.object(m.os,'mkdir',side_effect=AssertionError('stage was created')):
+    try: m.main()
+    except RuntimeError as e:
+        if 'overlap' not in str(e): raise
+    else: raise SystemExit(1)
+`;
+    const result = spawnSync('python3', [
+      '-c',
+      program,
+      join(root, 'scripts/release/remote_server_release.py'),
+      join(dir, 'stage'),
     ]);
     assert.equal(result.status, 0, result.stderr.toString());
   } finally {
