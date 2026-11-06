@@ -320,6 +320,9 @@ function createConfiguration() {
     port: toNumber(process.env.PORT),
 
     access_token: process.env.ACCESS_TOKEN as string,
+    checkpoint_control_token: optionalEnvironmentValue(
+      process.env.MATRIX_CHECKPOINT_CONTROL_TOKEN,
+    ),
     homeserver_url: process.env.HOMESERVER_URL as string,
     matrix_openid_userinfo_origin: optionalEnvironmentValue(
       process.env.MATRIX_OPENID_USERINFO_URL,
@@ -497,6 +500,7 @@ export const ValidationSchema = Joi.object({
   PORT: Joi.number(),
 
   ACCESS_TOKEN: Joi.string().required(),
+  MATRIX_CHECKPOINT_CONTROL_TOKEN: Joi.string().empty('').min(32),
   HOMESERVER_URL: Joi.string().required().uri(),
   MATRIX_OPENID_USERINFO_URL: openIdUserInfoOriginSchema,
   RADICALE_URL: Joi.string().uri(),

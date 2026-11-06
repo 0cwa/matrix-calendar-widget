@@ -35,6 +35,7 @@ import {
   MatrixAuthMiddleware,
   MX_IDENTITY,
 } from '../middleware/MatrixAuthMiddleware';
+import { AppWriteFenceService } from '../service/AppWriteFenceService';
 import { PrivateCalendarClientCallbackGateway } from '../service/private-client/PrivateCalendarClientCallbackGateway';
 import { PrivateCalendarClientDavGateway } from '../service/private-client/PrivateCalendarClientDavGateway';
 import { createCalendarGatewayHttpApplication } from './CalendarGatewayHttpApplication';
@@ -107,10 +108,22 @@ class CalendarGatewayHttpProbeController {
   }
 }
 
+@Controller({ path: 'write-probe', version: '1' })
+class CalendarGatewayWriteProbeController {
+  @Post()
+  write(): { accepted: true } {
+    return { accepted: true };
+  }
+}
+
 @Module({
-  controllers: [CalendarGatewayHttpProbeController],
+  controllers: [
+    CalendarGatewayHttpProbeController,
+    CalendarGatewayWriteProbeController,
+  ],
   providers: [
     { provide: ConfigService, useValue: configService },
+    AppWriteFenceService,
     { provide: TestMatrixAuthMiddleware, useValue: testAuthMiddleware },
     {
       provide: PrivateCalendarClientCallbackGateway,
@@ -314,6 +327,64 @@ describe('calendar gateway HTTP middleware setup', () => {
     expect(response.statusCode).toBe(413);
     expect(response.headers['access-control-allow-origin']).toBe('*');
     expect(authMiddlewareUse).not.toHaveBeenCalled();
+  });
+
+  it('blocks controller and direct DAV mutations while a checkpoint fence is held', async () => {
+    // The limiter snapshots its settings when the application starts. Restart
+    // this test app with enough capacity for the controller, DAV write, read,
+    // and resumed controller request that follow.
+    await app.close();
+    configService.getOrThrow.mockReturnValue({
+      ...appConfiguration,
+      calendar_gateway_rate_limit_requests: 10,
+    });
+    const application = await createCalendarGatewayHttpApplication(
+      CalendarGatewayHttpProbeModule,
+      TestMatrixAuthMiddleware,
+    );
+    app = application.app;
+    app.useLogger(false);
+    app.enableVersioning({ type: VersioningType.URI });
+    await app.listen(0, '127.0.0.1');
+    const address = app.getHttpServer().address() as AddressInfo;
+    baseUrl = `http://127.0.0.1:${address.port}`;
+
+    const fence = app.get(AppWriteFenceService);
+    const lease = await fence.acquireCheckpointFence(1_000, 5_000, jest.fn());
+    privateDavGatewayUse.mockClear();
+
+    const blockedControllerWrite = await send(
+      'POST',
+      '/v1/write-probe',
+      { 'Content-Type': 'application/json' },
+      '{}',
+    );
+    const blockedDavWrite = await send(
+      'PUT',
+      '/mcwpc~test/calendar/event.ics',
+      { 'Content-Type': 'text/calendar' },
+      'BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n',
+    );
+    const allowedDavRead = await send(
+      'GET',
+      '/mcwpc~test/calendar/event.ics',
+      {},
+    );
+
+    expect(blockedControllerWrite.statusCode).toBe(503);
+    expect(blockedControllerWrite.headers['retry-after']).toBe('1');
+    expect(blockedDavWrite.statusCode).toBe(503);
+    expect(allowedDavRead.statusCode).toBe(207);
+    expect(privateDavGatewayUse).toHaveBeenCalledTimes(1);
+
+    lease.release();
+    const resumedControllerWrite = await send(
+      'POST',
+      '/v1/write-probe',
+      { 'Content-Type': 'application/json' },
+      '{}',
+    );
+    expect(resumedControllerWrite.statusCode).toBe(201);
   });
 
   function send(

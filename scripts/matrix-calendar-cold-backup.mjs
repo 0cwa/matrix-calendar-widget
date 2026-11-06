@@ -49,7 +49,10 @@ const MAX_COMPOSE_FILES = 16;
 const CAPTURE_MANIFEST_NAME = 'capture-manifest.json';
 const CHECKSUM_NAME = 'SHA256SUMS';
 const CAPTURE_MARKER_NAME = '.capture-complete';
-const CAPTURE_MARKER_CONTENT = 'Cold capture verified and services resumed.\n';
+export const COLD_CAPTURE_MARKER_CONTENT =
+  'Cold capture verified and services resumed.\n';
+const ONLINE_CAPTURE_MARKER_CONTENT =
+  'Online capture verified while services remained running.\n';
 const LOCK_NAME = '.matrix-calendar-cold-backup.lock';
 const SNAPSHOT_ID = /^[a-f0-9]{64}$/u;
 const COMMAND_TIMEOUT_MS = 30_000;
@@ -82,6 +85,7 @@ const CONFIG_KEYS = new Set([
   'resticTags',
   'resticRetentionEnabled',
   'cleanupSuccessfulCapture',
+  'captureMode',
   'restoreInputs',
 ]);
 
@@ -259,6 +263,13 @@ function validateConfig(config) {
   } else if (
     dumpTransport !== 'native' ||
     config.postgresContainer !== undefined
+  ) {
+    fail('configuration');
+  }
+
+  if (
+    config.captureMode !== undefined &&
+    !['cold', 'online'].includes(config.captureMode)
   ) {
     fail('configuration');
   }
@@ -522,6 +533,59 @@ async function serviceFileContainsPassword(path, serviceName) {
     if (inService && /^password\s*=/iu.test(line)) return true;
   }
   return false;
+}
+
+async function readPostgresServiceTarget(path, serviceName) {
+  let contents;
+  try {
+    contents = await readFile(path, 'utf8');
+  } catch {
+    fail('preflight');
+  }
+  let inService = false;
+  const values = new Map();
+  for (const rawLine of contents.split(/\r?\n/u)) {
+    const line = rawLine.trim();
+    if (line === '' || line.startsWith('#') || line.startsWith(';')) continue;
+    if (/^(?:include|include_if_exists|include_dir)\s*=/iu.test(line)) {
+      fail('preflight');
+    }
+    const section = /^\[([^\]]+)\]$/u.exec(line);
+    if (section) {
+      inService = section[1] === serviceName;
+      continue;
+    }
+    if (!inService) continue;
+    const entry = /^([a-z][a-z0-9_]*)\s*=\s*(.*?)\s*$/iu.exec(line);
+    if (!entry || values.has(entry[1].toLowerCase())) fail('preflight');
+    values.set(entry[1].toLowerCase(), entry[2]);
+  }
+  const host = values.get('host');
+  const port = values.get('port') ?? '5432';
+  const database = values.get('dbname');
+  const supportedOptions = new Set([
+    'host',
+    'port',
+    'dbname',
+    'user',
+    'sslmode',
+    'sslrootcert',
+    'sslcert',
+    'sslkey',
+    'connect_timeout',
+    'application_name',
+  ]);
+  if (
+    [...values.keys()].some((key) => !supportedOptions.has(key)) ||
+    !host ||
+    !/^\d{1,5}$/u.test(port) ||
+    Number(port) < 1 ||
+    Number(port) > 65535 ||
+    !database
+  ) {
+    fail('preflight');
+  }
+  return { host: host.toLowerCase(), port: String(Number(port)), database };
 }
 
 function composeArgs(config, paths, args) {
@@ -1358,6 +1422,653 @@ async function dockerPreflight(config, paths, deps, runtimeEnv, signal) {
   return postgresPreflight;
 }
 
+export const ONLINE_STORE_INVENTORY_SCRIPT = `
+const { createHash } = require('node:crypto');
+const { readFileSync } = require('node:fs');
+const keys = [
+  'MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_URL',
+  'MATRIX_CALENDAR_BINDING_DATABASE_URL',
+  'MATRIX_CALENDAR_REMINDER_DATABASE_URL',
+];
+const databases = [];
+for (const key of keys) {
+  const value = process.env[key];
+  if (!value) continue;
+  let parsed;
+  try { parsed = new URL(value); } catch { process.exit(2); }
+  if (!['postgres:', 'postgresql:'].includes(parsed.protocol) || !parsed.hostname || !parsed.pathname || parsed.pathname === '/') process.exit(2);
+  if (parsed.hostname.includes(',') || parsed.searchParams.has('target_session_attrs') || process.env.PGTARGETSESSIONATTRS) process.exit(2);
+  const database = parsed.pathname.slice(1);
+  const port = parsed.port || process.env.PGPORT || '5432';
+  if (!database || database.includes('/') || !/^\\d{1,5}$/u.test(port) || Number(port) < 1 || Number(port) > 65535) process.exit(2);
+  databases.push({ key, host: parsed.hostname.toLowerCase(), port: String(Number(port)), database });
+}
+const known = new Set(keys);
+const unknownDatabaseSettings = Object.keys(process.env).filter((key) => /DATABASE_URL$/u.test(key) && !known.has(key));
+let publicFeedKeySha256 = null;
+const directKey = process.env.MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY;
+const keyFile = process.env.MATRIX_CALENDAR_PUBLIC_FEED_SIGNING_KEY_FILE;
+if (directKey && keyFile) process.exit(2);
+if (directKey || keyFile) {
+  let encoded = directKey;
+  try { if (keyFile) encoded = readFileSync(keyFile, 'utf8').replace(/\\r?\\n$/u, ''); } catch { process.exit(2); }
+  if (!/^[A-Za-z0-9_-]{43}$/u.test(encoded || '')) process.exit(2);
+  const key = Buffer.from(encoded, 'base64url');
+  if (key.length !== 32 || key.toString('base64url') !== encoded) process.exit(2);
+  publicFeedKeySha256 = createHash('sha256').update(key).digest('hex');
+}
+process.stdout.write(JSON.stringify({
+  databases,
+  unknownDatabaseSettings,
+  publicFeedEnabled: Boolean(process.env.MATRIX_CALENDAR_PUBLIC_FEED_ORIGIN),
+  publicFeedKeySha256,
+}));
+`;
+
+async function onlineStoreInventory(
+  config,
+  paths,
+  deps,
+  runtimeEnv,
+  ids,
+  signal,
+) {
+  const output = await runCommand(
+    deps,
+    'docker',
+    ['exec', ids.server, 'node', '-e', ONLINE_STORE_INVENTORY_SCRIPT],
+    {
+      cwd: paths.projectDirectory,
+      env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
+      signal,
+      timeoutMs: COMMAND_TIMEOUT_MS,
+    },
+    'preflight',
+  );
+  let inventory;
+  try {
+    inventory = JSON.parse(output);
+  } catch {
+    fail('preflight');
+  }
+  if (
+    !isRecord(inventory) ||
+    !Array.isArray(inventory.databases) ||
+    !Array.isArray(inventory.unknownDatabaseSettings) ||
+    typeof inventory.publicFeedEnabled !== 'boolean' ||
+    !(
+      inventory.publicFeedKeySha256 === null ||
+      /^[a-f0-9]{64}$/u.test(inventory.publicFeedKeySha256)
+    ) ||
+    inventory.unknownDatabaseSettings.length > 0
+  ) {
+    fail('preflight');
+  }
+  const targets = new Set();
+  for (const database of inventory.databases) {
+    if (
+      !isRecord(database) ||
+      ![
+        'MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_URL',
+        'MATRIX_CALENDAR_BINDING_DATABASE_URL',
+        'MATRIX_CALENDAR_REMINDER_DATABASE_URL',
+      ].includes(database.key) ||
+      typeof database.host !== 'string' ||
+      database.host === '' ||
+      typeof database.port !== 'string' ||
+      !/^\d{1,5}$/u.test(database.port) ||
+      typeof database.database !== 'string' ||
+      database.database === ''
+    ) {
+      fail('preflight');
+    }
+    targets.add(
+      `${database.host.toLowerCase()}:${String(Number(database.port))}/${database.database}`,
+    );
+  }
+  if (
+    targets.size > 1 ||
+    inventory.databases.length > 0 !== config.reminderDatabaseEnabled
+  ) {
+    fail('preflight');
+  }
+  if (inventory.databases.length > 0) {
+    if (postgresDumpTransport(config) !== 'native') fail('preflight');
+    const serviceTarget = await readPostgresServiceTarget(
+      runtimeEnv.PGSERVICEFILE,
+      config.pgService,
+    );
+    if (
+      targets.values().next().value !==
+      `${serviceTarget.host}:${serviceTarget.port}/${serviceTarget.database}`
+    ) {
+      fail('preflight');
+    }
+  }
+  if (inventory.publicFeedEnabled) {
+    const keyInput = config.restoreInputs.find(
+      (input) => input.name === 'public-feed-signing-key',
+    );
+    if (!keyInput || !inventory.publicFeedKeySha256) fail('preflight');
+    const source = await readRestoreInputSource(keyInput.path, 'preflight');
+    const encoded = source.contents.toString('utf8').replace(/\r?\n$/u, '');
+    if (!/^[A-Za-z0-9_-]{43}$/u.test(encoded)) fail('preflight');
+    const key = Buffer.from(encoded, 'base64url');
+    if (
+      key.byteLength !== 32 ||
+      key.toString('base64url') !== encoded ||
+      hashBytes(key) !== inventory.publicFeedKeySha256
+    ) {
+      fail('preflight');
+    }
+  }
+  return inventory;
+}
+
+async function verifyCapturedPublicFeedInput(
+  config,
+  inventory,
+  captureDirectory,
+  restoreInputs,
+) {
+  if (!inventory.publicFeedEnabled) return;
+  const configured = config.restoreInputs.find(
+    (input) => input.name === 'public-feed-signing-key',
+  );
+  const captured = restoreInputs.find(
+    (input) => input.name === 'public-feed-signing-key',
+  );
+  if (!configured || !captured) fail('capture');
+  let encoded;
+  try {
+    encoded = (
+      await readFile(join(captureDirectory, captured.archiveName), 'utf8')
+    ).replace(/\r?\n$/u, '');
+  } catch {
+    fail('capture');
+  }
+  if (!/^[A-Za-z0-9_-]{43}$/u.test(encoded)) fail('capture');
+  const key = Buffer.from(encoded, 'base64url');
+  if (
+    key.byteLength !== 32 ||
+    key.toString('base64url') !== encoded ||
+    hashBytes(key) !== inventory.publicFeedKeySha256
+  ) {
+    fail('capture');
+  }
+}
+
+async function checkpointRequest(
+  config,
+  paths,
+  deps,
+  runtimeEnv,
+  serverId,
+  operation,
+  leaseId,
+  signal,
+) {
+  const suffix =
+    operation === 'acquire' ? 'acquire' : `${leaseId}/${operation}`;
+  const script = `
+const token = process.env.MATRIX_CHECKPOINT_CONTROL_TOKEN;
+if (!token) process.exit(2);
+const controller = new AbortController();
+const timer = setTimeout(() => controller.abort(), 5000);
+fetch('http://127.0.0.1:3000/v1/internal/backup-checkpoint/${suffix}', { method: 'POST', headers: { 'X-Matrix-Checkpoint-Token': token }, signal: controller.signal })
+  .then(async response => { if (!response.ok) process.exit(3); process.stdout.write(JSON.stringify(await response.json())); })
+  .catch(() => process.exit(4))
+  .finally(() => clearTimeout(timer));
+`;
+  const output = await runCommand(
+    deps,
+    'docker',
+    ['exec', serverId, 'node', '-e', script],
+    {
+      cwd: paths.projectDirectory,
+      env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
+      signal,
+      timeoutMs: 10_000,
+    },
+    'checkpoint',
+  );
+  try {
+    return JSON.parse(output);
+  } catch {
+    fail('checkpoint');
+  }
+}
+
+export const RADICALE_LOCK_SCRIPT = `
+import fcntl, os, signal, stat, sys, time
+lock_path, marker_path, cancel_path = sys.argv[1:4]
+timeout_ms = int(sys.argv[4])
+deadline = time.monotonic() + timeout_ms / 1000
+def cancel_requested():
+    if not os.path.exists(cancel_path): return False
+    for path in (marker_path, cancel_path):
+        try: os.unlink(path)
+        except FileNotFoundError: pass
+    return True
+if cancel_requested(): sys.exit(3)
+fd = os.open(lock_path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
+if not stat.S_ISREG(os.fstat(fd).st_mode): sys.exit(2)
+def process_start_time(pid):
+    raw = open('/proc/%d/stat' % pid, encoding='ascii').read()
+    fields = raw[raw.rfind(')') + 2:].split()
+    return fields[19]
+start_time = process_start_time(os.getpid())
+with open(marker_path, 'x', encoding='ascii') as marker:
+    opened = os.fstat(fd)
+    marker.write('waiting:%d:%s:%d:%d:%d\\n' % (os.getpid(), start_time, opened.st_dev, opened.st_ino, fd))
+    marker.flush()
+while True:
+    if cancel_requested() or time.monotonic() >= deadline: sys.exit(3)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        break
+    except BlockingIOError:
+        time.sleep(0.1)
+if cancel_requested(): sys.exit(3)
+opened = os.fstat(fd)
+named = os.stat(lock_path, follow_symlinks=False)
+if (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino):
+    sys.exit(2)
+remaining = deadline - time.monotonic()
+if remaining <= 0: sys.exit(3)
+signal.signal(signal.SIGALRM, lambda _signum, _frame: sys.exit(3))
+signal.setitimer(signal.ITIMER_REAL, remaining)
+with open(marker_path, 'w', encoding='ascii') as marker:
+    marker.write('locked:%d:%d:%d:%s:%d\\n' % (os.getpid(), opened.st_dev, opened.st_ino, start_time, fd))
+    marker.flush()
+while True:
+    if cancel_requested(): sys.exit(3)
+    remaining = deadline - time.monotonic()
+    if remaining <= 0: sys.exit(3)
+    time.sleep(min(0.1, remaining))
+`;
+
+const RADICALE_PROCESS_CONTROL_SCRIPT = `
+import os, signal, sys
+mode, pid_text, expected_start_time, expected_dev, expected_ino, expected_fd = sys.argv[1:7]
+try:
+    pidfd = os.pidfd_open(int(pid_text), 0)
+except ProcessLookupError:
+    sys.exit(1)
+except OSError:
+    sys.exit(2)
+try:
+    try:
+        raw = open('/proc/%s/stat' % pid_text, encoding='ascii').read()
+    except FileNotFoundError:
+        sys.exit(1)
+    except OSError:
+        sys.exit(2)
+    fields = raw[raw.rfind(')') + 2:].split()
+    if fields[19] != expected_start_time:
+        sys.exit(1)
+    try:
+        fd_info = os.stat('/proc/%s/fd/%s' % (pid_text, expected_fd))
+    except FileNotFoundError:
+        sys.exit(1)
+    except OSError:
+        sys.exit(2)
+    if str(fd_info.st_dev) != expected_dev or str(fd_info.st_ino) != expected_ino:
+        sys.exit(1)
+    if mode == 'signal':
+        signal.pidfd_send_signal(pidfd, int(sys.argv[7]))
+    elif mode != 'check':
+        sys.exit(2)
+finally:
+    os.close(pidfd)
+`;
+
+const RADICALE_LOCK_VERIFY_SCRIPT = `
+import os, sys
+path, expected_dev, expected_ino = sys.argv[1:4]
+info = os.stat(path, follow_symlinks=False)
+if (str(info.st_dev), str(info.st_ino)) != (expected_dev, expected_ino): sys.exit(2)
+`;
+
+function radicaleRootExecArgs(radicaleId, ...args) {
+  return ['exec', '--user', '0', radicaleId, ...args];
+}
+
+function radicaleProcessControlArgs(
+  radicaleId,
+  mode,
+  pid,
+  startTime,
+  identity,
+  lockFd,
+  signal,
+) {
+  return radicaleRootExecArgs(
+    radicaleId,
+    'python3',
+    '-c',
+    RADICALE_PROCESS_CONTROL_SCRIPT,
+    mode,
+    pid,
+    startTime,
+    ...identity.split(':'),
+    lockFd,
+    ...(signal === undefined ? [] : [String(signal)]),
+  );
+}
+
+async function acquireRadicaleSharedLock(
+  config,
+  paths,
+  deps,
+  runtimeEnv,
+  radicaleId,
+  lockId,
+  maxHoldMs,
+  signal,
+) {
+  const marker = `/tmp/mcw-backup-lock-${lockId}`;
+  const cancel = `/tmp/mcw-backup-cancel-${lockId}`;
+  if (!/^[A-Za-z0-9-]{1,64}$/u.test(lockId)) fail('radicale-lock');
+  try {
+    await runCommand(
+      deps,
+      'docker',
+      [
+        'exec',
+        '--detach',
+        '--user',
+        '0',
+        radicaleId,
+        'python3',
+        '-c',
+        RADICALE_LOCK_SCRIPT,
+        '/data/collections/.Radicale.lock',
+        marker,
+        cancel,
+        String(maxHoldMs),
+      ],
+      {
+        cwd: paths.projectDirectory,
+        env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
+        signal,
+        timeoutMs: COMMAND_TIMEOUT_MS,
+      },
+      'radicale-lock',
+    );
+  } catch {
+    await deps
+      .command('docker', radicaleRootExecArgs(radicaleId, 'touch', cancel), {
+        cwd: paths.projectDirectory,
+        env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
+        timeoutMs: COMMAND_TIMEOUT_MS,
+      })
+      .catch(() => undefined);
+    fail('radicale-lock');
+  }
+  const deadline =
+    Date.now() + (deps.radicaleLockStartupTimeoutMs ?? COMMAND_TIMEOUT_MS);
+  let pid;
+  let identity;
+  let holderStartTime;
+  let holderFd;
+  let acquired = false;
+  while (Date.now() < deadline) {
+    const result = await deps
+      .command('docker', radicaleRootExecArgs(radicaleId, 'cat', marker), {
+        cwd: paths.projectDirectory,
+        env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
+        signal,
+        timeoutMs: COMMAND_TIMEOUT_MS,
+      })
+      .catch(() => ({ status: 1, stdout: '' }));
+    const line = result?.stdout?.trim() ?? '';
+    const waiting = /^waiting:(\d+):(\d+):(\d+):(\d+):(\d+)$/u.exec(line);
+    const locked = /^locked:(\d+):(\d+):(\d+):(\d+):(\d+)$/u.exec(line);
+    let startTime;
+    if (waiting) {
+      pid = waiting[1];
+      startTime = waiting[2];
+      identity = `${waiting[3]}:${waiting[4]}`;
+      holderFd = waiting[5];
+    }
+    if (locked) {
+      pid = locked[1];
+      identity = `${locked[2]}:${locked[3]}`;
+      startTime = locked[4];
+      holderStartTime = startTime;
+      holderFd = locked[5];
+      acquired = true;
+      break;
+    }
+    if (startTime) holderStartTime = startTime;
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+  }
+  if (!acquired) {
+    const cancelResult = await deps
+      .command('docker', radicaleRootExecArgs(radicaleId, 'touch', cancel), {
+        cwd: paths.projectDirectory,
+        env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
+        timeoutMs: COMMAND_TIMEOUT_MS,
+      })
+      .catch(() => ({ status: 1 }));
+    if (
+      isSuccess(cancelResult) &&
+      pid &&
+      identity &&
+      holderStartTime &&
+      holderFd
+    ) {
+      const cancelDeadline = Date.now() + CHILD_KILL_GRACE_MS;
+      let exited = false;
+      while (Date.now() < cancelDeadline) {
+        const control = await deps
+          .command(
+            'docker',
+            radicaleProcessControlArgs(
+              radicaleId,
+              'check',
+              pid,
+              holderStartTime,
+              identity,
+              holderFd,
+            ),
+            {
+              cwd: paths.projectDirectory,
+              env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
+            },
+          )
+          .catch(() => ({ status: 2 }));
+        if (control.status === 1) {
+          exited = true;
+          break;
+        }
+        if (control.status !== 0) break;
+        const signaled = await deps
+          .command(
+            'docker',
+            radicaleProcessControlArgs(
+              radicaleId,
+              'signal',
+              pid,
+              holderStartTime,
+              identity,
+              holderFd,
+              15,
+            ),
+            {
+              cwd: paths.projectDirectory,
+              env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
+            },
+          )
+          .catch(() => ({ status: 2 }));
+        if (signaled.status !== 0 && signaled.status !== 1) break;
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
+      }
+      if (exited) {
+        await deps
+          .command(
+            'docker',
+            radicaleRootExecArgs(radicaleId, 'rm', '-f', marker, cancel),
+            {
+              cwd: paths.projectDirectory,
+              env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
+            },
+          )
+          .catch(() => undefined);
+      }
+    }
+    fail('radicale-lock');
+  }
+  return {
+    async verify() {
+      await runCommand(
+        deps,
+        'docker',
+        radicaleProcessControlArgs(
+          radicaleId,
+          'check',
+          pid,
+          holderStartTime,
+          identity,
+          holderFd,
+        ),
+        {
+          cwd: paths.projectDirectory,
+          env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
+        },
+        'radicale-lock',
+      );
+      const markerContents = await runCommand(
+        deps,
+        'docker',
+        radicaleRootExecArgs(radicaleId, 'cat', marker),
+        {
+          cwd: paths.projectDirectory,
+          env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
+        },
+        'radicale-lock',
+      );
+      if (
+        markerContents.trim() !==
+        `locked:${pid}:${identity}:${holderStartTime}:${holderFd}`
+      ) {
+        fail('radicale-lock');
+      }
+      await runCommand(
+        deps,
+        'docker',
+        [
+          ...radicaleRootExecArgs(
+            radicaleId,
+            'python3',
+            '-c',
+            RADICALE_LOCK_VERIFY_SCRIPT,
+            '/data/collections/.Radicale.lock',
+            ...identity.split(':'),
+          ),
+        ],
+        {
+          cwd: paths.projectDirectory,
+          env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
+        },
+        'radicale-lock',
+      );
+    },
+    async release() {
+      const signalResult = await deps
+        .command(
+          'docker',
+          radicaleProcessControlArgs(
+            radicaleId,
+            'signal',
+            pid,
+            holderStartTime,
+            identity,
+            holderFd,
+            15,
+          ),
+          {
+            cwd: paths.projectDirectory,
+            env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
+          },
+        )
+        .catch(() => ({ status: 2 }));
+      if (signalResult.status === 1) {
+        const processState = await deps
+          .command(
+            'docker',
+            radicaleProcessControlArgs(
+              radicaleId,
+              'check',
+              pid,
+              holderStartTime,
+              identity,
+              holderFd,
+            ),
+            {
+              cwd: paths.projectDirectory,
+              env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
+            },
+          )
+          .catch(() => ({ status: 2 }));
+        if (processState.status !== 1) fail('radicale-lock');
+        await runCommand(
+          deps,
+          'docker',
+          radicaleRootExecArgs(radicaleId, 'rm', '-f', marker, cancel),
+          {
+            cwd: paths.projectDirectory,
+            env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
+          },
+          'radicale-lock',
+        );
+        fail('radicale-lock');
+      }
+      if (!isSuccess(signalResult)) fail('radicale-lock');
+      const deadline = Date.now() + COMMAND_TIMEOUT_MS;
+      let exited = false;
+      while (Date.now() < deadline) {
+        const check = await deps
+          .command(
+            'docker',
+            radicaleProcessControlArgs(
+              radicaleId,
+              'check',
+              pid,
+              holderStartTime,
+              identity,
+              holderFd,
+            ),
+            {
+              cwd: paths.projectDirectory,
+              env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
+            },
+          )
+          .catch(() => ({ status: 2 }));
+        if (check.status === 1) {
+          exited = true;
+          break;
+        }
+        if (check.status !== 0) fail('radicale-lock');
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
+      }
+      if (!exited) fail('radicale-lock');
+      await runCommand(
+        deps,
+        'docker',
+        radicaleRootExecArgs(radicaleId, 'rm', '-f', marker, cancel),
+        {
+          cwd: paths.projectDirectory,
+          env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
+        },
+        'radicale-lock',
+      );
+    },
+    identity,
+  };
+}
+
 function makeRunName(now, id) {
   if (typeof id !== 'string' || !/^[A-Za-z0-9-]{1,64}$/u.test(id)) {
     fail('capture');
@@ -1534,6 +2245,7 @@ async function localCaptureProof(
   runName,
   expectedCaptureIdentity,
   expectedNames,
+  markerContent = COLD_CAPTURE_MARKER_CONTENT,
 ) {
   const captureIdentity = await currentCaptureDirectoryIdentity(
     paths,
@@ -1551,7 +2263,7 @@ async function localCaptureProof(
   } catch {
     fail('verification');
   }
-  if (marker !== CAPTURE_MARKER_CONTENT) fail('verification');
+  if (marker !== markerContent) fail('verification');
   return { captureIdentity, files };
 }
 
@@ -1735,6 +2447,7 @@ async function verifyResticSnapshot(
   captureDirectory,
   expectedNames,
   captureProof,
+  markerContent = COLD_CAPTURE_MARKER_CONTENT,
 ) {
   const commandOptions = {
     env: commandEnvironment(config, paths, runtimeEnv, 'restic'),
@@ -1764,7 +2477,7 @@ async function verifyResticSnapshot(
     commandOptions,
     'verification',
   );
-  if (marker !== CAPTURE_MARKER_CONTENT) fail('verification');
+  if (marker !== markerContent) fail('verification');
 
   let manifestContents;
   try {
@@ -1826,6 +2539,7 @@ async function removeVerifiedCapture(
   runName,
   expectedNames,
   captureProof,
+  markerContent = COLD_CAPTURE_MARKER_CONTENT,
 ) {
   const currentProof = await localCaptureProof(
     paths,
@@ -1833,6 +2547,7 @@ async function removeVerifiedCapture(
     runName,
     captureProof.captureIdentity,
     expectedNames,
+    markerContent,
   );
   if (!sameCaptureProof(captureProof, currentProof, expectedNames)) {
     fail('verification');
@@ -2008,7 +2723,11 @@ async function capturePostgres(
   };
 }
 
-function archiveCommand(config, volumeName) {
+function archiveCommand(config, volumeName, captureMode = 'cold') {
+  const excludes =
+    captureMode === 'online' && volumeName.endsWith('_radicale-data')
+      ? ['--exclude=.Radicale.cache', '--exclude=.Radicale.tmp-*']
+      : [];
   return [
     'run',
     '--rm',
@@ -2025,6 +2744,7 @@ function archiveCommand(config, volumeName) {
     config.helperImage,
     '-cpf',
     '-',
+    ...excludes,
     '.',
   ];
 }
@@ -2037,13 +2757,14 @@ async function captureArchive(
   captureDirectory,
   volumeName,
   archiveName,
+  captureMode,
   signal,
 ) {
   const partialPath = join(captureDirectory, `${archiveName}.partial`);
   await runCommand(
     deps,
     'docker',
-    archiveCommand(config, volumeName),
+    archiveCommand(config, volumeName, captureMode),
     {
       cwd: paths.projectDirectory,
       env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
@@ -2212,19 +2933,23 @@ async function verifyRestoreInputSources(inputs) {
   }
 }
 
-async function writeCaptureManifest(
-  captureDirectory,
-  postgresDump,
-  restoreInputs,
-) {
+export function serializeCaptureManifest(postgresDump, restoreInputs) {
   const manifest = {
     schemaVersion: 1,
     postgresDump,
     ...(restoreInputs.length > 0 ? { restoreInputs } : {}),
   };
+  return `${JSON.stringify(manifest, null, 2)}\n`;
+}
+
+async function writeCaptureManifest(
+  captureDirectory,
+  postgresDump,
+  restoreInputs,
+) {
   await createOutputFile(
     join(captureDirectory, CAPTURE_MANIFEST_NAME),
-    `${JSON.stringify(manifest, null, 2)}\n`,
+    serializeCaptureManifest(postgresDump, restoreInputs),
     'verification',
   );
 }
@@ -2283,6 +3008,44 @@ async function releaseLock(lockHandle, lockPath) {
   }
 }
 
+async function removeIncompleteCapture(paths, captureDirectory) {
+  if (!captureDirectory || dirname(captureDirectory) !== paths.captureRoot)
+    return;
+  let info;
+  let entries;
+  try {
+    info = await lstat(captureDirectory, { bigint: true });
+    entries = await readdir(captureDirectory);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return;
+    fail('capture-cleanup');
+  }
+  if (!isPrivateOwnedDirectory(info)) fail('capture-cleanup');
+  for (const name of entries) {
+    if (name.includes('/') || name === '.' || name === '..') {
+      fail('capture-cleanup');
+    }
+    const path = join(captureDirectory, name);
+    let file;
+    try {
+      file = await lstat(path);
+    } catch {
+      fail('capture-cleanup');
+    }
+    if (!file.isFile() || file.isSymbolicLink()) fail('capture-cleanup');
+    try {
+      await unlink(path);
+    } catch {
+      fail('capture-cleanup');
+    }
+  }
+  try {
+    await rmdir(captureDirectory);
+  } catch {
+    fail('capture-cleanup');
+  }
+}
+
 function runtimeEnvironment(env = process.env) {
   const credentialsDirectory =
     typeof env.CREDENTIALS_DIRECTORY === 'string' &&
@@ -2314,6 +3077,7 @@ export async function runColdBackup(configInput, dependencies = {}) {
     now: dependencies.now ?? (() => new Date()),
     id: dependencies.id ?? randomUUID,
     env: dependencies.env ?? process.env,
+    radicaleLockStartupTimeoutMs: dependencies.radicaleLockStartupTimeoutMs,
   };
   const runtimeEnv = runtimeEnvironment(deps.env);
   const paths = await validateConfigFiles(config, runtimeEnv);
@@ -2335,6 +3099,10 @@ export async function runColdBackup(configInput, dependencies = {}) {
   let captureDirectory;
   let captureDirectoryIdentity;
   let stopAttempted = false;
+  let onlineLease;
+  let radicaleLock;
+  let onlineAbortTimer;
+  let captureComplete = false;
   let failure;
 
   try {
@@ -2392,92 +3160,256 @@ export async function runColdBackup(configInput, dependencies = {}) {
       );
     }
 
-    // From the first stop onward, every exit path attempts dependency-order resume.
-    stopAttempted = true;
-    for (const service of STOP_ORDER) {
-      await runCommand(
-        deps,
-        'docker',
-        composeArgs(config, paths, [
-          'stop',
-          '--timeout',
-          String(DOCKER_STOP_TIMEOUT_SECONDS),
-          service,
-        ]),
-        {
-          cwd: paths.projectDirectory,
-          env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
-          signal,
-          timeoutMs: (DOCKER_STOP_TIMEOUT_SECONDS + 30) * 1000,
-        },
-        'quiesce',
-      );
-    }
-
-    await assertStoppedServices(
-      config,
-      paths,
-      runtimeEnv,
-      deps,
-      'quiesce',
-      signal,
-    );
-    for (const service of SERVICE_NAMES) {
-      await inspectStoppedService(
+    let postgresDump;
+    let restoreInputs;
+    const captureMode = config.captureMode ?? 'cold';
+    const captureMarkerContent =
+      captureMode === 'online'
+        ? ONLINE_CAPTURE_MARKER_CONTENT
+        : COLD_CAPTURE_MARKER_CONTENT;
+    if (captureMode === 'online') {
+      const inventory = await onlineStoreInventory(
         config,
         paths,
-        runtimeEnv,
         deps,
-        current[service],
-        'quiesce',
+        runtimeEnv,
+        current,
         signal,
       );
-    }
-
-    const postgresDump = await capturePostgres(
-      config,
-      paths,
-      runtimeEnv,
-      deps,
-      captureDirectory,
-      signal,
-      postgresPreflight,
-    );
-    for (let index = 0; index < VOLUME_SUFFIXES.length; index += 1) {
-      const volumeName = `${config.projectName}_${VOLUME_SUFFIXES[index]}`;
-      await captureArchive(
+      const leaseAcquiredAt = Date.now();
+      const lease = await checkpointRequest(
+        config,
+        paths,
+        deps,
+        runtimeEnv,
+        current.server,
+        'acquire',
+        undefined,
+        signal,
+      );
+      if (
+        !isRecord(lease) ||
+        typeof lease.leaseId !== 'string' ||
+        !/^[a-f0-9-]{36}$/u.test(lease.leaseId) ||
+        !Number.isSafeInteger(lease.leaseTimeoutMs) ||
+        lease.leaseTimeoutMs < 1 ||
+        lease.leaseTimeoutMs > 120_000
+      ) {
+        fail('checkpoint');
+      }
+      onlineLease = {
+        id: lease.leaseId,
+        serverId: current.server,
+        deadline: leaseAcquiredAt + lease.leaseTimeoutMs,
+      };
+      const abortController = new AbortController();
+      onlineAbortTimer = setTimeout(
+        () => abortController.abort(),
+        Math.max(1, onlineLease.deadline - Date.now()),
+      );
+      onlineAbortTimer.unref();
+      const onlineSignal = signal
+        ? AbortSignal.any([signal, abortController.signal])
+        : abortController.signal;
+      await checkpointRequest(
+        config,
+        paths,
+        deps,
+        runtimeEnv,
+        current.server,
+        'verify',
+        onlineLease.id,
+        onlineSignal,
+      );
+      radicaleLock = await acquireRadicaleSharedLock(
+        config,
+        paths,
+        deps,
+        runtimeEnv,
+        current.radicale,
+        deps.id(),
+        Math.max(1, onlineLease.deadline - Date.now()),
+        onlineSignal,
+      );
+      await radicaleLock.verify();
+      await checkpointRequest(
+        config,
+        paths,
+        deps,
+        runtimeEnv,
+        current.server,
+        'verify',
+        onlineLease.id,
+        onlineSignal,
+      );
+      postgresDump = await capturePostgres(
         config,
         paths,
         runtimeEnv,
         deps,
         captureDirectory,
-        volumeName,
-        ARCHIVE_NAMES[index],
+        onlineSignal,
+        postgresPreflight,
+      );
+      await checkpointRequest(
+        config,
+        paths,
+        deps,
+        runtimeEnv,
+        current.server,
+        'verify',
+        onlineLease.id,
+        onlineSignal,
+      );
+      for (let index = 0; index < VOLUME_SUFFIXES.length; index += 1) {
+        const volumeName = `${config.projectName}_${VOLUME_SUFFIXES[index]}`;
+        await captureArchive(
+          config,
+          paths,
+          runtimeEnv,
+          deps,
+          captureDirectory,
+          volumeName,
+          ARCHIVE_NAMES[index],
+          'online',
+          onlineSignal,
+        );
+        await checkpointRequest(
+          config,
+          paths,
+          deps,
+          runtimeEnv,
+          current.server,
+          'verify',
+          onlineLease.id,
+          onlineSignal,
+        );
+      }
+      restoreInputs = await captureRestoreInputs(config, captureDirectory);
+      await verifyCapturedPublicFeedInput(
+        config,
+        inventory,
+        captureDirectory,
+        restoreInputs,
+      );
+      await writeCaptureManifest(captureDirectory, postgresDump, restoreInputs);
+      await writeChecksums(captureDirectory, postgresDump, restoreInputs);
+      await radicaleLock.verify();
+      await checkpointRequest(
+        config,
+        paths,
+        deps,
+        runtimeEnv,
+        current.server,
+        'verify',
+        onlineLease.id,
+        onlineSignal,
+      );
+      await radicaleLock.release();
+      radicaleLock = undefined;
+      await checkpointRequest(
+        config,
+        paths,
+        deps,
+        runtimeEnv,
+        current.server,
+        'release',
+        onlineLease.id,
+        onlineSignal,
+      );
+      onlineLease = undefined;
+      clearTimeout(onlineAbortTimer);
+      onlineAbortTimer = undefined;
+    } else {
+      // From the first stop onward, every exit path attempts dependency-order resume.
+      stopAttempted = true;
+      for (const service of STOP_ORDER) {
+        await runCommand(
+          deps,
+          'docker',
+          composeArgs(config, paths, [
+            'stop',
+            '--timeout',
+            String(DOCKER_STOP_TIMEOUT_SECONDS),
+            service,
+          ]),
+          {
+            cwd: paths.projectDirectory,
+            env: commandEnvironment(config, paths, runtimeEnv, 'docker'),
+            signal,
+            timeoutMs: (DOCKER_STOP_TIMEOUT_SECONDS + 30) * 1000,
+          },
+          'quiesce',
+        );
+      }
+
+      await assertStoppedServices(
+        config,
+        paths,
+        runtimeEnv,
+        deps,
+        'quiesce',
         signal,
       );
-    }
-    const restoreInputs = await captureRestoreInputs(config, captureDirectory);
-    await writeCaptureManifest(captureDirectory, postgresDump, restoreInputs);
-    await writeChecksums(captureDirectory, postgresDump, restoreInputs);
-    await assertStoppedServices(
-      config,
-      paths,
-      runtimeEnv,
-      deps,
-      'verification',
-      signal,
-    );
+      for (const service of SERVICE_NAMES) {
+        await inspectStoppedService(
+          config,
+          paths,
+          runtimeEnv,
+          deps,
+          current[service],
+          'quiesce',
+          signal,
+        );
+      }
 
-    // Restart before marking the capture complete and before any S3 access.
-    const resumed = await startServices(config, paths, runtimeEnv, deps);
-    stopAttempted = false;
-    if (!resumed) fail('resume');
+      postgresDump = await capturePostgres(
+        config,
+        paths,
+        runtimeEnv,
+        deps,
+        captureDirectory,
+        signal,
+        postgresPreflight,
+      );
+      for (let index = 0; index < VOLUME_SUFFIXES.length; index += 1) {
+        const volumeName = `${config.projectName}_${VOLUME_SUFFIXES[index]}`;
+        await captureArchive(
+          config,
+          paths,
+          runtimeEnv,
+          deps,
+          captureDirectory,
+          volumeName,
+          ARCHIVE_NAMES[index],
+          'cold',
+          signal,
+        );
+      }
+      restoreInputs = await captureRestoreInputs(config, captureDirectory);
+      await writeCaptureManifest(captureDirectory, postgresDump, restoreInputs);
+      await writeChecksums(captureDirectory, postgresDump, restoreInputs);
+      await assertStoppedServices(
+        config,
+        paths,
+        runtimeEnv,
+        deps,
+        'verification',
+        signal,
+      );
+
+      // Restart before marking the capture complete and before any S3 access.
+      const resumed = await startServices(config, paths, runtimeEnv, deps);
+      stopAttempted = false;
+      if (!resumed) fail('resume');
+    }
 
     await createOutputFile(
       join(captureDirectory, CAPTURE_MARKER_NAME),
-      CAPTURE_MARKER_CONTENT,
+      captureMarkerContent,
       'verification',
     );
+    captureComplete = true;
 
     let expectedCaptureNames;
     let captureProof;
@@ -2492,6 +3424,7 @@ export async function runColdBackup(configInput, dependencies = {}) {
         runName,
         captureDirectoryIdentity,
         expectedCaptureNames,
+        captureMarkerContent,
       );
     }
 
@@ -2508,6 +3441,7 @@ export async function runColdBackup(configInput, dependencies = {}) {
         runName,
         captureDirectoryIdentity,
         expectedCaptureNames,
+        captureMarkerContent,
       );
     }
 
@@ -2554,6 +3488,7 @@ export async function runColdBackup(configInput, dependencies = {}) {
         captureDirectory,
         expectedCaptureNames,
         captureProof,
+        captureMarkerContent,
       );
     }
 
@@ -2590,6 +3525,7 @@ export async function runColdBackup(configInput, dependencies = {}) {
         runName,
         expectedCaptureNames,
         captureProof,
+        captureMarkerContent,
       );
     }
   } catch (error) {
@@ -2598,11 +3534,35 @@ export async function runColdBackup(configInput, dependencies = {}) {
         ? error
         : new ColdBackupFailure('capture');
   } finally {
+    if (onlineAbortTimer) clearTimeout(onlineAbortTimer);
+    if (radicaleLock) {
+      await radicaleLock.release().catch(() => {
+        failure = new ColdBackupFailure('radicale-lock');
+      });
+    }
+    if (onlineLease) {
+      await checkpointRequest(
+        config,
+        paths,
+        deps,
+        runtimeEnv,
+        onlineLease.serverId,
+        'release',
+        onlineLease.id,
+      ).catch(() => {
+        failure ??= new ColdBackupFailure('checkpoint');
+      });
+    }
     if (
       stopAttempted &&
       !(await startServices(config, paths, runtimeEnv, deps))
     ) {
       failure = new ColdBackupFailure('resume');
+    }
+    if (!captureComplete && (config.captureMode ?? 'cold') === 'online') {
+      await removeIncompleteCapture(paths, captureDirectory).catch(() => {
+        failure ??= new ColdBackupFailure('capture-cleanup');
+      });
     }
     await releaseLock(lockHandle, lockPath).catch((error) => {
       failure =
@@ -2636,15 +3596,20 @@ function parseConfigArgument(args) {
 async function main() {
   let controller;
   let abortForSignal;
+  let config;
   try {
     const configPath = parseConfigArgument(process.argv.slice(2));
-    const config = await readConfigFile(configPath);
+    config = await readConfigFile(configPath);
     controller = new AbortController();
     abortForSignal = () => controller.abort();
     process.once('SIGINT', abortForSignal);
     process.once('SIGTERM', abortForSignal);
     await runColdBackup(config, { signal: controller.signal });
-    process.stdout.write('Cold backup completed.\n');
+    process.stdout.write(
+      (config.captureMode ?? 'cold') === 'online'
+        ? 'Online backup completed.\n'
+        : 'Cold backup completed.\n',
+    );
   } catch (error) {
     const stage =
       error instanceof ColdBackupFailure &&
@@ -2652,7 +3617,10 @@ async function main() {
         'configuration',
         'preflight',
         'lock',
+        'radicale-lock',
+        'checkpoint',
         'capture',
+        'capture-cleanup',
         'quiesce',
         'database',
         'archive',
@@ -2666,7 +3634,7 @@ async function main() {
         : 'configuration';
     process.stderr.write(
       stage === 'retention'
-        ? 'Cold backup upload completed, but retention failed; inspect the ' +
+        ? `${(config?.captureMode ?? 'cold') === 'online' ? 'Online' : 'Cold'} backup upload completed, but retention failed; inspect the ` +
             'repository and configured scope.\n'
         : `Cold backup failed during ${stage}; inspect host configuration and service state.\n`,
     );

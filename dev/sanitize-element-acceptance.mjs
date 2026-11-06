@@ -100,6 +100,10 @@ const PHASES = new Set([
   'reminder-restart-delivery-row',
   'restore-quiesced',
   'restore-radicale-backup',
+  'restore-server-backup',
+  'restore-capture-verified',
+  'restore-server-data-verified',
+  'restore-server-marker-cleanup',
   'restore-postgres-backup',
   'restore-targets-prepared',
   'restore-radicale-ready',
@@ -392,7 +396,10 @@ const PHASE_BOOLEAN_FIELDS = new Map([
     'restore-quiesced',
     ['gatewayStoppedGracefully', 'radicaleStoppedGracefully', 'oomFree'],
   ],
-  ['restore-targets-prepared', ['freshVolume', 'freshDatabase']],
+  [
+    'restore-targets-prepared',
+    ['freshVolume', 'freshServerVolume', 'freshDatabase'],
+  ],
   ['restore-postgres-role-ready', ['rolePolicyVerified']],
   [
     'restore-delivery-row',
@@ -816,6 +823,7 @@ const REMINDER_TIMELINE_COUNTS = new Map([
 ]);
 const PRIVATE_CHECKSUM_PHASES = new Set([
   'restore-radicale-backup',
+  'restore-server-backup',
   'restore-postgres-backup',
 ]);
 const RESTORE_TARGET_STEPS = new Set([
@@ -823,6 +831,8 @@ const RESTORE_TARGET_STEPS = new Set([
   'target-database-check',
   'target-plan-check',
   'volume-create',
+  'server-volume-create',
+  'server-archive-extract',
   'volume-empty-check',
   'database-create',
   'archive-extract',
@@ -833,12 +843,16 @@ const RESTORE_TARGET_STEPS = new Set([
 const RESTORE_TARGET_DIAGNOSTIC_FIELDS = [
   'restoreStep',
   'restoreVolumeExists',
+  'restoreServerVolumeExists',
   'restoreDatabaseExists',
   'restoreTargetPlanSafe',
   'restoreVolumeCreated',
+  'restoreServerVolumeCreated',
   'restoreVolumeEmpty',
+  'restoreServerVolumeEmpty',
   'restoreDatabaseCreated',
   'restoreArchiveExtracted',
+  'restoreServerArchiveExtracted',
   'restoreArchiveEntryCount',
   'restoreArchiveCountProbeValid',
   'restorePostgresRestored',
@@ -1579,7 +1593,14 @@ const ALLOWED_KEYS = new Set([
   'oomFree',
   'elementQuiesceSkipped',
   'freshVolume',
+  'freshServerVolume',
   'freshDatabase',
+  'archiveCount',
+  'restoreInputCount',
+  'postgresDumpEnabled',
+  'offlineVerifierPassed',
+  'markerRestored',
+  'markerRemoved',
   ...RESTORE_TARGET_DIAGNOSTIC_FIELDS,
   'containerState',
   'containerHealth',
@@ -3268,6 +3289,32 @@ export function formatSanitizerFailureSummary(error, sourceSha) {
   ].join('\n');
 }
 
+export function hasCompleteRestoreServerEvidence(record) {
+  if (
+    record?.phase === 'restore-targets-prepared' &&
+    record.status === 'passed'
+  ) {
+    return (
+      record.restoreServerVolumeCreated === true &&
+      record.restoreServerVolumeEmpty === true &&
+      record.restoreServerArchiveExtracted === true
+    );
+  }
+  if (
+    record?.phase === 'restore-server-data-verified' &&
+    record.status === 'passed'
+  ) {
+    return record.markerRestored === true;
+  }
+  if (
+    record?.phase === 'restore-server-marker-cleanup' &&
+    record.status === 'passed'
+  ) {
+    return record.markerRemoved === true;
+  }
+  return true;
+}
+
 export function sanitizeElementAcceptance(
   input,
   sourceSha,
@@ -3303,6 +3350,12 @@ export function sanitizeElementAcceptance(
       throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
     rejectionCategory = 'invalid-stage-record';
+    if (!hasCompleteRestoreServerEvidence(record)) {
+      if (typeof record?.phase === 'string' && PHASES.has(record.phase)) {
+        rejectedPhase = record.phase;
+      }
+      throw new SummaryValidationError(rejectionCategory, rejectedPhase);
+    }
     if (
       record !== null &&
       typeof record === 'object' &&
@@ -3902,7 +3955,9 @@ export function sanitizeElementAcceptance(
     if (
       record.phase === 'restore-targets-prepared' &&
       record.status === 'passed' &&
-      (record.freshVolume !== true || record.freshDatabase !== true)
+      (record.freshVolume !== true ||
+        record.freshServerVolume !== true ||
+        record.freshDatabase !== true)
     ) {
       throw new SummaryValidationError(rejectionCategory, rejectedPhase);
     }
@@ -3918,7 +3973,7 @@ export function sanitizeElementAcceptance(
       (record.phase === 'restore-targets-prepared' &&
         ['passed', 'failed'].includes(record.status) &&
         !hasRestoreTargetDiagnostics) ||
-      RESTORE_TARGET_DIAGNOSTIC_FIELDS.slice(1, 8).some(
+      RESTORE_TARGET_DIAGNOSTIC_FIELDS.slice(1, 9).some(
         (key) => Object.hasOwn(record, key) && typeof record[key] !== 'boolean',
       ) ||
       (Object.hasOwn(record, 'restoreArchiveEntryCount') &&
@@ -3927,17 +3982,51 @@ export function sanitizeElementAcceptance(
           record.restoreArchiveEntryCount > 2)) ||
       (Object.hasOwn(record, 'restorePostgresRestored') &&
         typeof record.restorePostgresRestored !== 'boolean') ||
+      (Object.hasOwn(record, 'restoreServerArchiveExtracted') &&
+        typeof record.restoreServerArchiveExtracted !== 'boolean') ||
+      (Object.hasOwn(record, 'postgresDumpEnabled') &&
+        typeof record.postgresDumpEnabled !== 'boolean') ||
+      (Object.hasOwn(record, 'offlineVerifierPassed') &&
+        typeof record.offlineVerifierPassed !== 'boolean') ||
+      (Object.hasOwn(record, 'markerRestored') &&
+        typeof record.markerRestored !== 'boolean') ||
+      (Object.hasOwn(record, 'markerRemoved') &&
+        typeof record.markerRemoved !== 'boolean') ||
+      (Object.hasOwn(record, 'archiveCount') &&
+        (!Number.isInteger(record.archiveCount) || record.archiveCount < 0)) ||
+      (Object.hasOwn(record, 'restoreInputCount') &&
+        (!Number.isInteger(record.restoreInputCount) ||
+          record.restoreInputCount < 0)) ||
+      (record.phase === 'restore-capture-verified' &&
+        record.status === 'passed' &&
+        (record.archiveCount !== 2 ||
+          record.restoreInputCount !== 1 ||
+          record.postgresDumpEnabled !== true ||
+          record.offlineVerifierPassed !== true)) ||
+      (record.phase === 'restore-server-data-verified' &&
+        record.status === 'passed' &&
+        record.markerRestored !== true) ||
+      (record.phase === 'restore-server-marker-cleanup' &&
+        record.status === 'passed' &&
+        record.markerRemoved !== true) ||
       (Object.hasOwn(record, 'restoreArchiveCountProbeValid') &&
         typeof record.restoreArchiveCountProbeValid !== 'boolean') ||
       (record.restoreDatabaseCreated === true &&
         record.restoreDatabaseExists !== false) ||
       (record.restoreVolumeCreated === true &&
         record.restoreVolumeExists !== false) ||
+      (record.restoreServerVolumeCreated === true &&
+        record.restoreServerVolumeExists !== false) ||
       (record.restoreVolumeEmpty === true &&
         record.restoreVolumeCreated !== true) ||
+      (record.restoreServerVolumeEmpty === true &&
+        record.restoreServerVolumeCreated !== true) ||
       (record.restoreArchiveExtracted === true &&
         (record.restoreVolumeCreated !== true ||
           record.restoreVolumeEmpty !== true)) ||
+      (record.restoreServerArchiveExtracted === true &&
+        (record.restoreServerVolumeCreated !== true ||
+          record.restoreServerVolumeEmpty !== true)) ||
       (record.restoreArchiveEntryCount > 0 &&
         record.restoreArchiveExtracted !== true) ||
       (record.restoreArchiveCountProbeValid === true &&
@@ -3963,6 +4052,9 @@ export function sanitizeElementAcceptance(
           record.restoreVolumeEmpty !== true ||
           record.restoreDatabaseCreated !== true ||
           record.restoreArchiveExtracted !== true ||
+          record.restoreServerVolumeCreated !== true ||
+          record.restoreServerVolumeEmpty !== true ||
+          record.restoreServerArchiveExtracted !== true ||
           record.restoreArchiveCountProbeValid !== true ||
           record.restoreArchiveEntryCount < 1 ||
           record.restorePostgresRestored !== true))

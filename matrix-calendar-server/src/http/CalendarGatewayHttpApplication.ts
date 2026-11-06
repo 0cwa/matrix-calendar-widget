@@ -20,10 +20,12 @@ import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { raw } from 'express';
 import { IAppConfiguration } from '../IAppConfiguration';
+import { AppWriteAdmissionMiddleware } from '../middleware/AppWriteAdmissionMiddleware';
 import {
   BoundedFixedWindowSourceRateLimiter,
   CalendarGatewayRateLimitMiddleware,
 } from '../middleware/CalendarGatewayRateLimitMiddleware';
+import { AppWriteFenceService } from '../service/AppWriteFenceService';
 import { PrivateCalendarClientCallbackGateway } from '../service/private-client/PrivateCalendarClientCallbackGateway';
 import { PrivateCalendarClientDavGateway } from '../service/private-client/PrivateCalendarClientDavGateway';
 import { configureRequestBodyLimits } from './RequestBodyLimits';
@@ -71,6 +73,10 @@ export async function createCalendarGatewayHttpApplication(
       calendarGatewayRateLimitMiddleware,
     ),
   );
+  const writeAdmissionMiddleware = new AppWriteAdmissionMiddleware(
+    app.get(AppWriteFenceService),
+  );
+  app.use(writeAdmissionMiddleware.use.bind(writeAdmissionMiddleware));
   const privateCallbackGateway = app.get<PrivateCalendarClientCallbackGateway>(
     PrivateCalendarClientCallbackGateway,
   );

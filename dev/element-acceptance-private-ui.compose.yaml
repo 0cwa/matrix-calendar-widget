@@ -24,6 +24,8 @@ services:
 
   private-gateway-https:
     image: matrix-calendar-widget/server:element-acceptance
+    mem_limit: 2g
+    cpus: 2
     depends_on:
       gateway:
         condition: service_started

@@ -21,7 +21,6 @@ import {
   IStorageProvider,
   MatrixClient,
   RustSdkCryptoStorageProvider,
-  SimpleFsStorageProvider,
   UserID,
 } from 'matrix-bot-sdk';
 import { LoggerModule } from 'nestjs-pino';
@@ -41,6 +40,7 @@ import { CommandController } from './controller/CommandController';
 import { ConfigurationController } from './controller/ConfigurationController';
 import { GuestMemberController } from './controller/GuestMemberController';
 import { HealthCheckController } from './controller/HealthCheckController';
+import { MatrixCheckpointController } from './controller/MatrixCheckpointController';
 import { MeetingController } from './controller/MeetingController';
 import { PrivateCalendarClientController } from './controller/PrivateCalendarClientController';
 import { PublicCalendarFeedController } from './controller/PublicCalendarFeedController';
@@ -51,10 +51,16 @@ import { WelcomeWorkflowController } from './controller/WelcomeWorkflowControlle
 import { WidgetController } from './controller/WidgetController';
 import { EventContentRenderer } from './EventContentRenderer';
 import { LegacyMeetingDisabledGuard } from './guard/LegacyMeetingDisabledGuard';
+import {
+  REQUEST_LOG_REDACT_PATHS,
+  shouldIgnoreRequestLog,
+} from './http/MatrixCheckpointRequestLogging';
 import { initializeI18next } from './i18n';
 import { IAppConfiguration } from './IAppConfiguration';
 import { RoomMatrixEventsReader } from './io/RoomMatrixEventsReader';
 import { WidgetLayoutConfigReader } from './io/WidgetLayoutConfigReader';
+import { AtomicFsStorageProvider } from './matrix/AtomicFsStorageProvider';
+import { CheckpointMatrixClient } from './matrix/CheckpointMatrixClient';
 import { MatrixClientProxyHandler } from './matrix/MatrixClientProxyHandler';
 import {
   AutojoinRoomsMixin,
@@ -76,6 +82,7 @@ import {
 } from './reminder/ReminderDatabaseConnection';
 import { createRoomReminderModuleProviders } from './reminder/RoomReminderModuleProviders';
 import { MatrixServer } from './rpc/MatrixServer';
+import { AppWriteFenceService } from './service/AppWriteFenceService';
 import { CalendarCommandService } from './service/CalendarCommandService';
 import { CommandService } from './service/CommandService';
 import { ConfiguredRoomCalendarPrincipalIdentityProvider } from './service/ConfiguredRoomCalendarPrincipalIdentityProvider';
@@ -92,7 +99,6 @@ import {
 import { PostgresRoomCalendarBindingStore } from './service/PostgresRoomCalendarBindingStore';
 import { PrivateCalendarClientCallbackGateway } from './service/private-client/PrivateCalendarClientCallbackGateway';
 import { PrivateCalendarClientDavGateway } from './service/private-client/PrivateCalendarClientDavGateway';
-import { isPrivateCalendarClientDavPath } from './service/private-client/PrivateCalendarClientPath';
 import { PrivateCalendarClientPolicy } from './service/private-client/PrivateCalendarClientPolicy';
 import { PrivateCalendarClientService } from './service/private-client/PrivateCalendarClientService';
 import { PublicCalendarFeedService } from './service/public-feed/PublicCalendarFeedService';
@@ -120,6 +126,7 @@ const appControllers = [
   CommandController,
   ConfigurationController,
   HealthCheckController,
+  MatrixCheckpointController,
   MeetingController,
   RoomReminderConfigurationController,
   RoomReminderAlarmOptionsController,
@@ -290,7 +297,7 @@ const matrixClientFactoryHelper = {
   createStorageProvider: async (
     appConfig: IAppConfiguration,
   ): Promise<IStorageProvider> => {
-    const storage = new SimpleFsStorageProvider(
+    const storage = new AtomicFsStorageProvider(
       path.join(appConfig.data_path, appConfig.data_filename),
     );
 
@@ -337,7 +344,7 @@ const matrixClientFactory: FactoryProvider<Promise<MatrixClient>> = {
     // create server object
     const server = matrixClientFactoryHelper.getServer(appConfig);
     // create matrix client
-    const client = new MatrixClient(
+    const client = new CheckpointMatrixClient(
       server.url,
       server.accessToken,
       storage,
@@ -400,20 +407,11 @@ const i18nFactory: FactoryProvider<void> = {
         genReqId(_req) {
           return uuiv4();
         },
-        redact: ['req.headers.authorization', 'matrix_event.content'],
+        redact: REQUEST_LOG_REDACT_PATHS,
         autoLogging: {
           // Publication queries contain canonical CalDAV hrefs; public URLs
           // contain bearer capabilities. Neither path belongs in access logs.
-          ignore: (request) => {
-            const path = request.url ?? '';
-            return (
-              path.startsWith('/v1/calendar-feeds/') ||
-              path.startsWith('/v1/public-calendar-feeds/') ||
-              path.startsWith('/v1/calendar/private-clients') ||
-              path.startsWith('/v1/private-calendar-client-callback/') ||
-              isPrivateCalendarClientDavPath(path)
-            );
-          },
+          ignore: shouldIgnoreRequestLog,
         },
       },
     }),
@@ -422,6 +420,7 @@ const i18nFactory: FactoryProvider<void> = {
 
   providers: [
     appConfigurationFactory,
+    AppWriteFenceService,
     roomReminderStoreFactory,
     roomCalendarBindingStoreFactory,
     privateCalendarClientStoreFactory,

@@ -18,6 +18,30 @@ const requiredBindings = new Map([
 ]);
 export const ACCEPTANCE_GATEWAY_RATE_LIMIT_REQUESTS = 1000;
 export const ACCEPTANCE_GATEWAY_RATE_LIMIT_WINDOW_MS = 60_000;
+export const ACCEPTANCE_CONTAINER_MEMORY_BYTES = 2 * 1024 ** 3;
+export const ACCEPTANCE_CONTAINER_CPUS = 2;
+
+export function hasAcceptanceContainerResourceLimits(model) {
+  const services = model?.services;
+  if (
+    !services ||
+    typeof services !== 'object' ||
+    Array.isArray(services) ||
+    Object.keys(services).length === 0
+  ) {
+    return false;
+  }
+
+  return Object.values(services).every(
+    (service) =>
+      service !== null &&
+      typeof service === 'object' &&
+      (service.mem_limit === ACCEPTANCE_CONTAINER_MEMORY_BYTES ||
+        service.mem_limit === String(ACCEPTANCE_CONTAINER_MEMORY_BYTES) ||
+        service.mem_limit === '2g') &&
+      service.cpus === ACCEPTANCE_CONTAINER_CPUS,
+  );
+}
 
 export function hasAcceptanceLoopbackBindings(model) {
   const services = model?.services;
@@ -172,10 +196,13 @@ export function hasLocalPrebuiltOwnershipLabels(model, runId, projectName) {
   }
 
   const restoreVolume = volumes['reminder-restore-radicale-data'];
+  const restoreServerVolume = volumes['reminder-restore-server-data'];
   const postgresVolumes = services.postgres?.volumes;
   return (
     restoreVolume?.name === `${projectName}_radicale-restore` &&
     restoreVolume.external !== true &&
+    restoreServerVolume?.name === `${projectName}_server-restore` &&
+    restoreServerVolume.external !== true &&
     Array.isArray(postgresVolumes) &&
     postgresVolumes.some(
       (volume) =>
@@ -204,6 +231,7 @@ async function main() {
       services?.['restore-gateway'] !== undefined;
     if (
       !hasAcceptanceLoopbackBindings(model) ||
+      !hasAcceptanceContainerResourceLimits(model) ||
       !hasPrivateClientCallbackNetwork(model) ||
       (hasGatewayService && !hasAcceptanceGatewayRateLimitBudget(model)) ||
       (localMode && !hasLocalPrebuiltOwnershipLabels(model, runId, projectName))
@@ -217,7 +245,7 @@ async function main() {
     );
   } catch {
     process.stderr.write(
-      'Acceptance Compose must use loopback ports, a bounded gateway rate budget, and required local ownership labels.\n',
+      'Acceptance Compose must use loopback ports, 2 GiB and 2 CPU service limits, a bounded gateway rate budget, and required local ownership labels.\n',
     );
     process.exitCode = 1;
   }

@@ -16,6 +16,7 @@
 
 import { OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { IAppConfiguration } from '../IAppConfiguration';
+import { AppWriteFenceService } from '../service/AppWriteFenceService';
 import type { RoomCalendarBindingRegistry } from '../service/IRoomCalendarBindingRegistry';
 import type {
   RoomCalendarPrincipalIdentity,
@@ -128,6 +129,7 @@ export class RoomReminderSchedulerLifecycle
     private readonly store: RoomReminderStore,
     private readonly scheduler: Pick<RoomReminderScheduler, 'runOnce'>,
     private readonly intervalMs = ROOM_REMINDER_SCHEDULER_INTERVAL_MS,
+    private readonly writeFence = new AppWriteFenceService(),
   ) {}
 
   onModuleInit(): void {
@@ -206,8 +208,11 @@ export class RoomReminderSchedulerLifecycle
     this.running = true;
     const controller = new AbortController();
     this.activeController = controller;
-    const currentRun = this.scheduler
-      .runOnce(controller.signal)
+    const currentRun = this.writeFence
+      .runWhenOpen(
+        () => this.scheduler.runOnce(controller.signal),
+        controller.signal,
+      )
       .then(() => undefined)
       .catch(() => undefined);
     this.activeRun = currentRun;

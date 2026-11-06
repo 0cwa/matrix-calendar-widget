@@ -190,6 +190,7 @@ until its placeholders and host paths are replaced:
 ```json
 {
   "projectName": "matrix-calendar-sidecar",
+  "captureMode": "cold",
   "projectDirectory": "/opt/matrix-calendar-widget",
   "composeEnvFile": "/etc/matrix-calendar/sidecar.env",
   "composeFiles": [
@@ -250,6 +251,40 @@ independent recovery custody; they are needed to open the snapshot and cannot
 be recovered from it. Never capture or store a user's Matrix password. Restore
 inputs are recovered to a new staging directory and inspected there. The
 coordinator does not write them back to their original live paths.
+
+`captureMode` is optional and defaults to `cold`. The opt-in `online` mode
+keeps services running, obtains and verifies the ADR048 Matrix/app-write lease,
+and holds a shared `fcntl` lock on Radicale's `/data/collections/.Radicale.lock`
+inode during the PostgreSQL dump and both volume archives. The lock is
+rechecked against the same device and inode before and after capture. Lease
+expiry aborts the capture; only a capture whose lease and lock were released
+successfully receives the completion marker. There is no automatic cold
+fallback; a failed online run must be reviewed and, if needed, rerun explicitly
+in cold mode.
+
+Online Radicale archives omit only `.Radicale.cache` and `.Radicale.tmp-*`
+entries. Radicale may change collection caches during shared-lock reads; the
+caches are recreated after restore. Canonical collections and share-token data
+remain included.
+
+Online mode inventories the three supported application PostgreSQL URL
+settings (private-client, room-binding, and reminder stores). It uses the
+existing configured `pgService` dump only when every enabled URL identifies
+the same host, port, and database as that service. Unknown `*DATABASE_URL`
+settings, distinct targets, container-exec PostgreSQL transport, or a mismatch
+fail closed before capture. When
+public feeds are enabled, `restoreInputs` must include the file named
+`public-feed-signing-key`; the coordinator checks the decoded key fingerprint
+against the running server and captured copy without printing the key. Restic
+remains the only upload path and encrypts the capture. Keep private-client
+epoch rotation and other out-of-band recovery inputs in the documented restore
+procedure.
+
+This is an opt-in coordinator slice, not a qualified recovery path. It cannot
+fence database writers that bypass the application or Radicale processes, and
+the complete isolated restore has not been verified. Keep the established cold
+backup as the recovery path until the full #442 restore and acceptance work is
+complete. Do not enable this mode in production based on source tests alone.
 
 When the reminder database is enabled, the coordinator keeps `native` as the
 default `postgresDumpTransport`: it uses the host's PostgreSQL client and the
@@ -637,6 +672,30 @@ SNAPSHOT_ID=replace-with-listed-snapshot-id
 mkdir -m 0700 "$RESTORE_STAGING_DIR"
 restic restore "$SNAPSHOT_ID" --target "$RESTORE_STAGING_DIR"
 ```
+
+Before using the restored files, run the local offline verifier against the
+captured directory found below `RESTORE_STAGING_DIR`:
+
+```bash
+node scripts/matrix-calendar-verify-restore.mjs \
+  --capture-dir "$RESTORE_STAGING_DIR/path/to/capture-directory"
+```
+
+The verifier requires the exact checksummed file inventory, validates the
+capture manifest and completion marker, checks every restore-input size and
+SHA-256 (including `public-feed-signing-key` when present), validates both tar
+archives, and extracts them only into new private temporary directories. The
+capture directory must have no group or other permissions. It rejects archive
+links and non-file entries, limits each staged archive or dump to 2 GiB and
+each archive to one million entries, caps expanded data at 2 GiB total across
+both archives, and removes its temporary data on success or failure. If the
+manifest includes PostgreSQL, it also requires `pg_restore` and validates the
+custom-format dump list. It prints no input
+contents or private paths. It does not connect to Docker, Matrix, Radicale, or
+PostgreSQL, and it does not test service startup or calendar behavior. A pass
+is an offline byte and archive check, not an isolated recovery rehearsal or
+production recovery acceptance; continue with the isolated Compose and
+application checks below.
 
 Restic restores the snapshot's saved paths below the target directory. Locate
 the captured backup directory there, then run the checksum and isolated-volume

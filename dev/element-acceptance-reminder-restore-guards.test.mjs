@@ -40,6 +40,7 @@ import {
 import {
   formatFailureMarker,
   RADICALE_EXTRACT_TAR,
+  waitForPostgresTcpAt,
   waitForRestoreRadicaleAt,
 } from './element-acceptance-reminder-restore.mjs';
 
@@ -60,6 +61,84 @@ test('restore Radicale readiness accepts its redirect without following it', asy
   assert.deepEqual(requests, [
     { url: 'http://127.0.0.1:5233/', redirect: 'manual' },
   ]);
+});
+
+test('PostgreSQL readiness retries until a TCP query succeeds', async () => {
+  let now = 0;
+  let attempts = 0;
+  const pauses = [];
+
+  await waitForPostgresTcpAt(
+    async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('PostgreSQL is restarting');
+      return '1';
+    },
+    100,
+    {
+      now: () => now,
+      delay: async (milliseconds) => {
+        pauses.push(milliseconds);
+        now += milliseconds;
+      },
+      pollIntervalMs: 10,
+    },
+  );
+
+  assert.equal(attempts, 2);
+  assert.deepEqual(pauses, [10]);
+});
+
+test('PostgreSQL readiness fails when no TCP query succeeds by the deadline', async () => {
+  let now = 0;
+  let attempts = 0;
+
+  await assert.rejects(
+    waitForPostgresTcpAt(
+      async () => {
+        attempts += 1;
+        throw new Error('PostgreSQL is unavailable');
+      },
+      20,
+      {
+        now: () => now,
+        delay: async (milliseconds) => {
+          now += milliseconds;
+        },
+        pollIntervalMs: 10,
+      },
+    ),
+    (error) => error.phase === 'reminder-postgres-ready',
+  );
+
+  assert.equal(attempts, 2);
+});
+
+test('PostgreSQL readiness bounds a slow probe to the remaining deadline', async () => {
+  let now = 0;
+  const probeBudgets = [];
+
+  await assert.rejects(
+    waitForPostgresTcpAt(
+      async (timeoutMs) => {
+        probeBudgets.push(timeoutMs);
+        now += timeoutMs;
+        throw new Error('TCP query timed out');
+      },
+      25,
+      {
+        now: () => now,
+        delay: async (milliseconds) => {
+          now += milliseconds;
+        },
+        pollIntervalMs: 10,
+      },
+    ),
+    (error) => error.phase === 'reminder-postgres-ready',
+  );
+
+  assert.deepEqual(probeBudgets, [25]);
+  assert.equal(now, 25);
 });
 
 const PYTHON_ACCOUNT = [
@@ -109,6 +188,9 @@ const safePlan = {
   sourceVolumeName: 'matrix-calendar-element-123-1_radicale-data',
   restoreVolumeName: 'matrix-calendar-element-123-1_radicale-restore',
   restoreVolumeExists: false,
+  sourceServerVolumeName: 'matrix-calendar-element-123-1_server-data',
+  restoreServerVolumeName: 'matrix-calendar-element-123-1_server-restore',
+  restoreServerVolumeExists: false,
   sourceDatabase: 'matrix_calendar_test',
   restoreDatabase: 'matrix_calendar_restored',
   restoreDatabaseExists: false,
@@ -329,6 +411,10 @@ test('restore target plan uses distinct, absent destinations', () => {
     false,
   );
   assert.equal(
+    isSafeRestoreTargetPlan({ ...safePlan, restoreServerVolumeExists: true }),
+    false,
+  );
+  assert.equal(
     isSafeRestoreTargetPlan({ ...safePlan, restoreDatabaseExists: true }),
     false,
   );
@@ -336,6 +422,13 @@ test('restore target plan uses distinct, absent destinations', () => {
     isSafeRestoreTargetPlan({
       ...safePlan,
       restoreVolumeName: safePlan.sourceVolumeName,
+    }),
+    false,
+  );
+  assert.equal(
+    isSafeRestoreTargetPlan({
+      ...safePlan,
+      restoreServerVolumeName: safePlan.sourceServerVolumeName,
     }),
     false,
   );

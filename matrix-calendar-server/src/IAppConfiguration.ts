@@ -21,6 +21,7 @@ export interface IAppConfiguration {
   port?: string | number;
 
   access_token: string;
+  checkpoint_control_token?: string;
   homeserver_url: string;
   matrix_openid_userinfo_origin?: string;
   radicale_url?: string;

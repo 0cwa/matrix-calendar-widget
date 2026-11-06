@@ -14,7 +14,8 @@
  * limitations under the License.
  */
 
-import { MatrixClient } from 'matrix-bot-sdk';
+import { MatrixClient, MemoryStorageProvider } from 'matrix-bot-sdk';
+import { CheckpointMatrixClient } from '../CheckpointMatrixClient';
 import { AutojoinRoomsMixin } from './AutojoinRoomsMixin';
 
 describe('AutojoinRoomsMixin', () => {
@@ -40,5 +41,26 @@ describe('AutojoinRoomsMixin', () => {
     await onInvite?.(roomId);
 
     expect(joinRoom).toHaveBeenCalledWith(roomId);
+  });
+
+  it('marks checkpoints unsafe when an autojoin failure is caught', async () => {
+    const roomId = '!calendar:example.test';
+    const client = new CheckpointMatrixClient(
+      'https://matrix.example.test',
+      'token',
+      new MemoryStorageProvider(),
+    );
+    jest.spyOn(client, 'joinRoom').mockRejectedValue(new Error('join failed'));
+    AutojoinRoomsMixin.setupOnClient(client);
+
+    const listeners = client.listeners('room.invite');
+    const listener = listeners[listeners.length - 1] as (
+      invitedRoomId: string,
+    ) => Promise<void>;
+    await listener(roomId);
+
+    await expect(client.assertCheckpointSafe()).rejects.toThrow(
+      'Matrix checkpoint is not known safe; operator review is required',
+    );
   });
 });
