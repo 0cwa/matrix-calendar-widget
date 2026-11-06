@@ -35,7 +35,7 @@ yarn prettier:check
 yarn ci
 ```
 
-`yarn ci` includes documentation link checks and their regressions, formatting, dependency checks, lint, the configured workspace type checks, unit tests, and builds. Use the [focused commands](./docs/DEVELOPMENT.md#run-focused-checks) while editing, then satisfy all applicable pull-request checks. Browser, PostgreSQL, and real CalDAV/Matrix contracts have separate setup and are not all exercised by `yarn ci`; the [testing map](./docs/DEVELOPMENT.md#choose-the-right-test-layer) explains when to use them.
+`yarn ci` includes documentation link checks and their regressions, formatting, dependency checks, lint, the configured workspace type checks, widget and server translation checks, unit tests, and builds. Use the [focused commands](./docs/DEVELOPMENT.md#run-focused-checks) while editing, then satisfy all applicable pull-request checks. Browser, PostgreSQL, and real CalDAV/Matrix contracts have separate setup and are not all exercised by `yarn ci`; the [testing map](./docs/DEVELOPMENT.md#choose-the-right-test-layer) explains when to use them.
 
 For a documentation-only change, check links and formatting, then verify any commands or behavior claims you edited:
 

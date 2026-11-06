@@ -121,7 +121,7 @@ yarn exec -- tsc -p e2e/gallery-tests/tsconfig.json --noEmit
 yarn ci
 ```
 
-This runs documentation checks and their regressions, formatting, dependency checks, lint, configured workspace type checks, shared-package builds, non-interactive unit tests, and builds. The [CI workflow](../.github/workflows/ci.yml) adds checks such as PostgreSQL contracts, deployment validation, and package-content checks. Keep all protected contexts and the integration contracts relevant to your change; focused local checks are an editing aid.
+This runs documentation checks and their regressions, formatting, dependency checks, lint, configured workspace type checks, shared-package builds, widget and server translation checks, non-interactive unit tests, and builds. The [CI workflow](../.github/workflows/ci.yml) adds checks such as PostgreSQL contracts, deployment validation, and package-content checks. Keep all protected contexts and the integration contracts relevant to your change; focused local checks are an editing aid.
 
 Useful individual commands:
 
