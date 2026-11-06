@@ -174,14 +174,17 @@ async function main() {
     ];
     if (
       !allowed.includes(result.phase) ||
-      !['candidate', 'previous', 'other'].includes(result.running) ||
-      !['candidate', 'previous', 'other'].includes(result.saved) ||
+      !['candidate', 'previous', 'other', 'unknown'].includes(result.running) ||
+      !['candidate', 'previous', 'other', 'unknown'].includes(result.saved) ||
+      !['candidate', 'previous', 'other', 'unknown'].includes(
+        result.savedResolved,
+      ) ||
       !['active', 'stale', 'absent'].includes(result.lock) ||
       !['healthy', 'unhealthy', 'unknown'].includes(result.health)
     )
       throw new Error('invalid status');
     console.log(
-      `Recorded phase: ${result.phase}; running: ${result.running}; saved: ${result.saved}; lock: ${result.lock}; health: ${result.health}.`,
+      `Recorded phase: ${result.phase}; running: ${result.running}; saved: ${result.saved}; saved image resolves to: ${result.savedResolved}; lock: ${result.lock}; health: ${result.health}.`,
     );
   } else {
     const phase = [

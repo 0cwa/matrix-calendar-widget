@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { once } from 'node:events';
 import {
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
@@ -139,12 +141,12 @@ test('release command deploys and recovers an unhealthy candidate', () => {
       newId = m.images[0].image_id;
     writeFileSync(
       join(bin, 'docker'),
-      `#!/usr/bin/env node\nconst fs=require('fs');const a=process.argv.slice(2),p=process.env.TEST_STATE;let s=JSON.parse(fs.readFileSync(p));function tag(){let files=[];for(let i=0;i<a.length;i++)if(a[i]=='-f')files.push(a[++i]);let t='';for(const f of files){const z=fs.readFileSync(f,'utf8').match(/image: ([^\\s]+)/);if(z)t=z[1]}return t}if(a[0]=='image'&&a[1]=='ls'){if(s.loaded)console.log(s.newId)}else if(a[0]=='image'&&a[1]=='inspect'){if(a.at(-1)!=s.old&&!s.loaded)process.exit(1);console.log(a.includes('{{.Os}}/{{.Architecture}}')?'linux/amd64':a.at(-1)==s.old?s.oldId:s.newId)}else if(a[0]=='image'&&a[1]=='load'){s.loaded=true;fs.writeFileSync(p,JSON.stringify(s))}else if(a[0]=='inspect')console.log(a.some(x=>x.includes('config-hash'))?(process.env.TEST_DRIFT==='yes'?'e':'d').repeat(64):s.current);else if(a.includes('config')&&a.includes('--hash'))console.log('server '+ 'd'.repeat(64));else if(a.includes('config'))console.log(JSON.stringify({services:{server:{image:tag()},widget:{image:'widget:fixed'}}}));else if(a.includes('ps'))console.log('server-1');else if(a.includes('up')){s.current=(tag()==s.old||tag()==s.oldId)?s.oldId:s.newId;fs.writeFileSync(p,JSON.stringify(s))}else process.exit(3);\n`,
+      `#!/usr/bin/env node\nconst fs=require('fs');const a=process.argv.slice(2),p=process.env.TEST_STATE;let s=JSON.parse(fs.readFileSync(p));function tag(){let files=[];for(let i=0;i<a.length;i++)if(a[i]=='-f')files.push(a[++i]);let t='';for(const f of files){const z=fs.readFileSync(f,'utf8').match(/image: ([^\\s]+)/);if(z)t=z[1]}return t}if(a[0]=='image'&&a[1]=='ls'){if(s.loaded)console.log(s.newId)}else if(a[0]=='image'&&a[1]=='inspect'){if(a.at(-1)!=s.old&&a.at(-1)!=s.oldId&&!s.loaded)process.exit(1);console.log(a.includes('{{.Os}}/{{.Architecture}}')?'linux/amd64':a.at(-1)==s.old?(s.retagged?'sha256:'+ 'e'.repeat(64):s.oldId):a.at(-1)==s.oldId?s.oldId:s.newId)}else if(a[0]=='image'&&a[1]=='load'){s.loaded=true;fs.writeFileSync(p,JSON.stringify(s))}else if(a[0]=='inspect')console.log(a.some(x=>x.includes('config-hash'))?(process.env.TEST_DRIFT==='yes'?'e':'d').repeat(64):s.current);else if(a.includes('config')&&a.includes('--hash'))console.log('server '+ 'd'.repeat(64));else if(a.includes('config'))console.log(JSON.stringify({services:{server:{image:tag()},widget:{image:'widget:fixed'}}}));else if(a.includes('ps')){if(process.env.TEST_NO_SERVER!=='yes')console.log('server-1')}else if(a.includes('up')){s.current=(tag()==s.old||tag()==s.oldId)?s.oldId:s.newId;fs.writeFileSync(p,JSON.stringify(s))}else process.exit(3);\n`,
       { mode: 0o755 },
     );
     writeFileSync(
       join(bin, 'check'),
-      `#!/usr/bin/env node\nconst fs=require('fs');const x=JSON.parse(fs.readFileSync(process.env.TEST_STATE));if(process.env.FAIL_HEALTH==='edit'&&x.current===x.newId){fs.appendFileSync(process.env.TEST_CANONICAL,'# concurrent edit\\n');process.exit(1)}if(process.env.FAIL_HEALTH==='yes'&&x.current===x.newId)process.exit(1);\n`,
+      `#!/usr/bin/env node\nconst fs=require('fs');const x=JSON.parse(fs.readFileSync(process.env.TEST_STATE));if(process.env.FAIL_HEALTH==='retag'&&x.current===x.newId){x.retagged=true;fs.writeFileSync(process.env.TEST_STATE,JSON.stringify(x));process.exit(1)}if(process.env.FAIL_HEALTH==='edit'&&x.current===x.newId){fs.appendFileSync(process.env.TEST_CANONICAL,'# concurrent edit\\n');process.exit(1)}if(process.env.FAIL_HEALTH==='yes'&&x.current===x.newId)process.exit(1);\n`,
       { mode: 0o755 },
     );
     writeFileSync(
@@ -157,6 +159,7 @@ test('release command deploys and recovers an unhealthy candidate', () => {
       'unhealthy',
       'concurrent-edit',
       'drift',
+      'retag',
     ]) {
       const target = join(dir, `${scenario} space;literal`);
       mkdirSync(target);
@@ -192,7 +195,9 @@ test('release command deploys and recovers an unhealthy candidate', () => {
             ? 'yes'
             : scenario === 'concurrent-edit'
               ? 'edit'
-              : 'no',
+              : scenario === 'retag'
+                ? 'retag'
+                : 'no',
         TEST_CANONICAL: canonical,
         TEST_DRIFT: scenario === 'drift' ? 'yes' : 'no',
       };
@@ -210,6 +215,11 @@ test('release command deploys and recovers an unhealthy candidate', () => {
       } else if (scenario === 'unhealthy') {
         assert.notEqual(result.status, 0);
         assert.match(result.stdout, /rolled-back/);
+        assert.equal(running, oldId);
+        assert.ok(contents.includes(old));
+      } else if (scenario === 'retag') {
+        assert.notEqual(result.status, 0);
+        assert.match(result.stdout, /recovery-incomplete/);
         assert.equal(running, oldId);
         assert.ok(contents.includes(old));
       } else if (scenario === 'drift') {
@@ -235,6 +245,21 @@ test('release command deploys and recovers an unhealthy candidate', () => {
         status.stdout,
         new RegExp(`running: ${expected}; saved: ${saved}`),
       );
+      if (scenario === 'retag')
+        assert.match(status.stdout, /saved image resolves to: other/);
+      if (scenario === 'success') {
+        const missing = spawnSync(
+          process.execPath,
+          [join(root, 'scripts/server-release.mjs'), 'status', configFile],
+          { encoding: 'utf8', env: { ...env, TEST_NO_SERVER: 'yes' } },
+        );
+        assert.equal(missing.status, 0, missing.stderr);
+        assert.match(
+          missing.stdout,
+          /Recorded phase: complete; running: unknown/,
+        );
+        assert.match(missing.stdout, /health: unknown/);
+      }
       const disconnected = spawnSync(
         process.execPath,
         [join(root, 'scripts/server-release.mjs'), 'status', configFile],
@@ -270,7 +295,11 @@ test('an interrupted image transfer leaves no staged archive', () => {
   try {
     const stage = join(dir, 'stage');
     const request = Buffer.from(
-      JSON.stringify({ action: 'deploy', stageDirectory: stage }),
+      JSON.stringify({
+        action: 'deploy',
+        stageDirectory: stage,
+        operationDirectory: join(dir, 'operation'),
+      }),
     );
     const header = Buffer.alloc(8);
     header.writeBigUInt64BE(BigInt(request.length));
@@ -292,7 +321,125 @@ test('an interrupted image transfer leaves no staged archive', () => {
     assert.notEqual(result.status, 0);
     assert.match(result.stdout, /"status": "unknown"/);
     assert.equal(existsSync(stage), false);
+    const overlapping = Buffer.from(
+      JSON.stringify({
+        action: 'deploy',
+        stageDirectory: stage,
+        operationDirectory: join(stage, 'operation'),
+      }),
+    );
+    const overlapHeader = Buffer.alloc(8);
+    overlapHeader.writeBigUInt64BE(BigInt(overlapping.length));
+    const rejected = spawnSync(
+      'python3',
+      [join(root, 'scripts/release/remote_server_release.py')],
+      {
+        input: Buffer.concat([
+          overlapHeader,
+          overlapping,
+          imageLength,
+          Buffer.alloc(10),
+        ]),
+        encoding: 'utf8',
+      },
+    );
+    assert.notEqual(rejected.status, 0);
+    assert.equal(existsSync(stage), false);
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('failed lock acquisition removes only the new lock', () => {
+  const parent = join(
+    homedir(),
+    'agent-scratch',
+    'matrix-calendar-widget',
+    'release-tests',
+  );
+  mkdirSync(parent, { recursive: true });
+  const dir = mkdtempSync(join(parent, 'lock-'));
+  try {
+    const program = `import importlib.util,os,sys
+from unittest.mock import patch
+s=importlib.util.spec_from_file_location('r',sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m)
+p=sys.argv[2]; cfg={'canonical':p,'projectDirectory':'/p','operationDirectory':'/o','archive':'/a','backupCheck':'/b','healthCheck':'/h','dependenciesCheck':'/d','project':'test','archiveSha256':'a'*64,'candidateId':'sha256:'+'b'*64,'candidateTag':'matrix-calendar-widget/server:archive-123-1','rollbackCompatible':True}
+for target in ('open','flock'):
+    obj=m.os if target=='open' else m.fcntl
+    with patch.object(obj,target,side_effect=PermissionError('injected')):
+        try: m.transaction(cfg)
+        except PermissionError: pass
+        else: raise SystemExit(1)
+    if os.path.exists(p+'.release.lock'): raise SystemExit(2)
+`;
+    const result = spawnSync('python3', [
+      '-c',
+      program,
+      join(root, 'scripts/release/remote_server_release.py'),
+      join(dir, 'compose'),
+    ]);
+    assert.equal(result.status, 0, result.stderr.toString());
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('termination during transfer removes the partial stage', async () => {
+  const parent = join(
+    homedir(),
+    'agent-scratch',
+    'matrix-calendar-widget',
+    'release-tests',
+  );
+  mkdirSync(parent, { recursive: true });
+  const dir = mkdtempSync(join(parent, 'signal-'));
+  const stage = join(dir, 'stage');
+  const request = Buffer.from(
+    JSON.stringify({
+      action: 'deploy',
+      stageDirectory: stage,
+      operationDirectory: join(dir, 'operation'),
+    }),
+  );
+  const header = Buffer.alloc(8);
+  header.writeBigUInt64BE(BigInt(request.length));
+  const imageLength = Buffer.alloc(8);
+  imageLength.writeBigUInt64BE(2n * 1024n * 1024n);
+  const child = spawn(
+    'python3',
+    [join(root, 'scripts/release/remote_server_release.py')],
+    { stdio: ['pipe', 'pipe', 'pipe'] },
+  );
+  let output = '';
+  child.stdout.on('data', (chunk) => {
+    output += chunk;
+  });
+  const exited = once(child, 'exit');
+  try {
+    child.stdin.write(
+      Buffer.concat([header, request, imageLength, Buffer.alloc(1024 * 1024)]),
+    );
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      try {
+        if (statSync(join(stage, 'server.tar')).size > 0) break;
+      } catch {
+        /* waiting for transfer */
+      }
+      await new Promise((resolveWait) => setTimeout(resolveWait, 20));
+    }
+    assert.ok(
+      existsSync(join(stage, 'server.tar')) &&
+        statSync(join(stage, 'server.tar')).size > 0,
+      'transfer did not start',
+    );
+    child.kill('SIGTERM');
+    await exited;
+    assert.match(output, /"status": "unknown"/);
+    assert.equal(existsSync(stage), false);
+  } finally {
+    if (child.exitCode === null && child.signalCode === null)
+      child.kill('SIGKILL');
     rmSync(dir, { recursive: true, force: true });
   }
 });

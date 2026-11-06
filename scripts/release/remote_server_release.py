@@ -265,10 +265,18 @@ def transaction(config):
     operation = config["operationDirectory"]
     lock = canonical + ".release.lock"
     os.mkdir(lock, 0o700)
-    lock_fd = os.open(
-        os.path.join(lock, "owner"), os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600
-    )
-    fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    lock_fd = None
+    try:
+        lock_fd = os.open(
+            os.path.join(lock, "owner"), os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600
+        )
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except Exception:
+        if lock_fd is not None:
+            os.close(lock_fd)
+            os.unlink(os.path.join(lock, "owner"))
+        os.rmdir(lock)
+        raise
     unlock = False
     phase = "preflight"
     activated = False
@@ -444,7 +452,7 @@ def transaction(config):
                     pass
                 changed = hash_file(canonical) not in (original_hash, updated_hash)
                 if (
-                    run(["docker", "image", "inspect", "--format", "{{.Id}}", old_tag])
+                    run(["docker", "image", "inspect", "--format", "{{.Id}}", old_id])
                     != old_id
                 ):
                     fail("rollback image changed")
@@ -471,6 +479,11 @@ def transaction(config):
                         ["up", "-d", "--no-deps", "server"],
                     )
                 check_image(config, old_id)
+                if (
+                    run(["docker", "image", "inspect", "--format", "{{.Id}}", old_tag])
+                    != old_id
+                ):
+                    fail("previous tag changed; running image was restored")
                 if changed:
                     fail("configuration changed; saved file was preserved")
                 if hash_file(canonical) == updated_hash:
@@ -523,8 +536,6 @@ def status(config):
         fail("invalid operation directory")
     with open(os.path.join(operation, "status.json"), encoding="utf-8") as source:
         record = json.load(source)
-    current = run(["docker", "inspect", "--format", "{{.Image}}", service_id(record)])
-    saved = model(record, [record["canonical"]])["services"]["server"]["image"]
 
     def classify(value, candidate, previous):
         return (
@@ -534,6 +545,24 @@ def status(config):
             if value == previous
             else "other"
         )
+
+    running = "unknown"
+    saved = "unknown"
+    saved_resolved = "unknown"
+    try:
+        current = run(
+            ["docker", "inspect", "--format", "{{.Image}}", service_id(record)]
+        )
+        running = classify(current, record["candidateId"], record["previousId"])
+    except Exception:
+        pass
+    try:
+        saved_tag = model(record, [record["canonical"]])["services"]["server"]["image"]
+        saved = classify(saved_tag, record["candidateTag"], record["previousTag"])
+        saved_id = run(["docker", "image", "inspect", "--format", "{{.Id}}", saved_tag])
+        saved_resolved = classify(saved_id, record["candidateId"], record["previousId"])
+    except Exception:
+        pass
 
     lock = record["canonical"] + ".release.lock"
     lock_state = "absent"
@@ -550,8 +579,10 @@ def status(config):
         except FileNotFoundError:
             pass
     health = "unknown"
-    if isinstance(config.get("healthCheck"), str) and os.path.isabs(
-        config["healthCheck"]
+    if (
+        running != "unknown"
+        and isinstance(config.get("healthCheck"), str)
+        and os.path.isabs(config["healthCheck"])
     ):
         try:
             invoke_hook(config["healthCheck"])
@@ -563,8 +594,9 @@ def status(config):
         "phase": record["phase"],
         "lock": lock_state,
         "health": health,
-        "running": classify(current, record["candidateId"], record["previousId"]),
-        "saved": classify(saved, record["candidateTag"], record["previousTag"]),
+        "running": running,
+        "saved": saved,
+        "savedResolved": saved_resolved,
     }
 
 
@@ -585,18 +617,38 @@ def main():
     stage = config.get("stageDirectory")
     if not isinstance(stage, str) or not os.path.isabs(stage):
         fail("invalid staging directory")
+    operation = config.get("operationDirectory")
+    if not isinstance(operation, str) or not os.path.isabs(operation):
+        fail("invalid operation directory")
+    stage_real = os.path.realpath(stage)
+    operation_real = os.path.realpath(operation)
+    common = os.path.commonpath([stage_real, operation_real])
+    if common in (stage_real, operation_real):
+        fail("stage and operation directories overlap")
     os.mkdir(stage, 0o700)
     archive = os.path.join(stage, "server.tar")
     fd = os.open(archive, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
         with os.fdopen(fd, "wb") as output:
-            remaining = size
-            while remaining:
-                block = stream.read(min(remaining, 1024 * 1024))
-                if not block:
-                    fail("incomplete image transfer")
-                output.write(block)
-                remaining -= len(block)
+
+            def interrupted(_signal, _frame):
+                raise InterruptedError("image transfer interrupted")
+
+            previous = {
+                sig: signal.signal(sig, interrupted)
+                for sig in (signal.SIGHUP, signal.SIGTERM)
+            }
+            try:
+                remaining = size
+                while remaining:
+                    block = stream.read(min(remaining, 1024 * 1024))
+                    if not block:
+                        fail("incomplete image transfer")
+                    output.write(block)
+                    remaining -= len(block)
+            finally:
+                for sig, handler in previous.items():
+                    signal.signal(sig, handler)
             output.flush()
             os.fsync(output.fileno())
         config["archive"] = archive

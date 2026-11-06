@@ -702,7 +702,9 @@ deployment. The status action reports the recorded phase, whether the lock is
 active or stale, the running and saved image identities, and the health check
 result. A status failure before the operation record exists does not prove that
 the remote runner has stopped. Reconcile the host before removing a stale lock
-or retrying. The command does not create or restore backups, review database
+or retrying. A killed runner can leave its private staging directory behind;
+remove that exact task-owned directory only after confirming its runner has
+stopped. The command does not create or restore backups, review database
 migrations, or repair an interrupted transaction automatically.
 
 ## Public calendar feed ingress and recovery
