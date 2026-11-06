@@ -644,6 +644,66 @@ otherwise a later normal reapply could revert the release. Recheck the rendered
 configuration after synchronization. Do not publish private Compose files or
 resolved environment values.
 
+#### Operator release command
+
+The local `scripts/server-release.mjs` command verifies the source-bound archive
+and streams its server image over strict SSH to a fixed Python runner on the
+host. The host needs Python 3, Docker Compose and the operator checks described
+below; it does not need Node.js. Run the command from a checkout of the trusted
+workflow commit named in the authenticated manifest. Supply a private, mode
+`0600` JSON file with absolute host paths and a new staging and operation
+directory for each attempt:
+
+```json
+{
+  "host": "calendar-host",
+  "archiveRoot": "/local/verified-archive",
+  "manifestSha256": "<authenticated manifest SHA-256>",
+  "sourceSha": "<reviewed source SHA>",
+  "canonical": "/private/compose.yaml",
+  "project": "calendar-sidecar",
+  "projectDirectory": "/private/calendar",
+  "stageDirectory": "/private/new-release-stage",
+  "operationDirectory": "/private/new-release-operation",
+  "backupCheck": "/private/check-backup",
+  "healthCheck": "/private/check-health",
+  "dependenciesCheck": "/private/check-dependencies",
+  "rollbackCompatible": true
+}
+```
+
+The three host checks are operator-owned, read-only executables run without
+arguments. They must be noninteractive, return nonzero on failure, and avoid printing
+credentials. The backup check must verify a recent paired backup and a safe
+window before the next scheduled backup; the command runs it twice, including
+immediately before activation. The health check must wait for the server to
+become ready, and the dependencies check must verify the services and storage
+that must remain unchanged. These checks are operator assertions; the command
+does not independently establish backup or dependency health. Set
+`rollbackCompatible` only after reviewing migration and persistent-state
+compatibility with the prior image.
+
+```bash
+node scripts/server-release.mjs deploy /local/private-release-config.json
+node scripts/server-release.mjs status /local/private-release-config.json
+```
+
+The runner locks the canonical file, checks the image and rendered Compose
+change, switches only the server, checks health and dependencies, and then
+atomically synchronizes the canonical file. It attempts to restore the previous
+server and configuration if activation or a later check fails. A
+`recovery-incomplete` result requires operator intervention. Concurrent
+operators must respect the same lock; an unrelated editor can still modify the
+file between the last hash check and the atomic rename.
+
+An interrupted SSH connection has an **unknown outcome**; never blindly rerun a
+deployment. The status action reports the recorded phase, whether the lock is
+active or stale, the running and saved image identities, and the health check
+result. A status failure before the operation record exists does not prove that
+the remote runner has stopped. Reconcile the host before removing a stale lock
+or retrying. The command does not create or restore backups, review database
+migrations, or repair an interrupted transaction automatically.
+
 ## Public calendar feed ingress and recovery
 
 Public subscriptions are available in current source under

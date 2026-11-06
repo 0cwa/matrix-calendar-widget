@@ -60,6 +60,9 @@ jobs:
       - name: Test pilot image pin proposal (synthetic, no host)
         run: node --test scripts/propose-pilot-image-pins.test.mjs
 
+      - name: Test server release and recovery
+        run: node --test scripts/server-release.test.mjs
+
       - name: Check pilot image overlay syntax (no services started)
         run: |
           docker compose --env-file deploy/etke-sidecar.env.example \
