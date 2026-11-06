@@ -204,6 +204,17 @@ def check_image(config, expected):
         fail('running image mismatch')
 
 
+def check_service_configuration(config, files):
+    rendered = compose(config, files, ['config', '--hash', 'server']).split()
+    if len(rendered) != 2 or rendered[0] != 'server' or not re.fullmatch(r'[0-9a-f]{64}', rendered[1]):
+        fail('invalid server configuration hash')
+    actual = run(['docker', 'inspect', '--format',
+                  '{{index .Config.Labels "com.docker.compose.config-hash"}}',
+                  service_id(config)])
+    if actual != rendered[1]:
+        fail('running server configuration differs')
+
+
 def transaction(config):
     validate(config)
     canonical = config['canonical']
@@ -258,6 +269,7 @@ def transaction(config):
         phase = 'dependency-check'
         invoke_hook(config['dependenciesCheck'])
         check_image(config, old_id)
+        check_service_configuration(config, [canonical])
         phase = 'image-check'
         if hash_file(config['archive']) != config['archiveSha256']:
             fail('transferred archive hash mismatch')
@@ -287,6 +299,8 @@ def transaction(config):
         invoke_hook(config['backupCheck'])
         phase = 'dependency-check'
         invoke_hook(config['dependenciesCheck'])
+        check_image(config, old_id)
+        check_service_configuration(config, [canonical])
         if run(['docker', 'image', 'inspect', '--format', '{{.Id}}', old_tag]) != old_id:
             fail('rollback image changed')
         if hash_file(canonical) != original_hash:
@@ -297,12 +311,14 @@ def transaction(config):
             compose(config, [canonical, overlay], ['up', '-d', '--no-deps', 'server'])
             phase = 'health'
             check_image(config, config['candidateId'])
+            check_service_configuration(config, [canonical, overlay])
             invoke_hook(config['healthCheck'])
             invoke_hook(config['dependenciesCheck'])
             phase = 'canonical'
             atomic_replace(canonical, updated, original_hash)
             phase = 'verification'
             check_image(config, config['candidateId'])
+            check_service_configuration(config, [canonical])
             if not same_except_server_image(baseline, model(config, [canonical]), config['candidateTag']):
                 fail('canonical verification failed')
             invoke_hook(config['healthCheck'])

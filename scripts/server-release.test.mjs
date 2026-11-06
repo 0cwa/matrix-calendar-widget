@@ -139,7 +139,7 @@ test('release command deploys and recovers an unhealthy candidate', () => {
       newId = m.images[0].image_id;
     writeFileSync(
       join(bin, 'docker'),
-      `#!/usr/bin/env node\nconst fs=require('fs');const a=process.argv.slice(2),p=process.env.TEST_STATE;let s=JSON.parse(fs.readFileSync(p));function tag(){let files=[];for(let i=0;i<a.length;i++)if(a[i]=='-f')files.push(a[++i]);let t='';for(const f of files){const z=fs.readFileSync(f,'utf8').match(/image: ([^\\s]+)/);if(z)t=z[1]}return t}if(a[0]=='image'&&a[1]=='inspect'){if(a.at(-1)!=s.old&&!s.loaded)process.exit(1);console.log(a.includes('{{.Os}}/{{.Architecture}}')?'linux/amd64':a.at(-1)==s.old?s.oldId:s.newId)}else if(a[0]=='image'&&a[1]=='load'){s.loaded=true;fs.writeFileSync(p,JSON.stringify(s))}else if(a[0]=='inspect')console.log(s.current);else if(a.includes('config'))console.log(JSON.stringify({services:{server:{image:tag()},widget:{image:'widget:fixed'}}}));else if(a.includes('ps'))console.log('server-1');else if(a.includes('up')){s.current=(tag()==s.old||tag()==s.oldId)?s.oldId:s.newId;fs.writeFileSync(p,JSON.stringify(s))}else process.exit(3);\n`,
+      `#!/usr/bin/env node\nconst fs=require('fs');const a=process.argv.slice(2),p=process.env.TEST_STATE;let s=JSON.parse(fs.readFileSync(p));function tag(){let files=[];for(let i=0;i<a.length;i++)if(a[i]=='-f')files.push(a[++i]);let t='';for(const f of files){const z=fs.readFileSync(f,'utf8').match(/image: ([^\\s]+)/);if(z)t=z[1]}return t}if(a[0]=='image'&&a[1]=='inspect'){if(a.at(-1)!=s.old&&!s.loaded)process.exit(1);console.log(a.includes('{{.Os}}/{{.Architecture}}')?'linux/amd64':a.at(-1)==s.old?s.oldId:s.newId)}else if(a[0]=='image'&&a[1]=='load'){s.loaded=true;fs.writeFileSync(p,JSON.stringify(s))}else if(a[0]=='inspect')console.log(a.some(x=>x.includes('config-hash'))?(process.env.TEST_DRIFT==='yes'?'e':'d').repeat(64):s.current);else if(a.includes('config')&&a.includes('--hash'))console.log('server '+ 'd'.repeat(64));else if(a.includes('config'))console.log(JSON.stringify({services:{server:{image:tag()},widget:{image:'widget:fixed'}}}));else if(a.includes('ps'))console.log('server-1');else if(a.includes('up')){s.current=(tag()==s.old||tag()==s.oldId)?s.oldId:s.newId;fs.writeFileSync(p,JSON.stringify(s))}else process.exit(3);\n`,
       { mode: 0o755 },
     );
     writeFileSync(
@@ -152,7 +152,12 @@ test('release command deploys and recovers an unhealthy candidate', () => {
       '#!/bin/sh\nif [ "$TEST_SSH_FAILURE" = yes ]; then exit 255; fi\nfor last do :; done\nexec sh -c "$last"\n',
       { mode: 0o755 },
     );
-    for (const scenario of ['success', 'unhealthy', 'concurrent-edit']) {
+    for (const scenario of [
+      'success',
+      'unhealthy',
+      'concurrent-edit',
+      'drift',
+    ]) {
       const target = join(dir, `${scenario} space;literal`);
       mkdirSync(target);
       const canonical = join(target, 'compose.yaml');
@@ -189,6 +194,7 @@ test('release command deploys and recovers an unhealthy candidate', () => {
               ? 'edit'
               : 'no',
         TEST_CANONICAL: canonical,
+        TEST_DRIFT: scenario === 'drift' ? 'yes' : 'no',
       };
       const result = spawnSync(
         process.execPath,
@@ -204,6 +210,11 @@ test('release command deploys and recovers an unhealthy candidate', () => {
       } else if (scenario === 'unhealthy') {
         assert.notEqual(result.status, 0);
         assert.match(result.stdout, /rolled-back/);
+        assert.equal(running, oldId);
+        assert.ok(contents.includes(old));
+      } else if (scenario === 'drift') {
+        assert.notEqual(result.status, 0);
+        assert.match(result.stdout, /failed/);
         assert.equal(running, oldId);
         assert.ok(contents.includes(old));
       } else {
