@@ -15,10 +15,25 @@
  * limitations under the License.
  */
 
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   resolve: {
+    alias: [
+      {
+        find: /^@matrix-calendar-widget\/calendar$/,
+        replacement: fileURLToPath(
+          new URL('../packages/calendar/src/index.ts', import.meta.url),
+        ),
+      },
+      {
+        find: /^@matrix-calendar-widget\/ical-timezones$/,
+        replacement: fileURLToPath(
+          new URL('../packages/ical-timezones/src/index.ts', import.meta.url),
+        ),
+      },
+    ],
     dedupe: [
       '@matrix-widget-toolkit/mui',
       '@matrix-widget-toolkit/react',

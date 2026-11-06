@@ -59,11 +59,16 @@ Normal widget startup is calendar-only. Some inherited meeting modules and serve
 
 All examples run from the repository root. Use the relevant workspace instead of waiting for the whole repository on every edit.
 
-Before focused widget checks, build the shared packages in dependency order, as CI does. Their `lib` outputs are generated from this checkout's source; if a shared package is missing or appears stale, check `node --version` and `yarn --version` against the [toolchain requirements above](#install-the-toolchain), then use `yarn workspaces info` to inspect the declared workspace map before rebuilding these packages. Do not reuse generated output from another checkout. When UI or translation catalog paths change, run the translation check before the affected widget tests:
+Focused widget and server tests resolve the shared calendar packages from this checkout's source, without requiring their generated `lib` output. Before running the server or building images, build those packages in dependency order; do not reuse generated output from another checkout:
 
 ```bash
 yarn workspace @matrix-calendar-widget/ical-timezones build
 yarn workspace @matrix-calendar-widget/calendar build
+```
+
+When UI or translation catalog paths change, run the translation check before the affected widget tests:
+
+```bash
 yarn workspace @matrix-calendar-widget/widget translate --ci --dry-run
 ```
 
