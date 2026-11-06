@@ -2382,28 +2382,7 @@ async function readStableList(
 ) {
   const rows = frame.locator('li[aria-label]');
   await expect(rows).toHaveCount(expectedTitles.length);
-  const body = frame.locator('body');
-  return measureStableDom(body, () =>
-    body.evaluate((bodyElement, expected) => {
-      const root = bodyElement.ownerDocument.documentElement;
-      const titles = Array.from(
-        bodyElement.querySelectorAll('li[aria-label]'),
-        (element) => element.getAttribute('aria-label') ?? '',
-      );
-      const actual = new Set(titles);
-      const expectedSet = new Set(expected);
-      return {
-        renderedCount: titles.length,
-        identitiesMatch:
-          actual.size === expectedSet.size &&
-          titles.length === expected.length &&
-          expected.every((title) => actual.has(title)),
-        horizontalOverflow:
-          Math.max(root.scrollWidth, bodyElement.scrollWidth) >
-          root.clientWidth,
-      };
-    }, expectedTitles),
-  );
+  return readStableRowCount(frame, expectedTitles);
 }
 
 async function readStableRowCount(
