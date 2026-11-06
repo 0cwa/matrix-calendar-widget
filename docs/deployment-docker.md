@@ -688,8 +688,9 @@ node scripts/server-release.mjs deploy /local/private-release-config.json
 node scripts/server-release.mjs status /local/private-release-config.json
 ```
 
-The runner locks the canonical file, checks the image and rendered Compose
-change, switches only the server, checks health and dependencies, and then
+The runner locks the canonical file, checks that the running server matches its
+saved Compose configuration, verifies the image and rendered change, switches
+only the server, checks health and dependencies, and then
 atomically synchronizes the canonical file. It attempts to restore the previous
 server and configuration if activation or a later check fails. A
 `recovery-incomplete` result requires operator intervention. Concurrent
