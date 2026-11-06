@@ -24,7 +24,7 @@
   },
   "scripts": {
     "build": "echo \"Nothing to build\"",
-    "test:all": "echo \"Nothing to test\"",
+    "test:all": "node --test src/readBoundedResponseBody.test.mjs",
     "generate-disclaimer": "echo \"Nothing to generate\"",
     "translate": "echo \"Nothing to translate\"",
     "docker:build": "echo \"Nothing to build\"",

@@ -61,6 +61,7 @@ import type {
   User,
 } from './elementAcceptanceTypes';
 import { ElementWebPage } from './pages/elementWebPage';
+import { readBoundedResponseBody } from './readBoundedResponseBody.mjs';
 
 type G6CalDavClient = {
   authorization: string;
@@ -100,7 +101,8 @@ type G6AcceptanceDependencies = {
   authenticateInElement: (
     context: BrowserContext,
     user: User,
-    waitForMemberSession?: boolean,
+    captureMemberADiagnostics?: boolean,
+    captureHomeserverHttpErrors?: boolean,
   ) => Promise<Page>;
   openMemberARoomWithDiagnostics: (
     page: Page,
@@ -111,6 +113,7 @@ type G6AcceptanceDependencies = {
       captureReminderRoomLayout?: boolean;
       captureRoomReadinessTimeline?: boolean;
       useNormalRoomSelection?: boolean;
+      blockedExternalRequests?: { count: number };
     },
   ) => Promise<MemberARoomResult>;
   recordMemberARoomObservation: (
@@ -390,14 +393,13 @@ async function g6CalDavRequest(
       await response.body?.cancel().catch(() => undefined);
       return { outcome: 'response', status: response.status };
     }
-    try {
-      const bytes = Buffer.from(await response.arrayBuffer());
-      return bytes.length <= G6_MAX_RESOURCE_BYTES
-        ? { outcome: 'response', status: response.status, bytes }
-        : { outcome: 'response', status: response.status };
-    } catch {
-      return { outcome: 'response', status: response.status };
-    }
+    const bytes = await readBoundedResponseBody(
+      response.body,
+      G6_MAX_RESOURCE_BYTES,
+    );
+    return bytes === undefined
+      ? { outcome: 'response', status: response.status }
+      : { outcome: 'response', status: response.status, bytes };
   }
 
   await response.body?.cancel().catch(() => undefined);
@@ -854,6 +856,10 @@ export async function runElementG6AcceptanceJourney(
 
   const contexts: BrowserContext[] = [];
   const resourcesToTrack: G6ResourceOwnership[] = [];
+  const blockedRequestsByContext = new WeakMap<
+    BrowserContext,
+    { count: number }
+  >();
   const resourceOwnershipByName = new Map<string, G6ResourceOwnership>();
   const stageRecords = new Map<G6Phase, G6StageRecord>();
   const allowedOrigins = new Set([
@@ -893,6 +899,8 @@ export async function runElementG6AcceptanceJourney(
       timezoneId: 'Europe/Stockholm',
       viewport: { width: 1440, height: 900 },
     });
+    const contextBlockedRequests = { count: 0 };
+    blockedRequestsByContext.set(context, contextBlockedRequests);
     contexts.push(context);
     await context.route('**/*', async (route) => {
       let origin: string;
@@ -900,11 +908,19 @@ export async function runElementG6AcceptanceJourney(
         origin = new URL(route.request().url()).origin;
       } catch {
         blockedRequests = Math.min(blockedRequests + 1, 100_000);
+        contextBlockedRequests.count = Math.min(
+          contextBlockedRequests.count + 1,
+          100_000,
+        );
         await route.abort('blockedbyclient');
         return;
       }
       if (!allowedOrigins.has(origin)) {
         blockedRequests = Math.min(blockedRequests + 1, 100_000);
+        contextBlockedRequests.count = Math.min(
+          contextBlockedRequests.count + 1,
+          100_000,
+        );
         await route.abort('blockedbyclient');
         return;
       }
@@ -941,6 +957,9 @@ export async function runElementG6AcceptanceJourney(
       fixture.roomName,
       fixture.teamRoomId,
       fixture.users.memberA.userId,
+      {
+        blockedExternalRequests: blockedRequestsByContext.get(contextA),
+      },
     );
     recordMemberARoomObservation(memberARoom, activeRoomPhase);
     if (memberARoom.failureCode) {
@@ -949,7 +968,12 @@ export async function runElementG6AcceptanceJourney(
     activeRoomPhase = undefined;
 
     const contextB = await newRoutedContext();
-    pageB = await authenticateInElement(contextB, fixture.users.memberB);
+    pageB = await authenticateInElement(
+      contextB,
+      fixture.users.memberB,
+      false,
+      true,
+    );
     record('member-b-authenticated', 'passed');
     activeRoomPhase = 'g6-member-b-room-context';
     const memberBRoom = await openMemberARoomWithDiagnostics(
@@ -960,6 +984,7 @@ export async function runElementG6AcceptanceJourney(
       {
         captureReminderRoomLayout: true,
         captureRoomReadinessTimeline: true,
+        blockedExternalRequests: blockedRequestsByContext.get(contextB),
       },
     );
     recordMemberARoomObservation(memberBRoom, activeRoomPhase);
@@ -1063,6 +1088,14 @@ export async function runElementG6AcceptanceJourney(
       seedCreateObservations,
     });
 
+    const unsupportedBefore = await g6CalDavRequest(
+      calDavClient!,
+      resources.unsupported,
+      'GET',
+    );
+    const canonicalSnapshotAvailable =
+      unsupportedBefore.status === 200 && unsupportedBefore.bytes !== undefined;
+
     activeG6Phase = 'g6-unsupported-preservation';
     const memberAEventsResponse = waitForG6EventsResponse(
       pageA,
@@ -1099,13 +1132,6 @@ export async function runElementG6AcceptanceJourney(
       .isVisible()
       .catch(() => false);
 
-    const unsupportedBefore = await g6CalDavRequest(
-      calDavClient!,
-      resources.unsupported,
-      'GET',
-    );
-    const canonicalSnapshotAvailable =
-      unsupportedBefore.status === 200 && unsupportedBefore.bytes !== undefined;
     await openEventEditor(frameA, names.neighbor);
     const neighborEditor = frameA.getByRole('dialog').last();
     const neighborPatchResponse = waitForGatewayResponse(
@@ -1317,11 +1343,15 @@ export async function runElementG6AcceptanceJourney(
         .waitFor({ state: 'visible' })
         .catch(() => {});
     }
-    const createControlReachable = await frameA
-      .getByRole('button', { name: 'Create event', exact: true })
-      .isVisible()
-      .catch(() => false);
+    const createEventButton = frameA.getByRole('button', {
+      name: 'Create event',
+      exact: true,
+    });
+    await expect(createEventButton).toBeEnabled({ timeout: 10_000 });
     const sidePanelToolbarObservation = await observeG6SidePanelToolbar(frameA);
+    const createControlReachable =
+      (await createEventButton.isVisible().catch(() => false)) &&
+      sidePanelToolbarObservation.createEventButtonEnabled === 'enabled';
     const viewport = pageA.viewportSize();
     const widgetCard = pageA.locator('.mx_WidgetCard');
     const widgetCardCount = Math.min(
@@ -1621,13 +1651,18 @@ export async function runElementG6AcceptanceJourney(
       () => undefined,
     );
     const memberBReloadStatus = memberBReloadEvents?.status();
+    const memberBNeighbor = frameB.getByRole('listitem', {
+      name: names.neighborEdited,
+    });
+    await memberBNeighbor
+      .waitFor({ state: 'visible', timeout: 30_000 })
+      .catch(() => {});
     const memberBDeleteRowAfterReload = frameB.getByRole('listitem', {
       name: names.deletable,
     });
     const memberBDeleteRowAbsent =
       (await memberBDeleteRowAfterReload.count().catch(() => 1)) === 0;
-    const memberBNeighborVisible = await frameB
-      .getByRole('listitem', { name: names.neighborEdited })
+    const memberBNeighborVisible = await memberBNeighbor
       .isVisible()
       .catch(() => false);
     const memberBRefreshPassed =

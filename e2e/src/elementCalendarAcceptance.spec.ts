@@ -1109,7 +1109,7 @@ test.afterEach(async ({}, testInfo) => {
   finishActiveReminderFlowDiagnostic(testInfo.status);
 });
 
-const memberAHomeserverHttpFailures = new WeakMap<
+const memberRoomHomeserverHttpFailures = new WeakMap<
   Page,
   HomeserverHttpFailures
 >();
@@ -5785,19 +5785,15 @@ async function authenticateInElement(
   context: BrowserContext,
   user: User,
   captureMemberADiagnostics = false,
+  captureHomeserverHttpErrors = captureMemberADiagnostics,
 ): Promise<Page> {
   const page = await context.newPage();
   page.setDefaultTimeout(30_000);
   page.setDefaultNavigationTimeout(30_000);
-  if (captureMemberADiagnostics) {
+  if (captureHomeserverHttpErrors) {
     const homeserverOrigin = new URL(fixture.homeserverUrl).origin;
     const homeserverHttpFailures: HomeserverHttpFailures = { count: 0 };
-    memberAHomeserverHttpFailures.set(page, homeserverHttpFailures);
-    const contextBlockedRequests =
-      blockedExternalRequestsByContext.get(context);
-    if (contextBlockedRequests) {
-      memberABlockedExternalRequests.set(page, contextBlockedRequests);
-    }
+    memberRoomHomeserverHttpFailures.set(page, homeserverHttpFailures);
     page.on('response', (response) => {
       try {
         if (
@@ -5814,6 +5810,13 @@ async function authenticateInElement(
         // Keep only the bounded count/status below; never retain request data.
       }
     });
+  }
+  if (captureMemberADiagnostics) {
+    const contextBlockedRequests =
+      blockedExternalRequestsByContext.get(context);
+    if (contextBlockedRequests) {
+      memberABlockedExternalRequests.set(page, contextBlockedRequests);
+    }
     activePhase = 'member-a-origin-navigation';
   }
   const originResponse = await page.goto(
@@ -5977,6 +5980,7 @@ async function openMemberARoomWithDiagnostics(
     captureReminderRoomLayout?: boolean;
     captureRoomReadinessTimeline?: boolean;
     useNormalRoomSelection?: boolean;
+    blockedExternalRequests?: { count: number };
   } = {},
 ): Promise<MemberARoomResult> {
   const element = new ElementWebPage(page);
@@ -6049,6 +6053,7 @@ async function openMemberARoomWithDiagnostics(
     navigationCompleted,
     roomHeadingReady,
     options.captureReminderRoomLayout ?? false,
+    options.blockedExternalRequests,
   ).catch(() => undefined);
   return {
     element,
@@ -6370,6 +6375,7 @@ async function observeMemberARoom(
   roomNavigationCompleted: boolean,
   roomHeadingReady: boolean,
   captureReminderRoomLayout: boolean,
+  blockedExternalRequestsOverride?: { count: number },
 ): Promise<MemberARoomObservation> {
   const matrixState = await page.evaluate(
     ({ expectedRoomId, expectedMatrixUserId }) => {
@@ -6500,11 +6506,13 @@ async function observeMemberARoom(
   } catch {
     // The URL is represented only as an equality result.
   }
-  const homeserverHttpFailures = memberAHomeserverHttpFailures.get(page) ?? {
+  const homeserverHttpFailures = memberRoomHomeserverHttpFailures.get(page) ?? {
     count: 0,
   };
   const blockedExternalRequests =
-    memberABlockedExternalRequests.get(page)?.count ?? 0;
+    blockedExternalRequestsOverride?.count ??
+    memberABlockedExternalRequests.get(page)?.count ??
+    0;
   return {
     ...matrixState,
     roomNavigationCompleted,
