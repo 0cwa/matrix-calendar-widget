@@ -16,6 +16,16 @@
 
 import { Buffer } from 'node:buffer';
 
+/**
+ * Read a response stream only while its cumulative size stays within a limit.
+ *
+ * Cancels and returns undefined for a missing body, invalid limit, overflow, or
+ * stream error so an oversized response is never fully buffered.
+ *
+ * @param {ReadableStream<Uint8Array> | null} body Response body stream.
+ * @param {number} maxBytes Maximum number of bytes to buffer.
+ * @returns {Promise<Buffer | undefined>} Complete body, or undefined on rejection.
+ */
 export async function readBoundedResponseBody(body, maxBytes) {
   if (body === null || !Number.isSafeInteger(maxBytes) || maxBytes < 0) {
     return undefined;

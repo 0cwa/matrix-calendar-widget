@@ -157,6 +157,12 @@ const G6_RADICALE_COLLECTION = 'element-acceptance';
 const G6_MAX_RESOURCE_BYTES = 16_384;
 const G6_POSTSAVE_EVENT_COUNT_CAP = 100;
 
+/**
+ * Resolve the authenticated principal used by the current acceptance fixture.
+ *
+ * Returns no principal when the fixture identity or its test-only credential is
+ * missing or malformed.
+ */
 export function acceptancePrincipal(fixtureValue: Fixture):
   | {
       mode: PrincipalMode;
@@ -836,6 +842,12 @@ async function observeG6KeyboardFocusTarget(
   };
 }
 
+/**
+ * Run the G6 unsupported-iCalendar and client-interaction acceptance journey.
+ *
+ * The supplied dependencies keep Element, gateway, and fixture setup owned by
+ * the registering acceptance suite while this module owns the journey steps.
+ */
 export async function runElementG6AcceptanceJourney(
   dependencies: G6AcceptanceDependencies,
 ): Promise<void> {
