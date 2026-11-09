@@ -156,6 +156,32 @@ describe('supported series recurrence rules', () => {
     ).toEqual(rule);
   });
 
+  it('handles a last-weekday rule in leap-year February', () => {
+    const lastThursday: CalendarEventDateTime = {
+      type: 'date',
+      value: '2024-02-29',
+    };
+
+    expect(
+      parseSupportedCalendarEventRecurrenceRule(
+        'FREQ=MONTHLY;BYDAY=-1TH',
+        lastThursday,
+      ),
+    ).toEqual({
+      frequency: 'MONTHLY',
+      interval: 1,
+      end: { type: 'never' },
+      weekdayOrdinal: { ordinal: -1, weekday: 'TH' },
+    });
+
+    expect(() =>
+      parseSupportedCalendarEventRecurrenceRule('FREQ=MONTHLY;BYDAY=-1TH', {
+        type: 'date',
+        value: '2024-02-22',
+      }),
+    ).toThrow('DTSTART does not match the monthly ordinal BYDAY rule');
+  });
+
   it.each([
     {
       text: 'FREQ=MONTHLY;BYDAY=1MO',

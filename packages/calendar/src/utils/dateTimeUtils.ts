@@ -34,8 +34,16 @@ export function formatICalDate(
   };
 }
 
+/** Reject Luxon's nullable ISO result for invalid calendar dates. */
+export function requireISO(value: string | null): string {
+  if (value === null) {
+    throw new RangeError('Invalid calendar date');
+  }
+  return value;
+}
+
 /** Format the date into an ISO string that will always be in UTC time (yyyy-MM-ddTHH:mm:ssZ) */
 export function toISOString(date: Date | DateTime): string {
   const jsDate = DateTime.isDateTime(date) ? date : DateTime.fromJSDate(date);
-  return jsDate.toUTC().toISO({ suppressMilliseconds: true });
+  return requireISO(jsDate.toUTC().toISO({ suppressMilliseconds: true }));
 }

@@ -1868,7 +1868,9 @@ function parseMonthlyOrdinalByDay(
     zone: 'UTC',
   });
   const ordinalInMonth = Math.ceil(anchorDate.day / 7);
-  const isLastWeekday = anchorDate.day + 7 > anchorDate.daysInMonth;
+  const daysInMonth = anchorDate.daysInMonth;
+  const isLastWeekday =
+    daysInMonth !== undefined && anchorDate.day + 7 > daysInMonth;
   if (
     !anchorDate.isValid ||
     calendarEventStartWeekday(anchor) !== weekday ||

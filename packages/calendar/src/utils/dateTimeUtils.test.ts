@@ -67,6 +67,12 @@ describe('formatICalDate', () => {
 });
 
 describe('toISOString', () => {
+  it('rejects an invalid Luxon date instead of returning null', () => {
+    expect(() => toISOString(DateTime.invalid('invalid input'))).toThrow(
+      'Invalid calendar date',
+    );
+  });
+
   it('should format javascript Date', () => {
     expect(toISOString(new Date('2022-10-29T08:00:00Z'))).toBe(
       '2022-10-29T08:00:00Z',
