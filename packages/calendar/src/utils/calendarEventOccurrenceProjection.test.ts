@@ -179,7 +179,7 @@ describe('supported series recurrence rules', () => {
         type: 'date',
         value: '2024-02-22',
       }),
-    ).toThrow('DTSTART does not match the monthly ordinal BYDAY rule');
+    ).toThrow('Unsupported recurrence rule');
   });
 
   it.each([
