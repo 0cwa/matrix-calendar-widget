@@ -277,6 +277,9 @@ export function isSafeRestoreTargetPlan({
   sourceVolumeName,
   restoreVolumeName,
   restoreVolumeExists,
+  sourceServerVolumeName,
+  restoreServerVolumeName,
+  restoreServerVolumeExists,
   sourceDatabase,
   restoreDatabase,
   restoreDatabaseExists,
@@ -287,7 +290,11 @@ export function isSafeRestoreTargetPlan({
     sourceVolumeName === `${projectName}_radicale-data` &&
     restoreVolumeName === `${projectName}_radicale-restore` &&
     restoreVolumeName !== sourceVolumeName &&
+    sourceServerVolumeName === `${projectName}_server-data` &&
+    restoreServerVolumeName === `${projectName}_server-restore` &&
+    restoreServerVolumeName !== sourceServerVolumeName &&
     restoreVolumeExists === false &&
+    restoreServerVolumeExists === false &&
     sourceDatabase === 'matrix_calendar_test' &&
     restoreDatabase === 'matrix_calendar_restored' &&
     restoreDatabase !== sourceDatabase &&

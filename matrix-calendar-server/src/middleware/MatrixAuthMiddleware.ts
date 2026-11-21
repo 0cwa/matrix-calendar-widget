@@ -50,6 +50,17 @@ export class MatrixAuthMiddleware implements NestMiddleware {
    * @param next
    */
   async use(request: Request, _response: Response, next: NextFunction) {
+    if (
+      /^\/v1\/internal\/backup-checkpoint\/(?:acquire|[^/]+\/(?:verify|release))\/?$/iu.test(
+        request.path,
+      )
+    ) {
+      // This loopback-only operator route authenticates with its own dedicated
+      // header. Do not forward a supplied Authorization value to the homeserver.
+      next();
+      return;
+    }
+
     let userContext: IUserContext | undefined;
     try {
       userContext = await this.extractUserContext(request);

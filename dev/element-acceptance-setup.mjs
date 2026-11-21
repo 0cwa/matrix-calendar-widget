@@ -1014,6 +1014,7 @@ async function provision() {
         }
       : {}),
     ELEMENT_ACCEPTANCE_RESTORE_VOLUME_NAME: `${requiredEnvironment('COMPOSE_PROJECT_NAME')}_radicale-restore`,
+    ELEMENT_ACCEPTANCE_RESTORE_SERVER_VOLUME_NAME: `${requiredEnvironment('COMPOSE_PROJECT_NAME')}_server-restore`,
     ELEMENT_ACCEPTANCE_ROOM_BINDING: JSON.stringify([
       { roomId: rooms.teamRoomId, calendarId: CALENDAR_ID },
     ]),

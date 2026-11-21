@@ -18,6 +18,7 @@ import { FactoryProvider } from '@nestjs/common';
 import { MatrixOpenIdCalDavCredentialProviderFactory } from '../caldav/MatrixOpenIdCalDavCredentialProviderFactory';
 import { IAppConfiguration } from '../IAppConfiguration';
 import { ModuleProviderToken } from '../ModuleProviderToken';
+import { AppWriteFenceService } from '../service/AppWriteFenceService';
 import type { RoomCalendarBindingRegistry } from '../service/IRoomCalendarBindingRegistry';
 import { validateRoomCalendarBindings } from '../service/RoomCalendarBindingResolver';
 import { RoomCalendarCalDavAccess } from '../service/RoomCalendarCalDavAccess';
@@ -282,11 +283,20 @@ export function createRoomReminderModuleProviders(): FactoryProvider[] {
         appConfig: IAppConfiguration,
         store: RoomReminderStore,
         scheduler: RoomReminderScheduler,
-      ) => new RoomReminderSchedulerLifecycle(appConfig, store, scheduler),
+        writeFence: AppWriteFenceService,
+      ) =>
+        new RoomReminderSchedulerLifecycle(
+          appConfig,
+          store,
+          scheduler,
+          undefined,
+          writeFence,
+        ),
       inject: [
         ModuleProviderToken.APP_CONFIGURATION,
         ModuleProviderToken.ROOM_REMINDER_STORE,
         RoomReminderScheduler,
+        AppWriteFenceService,
       ],
     },
     {

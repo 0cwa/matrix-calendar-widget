@@ -16,6 +16,7 @@
 
 import { Logger } from '@nestjs/common';
 import { MatrixClient } from 'matrix-bot-sdk';
+import { recordCheckpointFailure } from '../CheckpointMatrixClient';
 
 // This file was copied and adapted from https://github.com/turt2live/matrix-bot-sdk/blob/c7d16776502c26bbb547a3d667ec92eb50e7026c/src/mixins/AutojoinUpgradedRoomsMixin.ts
 // We added error handling because nodejs will crash if an unhandled promise exception occurs.
@@ -41,6 +42,7 @@ export class AutojoinUpgradedRoomsMixin {
           serverName,
         ]);
       } catch (e) {
+        await recordCheckpointFailure(client);
         logger.error(
           e,
           `Could not automatically join replacement room ${tombstoneEvent['content']['replacement_room']} for ${roomId}`,

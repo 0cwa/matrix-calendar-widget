@@ -99,6 +99,7 @@ if [[ "$LOCAL_PREBUILT" == true ]]; then
       ELEMENT_ACCEPTANCE_REMINDER_DATABASE_URL=postgresql://local:local@postgres:5432/matrix_calendar_test \
       ELEMENT_ACCEPTANCE_REMINDER_RESTORE_DATABASE_URL=postgresql://local:local@postgres:5432/matrix_calendar_restored \
       ELEMENT_ACCEPTANCE_RESTORE_VOLUME_NAME="${COMPOSE_PROJECT_NAME}_radicale-restore" \
+      ELEMENT_ACCEPTANCE_RESTORE_SERVER_VOLUME_NAME="${COMPOSE_PROJECT_NAME}_server-restore" \
       ROOM_CALENDAR_PRINCIPAL_MODE=bot-account \
       MATRIX_APPLICATION_SERVICE_TOKEN= \
       MATRIX_APPLICATION_SERVICE_USER_ID= \

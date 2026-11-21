@@ -998,3 +998,30 @@ describe('Matrix OpenID userinfo origin configuration', () => {
     }
   });
 });
+
+describe('Matrix checkpoint control token configuration', () => {
+  const variable = 'MATRIX_CHECKPOINT_CONTROL_TOKEN';
+  const originalValue = process.env[variable];
+
+  afterEach(() => {
+    if (originalValue === undefined) {
+      delete process.env[variable];
+    } else {
+      process.env[variable] = originalValue;
+    }
+  });
+
+  it('is disabled when empty and requires a dedicated token of at least 32 characters', () => {
+    process.env[variable] = '';
+    expect(configuration().config.checkpoint_control_token).toBeUndefined();
+    expect(
+      ValidationSchema.extract(variable).validate('').error,
+    ).toBeUndefined();
+    expect(
+      ValidationSchema.extract(variable).validate('short').error,
+    ).toBeDefined();
+    expect(
+      ValidationSchema.extract(variable).validate('x'.repeat(32)).error,
+    ).toBeUndefined();
+  });
+});

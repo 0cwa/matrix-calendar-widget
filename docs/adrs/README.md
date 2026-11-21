@@ -63,6 +63,7 @@ ADR001–ADR003 were inherited from NeoDateFix and describe its meeting product.
 | [ADR037](./adr037-independent-radicale-store-for-controlled-beta.md) | Use an independent Radicale store for the controlled beta |
 | [ADR045](./adr045-public-calendar-feeds.md)                          | Publish opt-in, VEVENT-only public calendar feeds         |
 | [ADR046](./adr046-private-caldav-clients.md)                         | Scope private CalDAV editing to separate app credentials  |
+| [ADR048](./adr048-matrix-sync-checkpoint-control.md)                 | Persist and expose a bounded Matrix sync checkpoint       |
 
 ## Inherited meeting architecture
 

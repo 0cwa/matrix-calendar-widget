@@ -41,6 +41,7 @@ import { IAppConfiguration } from '../IAppConfiguration';
 import { ModuleProviderToken } from '../ModuleProviderToken';
 import { ReactionClient } from '../client/ReactionClient';
 import { BotEventType } from '../matrix/BotEventType';
+import { recordCheckpointFailure } from '../matrix/CheckpointMatrixClient';
 import { IBotEventContent } from '../matrix/event/IBotEventContent';
 import { IRoomEvent } from '../matrix/event/IRoomEvent';
 import { IStateEvent } from '../matrix/event/IStateEvent';
@@ -253,6 +254,7 @@ export class MatrixServer
           await this.processEvent(botEventType, roomId, event);
         } catch (err) {
           // catches any error, otherwise node terminates
+          await recordCheckpointFailure(this.matrixClient);
           this.logger.error(err);
         }
       };

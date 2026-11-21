@@ -1,10 +1,66 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { sanitizeElementAcceptance } from './sanitize-element-acceptance.mjs';
+import {
+  hasCompleteRestoreServerEvidence,
+  sanitizeElementAcceptance,
+} from './sanitize-element-acceptance.mjs';
 
 const SOURCE_SHA = 'a'.repeat(40);
 const ALARM_PHASE = 'reminder-alarm-ui-readback';
+
+test('restore summary requires a fresh empty server volume, extracted archive, and restored marker', () => {
+  const restoreTargets = {
+    phase: 'restore-targets-prepared',
+    status: 'passed',
+    restoreServerVolumeCreated: true,
+    restoreServerVolumeEmpty: true,
+    restoreServerArchiveExtracted: true,
+  };
+  assert.equal(hasCompleteRestoreServerEvidence(restoreTargets), true);
+  for (const key of [
+    'restoreServerVolumeCreated',
+    'restoreServerVolumeEmpty',
+    'restoreServerArchiveExtracted',
+  ]) {
+    assert.equal(
+      hasCompleteRestoreServerEvidence({ ...restoreTargets, [key]: false }),
+      false,
+    );
+  }
+  assert.equal(
+    hasCompleteRestoreServerEvidence({
+      phase: 'restore-server-data-verified',
+      status: 'passed',
+      markerRestored: true,
+    }),
+    true,
+  );
+  assert.equal(
+    hasCompleteRestoreServerEvidence({
+      phase: 'restore-server-data-verified',
+      status: 'passed',
+      markerRestored: false,
+    }),
+    false,
+  );
+  assert.equal(
+    hasCompleteRestoreServerEvidence({
+      phase: 'restore-server-marker-cleanup',
+      status: 'passed',
+      markerRemoved: true,
+    }),
+    true,
+  );
+  assert.equal(
+    hasCompleteRestoreServerEvidence({
+      phase: 'restore-server-marker-cleanup',
+      status: 'passed',
+      markerRemoved: false,
+    }),
+    false,
+  );
+});
 
 function serializeStageRecord(phase, status, httpStatus, count, extra) {
   return JSON.stringify({

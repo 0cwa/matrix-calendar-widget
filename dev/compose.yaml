@@ -3,6 +3,8 @@ name: matrix-calendar-dev
 services:
   synapse:
     image: ghcr.io/element-hq/synapse:v1.161.0
+    mem_limit: 2g
+    cpus: 2
     environment:
       SYNAPSE_SERVER_NAME: localhost
       SYNAPSE_REPORT_STATS: 'no'
@@ -15,6 +17,8 @@ services:
 
   radicale:
     image: matrix-calendar-widget/radicale-openid:3.8.0.0
+    mem_limit: 2g
+    cpus: 2
     build:
       context: ../radicale-auth
       dockerfile: Dockerfile

@@ -1864,7 +1864,9 @@ test('operator Compose replaces pinned inherited scratch volumes with bounded tm
       [
         'synapse-data',
         'radicale-data',
+        'server-data',
         'postgres-data',
+        'reminder-restore-server-data',
         'reminder-restore-radicale-data',
       ].map((name) => [
         name,
@@ -1878,6 +1880,8 @@ test('operator Compose replaces pinned inherited scratch volumes with bounded tm
     'postgres-data',
     'radicale-data',
     'reminder-restore-radicale-data',
+    'reminder-restore-server-data',
+    'server-data',
     'synapse-data',
   ]);
   const missingScratchMount = structuredClone(model);
