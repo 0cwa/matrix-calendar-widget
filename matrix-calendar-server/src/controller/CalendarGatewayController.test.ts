@@ -46,6 +46,7 @@ import { MatrixRoomMembershipGuard } from '../guard/MatrixRoomMembershipGuard';
 import { IMatrixOpenIdCredential } from '../model/IMatrixOpenIdCredential';
 import { IUserContext } from '../model/IUserContext';
 import { GatewayAccessService } from '../service/GatewayAccessService';
+import { GatewayContextService } from '../service/GatewayContextService';
 import type { RoomCalendarBindingRegistry } from '../service/IRoomCalendarBindingRegistry';
 import { MatrixCalendarAuthorizationFactory } from '../service/MatrixCalendarAuthorization';
 import { resolveRoomCalendarBinding } from '../service/RoomCalendarBindingResolver';
@@ -200,6 +201,11 @@ describe('CalendarGatewayController', () => {
       credentialProviderFactory,
       roomAccess,
       new GatewayAccessService(authorizationFactory, bindingRegistry),
+      new GatewayContextService(
+        config,
+        authorizationFactory,
+        new GatewayAccessService(authorizationFactory, bindingRegistry),
+      ),
       roomEventOperations,
       roomEventAuditService,
     );

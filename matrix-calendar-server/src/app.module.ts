@@ -82,6 +82,7 @@ import { ConfiguredRoomCalendarPrincipalIdentityProvider } from './service/Confi
 import { ControlRoomMigrationService } from './service/ControlRoomMigrationService';
 import { DisabledRoomCalendarBindingStore } from './service/DisabledRoomCalendarBindingStore';
 import { GatewayAccessService } from './service/GatewayAccessService';
+import { GatewayContextService } from './service/GatewayContextService';
 import { GuestMemberService } from './service/GuestMemberService';
 import type { RoomCalendarBindingRegistry } from './service/IRoomCalendarBindingRegistry';
 import { MatrixCalendarAuthorizationFactory } from './service/MatrixCalendarAuthorization';
@@ -549,6 +550,7 @@ const i18nFactory: FactoryProvider<void> = {
     MeetingClient,
     MatrixCalendarAuthorizationFactory,
     GatewayAccessService,
+    GatewayContextService,
     MatrixAuthMiddleware,
     LegacyMeetingDisabledGuard,
     {
