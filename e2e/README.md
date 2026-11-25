@@ -13,7 +13,7 @@ This workspace contains several test harnesses with different scopes. For curren
 | [`playwright.element-desktop-acceptance.config.ts`](./playwright.element-desktop-acceptance.config.ts) | [`elementDesktopCalendarAcceptance.spec.ts`](./src/elementDesktopCalendarAcceptance.spec.ts) | Prepared packaged Desktop and isolated acceptance services                            | Actual Desktop widget journey with its own startup and evidence requirements                   |
 | [`playwright.config.ts`](./playwright.config.ts)                                                       | Inherited meeting suites in [`src/`](./src/)                                                 | Legacy Testcontainers setup and prepared widget/server images                         | Historical meeting, breakout, and compatibility coverage                                       |
 
-The root `yarn e2e` command selects the **inherited default configuration**. It is not the current calendar acceptance shortcut. Also, `yarn test:all` does not execute Playwright: this workspace's `test:all` script is a placeholder. Select the required configuration explicitly.
+The root `yarn e2e` command selects the **inherited default configuration**. It is not the current calendar acceptance shortcut. This workspace's `test:all` runs a bounded-response-body unit test; it does not execute Playwright. Select the required configuration explicitly.
 
 ## Run the synthetic calendar suite
 
@@ -32,7 +32,9 @@ The configuration builds the fixture and starts its own Vite preview on port 417
 
 To run a narrower layout check, append `calendar-layout.spec.ts` to the final command. Browser installation may need system-package privileges on Linux. Failure outputs go to `e2e/calendar-test-results/`; traces are disabled. See [browser validation](../docs/browser-calendar-validation.md) for dimensions, coverage, and interpretation.
 
-## Run actual Element acceptance
+## Release qualification: run actual Element acceptance
+
+These are release-qualification steps, not part of the ordinary merge gate. Element E2E acceptance is a manual or weekly smoke test; unit, contract, and widget tests in `yarn ci` are the merge gate.
 
 Use the checked-in [Element acceptance workflow](../.github/workflows/element-acceptance.yml), [local service/harness guide](../dev/README.md), and [client-validation procedure](../docs/calendar-client-validation.md). The Playwright configurations alone do not provision accounts, bindings, images, secrets, Desktop, or the stack. The workflow and helpers define those inputs and the corresponding cleanup.
 
