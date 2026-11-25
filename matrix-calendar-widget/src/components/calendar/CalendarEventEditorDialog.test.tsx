@@ -23,7 +23,7 @@ import {
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DateTime } from 'luxon';
-import { PropsWithChildren, useState } from 'react';
+import { type ComponentProps, PropsWithChildren, useState } from 'react';
 import { vi } from 'vitest';
 import { CalendarRepositoryProvider } from '../../calendar';
 import i18n from '../../i18n';
@@ -121,6 +121,22 @@ function createWrapper(repository: InMemoryCalendarRepository) {
       </CalendarRepositoryProvider>
     );
   };
+}
+
+function renderEditorScenario({
+  repositoryOptions,
+  editorProps,
+}: {
+  repositoryOptions: ConstructorParameters<
+    typeof InMemoryCalendarRepository
+  >[0];
+  editorProps: ComponentProps<typeof CalendarEventEditorDialog>;
+}) {
+  const repository = new InMemoryCalendarRepository(repositoryOptions);
+  render(<CalendarEventEditorDialog {...editorProps} />, {
+    wrapper: createWrapper(repository),
+  });
+  return { repository };
 }
 
 describe('<CalendarEventEditorDialog />', () => {
@@ -398,20 +414,15 @@ describe('<CalendarEventEditorDialog />', () => {
       unsupportedAttachment: true,
       attachments: [{ url: 'https://files.example.test/visible.pdf' }],
     };
-    const repository = new InMemoryCalendarRepository({
-      calendars: [calendar],
-      events: [unsupportedEvent],
+    const { repository } = renderEditorScenario({
+      repositoryOptions: { calendars: [calendar], events: [unsupportedEvent] },
+      editorProps: {
+        calendars: [calendar],
+        event: unsupportedEvent,
+        onClose: vi.fn(),
+        open: true,
+      },
     });
-
-    render(
-      <CalendarEventEditorDialog
-        calendars={[calendar]}
-        event={unsupportedEvent}
-        onClose={vi.fn()}
-        open
-      />,
-      { wrapper: createWrapper(repository) },
-    );
 
     expect(
       await screen.findByText(
@@ -640,19 +651,15 @@ describe('<CalendarEventEditorDialog />', () => {
         },
       ],
     };
-    const repository = new InMemoryCalendarRepository({
-      calendars: [calendar],
-      events: [conferenceEvent],
+    const { repository } = renderEditorScenario({
+      repositoryOptions: { calendars: [calendar], events: [conferenceEvent] },
+      editorProps: {
+        calendars: [calendar],
+        event: conferenceEvent,
+        onClose: vi.fn(),
+        open: true,
+      },
     });
-    render(
-      <CalendarEventEditorDialog
-        calendars={[calendar]}
-        event={conferenceEvent}
-        onClose={vi.fn()}
-        open
-      />,
-      { wrapper: createWrapper(repository) },
-    );
     fireEvent.change(
       await screen.findByRole('textbox', { name: 'Conference URL' }),
       { target: { value: '' } },
@@ -1514,20 +1521,15 @@ describe('<CalendarEventEditorDialog />', () => {
   });
 
   it('updates the entire selected source series with its current UID and resource id', async () => {
-    const repository = new InMemoryCalendarRepository({
-      calendars: [calendar],
-      events: [recurringEvent],
+    const { repository } = renderEditorScenario({
+      repositoryOptions: { calendars: [calendar], events: [recurringEvent] },
+      editorProps: {
+        calendars: [calendar],
+        event: recurringEvent,
+        onClose: vi.fn(),
+        open: true,
+      },
     });
-
-    render(
-      <CalendarEventEditorDialog
-        calendars={[calendar]}
-        event={recurringEvent}
-        onClose={vi.fn()}
-        open
-      />,
-      { wrapper: createWrapper(repository) },
-    );
 
     expect(
       await screen.findByText('Changes apply to the entire series.'),
@@ -1574,20 +1576,15 @@ describe('<CalendarEventEditorDialog />', () => {
         ],
       },
     };
-    const repository = new InMemoryCalendarRepository({
-      calendars: [calendar],
-      events: [exdateEvent],
+    const { repository } = renderEditorScenario({
+      repositoryOptions: { calendars: [calendar], events: [exdateEvent] },
+      editorProps: {
+        calendars: [calendar],
+        event: exdateEvent,
+        onClose: vi.fn(),
+        open: true,
+      },
     });
-
-    render(
-      <CalendarEventEditorDialog
-        calendars={[calendar]}
-        event={exdateEvent}
-        onClose={vi.fn()}
-        open
-      />,
-      { wrapper: createWrapper(repository) },
-    );
 
     await userEvent.click(
       await screen.findByRole('button', {
@@ -1902,20 +1899,15 @@ describe('<CalendarEventEditorDialog />', () => {
       },
       recurrence: { rrule: 'FREQ=WEEKLY;COUNT=4' },
     };
-    const repository = new InMemoryCalendarRepository({
-      calendars: [calendar],
-      events: [allDayEvent],
+    const { repository } = renderEditorScenario({
+      repositoryOptions: { calendars: [calendar], events: [allDayEvent] },
+      editorProps: {
+        calendars: [calendar],
+        event: allDayEvent,
+        onClose: vi.fn(),
+        open: true,
+      },
     });
-
-    render(
-      <CalendarEventEditorDialog
-        calendars={[calendar]}
-        event={allDayEvent}
-        onClose={vi.fn()}
-        open
-      />,
-      { wrapper: createWrapper(repository) },
-    );
 
     expect(
       await screen.findByRole('button', { name: 'Add date' }),
@@ -1996,19 +1988,15 @@ describe('<CalendarEventEditorDialog />', () => {
         rdates: [point, byEnd, byDuration],
       },
     };
-    const repository = new InMemoryCalendarRepository({
-      calendars: [calendar],
-      events: [periodEvent],
+    const { repository } = renderEditorScenario({
+      repositoryOptions: { calendars: [calendar], events: [periodEvent] },
+      editorProps: {
+        calendars: [calendar],
+        event: periodEvent,
+        onClose: vi.fn(),
+        open: true,
+      },
     });
-    render(
-      <CalendarEventEditorDialog
-        calendars={[calendar]}
-        event={periodEvent}
-        onClose={vi.fn()}
-        open
-      />,
-      { wrapper: createWrapper(repository) },
-    );
 
     expect(
       await screen.findByRole('button', {
@@ -2097,19 +2085,15 @@ describe('<CalendarEventEditorDialog />', () => {
         rdates: [point, period, byDuration],
       },
     };
-    const repository = new InMemoryCalendarRepository({
-      calendars: [calendar],
-      events: [periodEvent],
+    const { repository } = renderEditorScenario({
+      repositoryOptions: { calendars: [calendar], events: [periodEvent] },
+      editorProps: {
+        calendars: [calendar],
+        event: periodEvent,
+        onClose: vi.fn(),
+        open: true,
+      },
     });
-    render(
-      <CalendarEventEditorDialog
-        calendars={[calendar]}
-        event={periodEvent}
-        onClose={vi.fn()}
-        open
-      />,
-      { wrapper: createWrapper(repository) },
-    );
 
     await userEvent.click(
       await screen.findByRole('button', {
@@ -2199,19 +2183,15 @@ describe('<CalendarEventEditorDialog />', () => {
       ...recurringEvent,
       recurrence: { rrule: 'FREQ=WEEKLY;COUNT=8', rdates: [period] },
     };
-    const repository = new InMemoryCalendarRepository({
-      calendars: [calendar],
-      events: [periodEvent],
+    const { repository } = renderEditorScenario({
+      repositoryOptions: { calendars: [calendar], events: [periodEvent] },
+      editorProps: {
+        calendars: [calendar],
+        event: periodEvent,
+        onClose: vi.fn(),
+        open: true,
+      },
     });
-    render(
-      <CalendarEventEditorDialog
-        calendars={[calendar]}
-        event={periodEvent}
-        onClose={vi.fn()}
-        open
-      />,
-      { wrapper: createWrapper(repository) },
-    );
 
     await userEvent.click(
       await screen.findByRole('button', {
@@ -2256,20 +2236,18 @@ describe('<CalendarEventEditorDialog />', () => {
   });
 
   it('disables recurrence editing for complex sources and preserves them on other edits', async () => {
-    const repository = new InMemoryCalendarRepository({
-      calendars: [calendar],
-      events: [complexRecurringEvent],
+    const { repository } = renderEditorScenario({
+      repositoryOptions: {
+        calendars: [calendar],
+        events: [complexRecurringEvent],
+      },
+      editorProps: {
+        calendars: [calendar],
+        event: complexRecurringEvent,
+        onClose: vi.fn(),
+        open: true,
+      },
     });
-
-    render(
-      <CalendarEventEditorDialog
-        calendars={[calendar]}
-        event={complexRecurringEvent}
-        onClose={vi.fn()}
-        open
-      />,
-      { wrapper: createWrapper(repository) },
-    );
 
     expect(
       await screen.findByText(
@@ -2655,20 +2633,15 @@ describe('<CalendarEventEditorDialog />', () => {
       id: 'opaque-alarm',
       unsupportedAlarm: true,
     };
-    const repository = new InMemoryCalendarRepository({
-      calendars: [calendar],
-      events: [opaqueAlarmEvent],
+    const { repository } = renderEditorScenario({
+      repositoryOptions: { calendars: [calendar], events: [opaqueAlarmEvent] },
+      editorProps: {
+        calendars: [calendar],
+        event: opaqueAlarmEvent,
+        onClose: vi.fn(),
+        open: true,
+      },
     });
-
-    render(
-      <CalendarEventEditorDialog
-        calendars={[calendar]}
-        event={opaqueAlarmEvent}
-        onClose={vi.fn()}
-        open
-      />,
-      { wrapper: createWrapper(repository) },
-    );
 
     expect(
       await screen.findByText(
