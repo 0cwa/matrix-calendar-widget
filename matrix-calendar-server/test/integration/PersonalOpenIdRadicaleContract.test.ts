@@ -43,7 +43,9 @@ import { MatrixRoomMembershipGuard } from '../../src/guard/MatrixRoomMembershipG
 import { MatrixAuthMiddleware } from '../../src/middleware/MatrixAuthMiddleware';
 import { DisabledRoomCalendarBindingStore } from '../../src/service/DisabledRoomCalendarBindingStore';
 import { GatewayAccessService } from '../../src/service/GatewayAccessService';
+import { GatewayCalendarService } from '../../src/service/GatewayCalendarService';
 import { GatewayContextService } from '../../src/service/GatewayContextService';
+import { GatewayEventService } from '../../src/service/GatewayEventService';
 import { MatrixCalendarAuthorizationFactory } from '../../src/service/MatrixCalendarAuthorization';
 import { RoomCalendarBindingRegistryAdapter } from '../../src/service/RoomCalendarBindingRegistryAdapter';
 import { RoomCalendarCalDavAccess } from '../../src/service/RoomCalendarCalDavAccess';
@@ -195,14 +197,16 @@ const matrixClient = {
 @Module({
   controllers: [CalendarGatewayController],
   providers: [
+    GatewayAccessService,
+    GatewayContextService,
+    GatewayEventService,
+    GatewayCalendarService,
     {
       provide: ModuleProviderToken.APP_CONFIGURATION,
       useValue: testConfiguration,
     },
     { provide: MatrixClient, useValue: matrixClient },
     MatrixCalendarAuthorizationFactory,
-    GatewayAccessService,
-    GatewayContextService,
     {
       provide: MatrixOpenIdCalDavCredentialProviderFactory,
       useValue: credentialProviderFactory,
