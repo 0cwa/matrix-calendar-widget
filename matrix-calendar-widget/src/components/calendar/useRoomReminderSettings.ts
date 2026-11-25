@@ -174,6 +174,7 @@ export function useRoomReminderSettings({
     eventUid,
     loadRoomRecipients,
     reminderRepository,
+    setRoomRecipients,
   ]);
 
   useEffect(() => {
@@ -202,6 +203,10 @@ export function useRoomReminderSettings({
     refreshToken,
     repository,
     roomId,
+    rosterRequestSequence,
+    setRoomMembersLoading,
+    setRoomMembersUnavailable,
+    setRoomRecipients,
   ]);
 
   useEffect(
