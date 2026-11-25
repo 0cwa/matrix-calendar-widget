@@ -78,6 +78,22 @@ jobs:
       - name: Install dependencies
         run: yarn install --frozen-lockfile
 
+      - name: List tests in every Playwright configuration
+        run: |
+          for config in \
+            playwright.config.ts \
+            playwright.calendar.config.ts \
+            playwright.element-acceptance.config.ts \
+            playwright.element-desktop-acceptance.config.ts \
+            playwright.gallery.config.ts; do
+            output=$(yarn workspace e2e playwright test --list --config "$config") || {
+              printf '%s\n' "$output"
+              exit 1
+            }
+            printf '%s\n' "$output"
+            printf '%s\n' "$output" | grep -Eq 'Total: [1-9][0-9]* tests in [1-9][0-9]* files?'
+          done
+
       - name: Lint E2E
         run: yarn workspace e2e lint
 
