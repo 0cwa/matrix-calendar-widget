@@ -71,6 +71,10 @@ import { randomUUID } from 'crypto';
 import ICAL from 'ical.js';
 import { DateTime } from 'luxon';
 import {
+  ICalendarEventCodecError,
+  unsupportedAttachmentPatch,
+} from './ICalendarCodecError';
+import {
   calendarParameterValue,
   contentLineParameters,
   contentLinePropertyName,
@@ -94,6 +98,10 @@ import {
   isValidCompactUtcDateTime,
 } from './ICalendarUtcTimestamp';
 import { readCalendarLinks } from './readCalendarLinks';
+export {
+  ICalendarEventCodecError,
+  type ICalendarEventCodecErrorCode,
+} from './ICalendarCodecError';
 
 type RevisionPropertyState<T> =
   | { kind: 'missing' }
@@ -166,25 +174,6 @@ export type OccurrenceTimingOverrideResult = {
   revisionUpdated: boolean;
   noOp: boolean;
 };
-
-export type ICalendarEventCodecErrorCode =
-  | 'invalid-calendar'
-  | 'missing-event'
-  | 'missing-uid'
-  | 'missing-timing'
-  | 'invalid-timing'
-  | 'event-too-large'
-  | 'unsupported-patch';
-
-export class ICalendarEventCodecError extends Error {
-  constructor(
-    public readonly code: ICalendarEventCodecErrorCode,
-    message: string,
-  ) {
-    super(message);
-    this.name = 'ICalendarEventCodecError';
-  }
-}
 
 export class ParsedICalendarEvent {
   constructor(
@@ -3650,13 +3639,6 @@ function unsupportedConferencePatch(): ICalendarEventCodecError {
   return new ICalendarEventCodecError(
     'unsupported-patch',
     'Only one explicitly URI-typed safe conference link can be edited',
-  );
-}
-
-function unsupportedAttachmentPatch(): ICalendarEventCodecError {
-  return new ICalendarEventCodecError(
-    'unsupported-patch',
-    'Only one uniquely addressed safe URI attachment can be edited',
   );
 }
 
