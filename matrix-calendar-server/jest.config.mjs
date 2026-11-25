@@ -24,9 +24,8 @@ export default {
   preset: 'ts-jest',
   maxWorkers: Math.max(
     2,
-    Math.min(8, Math.floor(os.availableParallelism() / 2)),
+    Math.min(6, Math.floor(os.availableParallelism() / 2)),
   ),
-  workerIdleMemoryLimit: '1536MB',
   verbose: true,
   transform: {
     '^.+\\.(ts|tsx)$': 'ts-jest',
