@@ -186,6 +186,13 @@ import {
   unavailableTimezoneAudit,
 } from './elementAcceptanceProjectionHelpers';
 
+import {
+  REMINDER_ALL_DAY_CALDAV_ALARM_LEAD_MINUTES,
+  REMINDER_ALL_DAY_TIMEZONE,
+  reminderPlanForMarkerIndex,
+  summarizeReminderRecipientRoster,
+} from './elementAcceptanceReminderHelpers';
+
 import { createPrivateAcceptanceHelpers } from './elementAcceptancePrivateHelpers';
 
 export function createElementAcceptanceSupport() {
@@ -193,81 +200,6 @@ export function createElementAcceptanceSupport() {
   const MIN_REMINDER_LAYOUT_VIEWPORT_WIDTH = 319;
 
   const MAX_REMINDER_LAYOUT_VIEWPORT_WIDTH = 420;
-
-  const MAX_REMINDER_RECIPIENT_ROSTER_SIZE = 20_000;
-
-  function summarizeReminderRecipientRoster(
-    value: unknown,
-    expectedUserId: string,
-  ): {
-    recipientRosterCount: number;
-    recipientRosterShapeValid: boolean;
-    recipientRosterTargetPresent: boolean;
-    recipientRosterOutcome: 'empty' | 'invalid_shape' | 'nonempty';
-  } {
-    const invalid = (recipientRosterCount = 0) => ({
-      recipientRosterCount,
-      recipientRosterShapeValid: false,
-      recipientRosterTargetPresent: false,
-      recipientRosterOutcome: 'invalid_shape' as const,
-    });
-    if (
-      !isRecord(value) ||
-      Object.keys(value).length !== 1 ||
-      !('recipients' in value) ||
-      !Array.isArray(value.recipients)
-    ) {
-      return invalid();
-    }
-
-    const recipients = value.recipients;
-    const recipientRosterCount = Math.min(
-      recipients.length,
-      MAX_REMINDER_RECIPIENT_ROSTER_SIZE,
-    );
-    if (recipients.length > MAX_REMINDER_RECIPIENT_ROSTER_SIZE) {
-      return invalid(recipientRosterCount);
-    }
-
-    const seen = new Set<string>();
-    for (const recipient of recipients) {
-      if (
-        !isRecord(recipient) ||
-        Object.keys(recipient).length !== 2 ||
-        !('userId' in recipient) ||
-        typeof recipient.userId !== 'string' ||
-        !/^@[^\s:#?]+:[^\s?#]+$/u.test(recipient.userId) ||
-        seen.has(recipient.userId) ||
-        !('displayName' in recipient)
-      ) {
-        return invalid(recipientRosterCount);
-      }
-      const displayName = recipient.displayName;
-      const displayNameValid =
-        displayName === null ||
-        (typeof displayName === 'string' &&
-          Array.from(displayName).length <= 256 &&
-          displayName.length > 0 &&
-          !Array.from(displayName).some((character) => {
-            const codePoint = character.codePointAt(0);
-            return (
-              codePoint !== undefined &&
-              (codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f))
-            );
-          }) &&
-          displayName ===
-            displayName.normalize('NFC').replace(/\s+/gu, ' ').trim());
-      if (!displayNameValid) return invalid(recipientRosterCount);
-      seen.add(recipient.userId);
-    }
-
-    return {
-      recipientRosterCount,
-      recipientRosterShapeValid: true,
-      recipientRosterTargetPresent: seen.has(expectedUserId),
-      recipientRosterOutcome: recipientRosterCount === 0 ? 'empty' : 'nonempty',
-    };
-  }
 
   const PUBLIC_FEED_MANAGEMENT_ERROR_CODE_SET = new Set<string>(
     PUBLIC_FEED_MANAGEMENT_ERROR_CODES,
@@ -299,25 +231,6 @@ export function createElementAcceptanceSupport() {
   const REMINDER_TIMELINE_POLL_MS = 5_000;
 
   const REMINDER_TIMED_TIMEZONE = 'Europe/Stockholm';
-
-  const REMINDER_ALL_DAY_TIMEZONE = 'Asia/Tokyo';
-
-  const REMINDER_ALL_DAY_CALDAV_ALARM_LEAD_MINUTES = 1;
-
-  function reminderPlanForMarkerIndex(index: number): ReminderPlan {
-    if (index === 1) {
-      return {
-        recipient: 'selected',
-        allDay: true,
-        allDayTimezone: REMINDER_ALL_DAY_TIMEZONE,
-        caldavAlarmLeadMinutes: REMINDER_ALL_DAY_CALDAV_ALARM_LEAD_MINUTES,
-      };
-    }
-    if (index === 0 || index === 2) {
-      return { recipient: 'room', allDay: false };
-    }
-    throw new Error('Reminder acceptance marker plan is unavailable');
-  }
 
   let fixture: Fixture;
 
