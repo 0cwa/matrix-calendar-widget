@@ -83,7 +83,6 @@ import { readReminderAllDayScheduleFields } from '../../dev/element-reminder-all
 import {
   buildReminderFlowDiagnosticRecord,
   completeReminderFlowDiagnosticStage,
-  createReminderFlowDiagnosticState,
   enterReminderFlowDiagnosticStage,
   failReminderFlowDiagnostic,
   type ReminderFlowDiagnosticRecord,
@@ -121,9 +120,10 @@ import {
   runElementG6AcceptanceJourney,
 } from './elementG6AcceptanceJourney';
 import { runElementPerformanceAcceptanceJourney } from './elementPerformanceAcceptanceJourney';
+import { runElementReminderAcceptanceJourney } from './elementReminderAcceptanceJourney';
 import { ElementWebPage } from './pages/elementWebPage';
 
-type ReminderFlow = 'initial' | 'restart' | 'restore';
+export type ReminderFlow = 'initial' | 'restart' | 'restore';
 type ReminderRecipient = 'room' | 'selected';
 type ReminderPlan = Readonly<{
   recipient: ReminderRecipient;
@@ -138,7 +138,7 @@ type ReminderPlan = Readonly<{
   }>;
 }>;
 
-type ReminderReadbackReference = Readonly<{
+export type ReminderReadbackReference = Readonly<{
   expectedDueAt?: number;
   expectedAlarmLeadMinutes?: number;
   expectedAllDayEventDate?: string;
@@ -2140,375 +2140,67 @@ test('Element Web measures the ordinary 0-and-25-event calendar profile', async 
   );
 });
 
+function createReminderJourneyContext() {
+  return {
+    get fixture() {
+      return fixture;
+    },
+    set fixture(value: Fixture) {
+      fixture = value;
+    },
+    get activePhase() {
+      return activePhase;
+    },
+    set activePhase(value: Phase) {
+      activePhase = value;
+    },
+    get activeReminderFlowDiagnostic() {
+      return activeReminderFlowDiagnostic;
+    },
+    set activeReminderFlowDiagnostic(
+      value: ReminderFlowDiagnosticState | undefined,
+    ) {
+      activeReminderFlowDiagnostic = value;
+    },
+    get activeReminderFailureRecorded() {
+      return activeReminderFailureRecorded;
+    },
+    set activeReminderFailureRecorded(value: boolean) {
+      activeReminderFailureRecorded = value;
+    },
+    readReminderFlow,
+    enterActiveReminderFlowStage,
+    readFixture,
+    readReminderEventTitles,
+    completeActiveReminderFlowStage,
+    failActiveReminderFlow,
+    record,
+    authenticateInElement,
+    observeReminderWidgetContextResponse,
+    openMemberARoomWithDiagnostics,
+    recordMemberARoomObservation,
+    requireMemberARoom,
+    openCalendarWidget,
+    inspectReminderTimeline,
+    readBackReminderMarkers,
+    captureReminderFlowReadbackError,
+    reminderPlanForMarkerIndex,
+    createAndConfigureReminder,
+    verifyPublicFeedBrowserLifecycle,
+    waitForReminderDelivery,
+  };
+}
+export type ReminderJourneyContext = ReturnType<
+  typeof createReminderJourneyContext
+>;
+
 test('Element Web delivers room-timed and selected-member all-day reminders across restart and restore', async ({
   browser,
 }) => {
-  test.setTimeout(360_000);
-  activeReminderFlowDiagnostic = undefined;
-  activeReminderFailureRecorded = false;
-  let flow: ReminderFlow;
-  let eventTitles: string[];
-  try {
-    flow = readReminderFlow();
-    activeReminderFlowDiagnostic = createReminderFlowDiagnosticState(flow);
-    enterActiveReminderFlowStage('fixture');
-    fixture = readFixture();
-    eventTitles = readReminderEventTitles();
-    completeActiveReminderFlowStage('fixture');
-  } catch (error) {
-    failActiveReminderFlow(error);
-    record('reminder-ui-readback', 'failed', undefined, 0);
-    throw new Error('Reminder acceptance fixture state is unavailable');
-  }
-  const expectedPriorCount =
-    flow === 'initial' ? 0 : flow === 'restart' ? 1 : 2;
-  if (eventTitles.length !== expectedPriorCount) {
-    failActiveReminderFlow(
-      new Error('Reminder acceptance fixture state is inconsistent'),
-    );
-    record('reminder-ui-readback', 'failed', undefined, eventTitles.length);
-    throw new Error('Reminder acceptance fixture state is inconsistent');
-  }
-
-  enterActiveReminderFlowStage('room-context');
-  const allowedOrigins = new Set([
-    new URL(fixture.elementUrl).origin,
-    new URL(fixture.homeserverUrl).origin,
-    'http://localhost:8008',
-    new URL(fixture.gatewayUrl).origin,
-    new URL(fixture.widgetUrl).origin,
-  ]);
-  let blockedRequests = 0;
-  let failureHttpStatus: number | undefined;
-  let failureAlreadyRecorded = false;
-  const context = await browser.newContext({
-    locale: 'en-US',
-    timezoneId: 'Europe/Stockholm',
-    viewport: { width: 1440, height: 900 },
-  });
-
-  try {
-    await context.route('**/*', async (route) => {
-      let requestOrigin: string;
-      try {
-        requestOrigin = new URL(route.request().url()).origin;
-      } catch {
-        blockedRequests = Math.min(blockedRequests + 1, 100_000);
-        await route.abort('blockedbyclient');
-        return;
-      }
-      if (!allowedOrigins.has(requestOrigin)) {
-        blockedRequests = Math.min(blockedRequests + 1, 100_000);
-        await route.abort('blockedbyclient');
-        return;
-      }
-      await route.continue();
-    });
-
-    activePhase = 'member-a-authenticated';
-    const page = await authenticateInElement(context, fixture.users.memberA);
-    record(activePhase, 'passed');
-    activePhase = 'reminder-room-context';
-    const reminderContextResponseObserver =
-      observeReminderWidgetContextResponse(page, fixture.teamRoomId);
-    void reminderContextResponseObserver.response.catch(() => undefined);
-    const reminderRoom = await openMemberARoomWithDiagnostics(
-      page,
-      fixture.roomName,
-      fixture.teamRoomId,
-      fixture.users.memberA.userId,
-      { captureReminderRoomLayout: true },
-    );
-    recordMemberARoomObservation(
-      reminderRoom,
-      'reminder-room-context',
-      reminderContextResponseObserver.snapshot(),
-    );
-    failureAlreadyRecorded = Boolean(reminderRoom.failureCode);
-    const element = requireMemberARoom(reminderRoom);
-
-    activePhase = 'reminder-widget-context';
-    const frame = await openCalendarWidget(element, page, {
-      expectWidgetWarning: false,
-    });
-    if (flow === 'restart') {
-      await page.setViewportSize({ width: 390, height: 844 });
-      await expect(
-        frame.getByRole('button', { name: 'Create event', exact: true }),
-      ).toBeVisible();
-    }
-    const contextResult = await reminderContextResponseObserver.response;
-    failureHttpStatus = contextResult.status();
-    const contextPayload: unknown = await contextResult
-      .json()
-      .catch(() => null);
-    const canManageReminders =
-      contextPayload !== null &&
-      typeof contextPayload === 'object' &&
-      'roomCalendar' in contextPayload &&
-      contextPayload.roomCalendar !== null &&
-      typeof contextPayload.roomCalendar === 'object' &&
-      'canManageReminders' in contextPayload.roomCalendar &&
-      contextPayload.roomCalendar.canManageReminders === true;
-    if (failureHttpStatus !== 200 || !canManageReminders) {
-      record(activePhase, 'failed', failureHttpStatus, undefined, {
-        canManageReminders,
-      });
-      failureAlreadyRecorded = true;
-      throw new Error('Reminder room context was not authorized');
-    }
-    record(activePhase, 'passed', failureHttpStatus, undefined, {
-      canManageReminders,
-    });
-    failureHttpStatus = undefined;
-    completeActiveReminderFlowStage('room-context');
-
-    const priorReminderReadbackReferences = new Map<
-      string,
-      ReminderReadbackReference
-    >();
-    if (eventTitles.length > 0 && flow !== 'initial') {
-      enterActiveReminderFlowStage('prior-state');
-      activePhase =
-        flow === 'restart'
-          ? 'reminder-restart-prior-state'
-          : 'reminder-restore-prior-state';
-      const timeline = await inspectReminderTimeline(eventTitles);
-      const markersOnce =
-        timeline.complete &&
-        timeline.markerCounts.every((count) => count === 1) &&
-        timeline.markerTargetsMatch.every(Boolean);
-      if (timeline.httpStatus !== 200 || !markersOnce) {
-        record(
-          activePhase,
-          'failed',
-          timeline.httpStatus ?? undefined,
-          eventTitles.length,
-          { allMarkersOnce: markersOnce },
-        );
-        failureAlreadyRecorded = true;
-        throw new Error(
-          flow === 'restart'
-            ? 'Restarted reminder markers were not preserved'
-            : 'Restored reminder markers were not preserved',
-        );
-      }
-      record(activePhase, 'passed', timeline.httpStatus, eventTitles.length, {
-        allMarkersOnce: true,
-      });
-      completeActiveReminderFlowStage('prior-state');
-      for (const [index, title] of eventTitles.entries()) {
-        const deliveredAt = timeline.markerTimestamps[index];
-        if (deliveredAt !== null && deliveredAt !== undefined) {
-          priorReminderReadbackReferences.set(title, { deliveredAt });
-        }
-      }
-    }
-
-    if (eventTitles.length > 0) {
-      enterActiveReminderFlowStage('prior-state-ui-readback');
-      activePhase = 'reminder-ui-readback';
-      const existingReadback = await readBackReminderMarkers(
-        frame,
-        eventTitles,
-        priorReminderReadbackReferences,
-        captureReminderFlowReadbackError,
-      );
-      if (
-        !existingReadback.relativeAlarmReadback ||
-        !existingReadback.reminderEnabled ||
-        !existingReadback.targetSettingsReadback ||
-        !existingReadback.allDayScheduleReadback
-      ) {
-        record(activePhase, 'failed', undefined, existingReadback.count, {
-          relativeAlarmReadback: existingReadback.relativeAlarmReadback,
-          reminderEnabled: existingReadback.reminderEnabled,
-          targetSettingsReadback: existingReadback.targetSettingsReadback,
-          allDayScheduleReadback: existingReadback.allDayScheduleReadback,
-        });
-        failureAlreadyRecorded = true;
-        throw new Error('Persisted reminder settings did not reload');
-      }
-      record(activePhase, 'passed', undefined, existingReadback.count, {
-        relativeAlarmReadback: existingReadback.relativeAlarmReadback,
-        reminderEnabled: existingReadback.reminderEnabled,
-        targetSettingsReadback: existingReadback.targetSettingsReadback,
-        allDayScheduleReadback: existingReadback.allDayScheduleReadback,
-      });
-      completeActiveReminderFlowStage('prior-state-ui-readback');
-    }
-
-    enterActiveReminderFlowStage('marker-creation');
-    const markerTitle = `Reminder acceptance ${randomUUID()}`;
-    const markerPlan = reminderPlanForMarkerIndex(eventTitles.length);
-    const createdReminder = await createAndConfigureReminder(
-      frame,
-      page,
-      markerTitle,
-      markerPlan,
-    );
-    const dueAt = createdReminder.dueAt;
-    eventTitles.push(markerTitle);
-
-    const reminderReadbackReferences = new Map(priorReminderReadbackReferences);
-    reminderReadbackReferences.set(markerTitle, {
-      expectedDueAt: dueAt,
-      expectedAlarmLeadMinutes: createdReminder.alarmLeadMinutes,
-      ...(createdReminder.allDayEventDate
-        ? { expectedAllDayEventDate: createdReminder.allDayEventDate }
-        : {}),
-    });
-    completeActiveReminderFlowStage('marker-creation');
-    enterActiveReminderFlowStage('marker-ui-readback');
-    activePhase = 'reminder-ui-readback';
-    const allReadback = await readBackReminderMarkers(
-      frame,
-      eventTitles,
-      reminderReadbackReferences,
-      captureReminderFlowReadbackError,
-    );
-    if (
-      !allReadback.relativeAlarmReadback ||
-      !allReadback.reminderEnabled ||
-      !allReadback.targetSettingsReadback ||
-      !allReadback.allDayScheduleReadback
-    ) {
-      record(activePhase, 'failed', undefined, allReadback.count, {
-        relativeAlarmReadback: allReadback.relativeAlarmReadback,
-        reminderEnabled: allReadback.reminderEnabled,
-        targetSettingsReadback: allReadback.targetSettingsReadback,
-        allDayScheduleReadback: allReadback.allDayScheduleReadback,
-      });
-      failureAlreadyRecorded = true;
-      throw new Error('Reminder settings did not reload after configuration');
-    }
-    record(activePhase, 'passed', undefined, allReadback.count, {
-      relativeAlarmReadback: allReadback.relativeAlarmReadback,
-      reminderEnabled: allReadback.reminderEnabled,
-      targetSettingsReadback: allReadback.targetSettingsReadback,
-      allDayScheduleReadback: allReadback.allDayScheduleReadback,
-    });
-    completeActiveReminderFlowStage('marker-ui-readback');
-
-    enterActiveReminderFlowStage('delivery');
-    if (flow === 'initial') {
-      await verifyPublicFeedBrowserLifecycle(frame, page, markerTitle);
-    }
-
-    const deliveryPhase =
-      flow === 'initial'
-        ? 'reminder-initial-delivery'
-        : flow === 'restart'
-          ? 'reminder-restart-scheduler-scan'
-          : 'reminder-restore-scheduler-scan';
-    activePhase = deliveryPhase;
-    record(activePhase, 'started');
-    const delivery = await waitForReminderDelivery(
-      markerTitle,
-      eventTitles,
-      dueAt,
-    );
-    const allMarkersOnce =
-      delivery.complete &&
-      delivery.markerCounts.every((count) => count === 1) &&
-      delivery.markerTargetsMatch.every(Boolean);
-    const targetMentioned = delivery.markerTargetsMatch.at(-1) === true;
-    const roomMentioned = delivery.markerRoomMentions.at(-1) === true;
-    const selectedMemberMentioned =
-      delivery.markerSelectedMemberMentions.at(-1) === true;
-    const deliveryPassed =
-      delivery.httpStatus === 200 &&
-      delivery.markerCounts.at(-1) === 1 &&
-      targetMentioned &&
-      (markerPlan.recipient === 'room'
-        ? roomMentioned && !selectedMemberMentioned
-        : selectedMemberMentioned && !roomMentioned) &&
-      delivery.deliveredAfterDue &&
-      allMarkersOnce;
-    if (!deliveryPassed) {
-      record(
-        activePhase,
-        'failed',
-        delivery.httpStatus ?? undefined,
-        eventTitles.length,
-        {
-          canaryDelivered: delivery.markerCounts.at(-1) === 1,
-          roomMentioned,
-          selectedMemberMentioned,
-          targetMentioned,
-          expectedRoomRecipient: markerPlan.recipient === 'room',
-          expectedSelectedRecipient: markerPlan.recipient === 'selected',
-          deliveredAfterDue: delivery.deliveredAfterDue,
-          allMarkersOnce,
-        },
-      );
-      failureAlreadyRecorded = true;
-      throw new Error('Reminder scheduler delivery was not observed');
-    }
-    record(
-      activePhase,
-      'passed',
-      delivery.httpStatus ?? undefined,
-      eventTitles.length,
-      {
-        canaryDelivered: true,
-        roomMentioned,
-        selectedMemberMentioned,
-        targetMentioned: true,
-        expectedRoomRecipient: markerPlan.recipient === 'room',
-        expectedSelectedRecipient: markerPlan.recipient === 'selected',
-        deliveredAfterDue: true,
-        allMarkersOnce: true,
-      },
-    );
-
-    if (flow !== 'initial') {
-      activePhase =
-        flow === 'restart'
-          ? 'reminder-restart-no-duplicate'
-          : 'reminder-restore-no-duplicate';
-      const afterScan = await inspectReminderTimeline(eventTitles);
-      const markersOnce =
-        afterScan.complete &&
-        afterScan.markerCounts.every((count) => count === 1) &&
-        afterScan.markerTargetsMatch.every(Boolean);
-      if (afterScan.httpStatus !== 200 || !markersOnce) {
-        record(
-          activePhase,
-          'failed',
-          afterScan.httpStatus ?? undefined,
-          eventTitles.length,
-          {
-            allMarkersOnce: markersOnce,
-          },
-        );
-        failureAlreadyRecorded = true;
-        throw new Error('A previously sent reminder was repeated');
-      }
-      record(activePhase, 'passed', afterScan.httpStatus, eventTitles.length, {
-        allMarkersOnce: true,
-      });
-    }
-
-    activePhase = 'reminder-browser-egress';
-    if (blockedRequests !== 0) {
-      record(activePhase, 'failed', undefined, blockedRequests);
-      failureAlreadyRecorded = true;
-      throw new Error('Reminder browser attempted an unapproved request');
-    }
-    record(activePhase, 'passed', undefined, blockedRequests);
-    completeActiveReminderFlowStage('delivery');
-    enterActiveReminderFlowStage('complete');
-    completeActiveReminderFlowStage('complete');
-  } catch (error) {
-    failActiveReminderFlow(error);
-    if (!failureAlreadyRecorded && !activeReminderFailureRecorded) {
-      record(activePhase, 'failed', failureHttpStatus);
-    }
-    throw new Error('Element reminder acceptance journey failed');
-  } finally {
-    await context.close();
-  }
+  await runElementReminderAcceptanceJourney(
+    browser,
+    createReminderJourneyContext(),
+  );
 });
 
 test('Element Web preserves unsupported events and supports client interactions', async ({
