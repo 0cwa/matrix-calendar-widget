@@ -1,5 +1,7 @@
 # Legacy server inventory before pilot retirement
 
+[Documentation](./README.md) · [Legacy entry points](./legacy-entry-points.md) · [Roadmap](./ROADMAP.md)
+
 This is a read-only, source-level inventory for issue [#277](https://github.com/0cwa/matrix-calendar-widget/issues/277), recorded against `main` commit `496b5d0fa2fd33d6015c6779672fbc3d4e43e3bb` (tree `1d44cdbbe31a2105b398ae32b3d055577e086a19`). It classifies registered controllers, providers and Matrix event paths so later retirement work can be narrow. It does not change code, the frozen application candidate, or pilot/release gates.
 
 Source registration and default configuration are visible here. The private target configuration and live pilot behavior are not. **Unknown target settings remain unknown**; a default-off feature is not proof that an operator has not enabled it.

@@ -1,7 +1,19 @@
 # ADR023: Preserve floating date-times and RFC durations
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
 - Status: Accepted
 - Date: 2026-09-28
+
+> **Later implementation (2026-10-21):** The implementation-status and scope
+> statements below describe the earlier recurrence slices. Merged extensions
+> now support [selected-occurrence timing](./adr029-recurrence-instance-timing-edits.md),
+> [bounded following-occurrence timing](./adr034-bounded-following-timing-edits.md),
+> [monthly ordinal weekdays](./adr035-monthly-ordinal-weekday-recurrence.md), and
+> [selected-occurrence text fields](./adr040-selected-occurrence-text-fields.md).
+> These extensions do not add `RANGE=THISANDFUTURE`, unrestricted RRULE editing,
+> or arbitrary custom-timezone support. Cross-client acceptance remains
+> source-bound in the [release evidence](../RELEASE.md).
 
 ## Context
 

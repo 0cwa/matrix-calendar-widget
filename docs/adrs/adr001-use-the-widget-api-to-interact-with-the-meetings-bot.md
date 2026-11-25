@@ -1,5 +1,9 @@
 # ADR001: Use the Widget API to interact with the Meetings Bot to Create, Manage, and Display Meetings
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
+> **Inherited NeoDateFix record.** This document describes the original meeting product. Its recorded status is historical; use the [current architecture](../ARCHITECTURE.md) and fork decisions beginning with ADR004 for calendar development.
+
 Status: draft
 
 > This document uses ⚠ to highlight features which are not yet implemented.
@@ -201,7 +205,7 @@ The bot will only be used to create and mutate meetings.
 The widget can read state events from the client to compose the list of active meetings and the meeting details.
 
 > This section highlights only selected actions.
-> The authoritative source for the room event schema is the [data model](../data-model.md).
+> The authoritative source for the room event schema is the [data model](../archive/neodate-data-model.md).
 
 #### Permissions
 

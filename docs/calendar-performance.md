@@ -1,11 +1,20 @@
 # Calendar performance measurements
 
+[Documentation](./README.md) · [Beta scope](./beta-scope.md) · [Release ledger](./RELEASE.md)
+
 This benchmark measures the synchronous domain occurrence projection on
 synthetic calendars. It does not measure the CalDAV gateway, network latency,
 React/FullCalendar rendering, memory peaks, or a deployment's capacity. A
 separate synthetic browser smoke measures one fixed 1,000-event calendar in
 the actual list and month components; it is an observational UI measurement,
 not a product latency or capacity target.
+
+**On this page**
+
+- [Controlled beta ordinary-load contract](#controlled-beta-ordinary-load-contract)
+- [Reproduce](#reproduce)
+- [Initial measurement](#initial-measurement)
+- [Synthetic browser render measurement](#synthetic-browser-render-measurement)
 
 ## Controlled beta ordinary-load contract
 
@@ -227,10 +236,6 @@ browser job `112330122875`, at source commit
 Node 22, and Headless Chromium 149.0.7827.55. The fixture initializes locale
 with the production helper and gives the month grid the production viewport
 height chain. It exercises a normal pointer click on the overflow link.
-
-The [retained JSON](./evidence/calendar-browser-20261006.json) includes the
-warm-up, five raw samples per view, environment, counts, horizontal dimensions,
-and optional long-task summaries from artifact `11421332275`.
 
 | View  | Median mount ms | Maximum mount ms | Maximum sampled long task ms |
 | ----- | --------------: | ---------------: | ---------------------------: |

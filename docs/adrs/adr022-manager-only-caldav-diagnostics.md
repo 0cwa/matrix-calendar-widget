@@ -1,5 +1,7 @@
 # ADR022: Expose manager-only CalDAV collection diagnostics
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
 - Status: Accepted
 - Date: 2026-09-28
 

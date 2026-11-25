@@ -1,5 +1,7 @@
 # ADR032: Send room calendar action notices
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
 - Status: Accepted
 - Date: 2026-10-03
 - Preserves: ADR010, ADR014, ADR015, ADR030, and ADR027

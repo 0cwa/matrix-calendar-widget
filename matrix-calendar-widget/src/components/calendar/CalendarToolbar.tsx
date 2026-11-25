@@ -17,16 +17,32 @@
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
-import { Box, Button, Stack, useMediaQuery, useTheme } from '@mui/material';
-import { useState } from 'react';
+import {
+  Alert,
+  Box,
+  Button,
+  Snackbar,
+  Stack,
+  useMediaQuery,
+  useTheme,
+} from '@mui/material';
+import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CalendarFilters, useCalendars } from '../../calendar';
+import {
+  CalendarFilters,
+  isCalendarPrivateClientRepository,
+  isCalendarPublicFeedRepository,
+  useCalendarRepository,
+  useCalendars,
+} from '../../calendar';
 import { CalendarColorDialog } from './CalendarColorDialog';
 import { CalendarCreateDialog } from './CalendarCreateDialog';
 import { CalendarDeleteDialog } from './CalendarDeleteDialog';
 import { CalendarDescriptionDialog } from './CalendarDescriptionDialog';
 import { CalendarEventEditorDialog } from './CalendarEventEditorDialog';
 import { CalendarNavigation, CalendarSurfaceView } from './CalendarNavigation';
+import { CalendarPrivateClientDialog } from './CalendarPrivateClientDialog';
+import { CalendarPublicFeedDialog } from './CalendarPublicFeedDialog';
 import { CalendarRenameDialog } from './CalendarRenameDialog';
 import { CalendarToolbarButtons } from './CalendarToolbar/CalendarToolbarButtons';
 import { CalendarToolbarDatePicker } from './CalendarToolbar/CalendarToolbarDatePicker';
@@ -40,6 +56,11 @@ type CalendarToolbarProps = {
   onViewChange: (view: CalendarSurfaceView) => void;
 };
 
+type StalePrivateClientRecovery = {
+  calendarName: string;
+  createdAt: string;
+};
+
 export function CalendarToolbar({
   filters,
   view,
@@ -51,12 +72,31 @@ export function CalendarToolbar({
   const theme = useTheme();
   const showToolbarButtons = useMediaQuery(theme.breakpoints.up('md'));
   const calendars = useCalendars();
+  const calendarRepository = useCalendarRepository();
+  const supportsPublicFeeds =
+    isCalendarPublicFeedRepository(calendarRepository);
+  const supportsPrivateClients =
+    isCalendarPrivateClientRepository(calendarRepository);
   const [createCalendarOpen, setCreateCalendarOpen] = useState(false);
   const [deleteCalendarOpen, setDeleteCalendarOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [descriptionOpen, setDescriptionOpen] = useState(false);
   const [colorOpen, setColorOpen] = useState(false);
+  const [publicFeedOpen, setPublicFeedOpen] = useState(false);
+  const [privateClientOpen, setPrivateClientOpen] = useState(false);
+  const [privateClientRecovery, setPrivateClientRecovery] = useState<
+    StalePrivateClientRecovery[]
+  >([]);
+  const reportPrivateClientRecovery = useCallback(
+    (details: StalePrivateClientRecovery) => {
+      setPrivateClientRecovery((current) => [...current, details]);
+    },
+    [],
+  );
+  const dismissPrivateClientRecovery = () => {
+    setPrivateClientRecovery((current) => current.slice(1));
+  };
   const writableCalendars = calendars.data.filter(
     (calendar) => calendar.readOnly === false,
   );
@@ -77,6 +117,26 @@ export function CalendarToolbar({
             variant="outlined"
           >
             {t('calendars.create.action', 'Create calendar')}
+          </Button>
+        )}
+
+        {supportsPublicFeeds && (
+          <Button
+            disabled={calendars.loading || calendars.data.length === 0}
+            onClick={() => setPublicFeedOpen(true)}
+            variant="outlined"
+          >
+            {t('calendarPublicFeed.action', 'Public feed')}
+          </Button>
+        )}
+
+        {supportsPrivateClients && (
+          <Button
+            disabled={calendars.loading || calendars.data.length === 0}
+            onClick={() => setPrivateClientOpen(true)}
+            variant="outlined"
+          >
+            {t('calendarPrivateClient.action', 'Calendar app access')}
           </Button>
         )}
 
@@ -193,6 +253,40 @@ export function CalendarToolbar({
         onClose={() => setDeleteCalendarOpen(false)}
         open={deleteCalendarOpen}
       />
+
+      {supportsPublicFeeds && (
+        <CalendarPublicFeedDialog
+          calendars={calendars.data}
+          onClose={() => setPublicFeedOpen(false)}
+          open={publicFeedOpen}
+        />
+      )}
+
+      {supportsPrivateClients && (
+        <CalendarPrivateClientDialog
+          calendars={calendars.data}
+          onClose={() => setPrivateClientOpen(false)}
+          onStaleClientCleanupFailed={reportPrivateClientRecovery}
+          open={privateClientOpen}
+        />
+      )}
+
+      <Snackbar
+        anchorOrigin={{ horizontal: 'center', vertical: 'bottom' }}
+        onClose={(_, reason) => {
+          if (reason !== 'clickaway') dismissPrivateClientRecovery();
+        }}
+        open={privateClientRecovery.length > 0}
+      >
+        <Alert onClose={dismissPrivateClientRecovery} severity="warning">
+          {t('calendarPrivateClient.cleanupFailed', {
+            calendar: privateClientRecovery[0]?.calendarName ?? '',
+            date: privateClientRecovery[0]?.createdAt ?? '',
+            defaultValue:
+              'App access created for “{{calendar}}” on {{date}} may still be active. Open that calendar’s app access settings and check for an entry created then; revoke it if present.',
+          })}
+        </Alert>
+      </Snackbar>
 
       <CalendarEventEditorDialog
         calendars={calendars.data}

@@ -1,7 +1,18 @@
 # ADR014: Select calendar principals by target
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
 - Status: Accepted
 - Date: 2026-09-26
+
+> **Later implementation (2026-10-21):** The external-password development
+> backend mentioned in the context is historical. The owned OpenID module and
+> image are implemented under [ADR024](./adr024-in-repo-radicale-openid-auth.md).
+> Room event operations are implemented under
+> [ADR030](./adr030-gated-room-event-operations.md), and
+> [ADR041](./adr041-optional-normal-bot-account-for-room-operations.md) extends
+> the service-principal choice. These paths retain default-off gates, the
+> whole-home trust boundary below, and separate [deployment acceptance](../RELEASE.md).
 
 ## Context
 

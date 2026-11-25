@@ -1,5 +1,7 @@
 # IANA VTIMEZONE data package
 
+[Documentation](../../docs/README.md) · [Timezone maintenance](../../docs/timezones-ical-data.md)
+
 This workspace package contains generated IANA VTIMEZONE components and a
 small safe lookup API. See [the data maintenance guide](../../docs/timezones-ical-data.md)
 for the pinned source, hosted generation workflow, provenance, and license

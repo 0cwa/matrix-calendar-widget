@@ -1,7 +1,16 @@
 # ADR033: Bounded room reminder alarm options
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
 - Status: Accepted
 - Date: 2026-10-03
+
+> **Later implementation (2026-10-21):** The alarm-options endpoint is
+> implemented. [ADR041](./adr041-optional-normal-bot-account-for-room-operations.md)
+> extends its appservice-principal references to the selected room-principal
+> mode, and [ADR043](./adr043-moderator-room-calendar-setup.md) extends binding
+> resolution to ready dynamic bindings. The default-off gates, authorization
+> order, source validation, and metadata-only response remain unchanged.
 
 ## Context
 

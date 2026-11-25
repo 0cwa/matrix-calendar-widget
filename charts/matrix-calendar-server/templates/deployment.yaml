@@ -128,8 +128,9 @@ spec:
               protocol: TCP
           readinessProbe:
               httpGet:
-                path: /v1/health
+                path: /v1/health/ready
                 port: http
+              timeoutSeconds: 5
           livenessProbe:
               httpGet:
                 path: /v1/health/live

@@ -1,5 +1,7 @@
 # ADR037: Use an independent Radicale store for the controlled beta
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
 - Status: Accepted
 - Date: 2026-10-06
 - Supersedes: ADR024's existing-store deployment preference and dependent

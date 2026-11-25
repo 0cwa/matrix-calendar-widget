@@ -1,7 +1,15 @@
 # ADR006: Use a Matrix-authenticated gateway between widgets and CalDAV
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
 - Status: Accepted
 - Date: 2026-09-22
+
+> **Later implementation (2026-10-21):** The project-owned backend and image
+> selected by [ADR024](./adr024-in-repo-radicale-openid-auth.md) are implemented
+> and used by the development and contract stacks. The 1 October note below
+> records an earlier implementation state. Target-host deployment and rollout
+> remain separate gates in the [release evidence](../RELEASE.md).
 
 > **Implementation note (ADR024, 2026-10-01):** The following plugin sentence
 > records the development deployment's earlier behavior. ADR024 selects a

@@ -1,5 +1,7 @@
 # Security policy
 
+[Project overview](./README.md) · [Documentation](./docs/README.md) · [Threat model](./docs/threat-model.md)
+
 ## Project status
 
 Matrix Calendar Widget is currently pre-alpha and does not yet have a supported production release.
@@ -8,7 +10,7 @@ Matrix Calendar Widget is currently pre-alpha and does not yet have a supported 
 
 Please do **not** publish vulnerability details in a normal GitHub issue.
 
-Use GitHub's private vulnerability reporting / Security Advisory flow for this repository when available. Include:
+Use this repository's [private vulnerability reporting / Security Advisory flow](https://github.com/0cwa/matrix-calendar-widget/security/advisories/new) when available. Include:
 
 - a concise description,
 - affected commit/version,
@@ -29,6 +31,8 @@ Never include these in public reports:
 - passwords,
 - CalDAV Authorization headers,
 - gateway session secrets,
+- public-calendar subscription URLs, native sharing tokens, or signing keys,
+- database connection strings or secret-bearing backup/configuration files,
 - complete private ICS files,
 - private room IDs or event content unless necessary and sanitized.
 

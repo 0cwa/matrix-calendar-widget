@@ -18,6 +18,36 @@ import { Controller, Get, HttpException, Inject } from '@nestjs/common';
 import { IAppConfiguration } from '../IAppConfiguration';
 import { ModuleProviderToken } from '../ModuleProviderToken';
 
+const HOMESERVER_READINESS_TIMEOUT_MS = 3_000;
+
+const cancelResponseBodyBeforeDeadline = async (
+  body: ReadableStream<Uint8Array> | null,
+  signal: AbortSignal,
+): Promise<void> => {
+  if (!body) {
+    return;
+  }
+
+  const cancellation = body.cancel();
+  let onAbort: (() => void) | undefined;
+  const aborted = new Promise<void>((resolve) => {
+    if (signal.aborted) {
+      resolve();
+    } else {
+      onAbort = () => resolve();
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+  });
+
+  try {
+    await Promise.race([cancellation, aborted]);
+  } finally {
+    if (onAbort) {
+      signal.removeEventListener('abort', onAbort);
+    }
+  }
+};
+
 @Controller({
   path: 'health',
   version: ['1'],
@@ -28,25 +58,54 @@ export class HealthCheckController {
     private appConfig: IAppConfiguration,
   ) {}
 
-  //TODO: PB-2420 put jsdoc here with description
-  //TODO: PB-2420 test a bit more what happens if synapse not working or other cases
   @Get()
-  async health() {
-    const url = `${this.appConfig.homeserver_url}/health`;
-    const response = await fetch(url);
-    if (response.ok) {
-      return 'Healthy';
-    } else {
-      throw new HttpException(await response.text(), response.status);
-    }
+  health() {
+    return 'Healthy';
   }
 
   /**
    * Reports that the server process can receive HTTP requests.
-   * Dependency availability is checked separately by `health()`.
+   * Dependency availability is checked separately by `readiness()`.
    */
   @Get('live')
   liveness() {
-    return 'Healthy';
+    return this.health();
+  }
+
+  /**
+   * Checks whether the configured homeserver serves the Matrix Client-Server API.
+   */
+  @Get('ready')
+  async readiness() {
+    const url = `${this.appConfig.homeserver_url.replace(/\/+$/u, '')}/_matrix/client/versions`;
+
+    try {
+      const signal = AbortSignal.timeout(HOMESERVER_READINESS_TIMEOUT_MS);
+      const response = await fetch(url, {
+        signal,
+      });
+      if (!response.ok) {
+        await cancelResponseBodyBeforeDeadline(response.body, signal);
+        throw new Error('Matrix endpoint unavailable');
+      }
+
+      const body: unknown = await response.json();
+      if (
+        typeof body !== 'object' ||
+        body === null ||
+        !('versions' in body) ||
+        !Array.isArray(body.versions) ||
+        body.versions.length === 0 ||
+        !body.versions.every(
+          (version) => typeof version === 'string' && version.trim().length > 0,
+        )
+      ) {
+        throw new Error('Invalid Matrix versions response');
+      }
+
+      return 'Healthy';
+    } catch {
+      throw new HttpException('Homeserver is unavailable', 503);
+    }
   }
 }

@@ -1,5 +1,7 @@
 # ADR041: Support an optional normal bot account for room operations
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
 - Status: Accepted
 - Date: 2026-10-13
 - Partially supersedes: only the appservice-specific room-principal and

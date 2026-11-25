@@ -62,6 +62,30 @@ type RoomNavigationTargetObservation = {
   enabled: boolean | null;
 };
 
+export type RoomNavigationHitTestObservation = {
+  targetCountCapped: 0 | 1 | 2 | null;
+  centerHitObserved: boolean | null;
+  centerHitWithinTarget: boolean | null;
+  centerHitRole:
+    | 'button'
+    | 'row'
+    | 'option'
+    | 'treeitem'
+    | 'link'
+    | 'listbox'
+    | 'other'
+    | 'unavailable';
+};
+
+function unavailableRoomNavigationHitTest(): RoomNavigationHitTestObservation {
+  return {
+    targetCountCapped: null,
+    centerHitObserved: null,
+    centerHitWithinTarget: null,
+    centerHitRole: 'unavailable',
+  };
+}
+
 async function observeRoomNavigationTarget(
   locator: Locator,
 ): Promise<RoomNavigationTargetObservation> {
@@ -256,13 +280,90 @@ export class ElementWebPage {
     };
   }
 
+  async observeRoomNavigationHitTest(
+    name: string,
+  ): Promise<RoomNavigationHitTestObservation> {
+    try {
+      const target = this.roomItemLocator(name);
+      const targetCountCapped = Math.min(await target.count(), 2) as 0 | 1 | 2;
+      if (targetCountCapped !== 1) {
+        return {
+          targetCountCapped,
+          centerHitObserved: null,
+          centerHitWithinTarget: null,
+          centerHitRole: 'unavailable',
+        };
+      }
+
+      const box = await target.boundingBox({ timeout: 2_000 });
+      if (!box || box.width <= 0 || box.height <= 0) {
+        return {
+          targetCountCapped,
+          centerHitObserved: false,
+          centerHitWithinTarget: null,
+          centerHitRole: 'unavailable',
+        };
+      }
+
+      return await target.evaluate(
+        (targetElement, point): RoomNavigationHitTestObservation => {
+          const hitElement = document.elementFromPoint(point.x, point.y);
+          if (!hitElement) {
+            return {
+              targetCountCapped: 1,
+              centerHitObserved: false,
+              centerHitWithinTarget: null,
+              centerHitRole: 'unavailable',
+            };
+          }
+
+          const allowedRoles = new Set([
+            'button',
+            'row',
+            'option',
+            'treeitem',
+            'link',
+            'listbox',
+          ]);
+          const explicitRole = hitElement.getAttribute('role')?.toLowerCase();
+          const implicitRoleByTag: Record<string, string> = {
+            a: 'link',
+            button: 'button',
+            tr: 'row',
+          };
+          const role =
+            explicitRole ?? implicitRoleByTag[hitElement.tagName.toLowerCase()];
+
+          return {
+            targetCountCapped: 1,
+            centerHitObserved: true,
+            centerHitWithinTarget:
+              hitElement === targetElement ||
+              targetElement.contains(hitElement),
+            centerHitRole:
+              role && allowedRoles.has(role)
+                ? (role as RoomNavigationHitTestObservation['centerHitRole'])
+                : 'other',
+          };
+        },
+        { x: box.x + box.width / 2, y: box.y + box.height / 2 },
+        { timeout: 2_000 },
+      );
+    } catch {
+      return unavailableRoomNavigationHitTest();
+    }
+  }
+
   async waitForRoomsList(timeout = 60_000) {
     const roomsList = this.roomsListLocator();
     await roomsList.waitFor({ state: 'visible', timeout });
   }
 
-  async navigateToRoomOrInvitation(name: string) {
-    await this.roomItemLocator(name).click();
+  async navigateToRoomOrInvitation(
+    name: string,
+    options?: { timeout?: number },
+  ) {
+    await this.roomItemLocator(name).click(options);
   }
 
   async waitForRoom(name: string) {

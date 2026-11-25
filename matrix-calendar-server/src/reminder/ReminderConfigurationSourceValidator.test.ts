@@ -23,9 +23,14 @@ import {
 import {
   ReminderConfigurationSourceError,
   resolveProjectedReminderOccurrenceTiming,
+  resolveTriggerableReminderAlarmOption,
   resolveTriggerableReminderIdentity,
 } from './ReminderConfigurationSourceValidator';
-import { calculateDisplayReminderDueAt } from './ReminderTrigger';
+import {
+  calculateAllDayReminderDueAt,
+  calculateDisplayReminderDueAt,
+  isAllDayReminderScheduleWithinLimits,
+} from './ReminderTrigger';
 
 const icalendar = fs.readFileSync(
   path.resolve(
@@ -162,6 +167,10 @@ describe('resolveTriggerableReminderIdentity', () => {
       },
     });
 
+    if (gapTiming.type !== 'timed' || foldTiming.type !== 'timed') {
+      throw new Error('Expected timed occurrence timing');
+    }
+
     expect(gapTiming.start.hour).toBe(2);
     expect(foldTiming.start.hour).toBe(2);
     expect(
@@ -208,14 +217,6 @@ describe('resolveTriggerableReminderIdentity', () => {
       },
     },
     {
-      label: 'all-day DATE',
-      timing: {
-        type: 'all-day',
-        startDate: '2026-10-05',
-        endDate: '2026-10-06',
-      },
-    },
-    {
       label: 'unknown TZID',
       timing: {
         type: 'timed',
@@ -239,6 +240,81 @@ describe('resolveTriggerableReminderIdentity', () => {
     expect(() =>
       resolveProjectedReminderOccurrenceTiming(selection, timing as never),
     ).toThrow(ReminderConfigurationSourceError);
+  });
+
+  it('projects DATE occurrence timing without assigning it a timezone', () => {
+    const selection = resolveCanonicalReminderResourceSelection(
+      master,
+      resource,
+    );
+
+    expect(
+      resolveProjectedReminderOccurrenceTiming(selection, {
+        type: 'all-day',
+        startDate: '2026-10-05',
+        endDate: '2026-10-06',
+      }),
+    ).toEqual({
+      type: 'all-day',
+      startDate: '2026-10-05',
+      endDate: '2026-10-06',
+    });
+  });
+
+  it('requires an explicit local schedule for DATE alarms and applies RFC DST resolution', () => {
+    const allDayResource = {
+      ...resource,
+      icalendar: resource.icalendar
+        .replace(
+          'DTSTART;TZID=Europe/Stockholm:20261005T090000',
+          'DTSTART;VALUE=DATE:20261005',
+        )
+        .replace(
+          'DTEND;TZID=Europe/Stockholm:20261005T100000',
+          'DTEND;VALUE=DATE:20261006',
+        ),
+    };
+    const schedule = {
+      daysBefore: 1,
+      localTime: '09:00',
+      timezone: 'Europe/Stockholm',
+    };
+    const selection = resolveCanonicalReminderResourceSelection(
+      master,
+      allDayResource,
+    );
+
+    expect(() =>
+      resolveTriggerableReminderIdentity(master, allDayResource),
+    ).toThrow(ReminderConfigurationSourceError);
+    expect(
+      resolveTriggerableReminderIdentity(master, allDayResource, schedule),
+    ).toEqual({ ...master, eventUid: 'team-planning@example.test' });
+    expect(resolveTriggerableReminderAlarmOption(selection)).toMatchObject({
+      timingType: 'all-day',
+      supported: true,
+      requiresAllDaySchedule: true,
+    });
+    expect(
+      isAllDayReminderScheduleWithinLimits(
+        selection.alarmSource,
+        { ...schedule, daysBefore: 366 },
+        '2027-10-06',
+      ),
+    ).toBe(true);
+
+    const springGap = calculateAllDayReminderDueAt(
+      selection.alarmSource,
+      { daysBefore: 0, localTime: '02:30', timezone: 'Europe/Stockholm' },
+      '2026-03-29',
+    );
+    const autumnOverlap = calculateAllDayReminderDueAt(
+      selection.alarmSource,
+      { daysBefore: 0, localTime: '02:30', timezone: 'Europe/Stockholm' },
+      '2026-10-25',
+    );
+    expect(springGap?.toISOString()).toBe('2026-03-29T01:30:00.000Z');
+    expect(autumnOverlap?.toISOString()).toBe('2026-10-25T00:30:00.000Z');
   });
 
   it.each([

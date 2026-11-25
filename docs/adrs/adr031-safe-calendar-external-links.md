@@ -1,7 +1,16 @@
 # ADR031: Safely display external links from calendar events
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
 - Status: Accepted
 - Date: 2026-10-03
+
+> **Later implementation (2026-10-21):** Safe external-link display is
+> implemented. [ADR036](./adr036-bounded-conference-link-authoring.md) and
+> [ADR038](./adr038-bounded-safe-uri-attachment-authoring.md) add dedicated,
+> bounded conference and URI-attachment writers. They do not turn the
+> `externalLinks` projection into a write model or add remote previews;
+> unsupported source properties remain preserved.
 
 ## Context
 

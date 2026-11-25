@@ -52,6 +52,15 @@ export class RoomReminderConfigurationController {
     return this.configurations.list(userContext?.userId, roomId, limit, cursor);
   }
 
+  @Get('recipients')
+  @Header('Cache-Control', 'no-store')
+  listRecipients(
+    @UserContextParam() userContext: IUserContext,
+    @Param('roomId') roomId: string,
+  ) {
+    return this.configurations.listRecipients(userContext?.userId, roomId);
+  }
+
   @Put()
   @Header('Cache-Control', 'no-store')
   upsert(

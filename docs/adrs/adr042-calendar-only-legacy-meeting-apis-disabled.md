@@ -1,5 +1,7 @@
 # ADR042: Disable legacy meeting APIs for the calendar pilot
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
 - Status: Accepted
 - Date: 2026-10-15
 - Supersedes: the initial HTTP-only scope for this decision

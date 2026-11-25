@@ -1,5 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import {
+  STARTUP_EXCEPTION_CLASSES,
+  STARTUP_PHASES,
+} from './element-desktop-startup.mjs';
 
 const ORIGIN = 'vector://vector';
 const CHECK_NAMES = Object.freeze([
@@ -236,6 +240,8 @@ const STARTUP_FAILURES = new Set([
   'safe-storage-backend-unconfirmed',
   'probe-internal-error',
 ]);
+const STARTUP_FAILURE_PHASES = new Set(STARTUP_PHASES);
+const STARTUP_EXCEPTION_CLASS_SET = new Set(STARTUP_EXCEPTION_CLASSES);
 const SAFE_STORAGE_MODES = new Set([
   'encrypted',
   'plaintext',
@@ -2496,29 +2502,51 @@ function validateTargetUidPreflight(record) {
 }
 
 function validateStartup(record, sourceSha) {
+  const failureDiagnosticFields = ['failurePhase', 'failureExceptionClass'];
+  const baseFields = [
+    'phase',
+    'status',
+    'failureCode',
+    'sourceSha',
+    'package',
+    'runtime',
+    'origin',
+    'secretService',
+    'safeStorage',
+    'desktopObservation',
+    'rendererCount',
+    'rendererDiagnostics',
+    'uidLifecycleDiagnostics',
+    'uidTcpSocketDiagnostics',
+    'egressPhaseCounters',
+    'checks',
+  ];
+  const hasFailureDiagnostic = failureDiagnosticFields.every((field) =>
+    Object.hasOwn(record, field),
+  );
   if (
-    !hasKeys(record, [
-      'phase',
-      'status',
-      'failureCode',
-      'sourceSha',
-      'package',
-      'runtime',
-      'origin',
-      'secretService',
-      'safeStorage',
-      'desktopObservation',
-      'rendererCount',
-      'rendererDiagnostics',
-      'uidLifecycleDiagnostics',
-      'uidTcpSocketDiagnostics',
-      'egressPhaseCounters',
-      'checks',
-    ]) ||
+    !(
+      hasKeys(record, baseFields) ||
+      hasKeys(record, [...baseFields, ...failureDiagnosticFields])
+    ) ||
     record.phase !== 'desktop-startup' ||
     !['passed', 'failed'].includes(record.status) ||
     (record.failureCode !== null &&
       !STARTUP_FAILURES.has(record.failureCode)) ||
+    (hasFailureDiagnostic &&
+      !(
+        (record.failurePhase === null &&
+          record.failureExceptionClass === null) ||
+        (STARTUP_FAILURE_PHASES.has(record.failurePhase) &&
+          STARTUP_EXCEPTION_CLASS_SET.has(record.failureExceptionClass))
+      )) ||
+    (hasFailureDiagnostic &&
+      record.failureCode === 'probe-internal-error' &&
+      record.failurePhase === null) ||
+    (record.status === 'passed' &&
+      hasFailureDiagnostic &&
+      (record.failurePhase !== null ||
+        record.failureExceptionClass !== null)) ||
     record.sourceSha !== sourceSha ||
     record.origin !== ORIGIN ||
     (record.rendererCount !== null &&
@@ -3291,10 +3319,12 @@ export function sanitizeDesktopStages(records, sourceSha) {
         : 'evidence-incomplete'));
 
   return {
-    schemaVersion: 23,
+    schemaVersion: 24,
     sourceSha,
     status: allPassed ? 'passed' : 'failed',
     failureCode,
+    startupFailurePhase: startup?.failurePhase ?? null,
+    startupFailureExceptionClass: startup?.failureExceptionClass ?? null,
     package: startup?.package ?? {
       version: null,
       architecture: null,
@@ -3376,6 +3406,8 @@ export function validDesktopSummary(value) {
       'sourceSha',
       'status',
       'failureCode',
+      'startupFailurePhase',
+      'startupFailureExceptionClass',
       'package',
       'runtime',
       'origin',
@@ -3394,7 +3426,7 @@ export function validDesktopSummary(value) {
       'cleanupDiagnostics',
       'checks',
     ]) &&
-    value.schemaVersion === 23 &&
+    value.schemaVersion === 24 &&
     /^[0-9a-f]{40}$/u.test(value.sourceSha) &&
     ['passed', 'failed'].includes(value.status) &&
     (value.failureCode === null ||
@@ -3407,6 +3439,13 @@ export function validDesktopSummary(value) {
         'startup-observation-missing',
         ...STARTUP_FAILURES,
       ].includes(value.failureCode)) &&
+    (value.startupFailurePhase === null
+      ? value.startupFailureExceptionClass === null
+      : STARTUP_FAILURE_PHASES.has(value.startupFailurePhase) &&
+        STARTUP_EXCEPTION_CLASS_SET.has(value.startupFailureExceptionClass)) &&
+    (value.status !== 'passed' ||
+      (value.startupFailurePhase === null &&
+        value.startupFailureExceptionClass === null)) &&
     hasKeys(value.package, ['version', 'architecture', 'sha256']) &&
     hasKeys(value.runtime, [
       'probeNode',

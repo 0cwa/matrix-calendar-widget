@@ -61,8 +61,11 @@ export type CalendarRepositoryErrorCode =
   | 'invalid-calendar-color'
   | 'invalid-range'
   | 'event-conflict'
+  | 'unsupported-calendar-components'
   | 'unsupported-patch'
   | 'authentication-required'
+  | 'capability-unavailable'
+  | 'private-client-capacity-reached'
   | 'request-failed';
 
 export class CalendarRepositoryError extends Error {

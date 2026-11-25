@@ -1,5 +1,7 @@
 # ADR008: Align with MSC4496 without requiring it
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
 - Status: Accepted
 - Date: 2026-09-22
 

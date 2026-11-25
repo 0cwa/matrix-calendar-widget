@@ -27,6 +27,7 @@ import {
 } from './RoomReminderScheduler';
 import {
   createReminderDeliveryKey,
+  normalizeRoomReminderConfiguration,
   RoomReminderConfiguration,
 } from './RoomReminderStore';
 
@@ -215,6 +216,104 @@ describe('RoomReminderScheduler', () => {
         'm.mentions': { room: true },
       },
     });
+  });
+
+  it('uses selected-user mention metadata and keeps recipient edits on the same firing identity', async () => {
+    const harness = createHarness();
+    const config = {
+      ...configuration('selected-planning'),
+      target: { kind: 'users' as const, userIds: ['@alice:example.org'] },
+    };
+    const firing = candidate(config, '20261002T100000Z');
+    await harness.store.upsertConfiguration(config);
+    harness.candidates.set(config.eventUid, [firing]);
+
+    const first = await harness.scheduler.runOnce();
+    const firstTransactionId = harness.sent[0]?.transactionId;
+    await harness.store.upsertConfiguration({
+      ...config,
+      target: { kind: 'users', userIds: ['@bob:example.org'] },
+    });
+    const afterEdit = await harness.scheduler.runOnce();
+
+    expect(first.deliveriesSent).toBe(1);
+    expect(harness.sent[0].message).toEqual({
+      type: 'm.room.message',
+      content: {
+        msgtype: 'm.text',
+        body: 'Reminder for selected-planning',
+        'm.mentions': { user_ids: ['@alice:example.org'] },
+      },
+    });
+    expect(firstTransactionId).toBe(
+      `mcal-reminder-${createReminderDeliveryKey(firing.identity)}`,
+    );
+    expect(afterEdit.deliveryClaimsAcquired).toBe(0);
+    expect(harness.sent).toHaveLength(1);
+  });
+
+  it('marks a selected-user firing skipped when no configured recipient remains joined', async () => {
+    const harness = createHarness();
+    const config = {
+      ...configuration('departed-recipients'),
+      target: { kind: 'users' as const, userIds: ['@former:example.org'] },
+    };
+    const firing = candidate(config, '20261002T100000Z');
+    await harness.store.upsertConfiguration(config);
+    harness.candidates.set(config.eventUid, [firing]);
+    harness.sender.sendRoomMention = jest
+      .fn()
+      .mockResolvedValue('no-current-recipients');
+    const markSkipped = jest.spyOn(harness.store, 'markDeliverySkipped');
+
+    const first = await harness.scheduler.runOnce();
+    const second = await harness.scheduler.runOnce();
+
+    expect(first.deliveriesSkippedNoCurrentRecipients).toBe(1);
+    expect(markSkipped).toHaveBeenCalledWith(
+      createReminderDeliveryKey(firing.identity),
+      expect.any(String),
+      'no-current-recipients',
+      expect.any(AbortSignal),
+    );
+    expect(second.deliveryClaimsAcquired).toBe(0);
+    expect(harness.sent).toHaveLength(0);
+  });
+
+  it('releases a claimed firing and rescans if recipient configuration changed before delivery', async () => {
+    const harness = createHarness();
+    const config = {
+      ...configuration('changed-before-delivery'),
+      target: { kind: 'users' as const, userIds: ['@alice:example.org'] },
+    };
+    const firing = candidate(config, '20261002T100000Z');
+    await harness.store.upsertConfiguration(config);
+    harness.candidates.set(config.eventUid, [firing]);
+    const claimDelivery = jest.spyOn(harness.store, 'claimDelivery');
+    claimDelivery.mockImplementationOnce(async (...args) => {
+      await harness.store.upsertConfiguration({
+        ...config,
+        target: { kind: 'users', userIds: ['@bob:example.org'] },
+      });
+      return InMemoryRoomReminderStore.prototype.claimDelivery.apply(
+        harness.store,
+        args,
+      );
+    });
+
+    const first = await harness.scheduler.runOnce();
+    const retry = await harness.scheduler.runOnce();
+
+    expect(first.deliveriesStale).toBe(1);
+    expect(first.deliveryClaimsReleased).toBe(1);
+    expect(harness.sent).toHaveLength(1);
+    expect((harness.sent[0].message as any).content['m.mentions']).toEqual({
+      user_ids: ['@bob:example.org'],
+    });
+    expect(retry.deliveriesSent).toBe(1);
+    expect(createReminderDeliveryKey(firing.identity)).toMatch(
+      /^[a-f0-9]{64}$/,
+    );
   });
 
   it('reuses the same Matrix transaction ID after an accepted send loses its response', async () => {
@@ -463,7 +562,7 @@ describe('RoomReminderScheduler', () => {
     expect(firstScan.deliveriesSent).toBe(1);
     expect(harness.sent.map((entry) => entry.roomId)).toEqual([roomId]);
     expect(listDueCandidatesSpy).toHaveBeenCalledWith(
-      existingConfig,
+      normalizeRoomReminderConfiguration(existingConfig),
       expect.anything(),
       undefined,
       1,
@@ -527,7 +626,7 @@ describe('RoomReminderScheduler', () => {
     harness.candidates.set(config.eventUid, [
       candidate(config, '20261002T100000Z'),
     ]);
-    jest.spyOn(harness.store, 'hasConfiguration').mockResolvedValue(false);
+    jest.spyOn(harness.store, 'getConfiguration').mockResolvedValue(undefined);
 
     const report = await harness.scheduler.runOnce();
 

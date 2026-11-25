@@ -804,8 +804,21 @@ function encodeProjectedRecurrenceIdentity(
   projected: CalendarEventDateTime,
   sourceIdentity: string,
 ): string {
+  if (projected.type === 'date') {
+    const source = JSON.parse(sourceIdentity) as unknown;
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(projected.value);
+    if (
+      !Array.isArray(source) ||
+      source[0] !== 'date' ||
+      !match ||
+      !isValidDate(match[1], match[2], match[3])
+    ) {
+      throw new Error('Projected recurrence value does not match DATE source');
+    }
+    return JSON.stringify(['date', projected.value]);
+  }
   if (projected.type !== 'date-time') {
-    throw new Error('Only zoned DATE-TIME recurrence is supported');
+    throw new Error('Only DATE or zoned DATE-TIME recurrence is supported');
   }
   const source = JSON.parse(sourceIdentity) as unknown[];
   const local = projected.value.local;

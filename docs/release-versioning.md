@@ -1,14 +1,25 @@
 # Release and versioning policy
 
+[Documentation](./README.md) · [Beta scope](./beta-scope.md) · [Release ledger](./RELEASE.md)
+
 This is the adopted policy for the current pre-alpha phase and for a possible
 future controlled beta. The bounded candidate scope and required evidence are
 defined in [beta-scope.md](./beta-scope.md); broader M4/M5/M8 work may remain
 open when that narrower contract is met. This policy does not configure a
 release, publish artifacts, or establish that any deployment is ready. The
-project remains pre-alpha: live deployment and publication are not authorized,
-breaking changes are allowed, and the project makes no compatibility or
-support promise. A passing candidate must still receive a separate release or
+project remains pre-alpha: breaking changes are allowed, and the project
+makes no production compatibility or support promise. This policy grants no
+live-deployment or publication authority; any scoped operator authorization
+is recorded separately. A passing candidate must still receive a separate release or
 rollout decision.
+
+**On this page**
+
+- [What the repository does today](#what-the-repository-does-today)
+- [Future controlled-beta version source and artifact map](#future-controlled-beta-version-source-and-artifact-map)
+- [Future controlled-beta tag channels and SemVer rules](#future-controlled-beta-tag-channels-and-semver-rules)
+- [Compatibility and rollback expectations](#compatibility-and-rollback-expectations)
+- [Maintainer release checklist](#maintainer-release-checklist)
 
 ## What the repository does today
 
@@ -16,8 +27,10 @@ The named workspaces currently use version `0.0.0`. The root, widget, calendar,
 timezone-data, and E2E manifests are marked private. The server workspace
 manifest does not set `private`, so it lacks the package-level publish guard
 present on the other workspaces. The root manifest includes Changesets, and
-`.changeset/config.json` is present, but the repository has no release workflow
-or package-publishing workflow. The Changesets configuration uses restricted
+`.changeset/config.json` is present, but the repository has no automated release-publication
+or package-publishing workflow. The manual
+[source-bound image archive](./deployment-docker.md#source-bound-image-archive)
+workflow creates temporary, verified build artifacts without publishing them. The Changesets configuration uses restricted
 access and enables version/tag handling for private packages; that configuration
 alone does not publish releases.
 

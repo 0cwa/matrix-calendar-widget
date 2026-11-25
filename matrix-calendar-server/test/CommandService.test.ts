@@ -148,6 +148,7 @@ describe('test CommandService', () => {
         anyString(),
         anyString(),
         anything(),
+        anyString(),
       ),
     ).thenResolve('Calendar command response');
     commandService = new CommandService(
@@ -200,7 +201,7 @@ describe('test CommandService', () => {
     expect(txt).toContain('Find and read events');
     expect(txt).toContain('Create and delete events');
     expect(txt).toContain('Set up this room');
-    expect(txt).toContain('!calendar upcoming 3 --tz Europe/Stockholm');
+    expect(txt).toContain('!calendar upcoming 3 --ids --tz Europe/Stockholm');
     expect(txt).toContain('!calendar event team-planning.ics');
     expect(txt).toContain('!calendar create 2026-10-22T10:00');
     expect(txt).toContain('Read events: calendar access must be enabled');
@@ -220,6 +221,42 @@ describe('test CommandService', () => {
     expect(message['m.relates_to']).toEqual({
       'm.in_reply_to': { event_id: 'some_event_id' },
     });
+  });
+
+  test('escapes dynamic calendar text in the Matrix HTML companion', async () => {
+    const matrix = makeCalendarMatrixClient(async () => {
+      throw new MatrixError(
+        { errcode: 'M_NOT_FOUND', error: 'not encrypted' },
+        404,
+      );
+    });
+    const calendarRunner = {
+      execute: jest
+        .fn()
+        .mockResolvedValue('Upcoming events:\n<script>alert("@room")</script>'),
+    } as unknown as CalendarCommandService;
+    const service = new CommandService(
+      matrix.client,
+      instance(welcomeWorkflowService),
+      appConfig,
+      appRuntimeContext,
+      calendarRunner,
+    );
+    const event = createEvent();
+    event.content.body = '!calendar upcoming';
+
+    await service.handleRoomMessage(ROOM_ID, event);
+
+    const [, message] = matrix.sendMessage.mock.calls[0];
+    expect(message.body).toBe(
+      'Upcoming events:\n<script>alert("@room")</script>',
+    );
+    expect(message.format).toBe('org.matrix.custom.html');
+    expect(message.formatted_body).toContain(
+      '&lt;script&gt;alert(&quot;@room&quot;)&lt;/script&gt;',
+    );
+    expect(message.formatted_body).not.toContain('<script>');
+    expect(message['m.mentions']).toEqual({});
   });
 
   test('calendar setup sends only room and sender to the setup service and replies with a localized safe status', async () => {
@@ -250,6 +287,7 @@ describe('test CommandService', () => {
         anyString(),
         anyString(),
         anything(),
+        anyString(),
       ),
     ).never();
     expect(captureCalendarMessage().body).toContain('ready');
@@ -660,6 +698,7 @@ describe('test CommandService', () => {
         '@sender:matrix.org',
         'unknown',
         anything(),
+        anyString(),
       ),
     ).once();
   });
@@ -686,6 +725,7 @@ describe('test CommandService', () => {
         anyString(),
         anyString(),
         anything(),
+        anyString(),
       ),
     ).never();
     expect(matrix.sendMessage).not.toHaveBeenCalled();
@@ -717,6 +757,7 @@ describe('test CommandService', () => {
         anyString(),
         anyString(),
         anything(),
+        anyString(),
       ),
     ).never();
     expect(matrix.sendMessage).not.toHaveBeenCalled();
@@ -748,6 +789,7 @@ describe('test CommandService', () => {
         anyString(),
         anyString(),
         anything(),
+        anyString(),
       ),
     ).never();
   });
@@ -850,6 +892,7 @@ describe('test CommandService', () => {
         '@sender:matrix.org',
         'create 2026-10-04T13:00 2026-10-04T14:00 "Planning meeting" --description "Bring the draft"',
         anything(),
+        anyString(),
       ),
     ).once();
     const [replyRoom, message] = capture(matrixClientMock.sendMessage).last();

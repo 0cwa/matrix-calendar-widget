@@ -16,6 +16,7 @@
 
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   ServiceUnavailableException,
   UnauthorizedException,
@@ -29,13 +30,15 @@ import {
 } from '../service/RoomCalendarCalDavAccess';
 import { RoomCalendarEventOperations } from '../service/RoomCalendarEventOperations';
 import { CanonicalReminderResourceData } from './CanonicalReminderIdentityResolver';
-import { resolveTriggerableReminderIdentity } from './ReminderConfigurationSourceValidator';
+import { resolveTriggerableReminderConfiguration } from './ReminderConfigurationSourceValidator';
 import {
   RoomMentionMatrixState,
+  RoomMentionRecipient,
   authorizeRoomMentionScheduling,
+  normalizeRoomMentionDisplayName,
 } from './RoomMentionPolicy';
 import {
-  RoomReminderConfigurationIdentity,
+  RoomReminderConfigurationRecord,
   assertReminderConfigurationCursorScope,
   assertReminderConfigurationIdentity,
   encodeReminderConfigurationCursor,
@@ -48,12 +51,19 @@ import {
 import {
   RoomReminderConfiguration,
   RoomReminderStore,
+  normalizeRoomReminderConfiguration,
 } from './RoomReminderStore';
 
 export type RoomReminderConfigurationPage = {
-  items: RoomReminderConfigurationIdentity[];
+  items: RoomReminderConfigurationRecord[];
   nextCursor?: string;
 };
+
+export type RoomReminderRecipientsResponse = Readonly<{
+  recipients: readonly RoomMentionRecipient[];
+}>;
+
+const MAX_ROOM_REMINDER_RECIPIENTS = 20_000;
 
 /**
  * Actor-facing configuration only. This service never sends messages and does
@@ -67,6 +77,7 @@ export class RoomReminderConfigurationService {
     private readonly roomCalendarAccess: RoomCalendarCalDavAccess,
     private readonly eventResources: RoomCalendarEventOperations,
     private readonly bindingRegistry: RoomCalendarBindingRegistry,
+    private readonly now: () => number = Date.now,
   ) {}
 
   /**
@@ -133,9 +144,9 @@ export class RoomReminderConfigurationService {
       throw unavailable();
     }
 
-    let items: RoomReminderConfigurationIdentity[];
+    let items: RoomReminderConfigurationRecord[];
     try {
-      items = rows.map((row) => publicIdentity(row));
+      items = rows.map((row) => publicConfiguration(row));
     } catch {
       throw unavailable();
     }
@@ -154,27 +165,114 @@ export class RoomReminderConfigurationService {
     };
   }
 
+  async listRecipients(
+    actorUserId: unknown,
+    roomId: unknown,
+  ): Promise<RoomReminderRecipientsResponse> {
+    this.assertEnabled();
+    const actor = requireCanonicalActor(actorUserId);
+    const target = await this.authorize(actor, roomId);
+    const getRecipients = this.matrixState.getJoinedRoomRecipients;
+    if (typeof getRecipients !== 'function') throw unavailable();
+
+    try {
+      const rows = await getRecipients.call(this.matrixState, target.roomId);
+      if (!Array.isArray(rows) || rows.length > MAX_ROOM_REMINDER_RECIPIENTS) {
+        throw new Error('invalid roster');
+      }
+
+      const seen = new Set<string>();
+      const recipients = rows.map((row) => {
+        if (
+          !row ||
+          !isCanonicalMatrixUserId(row.userId) ||
+          seen.has(row.userId)
+        ) {
+          throw new Error('invalid roster');
+        }
+        seen.add(row.userId);
+        return {
+          userId: row.userId,
+          displayName: normalizeRoomMentionDisplayName(row.displayName),
+        };
+      });
+      return { recipients };
+    } catch {
+      throw unavailable();
+    }
+  }
+
   async upsert(
     actorUserId: unknown,
     roomId: unknown,
     body: unknown,
-  ): Promise<RoomReminderConfigurationIdentity> {
+  ): Promise<RoomReminderConfigurationRecord> {
     this.assertEnabled();
     const input = parseReminderConfigurationUpsertInput(body);
     const actor = requireCanonicalActor(actorUserId);
     const target = await this.authorize(actor, roomId);
-    const identity = await this.resolveSourceIdentity(target, input);
+    await this.assertSelectedRecipientsAreJoined(target.roomId, input.target);
+    const resolution = await this.resolveSourceConfiguration(target, input);
+    const configurationIdentity = {
+      roomId: target.roomId,
+      calendarId: target.calendarId,
+      eventUid: resolution.identity.eventUid,
+      recurrenceId: resolution.identity.recurrenceId,
+      alarmUid: resolution.identity.alarmUid,
+    };
 
+    let expectedCurrent: RoomReminderConfiguration | undefined;
     try {
-      await this.store.upsertConfiguration({
-        roomId: target.roomId,
-        calendarId: target.calendarId,
-        ...identity,
-      });
+      expectedCurrent = await this.store.getConfiguration(
+        configurationIdentity,
+      );
     } catch {
       throw unavailable();
     }
-    return publicIdentity(identity);
+    const allDayScheduleChanged =
+      expectedCurrent === undefined ||
+      !sameAllDayReminderSchedule(
+        expectedCurrent.allDaySchedule,
+        input.allDaySchedule,
+      );
+    if (
+      allDayScheduleChanged &&
+      resolution.allDayReminderDueAt &&
+      !resolution.isRecurringSeries &&
+      resolution.allDayReminderDueAt.getTime() <= this.now()
+    ) {
+      throw new BadRequestException({
+        code: 'room-reminder-time-in-past',
+        message: 'Choose a future Matrix reminder time before saving',
+      });
+    }
+
+    let stored: boolean;
+    try {
+      stored = await this.store.compareAndUpsertConfiguration(
+        {
+          ...configurationIdentity,
+          target: input.target,
+          allDaySchedule: input.allDaySchedule,
+        },
+        expectedCurrent,
+      );
+    } catch {
+      throw unavailable();
+    }
+    if (!stored) {
+      throw new ConflictException({
+        code: 'room-reminder-configuration-changed',
+        message: 'Reminder settings changed while saving. Reload and try again',
+      });
+    }
+    try {
+      const current = await this.store.getConfiguration(configurationIdentity);
+      if (!current) throw new Error('Reminder configuration was not stored');
+      return publicConfiguration(current);
+    } catch {
+      throw unavailable();
+    }
   }
 
   async delete(
@@ -239,21 +337,27 @@ export class RoomReminderConfigurationService {
     };
   }
 
-  private async resolveSourceIdentity(
+  private async resolveSourceConfiguration(
     target: RoomCalendarTarget,
-    input: { eventId: string; recurrenceId: string | null; alarmUid: string },
-  ): Promise<RoomReminderConfigurationIdentity> {
+    input: {
+      eventId: string;
+      recurrenceId: string | null;
+      alarmUid: string;
+      allDaySchedule: RoomReminderConfiguration['allDaySchedule'];
+    },
+  ): Promise<ReturnType<typeof resolveTriggerableReminderConfiguration>> {
     const resource = await this.readSourceForTarget(target, input.eventId);
 
-    let identity: ReturnType<typeof resolveTriggerableReminderIdentity>;
+    let resolution: ReturnType<typeof resolveTriggerableReminderConfiguration>;
     try {
-      identity = resolveTriggerableReminderIdentity(
+      resolution = resolveTriggerableReminderConfiguration(
         {
           calendarId: target.calendarId,
           recurrenceId: input.recurrenceId,
           alarmUid: input.alarmUid,
         },
         resource,
+        input.allDaySchedule,
       );
     } catch {
       throw new BadRequestException({
@@ -261,7 +365,26 @@ export class RoomReminderConfigurationService {
         message: 'Event reminder source is not supported',
       });
     }
-    return publicIdentity(identity);
+    return resolution;
+  }
+
+  private async assertSelectedRecipientsAreJoined(
+    roomId: string,
+    target: RoomReminderConfiguration['target'],
+  ): Promise<void> {
+    if (!target || target.kind !== 'users') return;
+    let joined: readonly string[];
+    try {
+      joined = await this.matrixState.getJoinedRoomMembers(roomId);
+    } catch {
+      throw unavailable();
+    }
+    if (target.userIds.some((userId) => !joined.includes(userId))) {
+      throw new BadRequestException({
+        code: 'room-reminder-recipient-not-joined',
+        message: 'Selected recipients must be joined room members',
+      });
+    }
   }
 
   private async readSourceForTarget(
@@ -313,18 +436,37 @@ function requireCanonicalActor(value: unknown): string {
   return value;
 }
 
-function publicIdentity(
-  identity: Pick<
-    RoomReminderConfiguration,
-    'eventUid' | 'recurrenceId' | 'alarmUid'
-  >,
-): RoomReminderConfigurationIdentity {
-  assertReminderConfigurationIdentity(identity);
+function isCanonicalMatrixUserId(value: unknown): value is string {
+  return typeof value === 'string' && /^@[^\s:#?]+:[^\s?#]+$/.test(value);
+}
+
+function publicConfiguration(
+  configuration: RoomReminderConfiguration,
+): RoomReminderConfigurationRecord {
+  assertReminderConfigurationIdentity(configuration);
+  const normalized = normalizeRoomReminderConfiguration(configuration);
   return {
-    eventUid: identity.eventUid,
-    recurrenceId: identity.recurrenceId,
-    alarmUid: identity.alarmUid,
+    eventUid: configuration.eventUid,
+    recurrenceId: configuration.recurrenceId,
+    alarmUid: configuration.alarmUid,
+    target: normalized.target,
+    allDaySchedule: normalized.allDaySchedule,
+    revision: normalized.revision,
   };
+}
+
+function sameAllDayReminderSchedule(
+  left: RoomReminderConfiguration['allDaySchedule'],
+  right: RoomReminderConfiguration['allDaySchedule'],
+): boolean {
+  const normalizedLeft = left ?? null;
+  const normalizedRight = right ?? null;
+  return normalizedLeft === null
+    ? normalizedRight === null
+    : normalizedRight !== null &&
+        normalizedLeft.daysBefore === normalizedRight.daysBefore &&
+        normalizedLeft.localTime === normalizedRight.localTime &&
+        normalizedLeft.timezone === normalizedRight.timezone;
 }
 
 function unavailable(): ServiceUnavailableException {

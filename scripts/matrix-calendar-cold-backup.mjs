@@ -21,7 +21,16 @@ import {
   unlink,
   writeFile,
 } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  normalize,
+  relative,
+  resolve,
+  sep,
+} from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const COMPOSE_FILE = 'deploy/etke-sidecar.compose.yaml';
@@ -36,6 +45,7 @@ const RESTORE_INPUT_PREFIX = 'restore-input-';
 const MAX_RESTORE_INPUTS = 32;
 const MAX_RESTORE_INPUT_BYTES = 4 * 1024 * 1024;
 const MAX_RESTORE_INPUT_TOTAL_BYTES = 16 * 1024 * 1024;
+const MAX_COMPOSE_FILES = 16;
 const CAPTURE_MANIFEST_NAME = 'capture-manifest.json';
 const CHECKSUM_NAME = 'SHA256SUMS';
 const CAPTURE_MARKER_NAME = '.capture-complete';
@@ -57,6 +67,7 @@ const CONFIG_KEYS = new Set([
   'projectName',
   'projectDirectory',
   'composeEnvFile',
+  'composeFiles',
   'captureRoot',
   'dockerSocket',
   'helperImage',
@@ -104,6 +115,31 @@ function isRecord(value) {
 function isSafePath(value) {
   return (
     typeof value === 'string' && isAbsolute(value) && SAFE_PATH.test(value)
+  );
+}
+
+function isSafeComposeRelativePath(value) {
+  return (
+    typeof value === 'string' &&
+    value.length <= 4096 &&
+    SAFE_PATH.test(value) &&
+    !isAbsolute(value) &&
+    !value.includes('\\') &&
+    normalize(value) === value &&
+    value !== '.' &&
+    value
+      .split('/')
+      .every((segment) => segment !== '' && segment !== '.' && segment !== '..')
+  );
+}
+
+function isWithinDirectory(directory, filePath) {
+  const relativePath = relative(directory, filePath);
+  return (
+    relativePath !== '' &&
+    relativePath !== '..' &&
+    !relativePath.startsWith(`..${sep}`) &&
+    !isAbsolute(relativePath)
   );
 }
 
@@ -225,6 +261,18 @@ function validateConfig(config) {
     config.postgresContainer !== undefined
   ) {
     fail('configuration');
+  }
+
+  if (config.composeFiles !== undefined) {
+    if (
+      !Array.isArray(config.composeFiles) ||
+      config.composeFiles.length === 0 ||
+      config.composeFiles.length > MAX_COMPOSE_FILES ||
+      !config.composeFiles.every(isSafeComposeRelativePath) ||
+      new Set(config.composeFiles).size !== config.composeFiles.length
+    ) {
+      fail('configuration');
+    }
   }
 
   const restoreInputs = config.restoreInputs ?? [];
@@ -349,19 +397,42 @@ async function validateConfigFiles(config, runtimeEnv) {
   }
 
   let projectInfo;
-  let composeInfo;
+  let projectDirectory;
   try {
     projectInfo = await lstat(config.projectDirectory);
-    composeInfo = await lstat(join(config.projectDirectory, COMPOSE_FILE));
+    projectDirectory = await realpath(config.projectDirectory);
   } catch {
     fail('preflight');
   }
-  if (
-    !projectInfo.isDirectory() ||
-    composeInfo.isSymbolicLink() ||
-    !composeInfo.isFile()
-  ) {
-    fail('preflight');
+  if (!projectInfo.isDirectory()) fail('preflight');
+
+  const composeFiles = config.composeFiles ?? [COMPOSE_FILE];
+  const resolvedComposeFiles = [];
+  const resolvedComposePaths = new Set();
+  for (const composeFile of composeFiles) {
+    if (!isSafeComposeRelativePath(composeFile)) fail('preflight');
+    const composePath = resolve(projectDirectory, composeFile);
+    if (!isWithinDirectory(projectDirectory, composePath)) fail('preflight');
+    await requireNoSymlinkAncestors(composePath, 'preflight');
+    let composeInfo;
+    let canonicalComposePath;
+    try {
+      composeInfo = await lstat(composePath);
+      canonicalComposePath = await realpath(composePath);
+    } catch {
+      fail('preflight');
+    }
+    if (
+      composeInfo.isSymbolicLink() ||
+      !composeInfo.isFile() ||
+      canonicalComposePath !== composePath ||
+      !isWithinDirectory(projectDirectory, canonicalComposePath) ||
+      resolvedComposePaths.has(canonicalComposePath)
+    ) {
+      fail('preflight');
+    }
+    resolvedComposePaths.add(canonicalComposePath);
+    resolvedComposeFiles.push(canonicalComposePath);
   }
 
   await requirePrivateRegularFile(config.composeEnvFile, 'preflight');
@@ -420,8 +491,8 @@ async function validateConfigFiles(config, runtimeEnv) {
       fail('preflight');
     }
     return {
-      projectDirectory: await realpath(config.projectDirectory),
-      composeFile: await realpath(join(config.projectDirectory, COMPOSE_FILE)),
+      projectDirectory,
+      composeFiles: resolvedComposeFiles,
       composeEnvFile: await realpath(config.composeEnvFile),
       captureRoot: resolvedCaptureRoot,
       captureRootIdentity: directoryIdentity(resolvedCaptureRootInfo),
@@ -462,8 +533,7 @@ function composeArgs(config, paths, args) {
     paths.projectDirectory,
     '--env-file',
     paths.composeEnvFile,
-    '-f',
-    paths.composeFile,
+    ...paths.composeFiles.flatMap((composeFile) => ['-f', composeFile]),
     ...args,
   ];
 }

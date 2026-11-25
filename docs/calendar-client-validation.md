@@ -1,17 +1,25 @@
 # Calendar widget accessibility and client validation
 
+[Documentation](./README.md) · [Beta scope](./beta-scope.md) · [Release ledger](./RELEASE.md)
+
 This checklist separates automated calendar-widget evidence from testing in an
 actual Matrix client. The bounded beta targets Element Web and Element Desktop;
 test both against the isolated pinned Synapse, project-owned Radicale, and
 PostgreSQL stack before any production contact. The current candidate requires the actual standard side-panel WidgetCard,
-horizontal-overflow, and keyboard/focus checks described in `beta-scope.md`.
+horizontal-overflow, and keyboard/focus checks described in [beta scope](./beta-scope.md).
 Its separate ordinary-load performance gate uses the default seven-day List
-view, as specified in `calendar-performance.md`. The broader viewport
+view, as specified in [calendar performance](./calendar-performance.md). The broader viewport
 procedure below is reference guidance, not an additional candidate gate.
 Pinned/full-width Apps-drawer placement and Maximise/Un-maximise certification,
 mobile/other clients, and formal screen-reader certification are deferred
 beyond this beta. This local acceptance does not establish compatibility with
 a team host.
+
+**On this page**
+
+- [Automated evidence](#automated-evidence)
+- [Client and viewport test procedure](#client-and-viewport-test-procedure)
+- [Evidence status](#evidence-status)
 
 ## Automated evidence
 
@@ -24,12 +32,12 @@ The calendar-view, event-list, and event-details suites run in Vitest's
 | Event list and details                                | `Tab` to event, `Enter` to open, named dialog, `Escape` to close, focus returns to event | Covered                                                                                                         |
 | Calendar grid, event list, event details              | `vitest-axe` automated accessibility scan                                                | Covered; no violations in the tested fixtures                                                                   |
 | Actual CSS layout at multiple widths                  | Hosted Chromium production-preview fixture at four viewports                             | PR #216 passed 12/12 hosted cases at tree `911027044f96463a06e7d42cd2371ecf333662f7`; synthetic components only |
-| Element Web and Element Desktop                       | Embedded in real clients against isolated pinned services                                | Bounded Web journeys are recorded; complete Web/Desktop beta acceptance remains open                            |
+| Element Web and Element Desktop                       | Embedded in real clients against isolated pinned services                                | Passed for the frozen candidate in the [release ledger](./RELEASE.md); later source needs its own qualification |
 | Mobile clients and formal screen-reader certification | Actual platform and assistive technology run                                             | Deferred beyond this beta                                                                                       |
 
 The automated tests use synthetic events and an in-memory calendar repository.
-For this worktree, all 14 tests in the three listed suites passed on
-2026-10-03. They do not exercise a screen reader or a host client's widget
+The original source checkpoint recorded 14 passing tests in these suites on
+2026-10-03; this historical count is not the current full test inventory. They do not exercise a screen reader or a host client's widget
 permission flow.
 
 ## Client and viewport test procedure
@@ -93,28 +101,32 @@ embedded widget rather than substituting a desktop browser emulation result.
 
 ## Evidence status
 
-The hosted Chromium component fixture passed at the exact tree recorded in
-[browser validation](./browser-calendar-validation.md). Bounded actual Element
-Web journeys are also recorded, but they do not complete the ordinary-load or
-full beta acceptance gates. The latest ordinary-load result passed its recorded
-latency limits but failed overall after widget-opening errors in both event
-profiles; there is no clean 0/25 result yet. The paired Desktop journey and
-process cleanup also remain incomplete; completed cleanup observations have
-retained the fail-closed policy when process-clear evidence was unavailable.
-Automated happy-dom and standalone-browser results do not replace those
-host-client checks. Mobile clients and formal screen-reader certification are
-outside the current beta scope.
+The [release ledger](./RELEASE.md) is the authoritative record of candidate
+results. Frozen application source `99d4c9f9f36aa0b0861a13499a7f7cd512c56920`
+(tree `97022a9d2351655d2aae0a50a44a14bd81daacc9`) passed the recorded full
+Element Web/Desktop flows, keyboard/focus and side-panel checks, strict 0/25
+event timing, preservation, reminders, restart/restore, and owned cleanup.
+Those results establish isolated client acceptance for that source, not a
+completed operator pilot or automatic qualification of later commits.
 
-| Client target                      | Version / device       | Result         | Evidence                                                                                                                                        |
-| ---------------------------------- | ---------------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Element Web                        | Configured tag 1.12.30 | **Partial**    | Bounded hosted interactions are recorded; ordinary-load acceptance remains open after widget-opening errors.                                    |
-| Element Desktop                    | Not established        | **Incomplete** | Paired user-flow and process-cleanup evidence remain open; see [project status](./STATUS.md).                                                   |
-| Element for Android                | Not recorded           | **Deferred**   | Outside this beta scope                                                                                                                         |
-| Element for iOS                    | Not recorded           | **Deferred**   | Outside this beta scope                                                                                                                         |
-| Screen-reader certification        | Not recorded           | **Deferred**   | Outside this beta scope; axe is not certification                                                                                               |
-| Browser layout at listed viewports | Synthetic fixture      | **Passed**     | Hosted Chromium job, 12/12 cases at tree `911027044f96463a06e7d42cd2371ecf333662f7`; see [browser validation](./browser-calendar-validation.md) |
+Current-source results are tracked separately in [project status](./STATUS.md)
+and the ledger. In particular, public-feed source `abff46b` passed normal-bot
+Element acceptance while the appservice Desktop navigation path failed; see
+[issue #386](https://github.com/0cwa/matrix-calendar-widget/issues/386). Full
+appservice browser certification remains deferred by the bounded beta scope;
+both modes' backend/authentication/CalDAV contracts remain mandatory.
 
-The Web runs provide separate bounded results. Run
+| Target                               | Scope and evidence                                                                                                                                                                                           |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Element Web and Desktop              | Passed on the frozen source above; repeat the required flows for a replacement candidate.                                                                                                                    |
+| Public calendar subscription clients | A separate publication/revocation/restore journey is needed before claiming compatibility for the new feed feature.                                                                                          |
+| Android and iOS                      | Deferred; browser viewport emulation does not establish native client support. Calendar/Android host interoperability is owned here under [#372](https://github.com/0cwa/matrix-calendar-widget/issues/372). |
+| Screen readers                       | Formal certification remains deferred; axe and keyboard tests are separate evidence.                                                                                                                         |
+| Browser component layout             | Synthetic fixture results belong to their recorded source trees; see [browser validation](./browser-calendar-validation.md).                                                                                 |
+
+### Historical partial and failed runs
+
+The following earlier Web runs retain their original partial or failed outcomes. Run
 [37611136645](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37611136645)
 covered shared event create/read/edit, stale-write conflict and reload,
 outsider denial, and reminder recovery. G6 run
@@ -129,8 +141,9 @@ classifier reported the closed `element-web` namespace and
 no cause. The earlier failed run
 [37745671795](https://github.com/0cwa/matrix-calendar-widget/actions/runs/37745671795)
 on candidate `bbfef4062b9b21af2f5bf069fab7cf21413e0d66` remains part of the
-history. The current page-error failure rule remains in force, so the complete
-0/25 gate remains open.
+history. Those runs did not complete the gate. Later exact-source acceptance and its
+explicit opening-error diagnostic predicate are recorded in the release ledger;
+they do not retroactively change these failed results.
 
 Keep each partial, failed, and unavailable result visible in the candidate
 record. Add exact versions, measured dimensions, and retained evidence as those

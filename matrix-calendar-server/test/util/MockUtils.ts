@@ -47,6 +47,7 @@ export function createAppConfig(): IAppConfiguration {
     room_calendar_setup_allowed_actor_server_names: [],
     room_calendar_access_enabled: false,
     room_calendar_event_writes_enabled: false,
+    public_calendar_feed_enabled: false,
     room_calendar_action_messages_enabled: false,
     calendar_gateway_rate_limit_requests: 120,
     calendar_gateway_rate_limit_window_ms: 60_000,

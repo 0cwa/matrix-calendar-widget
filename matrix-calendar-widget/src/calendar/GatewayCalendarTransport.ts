@@ -89,7 +89,55 @@ export class GatewayCalendarTransport {
       );
     }
 
+    if (response.status === 503) {
+      let body: unknown;
+      try {
+        body = await response.clone().json();
+      } catch {
+        // Only the explicit disabled-capability code gets a specialized state.
+      }
+      if (
+        body &&
+        typeof body === 'object' &&
+        'code' in body &&
+        body.code === 'private-calendar-clients-disabled'
+      ) {
+        throw new CalendarRepositoryError(
+          'capability-unavailable',
+          'Calendar app access is not available',
+        );
+      }
+    }
+
     if (response.status === 409) {
+      let body: unknown;
+      try {
+        body = await response.clone().json();
+      } catch {
+        // A non-JSON conflict uses the ordinary event-conflict contract.
+      }
+      if (
+        body &&
+        typeof body === 'object' &&
+        'code' in body &&
+        body.code === 'public-calendar-feed-components-unsupported'
+      ) {
+        throw new CalendarRepositoryError(
+          'unsupported-calendar-components',
+          'Public calendar feeds require a VEVENT-only calendar',
+        );
+      }
+      if (
+        body &&
+        typeof body === 'object' &&
+        'code' in body &&
+        body.code === 'private-calendar-client-capacity-reached'
+      ) {
+        throw new CalendarRepositoryError(
+          'private-client-capacity-reached',
+          'Calendar app access limit reached',
+        );
+      }
       throw new CalendarRepositoryError(
         'event-conflict',
         'The event changed on the server',

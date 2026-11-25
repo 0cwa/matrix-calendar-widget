@@ -18,6 +18,15 @@
 import type { PlaywrightTestConfig } from '@playwright/test';
 import { devices } from '@playwright/test';
 
+function privateAcceptanceBrowserArguments(): string[] {
+  if (process.env.ELEMENT_ACCEPTANCE_PRIVATE_UI !== 'true') return [];
+  const pin = process.env.ELEMENT_ACCEPTANCE_PRIVATE_TLS_SPKI_PIN;
+  if (typeof pin !== 'string' || !/^[A-Za-z0-9+/]{43}=$/u.test(pin)) {
+    throw new Error('Private acceptance browser trust is unavailable');
+  }
+  return [`--ignore-certificate-errors-spki-list=${pin}`];
+}
+
 const config: PlaywrightTestConfig = {
   testDir: './src',
   testMatch: 'elementCalendarAcceptance.spec.ts',
@@ -39,6 +48,7 @@ const config: PlaywrightTestConfig = {
     trace: 'off',
     video: 'off',
     screenshot: 'off',
+    launchOptions: { args: privateAcceptanceBrowserArguments() },
     baseURL: 'http://127.0.0.1:8090',
   },
 };

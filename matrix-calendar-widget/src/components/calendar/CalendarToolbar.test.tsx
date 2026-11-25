@@ -16,16 +16,19 @@
 
 import {
   Calendar,
+  CalendarRepository,
+  CalendarRepositoryError,
   InMemoryCalendarRepository,
 } from '@matrix-calendar-widget/calendar';
 import {
+  act,
   fireEvent,
   render,
   screen,
   waitFor,
   within,
 } from '@testing-library/react';
-import { PropsWithChildren } from 'react';
+import { PropsWithChildren, useState } from 'react';
 import { CalendarRepositoryProvider } from '../../calendar';
 import { CalendarToolbar } from './CalendarToolbar';
 
@@ -63,7 +66,470 @@ function createWrapper(repository: InMemoryCalendarRepository) {
   };
 }
 
+function ContextSwitchingToolbar({
+  initialRepository,
+  nextRepository,
+}: {
+  initialRepository: CalendarRepository;
+  nextRepository: CalendarRepository;
+}) {
+  const [repository, setRepository] = useState(initialRepository);
+  return (
+    <>
+      <button onClick={() => setRepository(nextRepository)} type="button">
+        Switch repository context
+      </button>
+      <CalendarRepositoryProvider repository={repository}>
+        <CalendarToolbar
+          filters={{
+            startDate: '2026-09-01T00:00:00Z',
+            endDate: '2026-10-01T00:00:00Z',
+          }}
+          onRangeChange={vi.fn()}
+          onSearchChange={vi.fn()}
+          onViewChange={vi.fn()}
+          view="month"
+        />
+      </CalendarRepositoryProvider>
+    </>
+  );
+}
+
 describe('<CalendarToolbar />', () => {
+  it('loads private app access only after opening settings and explains when the server has it disabled', async () => {
+    const listClients = vi
+      .fn()
+      .mockRejectedValue(
+        new CalendarRepositoryError(
+          'capability-unavailable',
+          'private calendar clients disabled',
+        ),
+      );
+    const repository = Object.assign(
+      new InMemoryCalendarRepository({ calendars }),
+      {
+        listPrivateCalendarClients: listClients,
+        createPrivateCalendarClient: vi.fn(),
+        revokePrivateCalendarClient: vi.fn(),
+      },
+    );
+
+    render(
+      <CalendarToolbar
+        filters={{
+          startDate: '2026-09-01T00:00:00Z',
+          endDate: '2026-10-01T00:00:00Z',
+        }}
+        onRangeChange={vi.fn()}
+        onSearchChange={vi.fn()}
+        onViewChange={vi.fn()}
+        view="month"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(listClients).not.toHaveBeenCalled();
+    const accessButton = screen.getByRole('button', {
+      name: 'Calendar app access',
+    });
+    await waitFor(() => expect(accessButton).toBeEnabled());
+    fireEvent.click(accessButton);
+    expect(
+      await screen.findByText(
+        'Calendar app access is not available on this server.',
+      ),
+    ).toBeInTheDocument();
+    expect(listClients).toHaveBeenCalledTimes(1);
+    expect(listClients).toHaveBeenCalledWith('writable');
+    expect(
+      screen.queryByRole('button', { name: 'Create app access' }),
+    ).toBeNull();
+  });
+
+  it('shows a nonsecret recovery warning when stale creation cleanup fails after a repository switch', async () => {
+    const appId = `mcwpc~${'e'.repeat(48)}`;
+    const secret = 'stale-secret-hidden-from-current-context';
+    let resolveCreate!: (value: {
+      client: {
+        appId: string;
+        target: { target: 'personal'; calendarId: string };
+        state: 'active';
+        mapState: 'present';
+        createdAt: string;
+        expiresAt: string;
+      };
+      secret: string;
+      calendarUrl: string;
+    }) => void;
+    const createRequest = new Promise<{
+      client: {
+        appId: string;
+        target: { target: 'personal'; calendarId: string };
+        state: 'active';
+        mapState: 'present';
+        createdAt: string;
+        expiresAt: string;
+      };
+      secret: string;
+      calendarUrl: string;
+    }>((resolve) => {
+      resolveCreate = resolve;
+    });
+    const revokeOriginal = vi
+      .fn()
+      .mockRejectedValue(new Error('radicale.internal secret credential'));
+    const listOriginal = vi.fn().mockResolvedValue([]);
+    const originalRepository = Object.assign(
+      new InMemoryCalendarRepository({ calendars }),
+      {
+        listPrivateCalendarClients: listOriginal,
+        createPrivateCalendarClient: vi.fn().mockReturnValue(createRequest),
+        revokePrivateCalendarClient: revokeOriginal,
+      },
+    );
+    const revokeCurrent = vi.fn();
+    const listCurrent = vi.fn().mockResolvedValue([]);
+    const currentRepository = Object.assign(
+      new InMemoryCalendarRepository({ calendars }),
+      {
+        listPrivateCalendarClients: listCurrent,
+        createPrivateCalendarClient: vi.fn(),
+        revokePrivateCalendarClient: revokeCurrent,
+      },
+    );
+
+    render(
+      <ContextSwitchingToolbar
+        initialRepository={originalRepository}
+        nextRepository={currentRepository}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Calendar app access' }),
+    );
+    expect(
+      await screen.findByText(/No calendar app access has been created/),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Create app access' }));
+    expect(listOriginal).toHaveBeenCalledWith('writable');
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        hidden: true,
+        name: 'Switch repository context',
+      }),
+    );
+    await waitFor(() => expect(listCurrent).toHaveBeenCalledWith('writable'));
+
+    await act(async () => {
+      resolveCreate({
+        client: {
+          appId,
+          target: { target: 'personal', calendarId: 'writable' },
+          state: 'active',
+          mapState: 'present',
+          createdAt: '2026-10-21T10:00:00.000Z',
+          expiresAt: '2027-01-19T10:00:00.000Z',
+        },
+        secret,
+        calendarUrl: `https://widget-api.example.test/${appId}/calendar/`,
+      });
+      await createRequest;
+    });
+
+    expect(
+      await screen.findByText(/App access created for “Writable calendar”/),
+    ).toHaveTextContent(/may still be active/);
+    expect(revokeOriginal).toHaveBeenCalledWith(appId);
+    expect(revokeCurrent).not.toHaveBeenCalled();
+    expect(screen.queryByText(secret)).not.toBeInTheDocument();
+    expect(screen.queryByText(appId)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('radicale.internal secret credential'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('requires public link consent before publishing and offers a standard subscribe URL', async () => {
+    const publicUrl =
+      'https://feeds.example.test/v1/public-calendar-feeds/signed-capability';
+    const getPublication = vi
+      .fn()
+      .mockResolvedValue({ enabled: true, published: false });
+    const publishPublication = vi.fn().mockResolvedValue({
+      enabled: true,
+      published: true,
+      url: publicUrl,
+    });
+    const repository = Object.assign(
+      new InMemoryCalendarRepository({ calendars }),
+      {
+        getPublicCalendarFeedPublication: getPublication,
+        publishPublicCalendarFeed: publishPublication,
+        unpublishPublicCalendarFeed: vi.fn(),
+      },
+    );
+
+    render(
+      <CalendarToolbar
+        filters={{
+          startDate: '2026-09-01T00:00:00Z',
+          endDate: '2026-10-01T00:00:00Z',
+        }}
+        onRangeChange={vi.fn()}
+        onSearchChange={vi.fn()}
+        onViewChange={vi.fn()}
+        view="month"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Public feed' }));
+    expect(
+      await screen.findByText(/Anyone with the link can read every event/i),
+    ).toBeInTheDocument();
+    expect(getPublication).toHaveBeenCalledWith('writable');
+
+    const publishButton = screen.getByRole('button', { name: 'Publish feed' });
+    expect(publishButton).toBeDisabled();
+    expect(publishPublication).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      screen.getByRole('checkbox', {
+        name: 'I understand that anyone with the link can read this calendar.',
+      }),
+    );
+    expect(publishButton).toBeEnabled();
+    fireEvent.click(publishButton);
+
+    const subscribeLink = await screen.findByRole('link', {
+      name: 'Subscribe in a calendar app',
+    });
+    expect(subscribeLink).toHaveAttribute(
+      'href',
+      publicUrl.replace('https:', 'webcal:'),
+    );
+    expect(screen.getByDisplayValue(publicUrl)).toBeInTheDocument();
+    expect(publishPublication).toHaveBeenCalledWith('writable', true);
+  });
+
+  it('selects the room calendar by its widget label and requires fresh consent', async () => {
+    const roomCalendarId = 'matrix-calendar-target://room/element-acceptance';
+    const targetCalendars: Calendar[] = [
+      { id: 'personal-calendar', name: 'Personal calendar', readOnly: false },
+      {
+        id: roomCalendarId,
+        name: 'Room calendar',
+        readOnly: true,
+        operatorManaged: true,
+        supportedComponents: ['VEVENT'],
+      },
+    ];
+    const getPublication = vi
+      .fn()
+      .mockResolvedValue({ enabled: true, published: false });
+    const publishPublication = vi.fn();
+    const repository = Object.assign(
+      new InMemoryCalendarRepository({ calendars: targetCalendars }),
+      {
+        getPublicCalendarFeedPublication: getPublication,
+        publishPublicCalendarFeed: publishPublication,
+        unpublishPublicCalendarFeed: vi.fn(),
+      },
+    );
+
+    render(
+      <CalendarToolbar
+        filters={{
+          startDate: '2026-09-01T00:00:00Z',
+          endDate: '2026-10-01T00:00:00Z',
+        }}
+        onRangeChange={vi.fn()}
+        onSearchChange={vi.fn()}
+        onViewChange={vi.fn()}
+        view="month"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Public feed' }));
+    const confirmation = await screen.findByRole('checkbox', {
+      name: 'I understand that anyone with the link can read this calendar.',
+    });
+    fireEvent.click(confirmation);
+    expect(confirmation).toBeChecked();
+
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Calendar' }));
+    const calendarListbox = await screen.findByRole('listbox');
+    fireEvent.click(
+      within(calendarListbox).getByRole('option', {
+        name: 'Room calendar',
+      }),
+    );
+
+    await waitFor(() => {
+      expect(getPublication).toHaveBeenCalledWith(roomCalendarId);
+    });
+    expect(confirmation).not.toBeChecked();
+    expect(screen.getByRole('button', { name: 'Publish feed' })).toBeDisabled();
+    expect(publishPublication).not.toHaveBeenCalled();
+  });
+
+  it('can unpublish without a public URL and hides native error details', async () => {
+    const unpublishPublication = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('private native token path'))
+      .mockResolvedValue({ enabled: false, published: false });
+    const repository = Object.assign(
+      new InMemoryCalendarRepository({ calendars }),
+      {
+        getPublicCalendarFeedPublication: vi
+          .fn()
+          .mockResolvedValue({ enabled: false, published: true }),
+        publishPublicCalendarFeed: vi.fn(),
+        unpublishPublicCalendarFeed: unpublishPublication,
+      },
+    );
+
+    render(
+      <CalendarToolbar
+        filters={{
+          startDate: '2026-09-01T00:00:00Z',
+          endDate: '2026-10-01T00:00:00Z',
+        }}
+        onRangeChange={vi.fn()}
+        onSearchChange={vi.fn()}
+        onViewChange={vi.fn()}
+        view="month"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Public feed' }));
+    expect(
+      await screen.findByText(/server cannot provide its public URL/i),
+    ).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Unpublish' }));
+    expect(
+      await screen.findByText(
+        'Could not unpublish this calendar. Check your permissions and try again.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText('private native token path'),
+    ).not.toBeInTheDocument();
+    expect(unpublishPublication).toHaveBeenCalledWith('writable');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Unpublish' }));
+    await waitFor(() => {
+      expect(unpublishPublication).toHaveBeenCalledTimes(2);
+    });
+    expect(
+      screen.queryByText(/server cannot provide its public URL/i),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Unpublish' })).toBeNull();
+  });
+
+  it('allows retrying when publication settings fail to load', async () => {
+    const getPublication = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValue({ enabled: true, published: false });
+    const repository = Object.assign(
+      new InMemoryCalendarRepository({ calendars }),
+      {
+        getPublicCalendarFeedPublication: getPublication,
+        publishPublicCalendarFeed: vi.fn(),
+        unpublishPublicCalendarFeed: vi.fn(),
+      },
+    );
+
+    render(
+      <CalendarToolbar
+        filters={{
+          startDate: '2026-09-01T00:00:00Z',
+          endDate: '2026-10-01T00:00:00Z',
+        }}
+        onRangeChange={vi.fn()}
+        onSearchChange={vi.fn()}
+        onViewChange={vi.fn()}
+        view="month"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Public feed' }));
+    expect(
+      await screen.findByText(
+        'Could not load public feed settings. Check your connection and your permission to manage this calendar, then try again.',
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+
+    expect(
+      await screen.findByRole('checkbox', {
+        name: 'I understand that anyone with the link can read this calendar.',
+      }),
+    ).not.toBeChecked();
+    expect(getPublication).toHaveBeenCalledTimes(2);
+  });
+
+  it('explains when a calendar has unsupported components and the server refuses publication', async () => {
+    const mixedCalendar: Calendar = {
+      id: 'mixed',
+      name: 'Mixed calendar',
+      readOnly: false,
+      supportedComponents: ['VEVENT', 'VTODO', 'VJOURNAL'],
+    };
+    const repository = Object.assign(
+      new InMemoryCalendarRepository({ calendars: [mixedCalendar] }),
+      {
+        getPublicCalendarFeedPublication: vi
+          .fn()
+          .mockResolvedValue({ enabled: true, published: false }),
+        publishPublicCalendarFeed: vi
+          .fn()
+          .mockRejectedValue(
+            new CalendarRepositoryError(
+              'unsupported-calendar-components',
+              'Public calendar feeds require a VEVENT-only calendar',
+            ),
+          ),
+        unpublishPublicCalendarFeed: vi.fn(),
+      },
+    );
+
+    render(
+      <CalendarToolbar
+        filters={{
+          startDate: '2026-09-01T00:00:00Z',
+          endDate: '2026-10-01T00:00:00Z',
+        }}
+        onRangeChange={vi.fn()}
+        onSearchChange={vi.fn()}
+        onViewChange={vi.fn()}
+        view="month"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Public feed' }));
+    expect(
+      await screen.findByText(/reports component types beyond VEVENT/i),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('checkbox', {
+        name: 'I understand that anyone with the link can read this calendar.',
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Publish feed' }));
+
+    expect(
+      await screen.findByText(/server refused to publish it/i),
+    ).toBeInTheDocument();
+  });
+
   it('opens the calendar description editor', async () => {
     const repository = new InMemoryCalendarRepository({ calendars });
 

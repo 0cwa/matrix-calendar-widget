@@ -29,6 +29,12 @@ import {
   formatRoomReminderSetupHttpStatus,
   formatRoomReminderSetupMatrixErrorCode,
   formatRoomReminderSetupStage,
+  getPrivatePolicyBodyResult,
+  getPrivatePolicyCleanupFailure,
+  getPrivatePolicyCleanupHttpStatus,
+  getPrivatePolicyCleanupMatrixErrorCode,
+  getPrivatePolicyCleanupOperation,
+  getPrivatePolicyCleanupRetryDelayMs,
   getRoomAppServiceCaseFailureStage,
   getRoomAppServiceSetupStage,
   getRoomAppServiceTeardownFailure,
@@ -67,6 +73,7 @@ const ROOM_CASES = new Set([
   'unauthorized-write',
   'bot-command-write',
   'bot-command-denial',
+  'private-client-live-policy',
 ]);
 const ROOM_FAILURE_CASES = new Map([
   ['room-appservice-exact-binding', 'exact-binding'],
@@ -76,6 +83,7 @@ const ROOM_FAILURE_CASES = new Map([
   ['room-appservice-unauthorized-write', 'unauthorized-write'],
   ['room-appservice-bot-command-write', 'bot-command-write'],
   ['room-appservice-bot-command-denial', 'bot-command-denial'],
+  ['room-appservice-private-client-live-policy', 'private-client-live-policy'],
 ]);
 const ALLOWED_ERROR_NAMES = new Set([
   'AbortError',
@@ -309,6 +317,14 @@ export function formatRoomAppServiceFailureDiagnostic(
     const testCase = ROOM_FAILURE_CASES.get(match[1]);
     if (!testCase) continue;
     const stage = getRoomAppServiceCaseFailureStage(stageContent, testCase);
+    if (testCase === 'private-client-live-policy') {
+      const cleanupRetryDelayMs =
+        getPrivatePolicyCleanupRetryDelayMs(stageContent);
+      failureLines.push(
+        `room-appservice-test-failure case=${match[1]} body-result=${getPrivatePolicyBodyResult(stageContent) ?? 'unavailable'} phase=${stage ?? 'unavailable'} cleanup-operation=${getPrivatePolicyCleanupOperation(stageContent) ?? 'none'} cleanup-failure=${getPrivatePolicyCleanupFailure(stageContent) ?? 'none'} cleanup-http-status=${getPrivatePolicyCleanupHttpStatus(stageContent) ?? 'unavailable'} cleanup-matrix-error=${getPrivatePolicyCleanupMatrixErrorCode(stageContent) ?? 'unavailable'} cleanup-retry=${cleanupRetryDelayMs === undefined ? 'none' : 'rate-limited'} cleanup-retry-delay-ms=${cleanupRetryDelayMs ?? 'unavailable'} error-class=${getPrivatePolicyFailureClass(suite)}`,
+      );
+      continue;
+    }
     failureLines.push(
       `room-appservice-test-failure case=${match[1]} stage=${stage ?? 'unavailable'}`,
     );
@@ -328,6 +344,11 @@ export function formatRoomAppServiceFailureDiagnostic(
     );
   }
   return failureLines.join('\n');
+}
+
+function getPrivatePolicyFailureClass(suite) {
+  if (suite?.testExecError) return 'runtime';
+  return 'unavailable';
 }
 
 export function formatPersonalOpenIdSetupDiagnostic(testReport, stageContent) {

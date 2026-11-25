@@ -42,6 +42,9 @@ import { ConfigurationController } from './controller/ConfigurationController';
 import { GuestMemberController } from './controller/GuestMemberController';
 import { HealthCheckController } from './controller/HealthCheckController';
 import { MeetingController } from './controller/MeetingController';
+import { PrivateCalendarClientController } from './controller/PrivateCalendarClientController';
+import { PublicCalendarFeedController } from './controller/PublicCalendarFeedController';
+import { PublicCalendarFeedPublicationController } from './controller/PublicCalendarFeedPublicationController';
 import { RoomReminderAlarmOptionsController } from './controller/RoomReminderAlarmOptionsController';
 import { RoomReminderConfigurationController } from './controller/RoomReminderConfigurationController';
 import { WelcomeWorkflowController } from './controller/WelcomeWorkflowController';
@@ -58,6 +61,7 @@ import {
   AutojoinUpgradedRoomsMixin,
 } from './matrix/mixins';
 import { MatrixAuthMiddleware } from './middleware/MatrixAuthMiddleware';
+import type { PrivateCalendarClientStore } from './model/IPrivateCalendarClientStore';
 import type { RoomCalendarBindingStore } from './model/IRoomCalendarBindingStore';
 import { IRoomMatrixEvents } from './model/IRoomMatrixEvents';
 import { ModuleProviderToken } from './ModuleProviderToken';
@@ -77,11 +81,25 @@ import { CommandService } from './service/CommandService';
 import { ConfiguredRoomCalendarPrincipalIdentityProvider } from './service/ConfiguredRoomCalendarPrincipalIdentityProvider';
 import { ControlRoomMigrationService } from './service/ControlRoomMigrationService';
 import { DisabledRoomCalendarBindingStore } from './service/DisabledRoomCalendarBindingStore';
+import { GatewayAccessService } from './service/GatewayAccessService';
+import { GatewayCalendarService } from './service/GatewayCalendarService';
+import { GatewayContextService } from './service/GatewayContextService';
+import { GatewayEventService } from './service/GatewayEventService';
 import { GuestMemberService } from './service/GuestMemberService';
 import type { RoomCalendarBindingRegistry } from './service/IRoomCalendarBindingRegistry';
 import { MatrixCalendarAuthorizationFactory } from './service/MatrixCalendarAuthorization';
 import { MeetingService } from './service/MeetingService';
+import {
+  DisabledPrivateCalendarClientStore,
+  PostgresPrivateCalendarClientStore,
+} from './service/PostgresPrivateCalendarClientStore';
 import { PostgresRoomCalendarBindingStore } from './service/PostgresRoomCalendarBindingStore';
+import { PrivateCalendarClientCallbackGateway } from './service/private-client/PrivateCalendarClientCallbackGateway';
+import { PrivateCalendarClientDavGateway } from './service/private-client/PrivateCalendarClientDavGateway';
+import { isPrivateCalendarClientDavPath } from './service/private-client/PrivateCalendarClientPath';
+import { PrivateCalendarClientPolicy } from './service/private-client/PrivateCalendarClientPolicy';
+import { PrivateCalendarClientService } from './service/private-client/PrivateCalendarClientService';
+import { PublicCalendarFeedService } from './service/public-feed/PublicCalendarFeedService';
 import { RoomCalendarBindingRegistryAdapter } from './service/RoomCalendarBindingRegistryAdapter';
 import { RoomCalendarCalDavAccess } from './service/RoomCalendarCalDavAccess';
 import { RoomCalendarEventAuditService } from './service/RoomCalendarEventAuditService';
@@ -100,6 +118,9 @@ import { DoesWidgetWithIdExistConstraint } from './validator/DoesWidgetWithIdExi
 const logger = new Logger('app.module');
 const appControllers = [
   CalendarGatewayController,
+  PublicCalendarFeedController,
+  PublicCalendarFeedPublicationController,
+  PrivateCalendarClientController,
   CommandController,
   ConfigurationController,
   HealthCheckController,
@@ -204,6 +225,43 @@ const roomCalendarBindingStoreFactory: FactoryProvider<
       postgresOptions,
     );
     const store = new PostgresRoomCalendarBindingStore(sql);
+    try {
+      await store.migrate();
+      return store;
+    } catch (error) {
+      await store.onApplicationShutdown();
+      throw error;
+    }
+  },
+  inject: [ModuleProviderToken.APP_CONFIGURATION],
+};
+
+const privateCalendarClientStoreFactory: FactoryProvider<
+  Promise<PrivateCalendarClientStore>
+> = {
+  provide: ModuleProviderToken.PRIVATE_CALENDAR_CLIENT_STORE,
+  useFactory: async (appConfig: IAppConfiguration) => {
+    if (
+      appConfig.private_calendar_clients_enabled !== true ||
+      !appConfig.private_calendar_client_database_url
+    ) {
+      return new DisabledPrivateCalendarClientStore();
+    }
+    const tlsMode =
+      appConfig.private_calendar_client_database_tls_mode ?? 'verify-full';
+    const databaseUrl = appConfig.private_calendar_client_database_url;
+    const postgresOptions = {
+      ...getPostgresDatabaseTlsOptions(tlsMode, databaseUrl),
+      max: 3,
+      connect_timeout: 5,
+      idle_timeout: 20,
+      connection: {
+        application_name: 'matrix-calendar-private-clients',
+        statement_timeout: 5_000,
+      },
+    } as unknown as Parameters<typeof postgres>[1];
+    const sql = postgres(databaseUrl, postgresOptions);
+    const store = new PostgresPrivateCalendarClientStore(sql);
     try {
       await store.migrate();
       return store;
@@ -347,6 +405,20 @@ const i18nFactory: FactoryProvider<void> = {
           return uuiv4();
         },
         redact: ['req.headers.authorization', 'matrix_event.content'],
+        autoLogging: {
+          // Publication queries contain canonical CalDAV hrefs; public URLs
+          // contain bearer capabilities. Neither path belongs in access logs.
+          ignore: (request) => {
+            const path = request.url ?? '';
+            return (
+              path.startsWith('/v1/calendar-feeds/') ||
+              path.startsWith('/v1/public-calendar-feeds/') ||
+              path.startsWith('/v1/calendar/private-clients') ||
+              path.startsWith('/v1/private-calendar-client-callback/') ||
+              isPrivateCalendarClientDavPath(path)
+            );
+          },
+        },
       },
     }),
   ],
@@ -356,6 +428,7 @@ const i18nFactory: FactoryProvider<void> = {
     appConfigurationFactory,
     roomReminderStoreFactory,
     roomCalendarBindingStoreFactory,
+    privateCalendarClientStoreFactory,
     roomCalendarBindingRegistryFactory,
     ...createRoomReminderModuleProviders(),
     roomMatrixEventsFactory,
@@ -478,6 +551,10 @@ const i18nFactory: FactoryProvider<void> = {
     JitsiClient,
     MeetingClient,
     MatrixCalendarAuthorizationFactory,
+    GatewayAccessService,
+    GatewayContextService,
+    GatewayEventService,
+    GatewayCalendarService,
     MatrixAuthMiddleware,
     LegacyMeetingDisabledGuard,
     {
@@ -561,6 +638,105 @@ const i18nFactory: FactoryProvider<void> = {
       ],
     },
     MatrixOpenIdCalDavCredentialProviderFactory,
+    {
+      provide: PublicCalendarFeedService,
+      useFactory: (
+        appConfig: IAppConfiguration,
+        authorizationFactory: MatrixCalendarAuthorizationFactory,
+        credentialProviderFactory: MatrixOpenIdCalDavCredentialProviderFactory,
+        roomCalendarCalDavAccess: RoomCalendarCalDavAccess,
+        nativeFetch: typeof fetch,
+      ) =>
+        new PublicCalendarFeedService(
+          appConfig,
+          authorizationFactory,
+          credentialProviderFactory,
+          roomCalendarCalDavAccess,
+          nativeFetch,
+        ),
+      inject: [
+        ModuleProviderToken.APP_CONFIGURATION,
+        MatrixCalendarAuthorizationFactory,
+        MatrixOpenIdCalDavCredentialProviderFactory,
+        ModuleProviderToken.ROOM_CALENDAR_CALDAV_ACCESS,
+        ModuleProviderToken.NATIVE_FETCH,
+      ],
+    },
+    {
+      provide: PrivateCalendarClientService,
+      useFactory: (
+        appConfig: IAppConfiguration,
+        authorizationFactory: MatrixCalendarAuthorizationFactory,
+        credentialProviderFactory: MatrixOpenIdCalDavCredentialProviderFactory,
+        roomCalendarCalDavAccess: RoomCalendarCalDavAccess,
+        store: PrivateCalendarClientStore,
+        nativeFetch: typeof fetch,
+      ) =>
+        new PrivateCalendarClientService(
+          appConfig,
+          authorizationFactory,
+          credentialProviderFactory,
+          roomCalendarCalDavAccess,
+          store,
+          nativeFetch,
+        ),
+      inject: [
+        ModuleProviderToken.APP_CONFIGURATION,
+        MatrixCalendarAuthorizationFactory,
+        MatrixOpenIdCalDavCredentialProviderFactory,
+        ModuleProviderToken.ROOM_CALENDAR_CALDAV_ACCESS,
+        ModuleProviderToken.PRIVATE_CALENDAR_CLIENT_STORE,
+        ModuleProviderToken.NATIVE_FETCH,
+      ],
+    },
+    {
+      provide: PrivateCalendarClientPolicy,
+      useFactory: (
+        appConfig: IAppConfiguration,
+        store: PrivateCalendarClientStore,
+        authorizationFactory: MatrixCalendarAuthorizationFactory,
+        matrixClient: MatrixClient,
+        roomCalendarCalDavAccess: RoomCalendarCalDavAccess,
+      ) =>
+        new PrivateCalendarClientPolicy(
+          appConfig,
+          store,
+          authorizationFactory,
+          matrixClient,
+          roomCalendarCalDavAccess,
+        ),
+      inject: [
+        ModuleProviderToken.APP_CONFIGURATION,
+        ModuleProviderToken.PRIVATE_CALENDAR_CLIENT_STORE,
+        MatrixCalendarAuthorizationFactory,
+        MatrixClient,
+        ModuleProviderToken.ROOM_CALENDAR_CALDAV_ACCESS,
+      ],
+    },
+    {
+      provide: PrivateCalendarClientCallbackGateway,
+      useFactory: (
+        appConfig: IAppConfiguration,
+        policy: PrivateCalendarClientPolicy,
+      ) => new PrivateCalendarClientCallbackGateway(appConfig, policy),
+      inject: [
+        ModuleProviderToken.APP_CONFIGURATION,
+        PrivateCalendarClientPolicy,
+      ],
+    },
+    {
+      provide: PrivateCalendarClientDavGateway,
+      useFactory: (
+        appConfig: IAppConfiguration,
+        policy: PrivateCalendarClientPolicy,
+        nativeFetch: typeof fetch,
+      ) => new PrivateCalendarClientDavGateway(appConfig, policy, nativeFetch),
+      inject: [
+        ModuleProviderToken.APP_CONFIGURATION,
+        PrivateCalendarClientPolicy,
+        ModuleProviderToken.NATIVE_FETCH,
+      ],
+    },
     MatrixClientAdapter,
     ReactionClient,
     WidgetClient,

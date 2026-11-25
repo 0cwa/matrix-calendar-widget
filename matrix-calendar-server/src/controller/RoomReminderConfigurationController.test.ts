@@ -28,7 +28,12 @@ describe('RoomReminderConfigurationController', () => {
   });
 
   it('marks every identity-bearing response no-store', () => {
-    for (const handler of ['list', 'upsert', 'delete'] as const) {
+    for (const handler of [
+      'list',
+      'listRecipients',
+      'upsert',
+      'delete',
+    ] as const) {
       expect(
         Reflect.getMetadata(
           HEADERS_METADATA,
@@ -40,10 +45,12 @@ describe('RoomReminderConfigurationController', () => {
 
   it('passes only the server context actor and route/body values to the service', async () => {
     const list = jest.fn().mockResolvedValue({ items: [] });
+    const listRecipients = jest.fn().mockResolvedValue({ recipients: [] });
     const upsert = jest.fn().mockResolvedValue({ eventUid: 'event' });
     const remove = jest.fn().mockResolvedValue({ deleted: true });
     const service = {
       list,
+      listRecipients,
       upsert,
       delete: remove,
     } as unknown as RoomReminderConfigurationService;
@@ -60,6 +67,7 @@ describe('RoomReminderConfigurationController', () => {
     };
 
     await controller.list(userContext, '!team:example.test', '20', 'cursor');
+    await controller.listRecipients(userContext, '!team:example.test');
     await controller.upsert(userContext, '!team:example.test', body);
     await controller.delete(userContext, '!team:example.test', body);
 
@@ -68,6 +76,10 @@ describe('RoomReminderConfigurationController', () => {
       '!team:example.test',
       '20',
       'cursor',
+    );
+    expect(listRecipients).toHaveBeenCalledWith(
+      '@alice:example.test',
+      '!team:example.test',
     );
     expect(upsert).toHaveBeenCalledWith(
       '@alice:example.test',

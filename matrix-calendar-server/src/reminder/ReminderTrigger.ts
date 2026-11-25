@@ -17,10 +17,13 @@
 import type { CalendarEventDuration } from '@matrix-calendar-widget/calendar';
 import { calendarLocalDateTimeToUnixMillis } from '@matrix-calendar-widget/calendar';
 import ICAL from 'ical.js';
+import type { RoomReminderAllDaySchedule } from './RoomReminderStore';
 
 export const MAX_REMINDER_REPEAT_COUNT = 100;
 export const MAX_REMINDER_TRIGGER_HORIZON_MS = 366 * 24 * 60 * 60 * 1000;
 export const MAX_REMINDER_EVENT_DURATION_MS = 366 * 24 * 60 * 60 * 1000;
+/** Bounds UTC projection differences while preserving local DATE scheduling. */
+export const MAX_REMINDER_TIMEZONE_OFFSET_MARGIN_MS = 32 * 60 * 60 * 1000;
 
 /**
  * Timing for one already-expanded VEVENT occurrence. The caller must pass
@@ -189,6 +192,159 @@ export function calculateDisplayReminderDueAt(
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Resolve the Matrix-specific schedule for one DATE occurrence. This instant
+ * is deliberately independent from the canonical VALARM trigger: DATE events
+ * have no timezone, so managers must choose a day offset, local wall time, and
+ * IANA zone in sidecar metadata. The VALARM still supplies the stable alarm
+ * identity and repeat definition.
+ */
+export function calculateAllDayReminderDueAt(
+  alarmSource: string,
+  schedule: RoomReminderAllDaySchedule,
+  occurrenceStartDate: string,
+  triggerOrdinal = 0,
+): Date | undefined {
+  try {
+    const alarmTiming = readReminderAlarmTimingOption(alarmSource);
+    if (
+      !alarmTiming ||
+      !isValidAllDaySchedule(schedule) ||
+      !isValidCalendarDate(occurrenceStartDate) ||
+      !Number.isSafeInteger(triggerOrdinal) ||
+      triggerOrdinal < 0 ||
+      triggerOrdinal > (alarmTiming.repeat?.count ?? 0)
+    ) {
+      return undefined;
+    }
+
+    const scheduledDate = shiftCalendarDate(
+      occurrenceStartDate,
+      -schedule.daysBefore,
+    );
+    const baseLocal = `${scheduledDate}T${schedule.localTime}:00`;
+    const baseInstant = calendarLocalDateTimeToUnixMillis(
+      baseLocal,
+      schedule.timezone,
+    );
+    if (!Number.isFinite(baseInstant)) return undefined;
+
+    const interval = alarmTiming.repeat?.interval;
+    const repeatMilliseconds = interval
+      ? ((interval.weeks * 7 + interval.days) * 86_400 +
+          interval.hours * 3_600 +
+          interval.minutes * 60 +
+          interval.seconds) *
+        1_000
+      : 0;
+    if (
+      (triggerOrdinal > 0 && (!interval || repeatMilliseconds <= 0)) ||
+      !Number.isSafeInteger(repeatMilliseconds * triggerOrdinal)
+    ) {
+      return undefined;
+    }
+    return validDate(
+      new Date(baseInstant + repeatMilliseconds * triggerOrdinal),
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+/** Apply the same bounded 366-day window to a DATE schedule and its repeats. */
+export function isAllDayReminderScheduleWithinLimits(
+  alarmSource: string,
+  schedule: RoomReminderAllDaySchedule,
+  occurrenceStartDate: string,
+): boolean {
+  try {
+    if (!isValidAllDaySchedule(schedule)) return false;
+    const alarmTiming = readReminderAlarmTimingOption(alarmSource);
+    if (!alarmTiming) return false;
+    const repeatCount = alarmTiming.repeat?.count ?? 0;
+    const firstDueAt = calculateAllDayReminderDueAt(
+      alarmSource,
+      schedule,
+      occurrenceStartDate,
+      0,
+    );
+    const lastDueAt = calculateAllDayReminderDueAt(
+      alarmSource,
+      schedule,
+      occurrenceStartDate,
+      repeatCount,
+    );
+    const eventAnchor = calendarLocalDateTimeToUnixMillis(
+      `${occurrenceStartDate}T${schedule.localTime}:00`,
+      schedule.timezone,
+    );
+    return Boolean(
+      firstDueAt &&
+      lastDueAt &&
+      Number.isFinite(eventAnchor) &&
+      Math.abs(firstDueAt.getTime() - eventAnchor) <=
+        MAX_REMINDER_TRIGGER_HORIZON_MS +
+          MAX_REMINDER_TIMEZONE_OFFSET_MARGIN_MS &&
+      Math.abs(lastDueAt.getTime() - eventAnchor) <=
+        MAX_REMINDER_TRIGGER_HORIZON_MS +
+          MAX_REMINDER_TIMEZONE_OFFSET_MARGIN_MS,
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isValidAllDaySchedule(schedule: RoomReminderAllDaySchedule): boolean {
+  if (
+    !schedule ||
+    !Number.isSafeInteger(schedule.daysBefore) ||
+    schedule.daysBefore < 0 ||
+    schedule.daysBefore > 366 ||
+    !/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(schedule.localTime) ||
+    typeof schedule.timezone !== 'string' ||
+    schedule.timezone.trim() !== schedule.timezone ||
+    schedule.timezone.length === 0 ||
+    schedule.timezone.length > 64
+  ) {
+    return false;
+  }
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: schedule.timezone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isValidCalendarDate(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (year < 1 || month < 1 || month > 12 || day < 1 || day > 31) {
+    return false;
+  }
+  const date = new Date(0);
+  date.setUTCFullYear(year, month - 1, day);
+  date.setUTCHours(0, 0, 0, 0);
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
+}
+
+function shiftCalendarDate(value: string, days: number): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) throw new Error('Invalid calendar date');
+  const date = new Date(0);
+  date.setUTCFullYear(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  date.setUTCHours(0, 0, 0, 0);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
 }
 
 /**

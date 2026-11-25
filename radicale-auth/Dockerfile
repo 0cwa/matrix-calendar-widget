@@ -12,6 +12,9 @@ FROM runtime-base AS image-base
 
 COPY --chown=radicale:radicale config /etc/radicale/config
 COPY --chown=radicale:radicale src/matrix_calendar_radicale_auth /opt/radicale-auth/src/matrix_calendar_radicale_auth
+COPY --chown=radicale:radicale \
+    src/matrix_calendar_private_client_callback.py \
+    /opt/radicale-auth/src/matrix_calendar_private_client_callback.py
 
 ENV PYTHONPATH=/opt/radicale-auth/src
 USER radicale
@@ -19,5 +22,7 @@ USER radicale
 FROM image-base AS test
 COPY --chown=radicale:radicale tests /opt/radicale-auth/tests
 RUN /app/bin/python -m unittest discover -s /opt/radicale-auth/tests -v
+RUN /app/bin/python /opt/radicale-auth/tests/public_feed_contract.py \
+    --radicale-config /etc/radicale/config
 
 FROM image-base AS runtime

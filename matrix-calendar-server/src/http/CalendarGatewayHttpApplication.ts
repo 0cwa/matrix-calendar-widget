@@ -18,11 +18,14 @@ import type { NestMiddleware, Type } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
+import { raw } from 'express';
 import { IAppConfiguration } from '../IAppConfiguration';
 import {
   BoundedFixedWindowSourceRateLimiter,
   CalendarGatewayRateLimitMiddleware,
 } from '../middleware/CalendarGatewayRateLimitMiddleware';
+import { PrivateCalendarClientCallbackGateway } from '../service/private-client/PrivateCalendarClientCallbackGateway';
+import { PrivateCalendarClientDavGateway } from '../service/private-client/PrivateCalendarClientDavGateway';
 import { configureRequestBodyLimits } from './RequestBodyLimits';
 
 export interface CalendarGatewayHttpApplication {
@@ -47,6 +50,10 @@ export async function createCalendarGatewayHttpApplication(
   // Nest applies its cors option during app.init(), after app.use registrations.
   app.enableCors();
   configureRequestBodyLimits(app);
+  app.use(
+    '/v1/private-calendar-client-callback',
+    raw({ type: 'application/octet-stream', limit: '16kb' }),
+  );
   const appConfig = app
     .get(ConfigService)
     .getOrThrow<IAppConfiguration>('config');
@@ -64,6 +71,14 @@ export async function createCalendarGatewayHttpApplication(
       calendarGatewayRateLimitMiddleware,
     ),
   );
+  const privateCallbackGateway = app.get<PrivateCalendarClientCallbackGateway>(
+    PrivateCalendarClientCallbackGateway,
+  );
+  app.use(privateCallbackGateway.use.bind(privateCallbackGateway));
+  const privateDavGateway = app.get<PrivateCalendarClientDavGateway>(
+    PrivateCalendarClientDavGateway,
+  );
+  app.use(privateDavGateway.use.bind(privateDavGateway));
   const matrixAuthMiddleware = app.get<NestMiddleware>(
     matrixAuthMiddlewareToken,
   );

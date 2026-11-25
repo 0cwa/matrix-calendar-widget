@@ -1,5 +1,7 @@
 # ADR 036: Bounded authoring of one conference link
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
 - Status: Accepted
 - Date: 2026-10-06
 

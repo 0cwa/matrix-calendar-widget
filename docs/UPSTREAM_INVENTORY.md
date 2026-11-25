@@ -1,6 +1,16 @@
 # NeoDateFix migration inventory
 
-This is a coarse migration map for the hard fork. It is deliberately architectural rather than file-by-file; update it as responsibilities move.
+[Documentation](./README.md) · [Current architecture](./ARCHITECTURE.md) · [Provenance](./UPSTREAM.md) · [Roadmap](./ROADMAP.md)
+
+This is the migration map for the hard fork. The lists below retain the original keep/adapt/retire rationale; use the current source maps and inventories when deciding whether a particular module can be removed.
+
+## Current migration state
+
+- Fork-owned package, image, and chart identities are in place; upstream attribution remains.
+- The primary calendar UI uses the calendar repository and gateway. Widget startup no longer initializes inherited meeting Redux or invitation acceptance, and old widget routes redirect to the calendar (#275/#276).
+- CalDAV discovery, event operations, Matrix OpenID, room authorization, bindings, and reminders are implemented. The gateway and bot still share the existing NestJS deployable.
+- Remaining legacy server code is tracked in the [server inventory](./legacy-server-inventory.md) and #277. Dependency/fixture removal #278 follows it; an inherited filename alone is not proof that code is unused.
+- The [Docker deployment guide](./deployment-docker.md) describes the current supported direction. [Helm material](../charts/README.md) remains a compatibility reference with its stated limitations.
 
 ## Keep and reuse aggressively
 
@@ -89,12 +99,12 @@ Direction:
 
 ### Docker / Helm
 
-Keep as reference only until renamed and redesigned.
+Fork identity has been renamed. Treat inherited Helm defaults as reference; use the current deployment guide for the owned Radicale and gateway setup.
 
 Direction:
 
 - do not publish inherited targets,
-- eventually produce fork-owned widget and gateway images,
+- retain fork-owned widget, gateway, and Radicale image names,
 - add Radicale integration examples without assuming Radicale must be bundled.
 
 ## Retire once replacement paths exist

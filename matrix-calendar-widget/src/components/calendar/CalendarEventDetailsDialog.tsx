@@ -41,9 +41,10 @@ import {
   Typography,
 } from '@mui/material';
 import { DateTime } from 'luxon';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  isCalendarRoomReminderRepository,
   useCalendarRepository,
   useCalendars,
   useDeleteCalendarEvent,
@@ -79,6 +80,21 @@ export function CalendarEventDetailsDialog({
   const [currentSourceEvent, setCurrentSourceEvent] = useState(sourceEvent);
   const [currentRecurrenceId, setCurrentRecurrenceId] = useState(recurrenceId);
   const [editing, setEditing] = useState(false);
+  const [reminderOptionsRevision, setReminderOptionsRevision] = useState(0);
+  const [requestedReminderSettings, setRequestedReminderSettings] = useState<{
+    calendarId: string;
+    eventId: string;
+    eventUid: string;
+    repository: typeof repository;
+    roomId?: string;
+    revision: number;
+  }>();
+  const reminderSettingsRequestRevision = useRef(0);
+  const eventDetailsDialogRef = useRef<HTMLDivElement>(null);
+  const getEventDetailsDialogElement = useCallback(
+    () => eventDetailsDialogRef.current,
+    [],
+  );
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState<
@@ -171,6 +187,7 @@ export function CalendarEventDetailsDialog({
 
     if (selectionChanged) {
       setEditing(false);
+      setRequestedReminderSettings(undefined);
       setDeleteOpen(false);
       setDeleteLoading(false);
       setDeleteError(undefined);
@@ -190,6 +207,28 @@ export function CalendarEventDetailsDialog({
         (calendar) => calendar.id === currentSourceEvent.calendarId,
       )
     : undefined;
+  const canManageRoomReminders = Boolean(
+    currentSourceEvent &&
+    eventCalendar?.operatorManaged === true &&
+    calendars.roomCapabilities?.canManageReminders === true &&
+    calendars.roomCapabilities?.calendarId === currentSourceEvent.calendarId &&
+    calendars.roomCapabilities?.roomId &&
+    isCalendarRoomReminderRepository(repository),
+  );
+  const canSaveAndConfigureRoomReminders = Boolean(
+    canManageRoomReminders &&
+    calendars.roomCapabilities?.canWriteEvents === true &&
+    eventCalendar?.readOnly !== true,
+  );
+  const reminderSettingsOpenRequest =
+    currentSourceEvent &&
+    requestedReminderSettings?.calendarId === currentSourceEvent.calendarId &&
+    requestedReminderSettings.eventId === currentSourceEvent.id &&
+    requestedReminderSettings.eventUid === currentSourceEvent.uid &&
+    requestedReminderSettings.roomId === calendars.roomCapabilities?.roomId &&
+    requestedReminderSettings.repository === repository
+      ? requestedReminderSettings.revision
+      : 0;
   const canMutate = Boolean(eventCalendar && !eventCalendar.readOnly);
   const deletesRecurringSeries = Boolean(
     currentSourceEvent?.recurrence?.rrule ||
@@ -331,6 +370,7 @@ export function CalendarEventDetailsDialog({
         maxWidth="sm"
         onClose={onClose}
         open={Boolean(currentEvent) && !editing}
+        ref={eventDetailsDialogRef}
       >
         {currentEvent && (
           <>
@@ -497,16 +537,25 @@ export function CalendarEventDetailsDialog({
                   </Stack>
                 )}
 
-                {currentSourceEvent &&
-                  eventCalendar?.operatorManaged === true &&
-                  calendars.roomCapabilities?.canManageReminders && (
-                    <CalendarRoomReminderControl
-                      calendarId={currentSourceEvent.calendarId}
-                      canManageReminders
-                      eventId={currentSourceEvent.id}
-                      eventUid={currentEvent.uid}
-                    />
-                  )}
+                {currentSourceEvent && canManageRoomReminders && (
+                  <CalendarRoomReminderControl
+                    calendarId={currentSourceEvent.calendarId}
+                    canManageReminders
+                    eventId={currentSourceEvent.id}
+                    eventUid={currentEvent.uid}
+                    eventTiming={currentEvent.timing}
+                    roomId={calendars.roomCapabilities?.roomId}
+                    isRecurringSeries={Boolean(
+                      currentSourceEvent.recurrence?.rrule ||
+                      currentSourceEvent.recurrence?.rdates?.length,
+                    )}
+                    calendarTimezone={eventCalendar?.timezone}
+                    openRequest={reminderSettingsOpenRequest}
+                    popperContainer={getEventDetailsDialogElement}
+                    refreshToken={reminderOptionsRevision}
+                    onEditCalendarReminder={() => setEditing(true)}
+                  />
+                )}
               </Stack>
             </DialogContent>
             <DialogActions>
@@ -539,6 +588,21 @@ export function CalendarEventDetailsDialog({
         <CalendarEventEditorDialog
           calendars={calendars.data}
           event={currentSourceEvent}
+          onSaveAndConfigureRoomReminders={
+            canSaveAndConfigureRoomReminders
+              ? (savedEvent) => {
+                  const revision = ++reminderSettingsRequestRevision.current;
+                  setRequestedReminderSettings({
+                    calendarId: savedEvent.calendarId,
+                    eventId: savedEvent.id,
+                    eventUid: savedEvent.uid,
+                    repository,
+                    roomId: calendars.roomCapabilities?.roomId,
+                    revision,
+                  });
+                }
+              : undefined
+          }
           occurrence={
             currentRecurrenceId && currentEvent
               ? { recurrenceId: currentRecurrenceId, event: currentEvent }
@@ -548,6 +612,7 @@ export function CalendarEventDetailsDialog({
           onSaved={(savedEvent, occurrenceEvent) => {
             setCurrentSourceEvent(savedEvent);
             setCurrentEvent(occurrenceEvent ?? savedEvent);
+            setReminderOptionsRevision((current) => current + 1);
             onSourceEventChange?.(savedEvent);
           }}
           onOccurrenceReloadRequired={(latestSourceEvent) => {

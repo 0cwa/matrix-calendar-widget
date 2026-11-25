@@ -1,5 +1,7 @@
 # CalDAV event transport boundary
 
+[Documentation](./README.md) · [Threat model](./threat-model.md) · [Discovery transport](./security-caldav-discovery.md)
+
 Credential-bearing CalDAV event `REPORT`, `GET`, `PUT`, and `DELETE` requests
 use manual redirect handling. The gateway rejects every 3xx response,
 including a redirect to the same origin, a different resource on that origin,
@@ -22,3 +24,7 @@ before identity validation or CalDAV work.
 
 This limit is per response and per gateway process. It does not limit response
 time, aggregate data over multiple requests, or discovery response bodies.
+
+Implementation: [CalDavEventClient](../matrix-calendar-server/src/caldav/CalDavEventClient.ts),
+[bounded response reader](../matrix-calendar-server/src/caldav/BoundedDavResponse.ts),
+and [request-body configuration](../matrix-calendar-server/src/http/RequestBodyLimits.ts).

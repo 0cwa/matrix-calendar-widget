@@ -1,7 +1,16 @@
 # ADR027: Restrict free/busy to an authorized, minimal projection
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
 - Status: Accepted
 - Date: 2026-10-03
+
+> **Later implementation (2026-10-21):** Room-calendar operations have since
+> been implemented behind default-off gates, as recorded in [status](../STATUS.md).
+> This free/busy decision remains policy-only: there is still no availability
+> API or widget surface. [ADR045 public feeds](./adr045-public-calendar-feeds.md)
+> publish a complete calendar representation by explicit choice; they do not
+> implement this minimal free/busy projection or relax its privacy requirements.
 
 ## Context
 

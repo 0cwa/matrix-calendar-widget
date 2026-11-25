@@ -2,18 +2,14 @@ name: Element Web acceptance
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - '.github/actions/element-acceptance/action.yml'
-      - '.github/workflows/element-acceptance.yml'
-      - 'dev/**'
-      - 'e2e/**'
-      - 'matrix-calendar-server/**'
-      - 'matrix-calendar-widget/**'
-      - 'packages/calendar/**'
-      - 'packages/ical-timezones/**'
-      - 'package.json'
-      - 'yarn.lock'
+    inputs:
+      private_ui:
+        description: Run the opt-in private calendar app UI and CalDAV lifecycle.
+        type: boolean
+        required: true
+        default: false
+  schedule:
+    - cron: '41 5 * * 1'
 
 permissions:
   contents: read
@@ -25,6 +21,7 @@ concurrency:
 jobs:
   element-web-acceptance:
     name: Element Web acceptance
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.private_ui }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
@@ -44,6 +41,7 @@ jobs:
         uses: ./.github/actions/element-acceptance
         with:
           principal-mode: appservice
+          private-ui: 'false'
 
   normal-bot-account-acceptance:
     name: Normal bot account acceptance
@@ -66,3 +64,4 @@ jobs:
         uses: ./.github/actions/element-acceptance
         with:
           principal-mode: bot-account
+          private-ui: ${{ github.event_name == 'workflow_dispatch' && inputs.private_ui && 'true' || 'false' }}

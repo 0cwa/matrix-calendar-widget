@@ -31,6 +31,7 @@ describe('parseCalendarCommand', () => {
       kind: 'upcoming',
       count: DEFAULT_UPCOMING_EVENT_COUNT,
       timeZone: 'UTC',
+      includeIds: false,
     });
     expect(
       parseCalendarCommand(`upcoming ${MAX_UPCOMING_EVENT_COUNT}`),
@@ -38,6 +39,7 @@ describe('parseCalendarCommand', () => {
       kind: 'upcoming',
       count: MAX_UPCOMING_EVENT_COUNT,
       timeZone: 'UTC',
+      includeIds: false,
     });
     expect(UPCOMING_HORIZON_DAYS).toBe(30);
   });
@@ -47,7 +49,22 @@ describe('parseCalendarCommand', () => {
       kind: 'upcoming',
       count: 3,
       timeZone: 'Europe/Stockholm',
+      includeIds: false,
     });
+  });
+
+  test('accepts the explicit resource ID option alongside the timezone option', () => {
+    expect(
+      parseCalendarCommand('upcoming 3 --ids --tz Europe/Stockholm'),
+    ).toEqual({
+      kind: 'upcoming',
+      count: 3,
+      timeZone: 'Europe/Stockholm',
+      includeIds: true,
+    });
+    expect(
+      parseCalendarCommand('upcoming --tz Europe/Stockholm --ids'),
+    ).toMatchObject({ kind: 'upcoming', includeIds: true });
   });
 
   test('parses event and delete resource IDs as opaque single path segments', () => {
@@ -154,6 +171,8 @@ describe('parseCalendarCommand', () => {
     ['duplicate timezone', 'upcoming --tz UTC --tz UTC'],
     ['timezone equals syntax', 'upcoming --tz=UTC'],
     ['unknown option', 'upcoming --limit 5'],
+    ['duplicate ID option', 'upcoming --ids --ids'],
+    ['ID option with a value', 'upcoming --ids=true'],
     ['numeric UTC offset', 'upcoming --tz +02:00'],
     ['invalid timezone', 'upcoming --tz Not/AZone'],
     ['event URL', 'event https://dav.example.test/a.ics'],

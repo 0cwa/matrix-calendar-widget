@@ -38,6 +38,18 @@ const MANAGE_POLICY = 'io.github.0cwa.matrix-calendar.manage';
 const MARKER_PATTERN =
   /^Reminder acceptance [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const MAX_TIMELINE_EVENTS = 100;
+const ROOM_REMINDER_CONFIGURATION_RECORD_FIXTURE = JSON.parse(
+  readFileSync(
+    new URL(
+      './fixtures/room-reminder-configuration-record.json',
+      import.meta.url,
+    ),
+    'utf8',
+  ),
+);
+const ROOM_REMINDER_CONFIGURATION_RECORD_KEYS = Object.freeze(
+  Object.keys(ROOM_REMINDER_CONFIGURATION_RECORD_FIXTURE),
+);
 const START_LEAD_MS = 150_000;
 const ALARM_OFFSET_MS = 60_000;
 const POST_DUE_SCAN_ALLOWANCE_MS = 90_000;
@@ -380,13 +392,94 @@ function roomQuery(fixture) {
   });
 }
 
+export function isRoomReminderConfigurationRecord(value) {
+  return (
+    hasExactKeys(value, ROOM_REMINDER_CONFIGURATION_RECORD_KEYS) &&
+    isValidReminderIdentity(value.eventUid) &&
+    isValidReminderRecurrenceId(value.recurrenceId) &&
+    isValidReminderIdentity(value.alarmUid) &&
+    isValidReminderTarget(value.target) &&
+    isValidAllDayReminderSchedule(value.allDaySchedule) &&
+    Number.isSafeInteger(value.revision) &&
+    value.revision > 0
+  );
+}
+
 function validConfigIdentity(value, eventUid, alarmUid) {
   return (
-    hasExactKeys(value, ['eventUid', 'recurrenceId', 'alarmUid']) &&
+    isRoomReminderConfigurationRecord(value) &&
     value.eventUid === eventUid &&
     value.recurrenceId === null &&
-    value.alarmUid === alarmUid
+    value.alarmUid === alarmUid &&
+    value.target.kind === 'room' &&
+    value.allDaySchedule === null
   );
+}
+
+function isValidReminderIdentity(value) {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= 255 &&
+    value.trim() === value &&
+    !/[\u0000-\u001f\u007f]/u.test(value)
+  );
+}
+
+function isValidReminderRecurrenceId(value) {
+  if (value === null) return true;
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= 1024 &&
+    value.trim() === value &&
+    !/[\u0000-\u001f\u007f]/u.test(value)
+  );
+}
+
+function isValidReminderTarget(value) {
+  if (!isRecord(value)) return false;
+  if (value.kind === 'room') return hasExactKeys(value, ['kind']);
+  return (
+    value.kind === 'users' &&
+    hasExactKeys(value, ['kind', 'userIds']) &&
+    Array.isArray(value.userIds) &&
+    value.userIds.length > 0 &&
+    value.userIds.length <= 50 &&
+    value.userIds.every(
+      (userId) =>
+        typeof userId === 'string' &&
+        userId.length <= 255 &&
+        /^@[^:\s?#]+:[^\s?#]+$/u.test(userId),
+    ) &&
+    new Set(value.userIds).size === value.userIds.length
+  );
+}
+
+function isValidAllDayReminderSchedule(value) {
+  if (value === null) return true;
+  if (
+    !hasExactKeys(value, ['daysBefore', 'localTime', 'timezone']) ||
+    !Number.isSafeInteger(value.daysBefore) ||
+    value.daysBefore < 0 ||
+    value.daysBefore > 366 ||
+    typeof value.localTime !== 'string' ||
+    !/^([01][0-9]|2[0-3]):[0-5][0-9]$/u.test(value.localTime) ||
+    typeof value.timezone !== 'string' ||
+    value.timezone.trim() !== value.timezone ||
+    value.timezone.length === 0 ||
+    value.timezone.length > 64 ||
+    /\s/u.test(value.timezone) ||
+    /[\u0000-\u001f\u007f]/u.test(value.timezone)
+  ) {
+    return false;
+  }
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value.timezone });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function readConfigPage(fetchImpl, fixture, token, phase) {
@@ -411,14 +504,7 @@ async function readConfigPage(fetchImpl, fixture, token, phase) {
     fail(phase);
   }
   for (const item of body.items) {
-    if (
-      !hasExactKeys(item, ['eventUid', 'recurrenceId', 'alarmUid']) ||
-      typeof item.eventUid !== 'string' ||
-      (item.recurrenceId !== null && typeof item.recurrenceId !== 'string') ||
-      typeof item.alarmUid !== 'string'
-    ) {
-      fail(phase);
-    }
+    if (!isRoomReminderConfigurationRecord(item)) fail(phase);
   }
   return body.items;
 }

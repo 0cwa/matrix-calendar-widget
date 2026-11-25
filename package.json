@@ -25,6 +25,7 @@
   },
   "devDependencies": {
     "@changesets/cli": "^2.30.0",
+    "@matrix-calendar-widget/calendar": "0.0.0",
     "depcheck": "^1.4.7",
     "husky": "^9.0.11",
     "ical.js": "^2.2.1",
@@ -40,7 +41,7 @@
     "yarn": ">=1.22.1 <2.0.0"
   },
   "scripts": {
-    "start": "yarn workspace @matrix-calendar-widget/widget start",
+    "start": "yarn dev",
     "dev": "yarn workspace @matrix-calendar-widget/widget dev",
     "build": "yarn workspaces run build",
     "tsc": "yarn workspaces run tsc",
@@ -55,9 +56,11 @@
     "prepare": "husky",
     "prettier:check": "prettier --check .",
     "prettier:write": "prettier --write .",
+    "docs:check": "node scripts/check-docs.mjs",
+    "docs:test": "node --test scripts/check-docs.test.mjs",
     "translate": "yarn workspaces run translate",
     "e2e": "yarn workspace e2e e2e",
-    "ci": "yarn prettier:check && yarn depcheck && yarn lint && yarn tsc && yarn workspace @matrix-calendar-widget/ical-timezones build && yarn workspace @matrix-calendar-widget/calendar build && yarn test:all && yarn build",
+    "ci": "yarn docs:test && yarn docs:check && yarn prettier:check && yarn depcheck && yarn lint && yarn tsc && yarn workspace @matrix-calendar-widget/ical-timezones build && yarn workspace @matrix-calendar-widget/calendar build && yarn workspace @matrix-calendar-widget/widget translate --ci --dry-run && yarn workspace @matrix-calendar-widget/server translate --ci --dry-run && yarn test:all && yarn workspace @matrix-calendar-widget/server test:migrate-postgres-cli && yarn build",
     "dev:services:up": "bash dev/up.sh",
     "dev:services:down": "docker compose -f dev/compose.yaml down",
     "dev:services:reset": "docker compose -f dev/compose.yaml down -v --remove-orphans"

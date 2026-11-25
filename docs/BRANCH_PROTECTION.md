@@ -1,7 +1,10 @@
 # Main branch protection
 
-GitHub's current protection settings for `main` are configured as described
-below and were confirmed through the repository API on 2026-10-02. Issue #29
+[Documentation](./README.md) · [Contributing](../CONTRIBUTING.md) · [Development checks](./DEVELOPMENT.md)
+
+This page records the intended `main` protection policy and the settings last
+confirmed through the repository API on 2026-10-02. Check the live rule when
+changing repository administration; the documentation date is not a new API verification. Issue #29
 records a trivial documentation-PR check for verifying that GitHub blocks
 merging while a required check is pending and allows merging only after all
 five required checks pass.
@@ -37,7 +40,7 @@ Prefer strict/up-to-date required checks once the project has multiple concurren
 
 ## Why these checks
 
-`Quality` covers formatting, fork-identity guardrails, Compose validation, dependency checks, and TypeScript checking.
+`Quality` covers local documentation links and anchors, validator regressions, formatting, fork-identity guardrails, Compose validation, dependency checks, and TypeScript checking.
 
 `Widget` covers the shared calendar package plus widget lint, translations, unit tests, and build.
 

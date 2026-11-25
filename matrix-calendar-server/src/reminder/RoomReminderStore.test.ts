@@ -19,6 +19,7 @@ import { createReminderDeliveryKey } from './PostgresRoomReminderStore';
 import {
   DisabledRoomReminderStore,
   ReminderStoreDisabledError,
+  normalizeRoomReminderConfiguration,
   validateReminderDeliveryIdentity,
   validateRoomReminderConfiguration,
 } from './RoomReminderStore';
@@ -73,7 +74,7 @@ describe('InMemoryRoomReminderStore configuration paging', () => {
       undefined,
       1,
     );
-    expect(firstPage).toEqual([master]);
+    expect(firstPage).toEqual([normalizeRoomReminderConfiguration(master)]);
 
     const secondPage = await store.listConfigurationPage(
       master.roomId,
@@ -85,7 +86,56 @@ describe('InMemoryRoomReminderStore configuration paging', () => {
       },
       1,
     );
-    expect(secondPage).toEqual([occurrence]);
+    expect(secondPage).toEqual([
+      normalizeRoomReminderConfiguration(occurrence),
+    ]);
+  });
+
+  it('rejects a stale configuration snapshot without replacing newer settings', async () => {
+    const store = new InMemoryRoomReminderStore();
+    const identity = {
+      roomId: '!team:example.org',
+      calendarId: 'team',
+      eventUid: 'planning',
+      recurrenceId: null,
+      alarmUid: 'alarm-1',
+    };
+    const firstSchedule = {
+      daysBefore: 1,
+      localTime: '09:00',
+      timezone: 'Europe/Stockholm',
+    };
+    const changedSchedule = { ...firstSchedule, daysBefore: 2 };
+
+    await store.upsertConfiguration({
+      ...identity,
+      allDaySchedule: firstSchedule,
+    });
+    const snapshot = await store.getConfiguration(identity);
+    expect(snapshot).toBeDefined();
+    await store.upsertConfiguration({
+      ...identity,
+      allDaySchedule: changedSchedule,
+    });
+
+    await expect(
+      store.compareAndUpsertConfiguration(
+        {
+          ...identity,
+          target: {
+            kind: 'users',
+            userIds: ['@alice:example.org'],
+          },
+          allDaySchedule: firstSchedule,
+        },
+        snapshot,
+      ),
+    ).resolves.toBe(false);
+    await expect(store.getConfiguration(identity)).resolves.toMatchObject({
+      target: { kind: 'room' },
+      allDaySchedule: changedSchedule,
+      revision: 2,
+    });
   });
 });
 
@@ -104,6 +154,55 @@ describe('createReminderDeliveryKey', () => {
       createReminderDeliveryKey({ ...identity }),
     );
     expect(createReminderDeliveryKey(identity)).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('normalizes legacy configuration rows to room-target timing defaults', () => {
+    expect(
+      normalizeRoomReminderConfiguration({
+        roomId: identity.roomId,
+        calendarId: identity.calendarId,
+        eventUid: identity.eventUid,
+        recurrenceId: null,
+        alarmUid: identity.alarmUid,
+      }),
+    ).toEqual({
+      roomId: identity.roomId,
+      calendarId: identity.calendarId,
+      eventUid: identity.eventUid,
+      recurrenceId: null,
+      alarmUid: identity.alarmUid,
+      target: { kind: 'room' },
+      allDaySchedule: null,
+      revision: 1,
+    });
+  });
+
+  it.each([
+    {
+      target: { kind: 'future-target', extra: true },
+      allDaySchedule: null,
+      revision: 1,
+    },
+    {
+      target: { kind: 'users', userIds: ['@alice:example.test'] },
+      allDaySchedule: {
+        daysBefore: 0,
+        localTime: '09:00',
+        timezone: 'Unknown/Zone',
+      },
+      revision: 1,
+    },
+  ])('fails closed for unknown reminder metadata', (metadata) => {
+    expect(() =>
+      normalizeRoomReminderConfiguration({
+        roomId: identity.roomId,
+        calendarId: identity.calendarId,
+        eventUid: identity.eventUid,
+        recurrenceId: null,
+        alarmUid: identity.alarmUid,
+        ...metadata,
+      } as any),
+    ).toThrow('Invalid room reminder configuration');
   });
 
   it.each([

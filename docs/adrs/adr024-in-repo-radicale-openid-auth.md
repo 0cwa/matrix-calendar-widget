@@ -1,5 +1,7 @@
 # ADR024: Own a clean-room OpenID authentication module for Radicale
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
 - Status: Accepted
 - Date: 2026-10-01
 - Supersedes: ADR009's external-only implementation-location requirement and
@@ -9,6 +11,17 @@
   decision 9. Authentication and authorization decisions remain in force.
 - Preserves: ADR006, ADR010, ADR014, and ADR015 identity, principal, and
   authorization decisions
+
+> **Later implementation (2026-10-21):** The dated status below predates the
+> implemented room read/write paths in
+> [ADR030](./adr030-gated-room-event-operations.md). Room capabilities remain
+> default-off; [ADR041](./adr041-optional-normal-bot-account-for-room-operations.md)
+> adds the optional normal-bot-account principal. [ADR045](./adr045-public-calendar-feeds.md)
+> separately uses native collection sharing for explicit public read-only
+> publication; it does not replace OpenID authentication for private CalDAV
+> access. Existing-store compatibility and target-host rollout remain subject
+> to [ADR037](./adr037-independent-radicale-store-for-controlled-beta.md) and
+> the [release evidence](../RELEASE.md).
 
 ## Implementation status (2026-10-02)
 

@@ -1,11 +1,14 @@
 # Upgrade and migration runbook
 
+[Documentation](./README.md) · [Backup and recovery](./backup-recovery.md) · [Release policy](./release-versioning.md)
+
 This document defines a release and recovery procedure for a future, reviewed
 Matrix Calendar deployment. It does not establish that the application is
 production-ready, validate an etke-managed host, or authorize a deployment or
 artifact publication. The repository remains pre-alpha; the current
-[release policy](./release-versioning.md) explicitly permits breaking changes
-and does not authorize live deployment or publication.
+[release policy](./release-versioning.md) permits breaking changes. Use the
+[release ledger](./RELEASE.md) for candidate evidence and the deployment
+owner's separate, target-specific authorization for operational work.
 
 The only described deployment example is an operator-run Compose sidecar with
 its own Radicale store. That sidecar is not an etke-managed Radicale upgrade,
@@ -13,6 +16,14 @@ does not use etke's existing `/data`, and does not migrate existing etke
 calendar data. An etke image override, runtime configuration, persistent-data
 continuity, PostgreSQL wiring, and rollback path still require operator
 validation on the actual host.
+
+**On this page**
+
+- [Data stores and migration behavior](#data-stores-and-migration-behavior)
+- [Before an upgrade](#before-an-upgrade)
+- [Apply and validate an upgrade](#apply-and-validate-an-upgrade)
+- [Failure and rollback](#failure-and-rollback)
+- [Deployment-specific stop conditions](#deployment-specific-stop-conditions)
 
 ## Data stores and migration behavior
 
@@ -38,12 +49,40 @@ path for this state, so validate a candidate against an isolated restore.
 disabled and no reminder-store schema migration runs. If configured, the
 server applies numbered migrations at startup to the separate
 `matrix_calendar` schema ([store implementation](../matrix-calendar-server/src/reminder/PostgresRoomReminderStore.ts),
-[startup wiring](../matrix-calendar-server/src/app.module.ts)). At base
-commit `cbd1a0a`, the source contains migration version 1. It creates
+[startup wiring](../matrix-calendar-server/src/app.module.ts)). The current
+source supports reminder migration version 4. Its schema includes
 `schema_migrations`, `room_reminder_configurations`, `reminder_deliveries`,
 and their indexes. It stores identifiers and delivery state, not event titles
 or bodies. Record the exact before/after schema versions for every release
 that changes them.
+
+**Optional binding PostgreSQL.** Moderator-driven room setup uses the independent
+`MATRIX_CALENDAR_BINDING_DATABASE_URL` setting and
+`matrix_calendar_bindings` schema. Its current migration version 1 creates
+`room_calendar_bindings` and indexes alongside its own migration ledger
+([binding store](../matrix-calendar-server/src/service/PostgresRoomCalendarBindingStore.ts)).
+Binding and reminder stores may share an application-owned database, but
+neither substitutes for the other. Record both schema versions and include
+both in recovery. If they use different databases, the single-database backup
+coordinator requires a separate operator procedure for the second database.
+
+**Optional private-client PostgreSQL.** The independently gated private
+CalDAV-client store uses `MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_URL` and the
+`matrix_calendar_private_clients` schema. Its current source supports migration
+version 2. The server uses this store only when
+`MATRIX_CALENDAR_PRIVATE_CLIENTS_ENABLED=true` and the database URL is
+configured. Back up and record this schema separately when it uses a different
+database.
+
+**Public share tokens and signing key.** Public calendar feeds store native
+share metadata inside Radicale `/data`; the gateway's dedicated signing key
+is external configuration. Preserve both in the same protected recovery point.
+Losing or rotating the key invalidates existing signed URLs without deleting
+the native shares. Reconcile or revoke those shares before issuing new links.
+An older Radicale backup can contain shares revoked since that recovery point;
+verify and reapply intended revocations in isolation before exposing restored
+public ingress. See [ADR045](./adrs/adr045-public-calendar-feeds.md) and
+[backup and recovery](./backup-recovery.md).
 
 **Legacy Matrix control-room migration.**
 `ENABLE_CONTROL_ROOM_MIGRATION` defaults to `false`
@@ -57,12 +96,77 @@ intended and rehearsed change; its sequential room-state writes can be partial
 when an individual update fails, and the startup migration does not restore
 prior state.
 
-The PostgreSQL migration runner serializes migrations with a transaction-level
+Each PostgreSQL migration runner serializes its migrations with a transaction-level
 advisory lock and executes pending migration SQL and its version records
 transactionally. Startup fails when the database or migration cannot be used. It
 also rejects a database whose recorded migration version is newer than the
 server supports. Do not hand-edit `schema_migrations`, run copied DDL, or treat
 startup migration failure as permission to downgrade the database.
+
+### Run PostgreSQL migrations without starting the Matrix application
+
+The server image contains the compiled PostgreSQL stores and their shared TLS
+helper under `/app/lib/src`, with Postgres.js under `/app/node_modules`. A
+standalone tool can load those existing modules while bypassing Nest and Matrix
+startup. Use the tool from the same reviewed source as the server image, mount
+the tool file read-only, and invoke Node as the container entrypoint so the
+server command does not run:
+
+```bash
+docker run --rm \
+  --network '<database-network>' \
+  --entrypoint node \
+  --mount type=bind,src='/absolute/path/matrix-calendar-migrate-postgres.mjs',dst=/tool/matrix-calendar-migrate-postgres.mjs,readonly \
+  --env MATRIX_CALENDAR_REMINDER_DATABASE_URL \
+  --env MATRIX_CALENDAR_REMINDER_DATABASE_TLS_MODE \
+  '<exact-server-image>' \
+  /tool/matrix-calendar-migrate-postgres.mjs \
+  --runtime-root /app --store reminders
+```
+
+Supply the selected store's URL and TLS mode through the operator's secret
+mechanism. Do not put database URLs in command arguments or logs. Select one or
+more stores explicitly with repeated `--store` options: `reminders`,
+`bindings`, or `private-clients`. `--store all` deliberately selects all three
+and requires a configured URL for each. Private clients also require
+`MATRIX_CALENDAR_PRIVATE_CLIENTS_ENABLED=true`. The command validates all
+selected URLs, TLS modes, selectors, and the private-client gate before opening
+any PostgreSQL pool; it does not inspect unrelated store configuration. Each
+selected store is migrated sequentially and its pool is closed on success or
+failure. The command reports only the selected store and failed stage, never
+the URL or driver exception.
+
+Run it only after confirming the target database and role, quiescing writers,
+and taking the separately coordinated PostgreSQL backup described above. The
+tool uses the same canonical store adapters as server startup, including their
+transaction locks and future-schema rejection. A successful result applies
+database schema migrations only; it does not start Matrix, migrate Matrix room
+state, migrate Radicale data, enable a feature gate, or provide a downgrade.
+The regular server startup continues to run its configured migrations.
+
+ADR044 adds reminder-store migrations 2, 3, and 4. Version 2 adds a Matrix target
+with a whole-room default, a nullable all-day schedule, and a configuration
+revision initialized to 1. Existing reminder settings and delivery identities
+remain in place. Version 3 adds a constrained terminal skip reason for
+deliveries whose selected recipients have all left; existing delivery rows
+keep their prior state. Version 4 adds `schedule_effective_at`; existing
+all-day schedules become active at migration time, while timed rows retain a
+null value. A schedule change resets this timestamp, but a recipient-only edit
+preserves it. The scheduler skips DATE firings that precede activation and
+keeps its normal catch-up window for schedules enabled before the due instant.
+The reminder restore acceptance helper snapshots and compares recipient
+targets, all-day schedules, activation timestamps, revisions, and delivery
+skip metadata after restore.
+
+Do not run a pre-ADR044 server with reminder delivery enabled while selected-
+user targets exist: older code cannot interpret those destinations and could
+send a whole-room mention. A server predating migration 4 also cannot honor
+all-day schedule activation times and could send a past DATE reminder after an
+edit or restart. For rollback, disable and quiesce delivery before starting
+older code, keep the forward-migrated database and all reminder rows, and leave
+delivery disabled until compatible code is restored. Prefer a compatible
+forward fix when selected-user reminders must stay active. There is no
+downgrade migration.
 
 Provision a dedicated application-owned database and role before enabling the
 store. The startup role needs permission to create and update this application's
@@ -72,10 +176,9 @@ production credentials, TLS settings, or database ownership on an operator
 host; see [ADR019](./adrs/adr019-postgresql-reminder-sidecar-store.md) and
 [ADR021](./adrs/adr021-postgresql-verified-tls.md).
 
-The source has no automatic CalDAV data migration. The existing M6 room-owned
-calendar path remains gated separately; passing a database migration does not
-enable room-calendar access or prove that an etke-host image can preserve its
-existing store.
+The source has no automatic CalDAV data migration. Room access, setup, writes,
+and reminders remain separate capability gates; passing a database migration
+does not enable them or establish compatibility with an existing managed store.
 
 ## Before an upgrade
 
@@ -163,9 +266,10 @@ unset.
    delete behavior. Check the migration record and that expected reminder
    identifiers remain available if the optional store is enabled. Do not use
    real user event contents in the report, and do not send real Matrix
-   notifications. Room-target checks remain unavailable until their separate
-   M6 authorization, appservice, cross-room-isolation, and deployment gates
-   pass.
+   notifications. For any enabled room capability, also check current membership/power, exact
+   binding, cross-room denial, and the selected principal mode. Include dynamic
+   setup or public-feed lifecycle checks only when those features are in the
+   reviewed release scope.
 5. **Record the result.** Record pass/fail, elapsed maintenance and restore
    times, release commit and image digests, chart/configuration revisions,
    database migration version, and any data or permission discrepancy. Do not
@@ -208,6 +312,6 @@ stop and plan a separate CalDAV migration with the operator; the Compose
 sidecar example creates an independent Radicale service and does not perform
 that migration.
 
-This runbook records a future procedure only. It does not execute an upgrade,
-create a release, publish images or charts, or imply that a live deployment or
-recovery rehearsal has passed.
+This runbook is a procedure, not an execution record. Consult the
+[release ledger](./RELEASE.md) and private operator record for completed
+rehearsals and target-specific decisions.

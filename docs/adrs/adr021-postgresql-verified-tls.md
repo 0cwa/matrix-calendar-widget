@@ -1,5 +1,7 @@
 # ADR021: Verify PostgreSQL transport by default
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
 - Status: Accepted
 - Date: 2026-09-27
 

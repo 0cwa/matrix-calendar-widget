@@ -35,6 +35,8 @@ import {
   MatrixAuthMiddleware,
   MX_IDENTITY,
 } from '../middleware/MatrixAuthMiddleware';
+import { PrivateCalendarClientCallbackGateway } from '../service/private-client/PrivateCalendarClientCallbackGateway';
+import { PrivateCalendarClientDavGateway } from '../service/private-client/PrivateCalendarClientDavGateway';
 import { createCalendarGatewayHttpApplication } from './CalendarGatewayHttpApplication';
 
 jest.mock('matrix-bot-sdk', () => ({
@@ -68,6 +70,24 @@ const configService = {
 
 let matrixAuthMiddleware: MatrixAuthMiddleware;
 const authMiddlewareUse = jest.fn();
+const privateCallbackGatewayUse = jest.fn(
+  (request: Request, response: Response, next: NextFunction) => {
+    if (request.path.startsWith('/v1/private-calendar-client-callback/')) {
+      response.status(Buffer.isBuffer(request.body) ? 204 : 400).end();
+      return;
+    }
+    next();
+  },
+);
+const privateDavGatewayUse = jest.fn(
+  (request: Request, response: Response, next: NextFunction) => {
+    if (request.path.startsWith('/mcwpc~')) {
+      response.status(207).send('reserved DAV route');
+      return;
+    }
+    next();
+  },
+);
 
 class TestMatrixAuthMiddleware {}
 
@@ -92,6 +112,14 @@ class CalendarGatewayHttpProbeController {
   providers: [
     { provide: ConfigService, useValue: configService },
     { provide: TestMatrixAuthMiddleware, useValue: testAuthMiddleware },
+    {
+      provide: PrivateCalendarClientCallbackGateway,
+      useValue: { use: privateCallbackGatewayUse },
+    },
+    {
+      provide: PrivateCalendarClientDavGateway,
+      useValue: { use: privateDavGatewayUse },
+    },
     MatrixAuthGuard,
   ],
 })
@@ -119,6 +147,26 @@ describe('calendar gateway HTTP middleware setup', () => {
         (request: Request, response: Response, next: NextFunction) =>
           matrixAuthMiddleware.use(request, response, next),
       );
+    privateCallbackGatewayUse.mockClear();
+    privateDavGatewayUse.mockClear();
+    privateCallbackGatewayUse.mockImplementation(
+      (request: Request, response: Response, next: NextFunction) => {
+        if (request.path.startsWith('/v1/private-calendar-client-callback/')) {
+          response.status(Buffer.isBuffer(request.body) ? 204 : 400).end();
+          return;
+        }
+        next();
+      },
+    );
+    privateDavGatewayUse.mockImplementation(
+      (request: Request, response: Response, next: NextFunction) => {
+        if (request.path.startsWith('/mcwpc~')) {
+          response.status(207).send('reserved DAV route');
+          return;
+        }
+        next();
+      },
+    );
     matrixAuthMiddleware = new MatrixAuthMiddleware(
       appConfiguration as IAppConfiguration,
     );
@@ -217,6 +265,37 @@ describe('calendar gateway HTTP middleware setup', () => {
     expect(response.statusCode).toBe(403);
     expect(response.headers['access-control-allow-origin']).toBe('*');
     expect(authMiddlewareUse).toHaveBeenCalledTimes(1);
+  });
+
+  it('dispatches the reserved root DAV namespace before Matrix authentication', async () => {
+    const authCallsBefore = authMiddlewareUse.mock.calls.length;
+    const response = await send(
+      'PROPFIND',
+      '/mcwpc~0123456789abcdef0123456789abcdef0123456789abcdef/calendar/',
+      { Depth: '1' },
+    );
+
+    expect(response.statusCode).toBe(207);
+    expect(response.body).toBe('reserved DAV route');
+    expect(authMiddlewareUse).toHaveBeenCalledTimes(authCallsBefore);
+    expect(privateDavGatewayUse).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps callback bodies as bounded raw bytes before Matrix authentication', async () => {
+    const authCallsBefore = authMiddlewareUse.mock.calls.length;
+    const response = await send(
+      'POST',
+      '/v1/private-calendar-client-callback/auth',
+      { 'Content-Type': 'application/octet-stream' },
+      '{"username":"synthetic"}',
+    );
+
+    expect(response.statusCode).toBe(204);
+    expect(authMiddlewareUse).toHaveBeenCalledTimes(authCallsBefore);
+    expect(privateCallbackGatewayUse).toHaveBeenCalledTimes(1);
+    expect(
+      Buffer.isBuffer(privateCallbackGatewayUse.mock.calls[0][0].body),
+    ).toBe(true);
   });
 
   it('keeps CORS headers on the existing request-body limit response', async () => {

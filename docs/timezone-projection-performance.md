@@ -1,6 +1,12 @@
 # Reusing exact timezone transition instants
 
-The bundled timezone adapter now computes UTC transition instants and the local
+[Documentation](./README.md) · [Calendar performance](./calendar-performance.md) · [Timezone data](./timezones-ical-data.md)
+
+This page preserves the historical transition-index optimization measurement.
+For current acceptance targets, see [calendar performance](./calendar-performance.md);
+for current test results, use the exact-source CI run.
+
+The bundled timezone adapter computes UTC transition instants and the local
 wall-time boundaries on each side once, when it constructs its cached exact
 transition list. Conversion and DST-gap checks reuse those numeric values,
 instead of constructing a Date for every transition on every lookup. The
@@ -10,7 +16,8 @@ No event data or conversion-result cache is introduced.
 Regressions cover both edges of Stockholm spring gaps and autumn overlaps,
 explicit RFC wall-time interpretation versus generated-gap rejection, and
 historical second-resolution Kolkata offsets after newer cache coverage.
-All 270 calendar-package tests pass.
+The candidate measurement recorded 270 passing calendar-package tests; this
+is historical evidence, not a current suite-count claim.
 
 ## Observed synchronous projection timings
 

@@ -1,6 +1,8 @@
 # iCalendar regression fixtures
 
-These fixtures are deliberately small and human-readable. They define interoperability cases that the future CalDAV/iCalendar adapter must preserve.
+[Documentation](../../docs/README.md) · [Calendar package](../../packages/calendar/README.md) · [Data model](../../docs/data-model.md)
+
+These fixtures are deliberately small and human-readable. They define interoperability cases that the CalDAV/iCalendar adapter must preserve.
 
 | Fixture                                        | Purpose                                                   |
 | ---------------------------------------------- | --------------------------------------------------------- |
@@ -22,7 +24,7 @@ These fixtures are deliberately small and human-readable. They define interopera
 | `vtimezone-stockholm-divergent-transition.ics` | recognized TZID with a conflicting autumn transition      |
 | `folded-escaped.ics`                           | escaped text and RFC 5545 content-line folding            |
 
-Rules for agents:
+## Adding or updating a fixture
 
 1. Minimize real-world bug samples before committing them.
 2. Never commit private calendar data.

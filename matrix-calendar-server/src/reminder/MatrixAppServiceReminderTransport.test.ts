@@ -18,6 +18,7 @@ import {
   MatrixAppServiceReminderTransport,
   MatrixReminderTransportError,
 } from './MatrixAppServiceReminderTransport';
+import { buildUserMentionMessage } from './RoomMentionMessage';
 import { ReminderSchedulerRuntimeSource } from './RoomReminderScheduler';
 
 const roomId = '!team:example.test';
@@ -99,6 +100,44 @@ describe('MatrixAppServiceReminderTransport', () => {
     expect(init?.signal).toBeInstanceOf(AbortSignal);
     expect(init?.signal).not.toBe(controller.signal);
     expect(init?.redirect).toBe('manual');
+  });
+
+  it('returns normalized joined-member labels without other profile fields', async () => {
+    const fetchMock = createFetchMock().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          joined: {
+            '@alice:example.test': {
+              display_name: '  Alice\nExample  ',
+              avatar_url: 'mxc://private-avatar',
+            },
+            '@bob:example.test': { display_name: '  ' },
+            '@carol:example.test': null,
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+
+    await expect(
+      createTransport(fetchMock).getJoinedRoomRecipients(roomId),
+    ).resolves.toEqual([
+      { userId: '@alice:example.test', displayName: 'Alice Example' },
+      { userId: '@bob:example.test', displayName: null },
+      { userId: '@carol:example.test', displayName: null },
+    ]);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(new URL(String(url)).pathname).toBe(
+      '/_matrix/client/v3/rooms/!team%3Aexample.test/joined_members',
+    );
+    expect(new URL(String(url)).searchParams.get('user_id')).toBe(senderUserId);
+    expect(new Headers(init?.headers).get('Authorization')).toBe(
+      `Bearer ${token}`,
+    );
+    expect(JSON.stringify(fetchMock.mock.calls)).not.toContain(
+      'private-avatar',
+    );
   });
 
   it('retains the appservice-only constructor while reading the runtime-selected identity', async () => {
@@ -273,6 +312,116 @@ describe('MatrixAppServiceReminderTransport', () => {
       body: 'A meeting is starting',
       'm.mentions': { room: true },
     });
+  });
+
+  it('filters selected user mentions to members still joined at send time', async () => {
+    const fetchMock = createFetchMock()
+      .mockResolvedValueOnce(missingState())
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ joined: { [senderUserId]: {} } }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            users: { [senderUserId]: 100 },
+            events: { 'm.room.message': 0 },
+            notifications: { room: 0 },
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ room_version: '10' }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            joined: {
+              '@alice:example.test': {},
+              [senderUserId]: {},
+            },
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ event_id: '$sent:example.test' }), {
+          status: 200,
+        }),
+      );
+    const message = buildUserMentionMessage('Reminder', [
+      '@alice:example.test',
+      '@former:example.test',
+    ]);
+
+    await expect(
+      createTransport(fetchMock).sendRoomMention(
+        roomId,
+        calendarId,
+        message,
+        `mcal-reminder-${'d'.repeat(64)}`,
+        new AbortController().signal,
+      ),
+    ).resolves.toBe('sent');
+
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+    const [url, init] = fetchMock.mock.calls[5];
+    expect(new URL(String(url)).pathname).toContain('/send/m.room.message/');
+    expect(JSON.parse(String(init?.body))).toEqual({
+      msgtype: 'm.text',
+      body: 'Reminder',
+      'm.mentions': { user_ids: ['@alice:example.test'] },
+    });
+  });
+
+  it('skips selected-user delivery without room fallback when every recipient left', async () => {
+    const fetchMock = createFetchMock()
+      .mockResolvedValueOnce(missingState())
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ joined: { [senderUserId]: {} } }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            users: { [senderUserId]: 100 },
+            events: { 'm.room.message': 0 },
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ room_version: '10' }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ joined: { [senderUserId]: {} } }), {
+          status: 200,
+        }),
+      );
+
+    await expect(
+      createTransport(fetchMock).sendRoomMention(
+        roomId,
+        calendarId,
+        buildUserMentionMessage('Reminder', ['@former:example.test']),
+        `mcal-reminder-${'e'.repeat(64)}`,
+        new AbortController().signal,
+      ),
+    ).resolves.toBe('no-current-recipients');
+
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(
+      fetchMock.mock.calls.some(([url]) =>
+        new URL(String(url)).pathname.includes('/send/m.room.message/'),
+      ),
+    ).toBe(false);
   });
 
   it('uses canonical room-version 12 IDs for state reads and sends', async () => {

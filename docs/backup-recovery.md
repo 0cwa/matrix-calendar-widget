@@ -1,5 +1,7 @@
 # Backup and recovery for the operator-run Compose sidecar
 
+[Documentation](./README.md) · [Deployment](./deployment-docker.md) · [Upgrades](./upgrade-migration.md)
+
 This runbook covers only the project-owned named volumes in
 [`deploy/etke-sidecar.compose.yaml`](../deploy/etke-sidecar.compose.yaml):
 
@@ -14,6 +16,20 @@ configured Matrix SDK file store and may also contain crypto state if that
 feature is enabled. Treat both archives as sensitive, restrict access, and
 protect them at rest.
 
+When [public calendar feeds](./adrs/adr045-public-calendar-feeds.md) are
+enabled, Radicale 3.8.0 stores native share tokens below
+`/data/collections/collection-db/files/token`, within the complete `radicale-data`
+volume captured here. Preserve the configured public-feed signing key in the
+same protected recovery point: if the key is file-backed, add the exact key
+file to the encrypted `restoreInputs` allowlist; if it comes from an environment
+file, include that file only where secret-backup policy permits. The signing
+key is required to keep existing signed URLs valid after recovery. A restored
+share database may also restore a token revoked after the snapshot: verify
+and reapply intended revocations in isolation before reopening public ingress. Restoring
+the Radicale volume without its matching key, or the key without the matching
+volume, does not preserve those URLs. Keep the signing key in separate secret
+custody from the Restic repository password and object-store credentials.
+
 The volume capture below is a cold, consistent copy. The recommended off-host
 storage layer is a Restic repository on S3-compatible storage. Restic encrypts
 and deduplicates the captured files; the repository password must be kept
@@ -22,6 +38,17 @@ and generic systemd service/timer templates. The templates are examples only:
 they are not installed or enabled by the project. No S3 provider, scheduled
 run, or production recovery path has been validated here. No live etke
 deployment or etke data recovery path has been verified.
+
+**On this page**
+
+- [Restic repository and daily schedule](#restic-repository-and-daily-schedule)
+- [Use the shipped host-local coordinator](#use-the-shipped-host-local-coordinator)
+- [Prepare a backup window](#prepare-a-backup-window)
+- [Archive the two volumes](#archive-the-two-volumes)
+- [Restore into an isolated Compose project](#restore-into-an-isolated-compose-project)
+- [Validate the recovery copy](#validate-the-recovery-copy)
+- [Optional external PostgreSQL store](#optional-external-postgresql-store)
+- [Explicit exclusions](#explicit-exclusions)
 
 ## Restic repository and daily schedule
 
@@ -165,6 +192,11 @@ until its placeholders and host paths are replaced:
   "projectName": "matrix-calendar-sidecar",
   "projectDirectory": "/opt/matrix-calendar-widget",
   "composeEnvFile": "/etc/matrix-calendar/sidecar.env",
+  "composeFiles": [
+    "deploy/etke-sidecar.compose.yaml",
+    "deploy/image-overlay.yaml",
+    "deploy/migration-off.yaml"
+  ],
   "captureRoot": "/var/backups/matrix-calendar",
   "dockerSocket": "/var/run/docker.sock",
   "helperImage": "busybox:1.37.0@sha256:<reviewed-image-digest>",
@@ -186,6 +218,18 @@ until its placeholders and host paths are replaced:
   ]
 }
 ```
+
+`composeFiles` is optional for compatibility with existing configurations. If
+omitted, the coordinator uses only `deploy/etke-sidecar.compose.yaml`. When
+provided, list every Compose file in the exact order required to run and resume
+the selected services. Each entry must be a unique, canonical relative file
+inside `projectDirectory`; traversal, absolute paths, symlinks, and more than
+16 files are rejected. The coordinator applies the same `composeEnvFile` and
+ordered file list to Compose configuration checks, service discovery, stop,
+and resume commands. Put any temporary migration or recovery safety overlay
+last so its settings take precedence during that phase. After a phase change,
+update the installed coordinator configuration and review the next timer run's
+active stack before enabling it.
 
 `restoreInputs` is optional for older configurations. When used, it is an
 explicit allowlist of at most 32 named regular files; each file is limited to
@@ -631,6 +675,21 @@ Radicale service or its data.
 
 ## Optional external PostgreSQL store
 
+Inventory both configured database URLs before a backup. The reminder store
+uses `MATRIX_CALENDAR_REMINDER_DATABASE_URL`; dynamic room setup uses
+`MATRIX_CALENDAR_BINDING_DATABASE_URL`. They may share one application-owned
+database, with separate `matrix_calendar` and `matrix_calendar_bindings`
+schemas. A full dump of that database must include both schemas and their
+migration ledgers. Verify the dump inventory and restore both before enabling
+their features.
+
+The shipped coordinator captures one PostgreSQL database and calls the archive
+`reminder-postgresql.dump`; it does not automatically discover or capture a
+second binding database. If the stores use different databases, arrange an
+explicit, rehearsed capture/restore of the additional database in the same
+stopped-writer maintenance window. Do not treat the coordinator's successful
+single-database result as proof of complete binding recovery.
+
 The optional reminder database configured by
 `MATRIX_CALENDAR_REMINDER_DATABASE_URL` is external to the Compose volumes. The
 enabled capture branch above creates its custom-format dump while the writers
@@ -647,7 +706,7 @@ Restore PostgreSQL into an isolated staging database before restoring or
 starting the sidecar against it. The production server requires verified TLS
 by default; configure the staging endpoint and its certificate according to
 the deployment's normal secret and CA handling. Do not reuse Synapse's database,
-role, schema, or credentials. See [Docker deployment notes](./deployment-docker.md#optional-reminder-postgresql-database)
+role, schema, or credentials. See [Docker deployment notes](./deployment-docker.md#optional-application-postgresql-stores)
 for the database configuration boundary.
 
 ## Explicit exclusions

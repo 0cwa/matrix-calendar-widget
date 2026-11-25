@@ -25,6 +25,10 @@ emit_startup_failure_marker() {
 trap 'emit_startup_failure_marker "$?"' EXIT
 
 if [[ "$LOCAL_PREBUILT" == true ]]; then
+  if [[ "${ELEMENT_ACCEPTANCE_PRIVATE_UI:-false}" != false ]]; then
+    echo 'Private UI acceptance is not available in the local prebuilt rehearsal' >&2
+    exit 2
+  fi
   startup_failure_stage=configuration-preflight
   if ! node --input-type=module - "$ROOT_DIR" <<'NODE'
 import { pathToFileURL } from 'node:url';
@@ -64,7 +68,26 @@ else
     echo 'MATRIX_CALENDAR_LOCAL_PREBUILT_REHEARSAL must be true or false' >&2
     exit 2
   fi
-  COMPOSE=(docker compose -f "$ROOT_DIR/dev/compose.yaml")
+  case "${ELEMENT_ACCEPTANCE_PRIVATE_UI:-false}" in
+    false) COMPOSE=(docker compose -f "$ROOT_DIR/dev/compose.yaml") ;;
+    true)
+      private_ui_env_file="${ELEMENT_ACCEPTANCE_PRIVATE_UI_ENV_FILE:-}"
+      if [[ -z "$private_ui_env_file" || ! -f "$private_ui_env_file" || -L "$private_ui_env_file" ]]; then
+        echo 'Private UI acceptance environment is unavailable' >&2
+        exit 2
+      fi
+      COMPOSE=(
+        docker compose
+        --env-file "$private_ui_env_file"
+        -f "$ROOT_DIR/dev/compose.yaml"
+        -f "$ROOT_DIR/dev/element-acceptance-private-ui-tls.compose.yaml"
+      )
+      ;;
+    *)
+      echo 'ELEMENT_ACCEPTANCE_PRIVATE_UI must be true or false' >&2
+      exit 2
+      ;;
+  esac
 fi
 
 if [[ "$LOCAL_PREBUILT" == true ]]; then

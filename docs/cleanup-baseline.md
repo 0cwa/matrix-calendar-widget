@@ -1,5 +1,7 @@
 # Calendar cleanup baseline
 
+[Documentation](./README.md) · [Roadmap](./ROADMAP.md) · [Historical records](./archive/README.md)
+
 Captured 2026-10-19 before the remaining widget/server retirement and
 maintainability slices. This records measurements available for the current
 source; missing historical data is called out instead of inferred.

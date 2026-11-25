@@ -11,6 +11,7 @@ export type RoomRenderDiagnosticField =
   | 'roomViewRendererPresent'
   | 'matrixChatStateAvailable'
   | 'matrixChatViewBucket'
+  | 'matrixChatFirstSyncComplete'
   | 'matrixChatReady'
   | 'matrixChatPageTypeBucket'
   | 'matrixChatCurrentRoomMatches'
@@ -34,12 +35,34 @@ export type RoomReadinessSyncState =
   | 'CATCHUP'
   | 'UNKNOWN';
 
+export type RoomNavigationPageType =
+  | 'room-view'
+  | 'other-page'
+  | 'missing'
+  | 'unavailable';
+
+export type RoomNavigationReadinessSnapshot = {
+  firstSyncComplete: boolean | null;
+  ready: boolean | null;
+  pageType: RoomNavigationPageType;
+  currentRoomMatches: boolean | null;
+  matrixSyncState: RoomReadinessSyncState;
+};
+
+export type RoomNavigationReadinessObservation = {
+  beforeNavigation: RoomNavigationReadinessSnapshot;
+  afterRoute: RoomNavigationReadinessSnapshot;
+};
+
 export type RoomReadinessSnapshot = {
   roomViewPresent: boolean;
   roomHeaderPresent: boolean;
   roomHeadingPresent: boolean;
   currentRoomMatches: boolean | null;
   matrixSyncState: RoomReadinessSyncState;
+  matrixChatFirstSyncComplete?: boolean | null;
+  matrixChatReady?: boolean | null;
+  matrixChatPageTypeBucket?: RoomNavigationPageType;
 };
 
 export type RoomReadinessSample = {
@@ -72,7 +95,38 @@ export function collectRoomReadinessTimeline(input: {
   signal: AbortSignal;
 }): Promise<RoomReadinessTimeline>;
 
+export function normalizeRoomNavigationReadinessSnapshot(
+  value: unknown,
+): RoomNavigationReadinessSnapshot;
+
+export function createRoomNavigationReadinessObservation(
+  beforeNavigation: unknown,
+  afterRoute: unknown,
+): RoomNavigationReadinessObservation;
+
+export function isRoomNavigationReadinessObservation(
+  value: unknown,
+): value is RoomNavigationReadinessObservation;
+
 export function roomContextObservationForPhase<T extends object>(
   observation: T,
   phase: MemberRoomContextPhase,
-): T | Omit<T, RoomRenderDiagnosticField | 'roomReadinessTimeline'>;
+):
+  | T
+  | Omit<
+      T,
+      | RoomRenderDiagnosticField
+      | 'roomReadinessTimeline'
+      | 'roomNavigationReadiness'
+    >;
+
+export function createMemberRoomContextRecord<T extends object>(
+  result: {
+    failureCode?: string;
+    observation?: T;
+    roomReadinessTimeline?: RoomReadinessTimeline;
+    roomNavigationReadiness?: RoomNavigationReadinessObservation;
+  },
+  phase: MemberRoomContextPhase,
+  reminderWidgetContext?: object,
+): Record<string, unknown>;

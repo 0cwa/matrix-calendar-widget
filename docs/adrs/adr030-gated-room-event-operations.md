@@ -1,8 +1,19 @@
 # ADR030: Gate room-owned event operations
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
 - Status: Proposed
 - Date: 2026-10-03
 - Preserves: ADR005, ADR006, ADR010, ADR014, ADR015, ADR024, and ADR026
+
+> **Later implementation (2026-10-21):** The recorded proposal status is
+> retained, but room event operations and their independent write gate are
+> implemented. [ADR041](./adr041-optional-normal-bot-account-for-room-operations.md)
+> adds the optional normal-bot-account principal, and
+> [ADR043](./adr043-moderator-room-calendar-setup.md) adds separately gated
+> collection setup outside these event APIs. These changes do not enable room
+> access or writes by default. Repository contracts and target-host acceptance
+> remain distinguished in the [release evidence](../RELEASE.md).
 
 ## Context
 

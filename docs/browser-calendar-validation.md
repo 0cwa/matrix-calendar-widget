@@ -1,5 +1,7 @@
 # Browser validation for calendar components
 
+[Documentation](./README.md) · [Client validation](./calendar-client-validation.md) · [Development](./DEVELOPMENT.md)
+
 The separate **Calendar browser layout** CI job exercises the production
 calendar list, month grid, toolbar, and event details in Chromium with
 synthetic, in-memory repositories. It uses the repository-locked Playwright and
@@ -46,7 +48,9 @@ reader, or uses the same fonts/theme. Actual Element Web and Desktop acceptance
 against the isolated pinned stack is a controlled-beta gate. Android/iOS
 clients and formal screen-reader certification are deferred beyond this beta.
 
-Run the checks from a clean checkout:
+## Run the component checks
+
+Run these commands from the repository root:
 
 ```bash
 yarn install --frozen-lockfile
@@ -58,8 +62,8 @@ yarn workspace e2e playwright install --with-deps chromium --only-shell
 yarn workspace e2e playwright test --config playwright.calendar.config.ts
 ```
 
-The local validation environment could not download the Chromium executable
-for the original fixture run. Source type checks, lint, and test discovery were
+At the original fixture checkpoint, the local validation environment could
+not download Chromium. Source type checks, lint, and test discovery were
 run locally; hosted Chromium results supply standalone component-layout
 evidence only. They do not replace actual Element Web/Desktop acceptance.
 Formal screen-reader certification is deferred for the bounded beta and must

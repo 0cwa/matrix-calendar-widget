@@ -56,6 +56,35 @@ function configuration(
   };
 }
 
+function allDayFixture(startDate: string, recurrenceId?: string): string {
+  return [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'BEGIN:VEVENT',
+    `UID:${eventUid}`,
+    'DTSTAMP:20260926T120000Z',
+    ...(recurrenceId ? [`RECURRENCE-ID;VALUE=DATE:${recurrenceId}`] : []),
+    `DTSTART;VALUE=DATE:${startDate.replaceAll('-', '')}`,
+    `DTEND;VALUE=DATE:${shiftDate(startDate, 1).replaceAll('-', '')}`,
+    'SUMMARY:Private all-day reminder',
+    'BEGIN:VALARM',
+    `UID:${alarmUid}`,
+    'ACTION:DISPLAY',
+    'DESCRIPTION:Reminder',
+    'TRIGGER:-PT15M',
+    'END:VALARM',
+    'END:VEVENT',
+    'END:VCALENDAR',
+    '',
+  ].join('\r\n');
+}
+
+function shiftDate(value: string, days: number): string {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
 function window(notBefore: string, through: string): ReminderSchedulerWindow {
   return {
     notBefore: new Date(notBefore),
@@ -220,6 +249,224 @@ describe('CanonicalRoomReminderSchedulerSource', () => {
       body: 'Reminder: Private planning title',
     });
   });
+
+  it('schedules DATE occurrences from the explicit sidecar timezone and preserves an all-day detached exception identity', async () => {
+    const allDayFixture = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'BEGIN:VEVENT',
+      `UID:${eventUid}`,
+      'DTSTAMP:20260926T120000Z',
+      'DTSTART;VALUE=DATE:20261001',
+      'DTEND;VALUE=DATE:20261002',
+      'RRULE:FREQ=DAILY;COUNT=3',
+      'SUMMARY:Private all-day series',
+      'BEGIN:VALARM',
+      `UID:${alarmUid}`,
+      'ACTION:DISPLAY',
+      'DESCRIPTION:Reminder',
+      'TRIGGER:-P1D',
+      'END:VALARM',
+      'END:VEVENT',
+      'BEGIN:VEVENT',
+      `UID:${eventUid}`,
+      'DTSTAMP:20260926T120000Z',
+      'RECURRENCE-ID;VALUE=DATE:20261002',
+      'DTSTART;VALUE=DATE:20261005',
+      'DTEND;VALUE=DATE:20261006',
+      'SUMMARY:Private moved all-day instance',
+      'BEGIN:VALARM',
+      'UID:override-all-day-alarm@example.test',
+      'ACTION:DISPLAY',
+      'DESCRIPTION:Reminder',
+      'TRIGGER:-P1D',
+      'END:VALARM',
+      'END:VEVENT',
+      'END:VCALENDAR',
+      '',
+    ].join('\r\n');
+    const fetchMock = createFetchMock(allDayFixture, allDayFixture);
+    const { source } = createSource(fetchMock as typeof fetch);
+    const signal = new AbortController().signal;
+    const schedule = {
+      daysBefore: 1,
+      localTime: '09:00',
+      timezone: 'Europe/Stockholm',
+    };
+
+    const masterCandidates = await source.listDueCandidates(
+      configuration({ allDaySchedule: schedule }),
+      window('2026-09-30T06:55:00.000Z', '2026-09-30T07:05:00.000Z'),
+      undefined,
+      1,
+      signal,
+    );
+    expect(masterCandidates).toHaveLength(1);
+    expect(masterCandidates[0].dueAt.toISOString()).toBe(
+      '2026-09-30T07:00:00.000Z',
+    );
+    expect(JSON.parse(masterCandidates[0].identity.recurrenceId)).toEqual([
+      'date',
+      '2026-10-01',
+    ]);
+
+    const movedException = await source.listDueCandidates(
+      configuration({
+        recurrenceId: JSON.stringify(['date', '2026-10-02']),
+        alarmUid: 'override-all-day-alarm@example.test',
+        allDaySchedule: { ...schedule, daysBefore: 0 },
+      }),
+      window('2026-10-05T06:55:00.000Z', '2026-10-05T07:05:00.000Z'),
+      undefined,
+      1,
+      signal,
+    );
+    expect(movedException).toHaveLength(1);
+    expect(movedException[0].dueAt.toISOString()).toBe(
+      '2026-10-05T07:00:00.000Z',
+    );
+    expect(JSON.parse(movedException[0].identity.recurrenceId)).toEqual([
+      'date',
+      '2026-10-02',
+    ]);
+  });
+
+  it('finds a future DATE event whose explicit Matrix schedule is due today even when its VALARM is only 15 minutes before', async () => {
+    const fetchMock = createFetchMock(allDayFixture('2026-10-28'));
+    const { source } = createSource(fetchMock as typeof fetch);
+
+    const candidates = await source.listDueCandidates(
+      configuration({
+        allDaySchedule: {
+          daysBefore: 7,
+          localTime: '09:00',
+          timezone: 'Europe/Stockholm',
+        },
+      }),
+      window('2026-10-21T06:55:00.000Z', '2026-10-21T07:05:00.000Z'),
+      undefined,
+      1,
+      new AbortController().signal,
+    );
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].dueAt.toISOString()).toBe('2026-10-21T07:00:00.000Z');
+    expect(candidates[0].identity).toMatchObject({
+      eventUid,
+      alarmUid,
+      triggerOrdinal: 0,
+    });
+  });
+
+  it('skips an all-day firing whose due instant predates schedule activation', async () => {
+    const fetchMock = createFetchMock(allDayFixture('2026-10-28'));
+    const { source } = createSource(fetchMock as typeof fetch);
+
+    const candidates = await source.listDueCandidates(
+      configuration({
+        allDaySchedule: {
+          daysBefore: 7,
+          localTime: '09:00',
+          timezone: 'Europe/Stockholm',
+        },
+        scheduleEffectiveAt: new Date('2026-10-21T07:01:00.000Z'),
+      }),
+      window('2026-10-21T06:55:00.000Z', '2026-10-21T07:05:00.000Z'),
+      undefined,
+      1,
+      new AbortController().signal,
+    );
+
+    expect(candidates).toEqual([]);
+  });
+
+  it('keeps the normal catch-up window when a schedule was active before its due instant', async () => {
+    const fetchMock = createFetchMock(allDayFixture('2026-10-28'));
+    const { source } = createSource(fetchMock as typeof fetch);
+
+    const candidates = await source.listDueCandidates(
+      configuration({
+        allDaySchedule: {
+          daysBefore: 7,
+          localTime: '09:00',
+          timezone: 'Europe/Stockholm',
+        },
+        scheduleEffectiveAt: new Date('2026-10-21T06:59:00.000Z'),
+      }),
+      window('2026-10-21T06:55:00.000Z', '2026-10-21T07:05:00.000Z'),
+      undefined,
+      1,
+      new AbortController().signal,
+    );
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].dueAt.toISOString()).toBe('2026-10-21T07:00:00.000Z');
+  });
+
+  it.each([
+    {
+      label: 'zero days in UTC',
+      daysBefore: 0,
+      localTime: '09:00',
+      timezone: 'UTC',
+      startDate: '2026-10-21',
+      dueAt: '2026-10-21T09:00:00.000Z',
+    },
+    {
+      label: 'one day across the Los Angeles spring DST change',
+      daysBefore: 1,
+      localTime: '09:00',
+      timezone: 'America/Los_Angeles',
+      startDate: '2026-03-08',
+      dueAt: '2026-03-07T17:00:00.000Z',
+    },
+    {
+      label: 'maximum days across the Stockholm spring DST change',
+      daysBefore: 366,
+      localTime: '09:00',
+      timezone: 'Europe/Stockholm',
+      startDate: '2027-10-27',
+      dueAt: '2026-10-26T08:00:00.000Z',
+    },
+    {
+      label: 'maximum days in a UTC+14 zone',
+      daysBefore: 366,
+      localTime: '09:00',
+      timezone: 'Pacific/Kiritimati',
+      startDate: '2027-10-22',
+      dueAt: '2026-10-20T19:00:00.000Z',
+    },
+  ])(
+    'projects bounded all-day schedule dates for $label',
+    async ({ daysBefore, localTime, timezone, startDate, dueAt }) => {
+      const [notBefore, through] = [
+        new Date(new Date(dueAt).getTime() - 5 * 60_000),
+        new Date(new Date(dueAt).getTime() + 5 * 60_000),
+      ];
+      let chunks = 0;
+      const fetchMock = createFetchMock(allDayFixture(startDate));
+      const { source } = createSource(fetchMock as typeof fetch, {
+        yieldToEventLoop: async () => {
+          chunks += 1;
+        },
+      });
+
+      const candidates = await source.listDueCandidates(
+        configuration({
+          allDaySchedule: { daysBefore, localTime, timezone },
+        }),
+        { notBefore, through },
+        undefined,
+        1,
+        new AbortController().signal,
+      );
+
+      expect(candidates).toHaveLength(1);
+      expect(candidates[0].dueAt.toISOString()).toBe(dueAt);
+      expect(chunks).toBeGreaterThan(0);
+      expect(chunks).toBeLessThanOrEqual(10);
+    },
+  );
 
   it('does not deliver stale relative reminder intent after the current alarm becomes absolute', async () => {
     const absoluteFixture = supportedFixture.replace(

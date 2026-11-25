@@ -538,6 +538,36 @@ test('fails closed for an unknown RoomAppService assertion without exposing it',
   assert.equal(output.includes('private-room-contract-detail'), false);
 });
 
+test('maps the live private-client policy contract to a closed case ID', () => {
+  const testReport = {
+    testResults: [
+      {
+        name: suitePath(
+          'matrix-calendar-server/test/integration/RoomAppServiceRadicaleContract.test.ts',
+        ),
+        status: 'failed',
+        assertionResults: [
+          {
+            title:
+              'rechecks private-client room policy against live Synapse state',
+            status: 'failed',
+            failureMessages: ['synthetic private assertion detail'],
+          },
+        ],
+      },
+    ],
+  };
+
+  const output = safeContractCaseStatusLines(testReport).join('\n');
+
+  assert.equal(
+    output,
+    'contract-case room-appservice-private-client-live-policy failed\n' +
+      'contract-suite room-appservice-radicale-contract failed',
+  );
+  assert.equal(output.includes('synthetic private assertion detail'), false);
+});
+
 test('sanitizes live reminder delivery contract failures to closed case IDs', () => {
   const testReport = {
     testResults: [

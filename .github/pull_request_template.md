@@ -2,9 +2,11 @@
 
 <!-- What user/developer capability does this change add or fix? -->
 
+New contributors: see [CONTRIBUTING.md](https://github.com/0cwa/matrix-calendar-widget/blob/main/CONTRIBUTING.md) for setup, review expectations, and documentation guidance.
+
 ## Tracking
 
-Closes #
+<!-- Link the issue or describe the scoped request. Use Closes #123 only when this PR completes it. -->
 
 ## Architecture and data boundaries
 
@@ -28,11 +30,19 @@ Source(s) of truth touched:
 
 ## Testing
 
+<!-- Record commands and results relevant to this change; explain any unavailable check. Hosted required checks still apply. -->
+
+- [ ] `yarn docs:check`
 - [ ] `yarn prettier:check`
 - [ ] `yarn lint`
 - [ ] `yarn tsc`
 - [ ] `yarn test:all`
 - [ ] `yarn build`
+
+## Documentation
+
+- [ ] Changed behavior and setup instructions are documented, or no update is needed.
+- [ ] New guides are linked from the documentation index; agent-only instructions stay in `docs/agents/`.
 
 ## Screenshots / recordings
 

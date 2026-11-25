@@ -10,6 +10,7 @@ const requiredBindings = new Map([
   ['synapse', { target: 8008, published: '8008' }],
   ['radicale', { target: 5232, published: '5232' }],
   ['gateway', { target: 3000, published: '3000' }],
+  ['private-gateway-https', { target: 3443, published: '3001' }],
   ['widget', { target: 8080, published: '8080' }],
   ['element', { target: 80, published: '8090' }],
   ['restore-gateway', { target: 3000, published: '3000' }],
@@ -60,6 +61,54 @@ export function hasAcceptanceLoopbackBindings(model) {
   }
 
   return true;
+}
+
+export function hasPrivateClientCallbackNetwork(model) {
+  const services = model?.services;
+  if (!services || typeof services !== 'object') return false;
+  if (services['private-gateway-https'] === undefined) return true;
+
+  const networks = model?.networks;
+  const callbackNetwork = networks?.['private-client-callback'];
+  const expectedMembers = new Set([
+    'gateway',
+    'private-gateway-https',
+    'radicale',
+  ]);
+  if (
+    !networks ||
+    typeof networks !== 'object' ||
+    !callbackNetwork ||
+    typeof callbackNetwork !== 'object' ||
+    callbackNetwork.internal !== true
+  ) {
+    return false;
+  }
+
+  for (const [name, service] of Object.entries(services)) {
+    const serviceNetworks = service?.networks;
+    if (
+      !serviceNetworks ||
+      typeof serviceNetworks !== 'object' ||
+      Array.isArray(serviceNetworks)
+    ) {
+      return false;
+    }
+    const hasCallbackNetwork = Object.hasOwn(
+      serviceNetworks,
+      'private-client-callback',
+    );
+    if (expectedMembers.has(name) !== hasCallbackNetwork) return false;
+  }
+
+  const bridgeNetworks = services['private-gateway-https'].networks;
+  return (
+    bridgeNetworks &&
+    typeof bridgeNetworks === 'object' &&
+    !Array.isArray(bridgeNetworks) &&
+    Object.keys(bridgeNetworks).length === 1 &&
+    Object.hasOwn(bridgeNetworks, 'private-client-callback')
+  );
 }
 
 export function hasAcceptanceGatewayRateLimitBudget(model) {
@@ -155,6 +204,7 @@ async function main() {
       services?.['restore-gateway'] !== undefined;
     if (
       !hasAcceptanceLoopbackBindings(model) ||
+      !hasPrivateClientCallbackNetwork(model) ||
       (hasGatewayService && !hasAcceptanceGatewayRateLimitBudget(model)) ||
       (localMode && !hasLocalPrebuiltOwnershipLabels(model, runId, projectName))
     ) {

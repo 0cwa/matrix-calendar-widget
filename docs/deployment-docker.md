@@ -1,6 +1,18 @@
 # Docker build and deployment notes
 
+[Documentation](./README.md) · [Configuration](./configuration.md) · [Release ledger](./RELEASE.md)
+
 This page records the container behavior currently present in the repository at the time of writing. It is not a production deployment recipe. The project is pre-alpha; operators must supply and verify their own configuration, networking, persistence, and upgrade procedures.
+
+**On this page**
+
+- [Build contracts](#build-contracts)
+- [Source-bound image archive](#source-bound-image-archive)
+- [Runtime behavior in the current Dockerfiles](#runtime-behavior-in-the-current-dockerfiles)
+- [etke and Matrix Docker Ansible deployment](#etke-and-matrix-docker-ansible-deployment)
+- [Operator-run Compose sidecar example](#operator-run-compose-sidecar-example)
+- [Public calendar feed ingress and recovery](#public-calendar-feed-ingress-and-recovery)
+- [Optional application PostgreSQL stores](#optional-application-postgresql-stores)
 
 ## Build contracts
 
@@ -8,6 +20,7 @@ Build the server from the repository root after installing the locked Yarn depen
 
 ```bash
 yarn install --frozen-lockfile
+yarn workspace @matrix-calendar-widget/ical-timezones build
 yarn workspace @matrix-calendar-widget/calendar build
 yarn workspace @matrix-calendar-widget/server build
 docker build -t matrix-calendar-widget/server:local -f matrix-calendar-server/Dockerfile .
@@ -15,9 +28,10 @@ docker build -t matrix-calendar-widget/server:local -f matrix-calendar-server/Do
 
 The root context is required because the server Dockerfile reads the root `package.json` and `yarn.lock`, and copies the built calendar package. The build also creates a license SBOM with Trivy.
 
-Build the widget after the calendar package and widget workspace have been built:
+Build the widget after building both shared packages:
 
 ```bash
+yarn workspace @matrix-calendar-widget/ical-timezones build
 yarn workspace @matrix-calendar-widget/calendar build
 yarn workspace @matrix-calendar-widget/widget build
 docker build --build-context root=. -t matrix-calendar-widget/widget:local -f matrix-calendar-widget/Dockerfile matrix-calendar-widget
@@ -276,7 +290,7 @@ The local `dev/compose.yaml` stack is for development and integration services;
 it does not define a production deployment or an etke/MDAD deployment contract.
 Helm and Kubernetes packaging are outside this slice.
 
-### Operator-run Compose sidecar example
+## Operator-run Compose sidecar example
 
 [`deploy/etke-sidecar.compose.yaml`](../deploy/etke-sidecar.compose.yaml) is a
 reference for an operator who already manages a Matrix homeserver with etke's
@@ -380,8 +394,11 @@ credential uses the service localpart as the username and a
 name. Keep the proof in memory, suppress request/response logging that could
 expose it, and discard it immediately; never place it in command arguments,
 shell history, files, or artifacts. The repository does not yet provide a
-one-command provisioner, so perform this step only with an operator-approved
-secret-safe tool during isolated acceptance.
+standalone command-line provisioner for this static-binding path, so perform
+this step only with an operator-approved secret-safe tool during isolated
+acceptance. For an explicitly enabled dynamic setup deployment,
+[`!calendar setup`](./bot-calendar.md) provides the separately authorized
+moderator workflow under ADR043; it does not change the frozen pilot baseline.
 
 #### Normal bot-account mode
 
@@ -570,7 +587,174 @@ Preserve the existing managed services and stores. Issue
 deployment, with the source/evidence ledger in
 [#255](https://github.com/0cwa/matrix-calendar-widget/issues/255).
 
-## Optional reminder PostgreSQL database
+For a later, separately accepted candidate, first complete the archive
+verification steps above and copy the manifest SHA-256 from that exact Actions
+run summary. Then use the read-only proposal helper:
+
+```bash
+node scripts/propose-pilot-image-pins.mjs \
+  --manifest /private/verified-archive-manifest.json \
+  --manifest-sha256 '<manifest SHA-256 from the selected run summary>'
+```
+
+The helper checks that the supplied digest matches the manifest, that the
+manifest names the trusted `main` workflow and all three supported images on
+`linux/amd64`, and that the current validator, overlay, and documentation pins
+agree. It prints a unified patch for review; it does not change files, verify
+archive contents, read operator environment or binding files, or start
+services. Use it only after the existing archive verifier succeeds, and review
+the proposed source, workflow, run, and image pins before applying any change.
+
+### Server-only releases
+
+For a release that changes only the server image, the archive workflow also
+accepts `image_set=server-only`. Select this only after reviewing whether the
+release changes database migrations, shared storage, or compatibility with
+the running widget and Radicale. A server-only archive does not contain the
+other images, and the all-image pin proposal above must not be used for it.
+
+Follow the source-bound archive procedure above for the selected run. When
+running its verifier, set `RELEASE_IMAGE_SET=server-only` and use the verifier
+from the manifest's trusted workflow commit. Verify the downloaded manifest
+against authenticated provenance, then verify the archive and load the server
+image; compare its loaded image ID with the manifest. Retain the previous server
+image and confirm the release can be rolled back without reversing migrations.
+Skip the widget and Radicale load and inspect commands above: their archives
+are absent from a server-only artifact.
+
+After verification, generate a server-only Compose overlay for review:
+
+```bash
+node scripts/propose-pilot-image-pins.mjs \
+  --manifest /private/verified-archive-manifest.json \
+  --manifest-sha256 '<authenticated manifest SHA-256>' \
+  --server-only-overlay
+```
+
+The output contains only the server image reference. Redirect it to a new,
+operator-private file without overwriting an existing file. This helper does
+not verify the archive, inspect the live host, update an existing Compose file,
+or start services. Before applying an overlay, verify a current recoverable
+backup, the existing server image and rollback path, and that the rendered
+Compose change affects only the intended server image. Apply only the server
+with `docker compose ... up -d --no-deps server`, run the operator's health
+checks, and verify the other services remain unchanged. Synchronize the
+operator's canonical Compose configuration only after the checks succeed;
+otherwise a later normal reapply could revert the release. Recheck the rendered
+configuration after synchronization. Do not publish private Compose files or
+resolved environment values.
+
+#### Operator release command
+
+The local `scripts/server-release.mjs` command verifies the source-bound archive
+and streams its server image over strict SSH to a fixed Python runner on the
+host. The host needs Python 3, Docker Compose and the operator checks described
+below; it does not need Node.js. Run the command from a checkout of the trusted
+workflow commit named in the authenticated manifest. Supply a private, mode
+`0600` JSON file with absolute host paths and a new staging and operation
+directory for each attempt:
+
+```json
+{
+  "host": "calendar-host",
+  "archiveRoot": "/local/verified-archive",
+  "manifestSha256": "<authenticated manifest SHA-256>",
+  "sourceSha": "<reviewed source SHA>",
+  "canonical": "/private/compose.yaml",
+  "project": "calendar-sidecar",
+  "projectDirectory": "/private/calendar",
+  "stageDirectory": "/private/new-release-stage",
+  "operationDirectory": "/private/new-release-operation",
+  "backupCheck": "/private/check-backup",
+  "healthCheck": "/private/check-health",
+  "dependenciesCheck": "/private/check-dependencies",
+  "rollbackCompatible": true
+}
+```
+
+The three host checks are operator-owned, read-only executables run without
+arguments. They must be noninteractive, return nonzero on failure, and avoid printing
+credentials. The backup check must verify a recent paired backup and a safe
+window before the next scheduled backup; the command runs it twice, including
+immediately before activation. The health check must wait for the server to
+become ready, and the dependencies check must verify the services and storage
+that must remain unchanged. These checks are operator assertions; the command
+does not independently establish backup or dependency health. Set
+`rollbackCompatible` only after reviewing migration and persistent-state
+compatibility with the prior image.
+
+```bash
+node scripts/server-release.mjs deploy /local/private-release-config.json
+node scripts/server-release.mjs status /local/private-release-config.json
+```
+
+The runner locks the canonical file, checks that the running server matches its
+saved Compose configuration, verifies the image and rendered change, switches
+only the server, checks health and dependencies, and then
+atomically synchronizes the canonical file. It attempts to restore the previous
+server and configuration if activation or a later check fails. A
+`recovery-incomplete` result requires operator intervention. Concurrent
+operators must respect the same lock; an unrelated editor can still modify the
+file between the last hash check and the atomic rename.
+
+An interrupted SSH connection has an **unknown outcome**; never blindly rerun a
+deployment. The status action reports the recorded phase, whether the lock is
+active or stale, the running and saved image identities, and the health check
+result. A status failure before the operation record exists does not prove that
+the remote runner has stopped. Reconcile the host before removing a stale lock
+or retrying. A killed runner can leave its private staging directory behind;
+remove that exact task-owned directory only after confirming its runner has
+stopped. The command does not create or restore backups, review database
+migrations, or repair an interrupted transaction automatically.
+
+## Public calendar feed ingress and recovery
+
+Public subscriptions are available in current source under
+[ADR045](./adrs/adr045-public-calendar-feeds.md), outside the older frozen pilot
+candidate. A publication-specific rollout must verify its own exact source,
+public ingress, logging, and recovery. See the [release ledger](./RELEASE.md)
+for what is actually qualified.
+
+Before setting the [origin and signing key](./configuration.md#public-calendar-subscriptions):
+
+1. Route only the gateway's `GET`/`HEAD /v1/public-calendar-feeds/<envelope>`
+   reads through the chosen public HTTPS origin. Keep Radicale's root origin,
+   `/.token/`, and `/.sharing/` private to trusted services/operators. The signed
+   URL is not encrypted; its native token can be decoded, so direct public
+   access to Radicale would bypass gateway signature/content validation and request limits.
+2. Redact or omit the public bearer path and publication-management query at
+   every proxy/access-log boundary. Keep ordinary diagnostics. Verify this
+   with synthetic tokens before publishing a real calendar.
+3. Supply one dedicated persistent signing key, inline through secret
+   management or as a mounted one-line file. Never set both key forms. The
+   gateway keeps publication disabled when origin/key configuration is absent.
+4. Include the complete Radicale `/data` store and the matching key in the
+   protected recovery point described in [backup and recovery](./backup-recovery.md).
+   If file-backed, add the exact key file to the encrypted restore-input
+   allowlist. A new key invalidates existing signed URLs; native shares must
+   then be explicitly reconciled or revoked.
+5. Exercise publish, anonymous read, unpublish/revocation, and isolated restore
+   with a synthetic VEVENT calendar and an actual subscription client. A mixed
+   calendar must fail without returning data. Existing downloaded copies
+   cannot be recalled. Public reads intentionally continue after Matrix
+   membership or manager-power changes, so unpublish before removing or
+   changing a static binding.
+
+The gateway validates the complete canonical calendar on every GET/HEAD. It
+uses fixed transport size/time limits, denies redirects and writes, and sends
+no-store responses. These source controls do not establish a target's proxy,
+client-cache behavior, or recovery readiness. One publication-management
+writer is required; locks are process-local.
+
+## Optional application PostgreSQL stores
+
+The binding store from moderator setup is independently configured through
+`MATRIX_CALENDAR_BINDING_DATABASE_URL` and
+`MATRIX_CALENDAR_BINDING_DATABASE_TLS_MODE`. It may share the same
+application-owned database while using its own `matrix_calendar_bindings`
+schema. If the URLs select different databases, back up and restore both;
+the existing single-database backup coordinator does not discover a second
+binding database automatically. See [configuration](./configuration.md#application-postgresql-stores).
 
 The server can persist Matrix reminder sidecar state in a separate
 application-owned PostgreSQL database through the optional
@@ -580,6 +764,13 @@ at startup and will not start if the database or migrations are unavailable.
 Provide the URL through the operator's secret mechanism; do not reuse Synapse's
 database, schema, role, or credentials. The application does not create the
 database or role.
+
+Private CalDAV clients use the separately gated store in
+`matrix_calendar_private_clients`; it is active only when
+`MATRIX_CALENDAR_PRIVATE_CLIENTS_ENABLED=true` and its database URL is
+configured. Each store has its own URL and TLS-mode settings, and may share an
+application-owned PostgreSQL database. When they use different databases,
+back up and restore each one separately.
 
 Connections require verified TLS by default. Use a certificate whose DNS name
 or IP subject alternative name matches the configured endpoint; the driver uses
@@ -591,6 +782,16 @@ operator-controlled isolated database network. It disables TLS explicitly and
 must not be used across an untrusted network. The CI localhost PostgreSQL
 contract sets this exception only for its disposable test database. No
 production database TLS connection or etke host deployment has been validated.
+Binding and private-client stores use the corresponding
+`MATRIX_CALENDAR_BINDING_DATABASE_TLS_MODE` and
+`MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_TLS_MODE` settings, with the same
+verified-TLS default and explicit `trusted-private-network` exception.
+
+For a one-shot migration without launching Nest or Matrix, the server image's
+compiled store adapters are available under `/app/lib/src`. The tool is a
+read-only mounted script that runs with Node from the exact reviewed server
+image; its selector, environment requirements, and operating steps are in the
+[upgrade and migration runbook](./upgrade-migration.md#run-postgresql-migrations-without-starting-the-matrix-application).
 
 ### First initialization with file-backed secrets
 

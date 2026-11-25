@@ -52,6 +52,7 @@ describe('calendar command formatting', () => {
     description: 'Description',
     untitled: '(untitled)',
     timeUnavailable: 'Time unavailable',
+    allDay: 'All day',
   };
 
   const event: CalendarEvent = {
@@ -83,21 +84,50 @@ describe('calendar command formatting', () => {
       labels,
     );
 
-    expect(details).toContain('Resource ID: event.ics');
     expect(details).toContain('Title: <script>alert(1)</script> Planning');
-    expect(details).toContain('When: 2026-10-04 11:00 – 12:00');
+    expect(details).toContain(
+      'When: Sun, Oct 4, 2026 · 11:00 AM–12:00 PM (UTC)',
+    );
     expect(details).toContain('Description: First line Second line');
+    expect(details.endsWith('Resource ID: event.ics')).toBe(true);
     expect(details).not.toContain('private-uid');
     expect(details).not.toContain('https://dav.example.test');
     expect(details).not.toContain('\u202e');
   });
 
-  test('formats an occurrence using a plain bounded title and collection ID', () => {
+  test('formats an occurrence title first and omits the resource ID by default', () => {
     expect(
       formatCalendarEventOccurrence(event, 'event.ics', 'UTC', labels),
     ).toBe(
-      'event.ics — 2026-10-04 11:00 – 12:00 — <script>alert(1)</script> Planning',
+      '<script>alert(1)</script> Planning\n  Sun, Oct 4, 2026 · 11:00 AM–12:00 PM (UTC)',
     );
+  });
+
+  test('adds the canonical resource ID only when requested', () => {
+    expect(
+      formatCalendarEventOccurrence(
+        event,
+        'event.ics',
+        'UTC',
+        labels,
+        'en',
+        true,
+      ),
+    ).toContain('  Resource ID: event.ics');
+  });
+
+  test('formats timed events with the requested locale and named timezone', () => {
+    const when = formatCalendarEventWhen(
+      event.timing,
+      'Europe/Stockholm',
+      'Time unavailable',
+      'de',
+      'Ganztägig',
+    );
+
+    expect(when).toContain('Okt');
+    expect(when).toContain('(Europe/Stockholm)');
+    expect(when).not.toContain('2026-10-04');
   });
 
   test('formats all-day dates with their exclusive end converted to the last day', () => {
@@ -111,7 +141,7 @@ describe('calendar command formatting', () => {
         'UTC',
         'Time unavailable',
       ),
-    ).toBe('2026-10-04');
+    ).toBe('All day · Sun, Oct 4, 2026');
     expect(
       formatCalendarEventWhen(
         {
@@ -122,6 +152,6 @@ describe('calendar command formatting', () => {
         'UTC',
         'Time unavailable',
       ),
-    ).toBe('2026-10-04 – 2026-10-06');
+    ).toBe('All day · Sun, Oct 4, 2026 – Tue, Oct 6, 2026');
   });
 });

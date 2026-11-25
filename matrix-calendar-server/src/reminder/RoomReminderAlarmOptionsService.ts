@@ -24,8 +24,16 @@ export type RoomReminderAlarmOption = {
   eventUid: string;
   recurrenceId: string | null;
   alarmUid: string;
-  relatedTo: 'start' | 'end';
-  trigger: CalendarEventDuration;
+  timingType: 'timed' | 'all-day' | 'unsupported';
+  supported: boolean;
+  requiresAllDaySchedule: boolean;
+  unavailableReason?:
+    | 'unsupported-timezone'
+    | 'unsupported-event-timing'
+    | 'absolute-trigger'
+    | 'unsupported-trigger';
+  relatedTo?: 'start' | 'end';
+  trigger?: CalendarEventDuration;
   repeat?: {
     count: number;
     interval: CalendarEventDuration;
@@ -37,7 +45,7 @@ export type RoomReminderAlarmOptionsResponse = {
 };
 
 /**
- * Lists only stable, currently triggerable DISPLAY alarm metadata. Current
+ * Lists stable DISPLAY alarm metadata with a safe eligibility reason. Current
  * room authorization, feature gates, the bound source read, and the source
  * response limit stay in RoomReminderConfigurationService.
  */
@@ -61,7 +69,7 @@ export class RoomReminderAlarmOptionsService {
       const options: RoomReminderAlarmOption[] = [];
       for (const selection of selections) {
         const option = resolveTriggerableReminderAlarmOption(selection);
-        if (option) options.push(option);
+        options.push(option);
       }
       return { options };
     } catch (error) {

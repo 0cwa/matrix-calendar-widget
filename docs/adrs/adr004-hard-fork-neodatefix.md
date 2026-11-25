@@ -1,5 +1,7 @@
 # ADR004: Hard-fork NeoDateFix as the implementation baseline
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
 - Status: Accepted
 - Date: 2026-09-22
 

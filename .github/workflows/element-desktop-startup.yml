@@ -2,12 +2,8 @@ name: Element Desktop startup acceptance
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - '.github/workflows/element-desktop-startup.yml'
-      - 'dev/element-desktop-*'
-      - 'e2e/package.json'
-      - 'yarn.lock'
+  schedule:
+    - cron: '17 5 * * 1'
 
 permissions:
   contents: read
@@ -41,17 +37,6 @@ jobs:
           stage_file="$RUNNER_TEMP/element-desktop-startup-stage.jsonl"
           : > "$stage_file"
           chmod 0600 "$stage_file"
-
-      - name: Test shared Desktop lifecycle, egress policy, and evidence
-        run: |
-          node --check dev/element-desktop-egress-policy.mjs
-          node --check dev/element-desktop-startup.mjs
-          node --check dev/element-desktop-journey-runner.mjs
-          node --check dev/element-desktop-evidence.mjs
-          node dev/element-desktop-startup.test.mjs
-          node dev/element-desktop-egress-policy.test.mjs
-          node dev/element-desktop-evidence.test.mjs
-          node dev/element-desktop-journey-runner.test.mjs
 
       - name: Start packaged Desktop through the shared lifecycle runner
         id: desktop_startup

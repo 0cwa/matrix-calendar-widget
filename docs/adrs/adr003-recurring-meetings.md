@@ -1,5 +1,9 @@
 # ADR003: Recurring Meetings
 
+[Decision index](./README.md) · [Documentation](../README.md)
+
+> **Inherited NeoDateFix record.** This document describes the original meeting product. Its recorded status is historical; use the [current architecture](../ARCHITECTURE.md) and fork decisions beginning with ADR004 for calendar development.
+
 Status: accepted
 
 <!-- These documents have names that are short noun phrases. For example, "ADR001: Deployment on Ruby on Rails 3.0.10" or "ADR009: LDAP for Multitenant Integration" -->
