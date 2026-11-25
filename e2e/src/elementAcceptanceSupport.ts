@@ -128,8 +128,6 @@ import {
   type BrowserActor,
   type CalDavReportProbeResult,
   type ExpectedRoomRange,
-  type GatewayEndpointKind,
-  type GatewayRequestMethod,
   type HomeserverHttpFailures,
   type MemberAriaHiddenState,
   type MemberCssVisibility,
@@ -163,7 +161,6 @@ import {
   type RoomRenderStateObservation,
   type WidgetDocumentReadyState,
   type WidgetPageErrorClass,
-  type WidgetResourceKind,
 } from './elementAcceptanceSupportTypes';
 
 import {
@@ -192,6 +189,13 @@ import {
   reminderPlanForMarkerIndex,
   summarizeReminderRecipientRoster,
 } from './elementAcceptanceReminderHelpers';
+
+import {
+  classifyGatewayMethod,
+  classifyGatewayRequest,
+  classifyWidgetResource,
+  isOpenIdRequest,
+} from './elementAcceptanceRequestHelpers';
 
 import { createPrivateAcceptanceHelpers } from './elementAcceptancePrivateHelpers';
 
@@ -5250,84 +5254,6 @@ export function createElementAcceptanceSupport() {
     });
 
     return observation;
-  }
-
-  function classifyGatewayRequest(
-    rawUrl: string,
-    rawMethod: string,
-    gatewayOrigin: string,
-  ):
-    | {
-        endpoint: GatewayEndpointKind;
-        method: GatewayRequestMethod;
-      }
-    | undefined {
-    try {
-      const url = new URL(rawUrl);
-      if (url.origin !== gatewayOrigin) return undefined;
-
-      let endpoint: GatewayEndpointKind;
-      if (url.pathname === '/v1/calendar/context') {
-        endpoint = 'context';
-      } else if (url.pathname === '/v1/calendar/calendars') {
-        endpoint = 'calendars';
-      } else if (url.pathname === '/v1/calendar/events') {
-        endpoint = 'events';
-      } else if (url.pathname.startsWith('/v1/calendar/')) {
-        endpoint = 'other-calendar';
-      } else {
-        endpoint = 'other-api';
-      }
-
-      const method = classifyGatewayMethod(rawMethod);
-      return { endpoint, method };
-    } catch {
-      return undefined;
-    }
-  }
-
-  function classifyGatewayMethod(rawMethod: string): GatewayRequestMethod {
-    const methods: GatewayRequestMethod[] = [
-      'GET',
-      'POST',
-      'PATCH',
-      'PUT',
-      'DELETE',
-      'OPTIONS',
-      'HEAD',
-    ];
-    return methods.includes(rawMethod as GatewayRequestMethod)
-      ? (rawMethod as GatewayRequestMethod)
-      : 'OTHER';
-  }
-
-  function classifyWidgetResource(
-    rawUrl: string,
-    resourceType: string,
-    widgetOrigin: string,
-  ): WidgetResourceKind | undefined {
-    try {
-      if (new URL(rawUrl).origin !== widgetOrigin) return undefined;
-      return resourceType === 'document' ||
-        resourceType === 'script' ||
-        resourceType === 'stylesheet'
-        ? resourceType
-        : undefined;
-    } catch {
-      return undefined;
-    }
-  }
-
-  function isOpenIdRequest(rawUrl: string, homeserverOrigin: string): boolean {
-    try {
-      const url = new URL(rawUrl);
-      return (
-        url.origin === homeserverOrigin &&
-        url.pathname.endsWith('/openid/request_token')
-      );
-    } catch {
-      return false;
-    }
   }
 
   async function recordWidgetRuntimeObservation(
