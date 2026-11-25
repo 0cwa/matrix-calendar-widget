@@ -81,6 +81,7 @@ import {
   type WebBEventListReadDiagnostic,
 } from '../../dev/element-desktop-journey.mjs';
 import { resolveDesktopViewportSize } from '../../dev/element-desktop-viewport.mjs';
+import { isRecord } from './elementAcceptanceShared';
 import { ElementWebPage, getMainRoomListLocator } from './pages/elementWebPage';
 
 type FixtureUser = {
@@ -2139,10 +2140,6 @@ function observeDesktopEventCreatePost(
     },
     stop,
   };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 async function tabToEventButton(page: Page, eventButton: Locator) {
