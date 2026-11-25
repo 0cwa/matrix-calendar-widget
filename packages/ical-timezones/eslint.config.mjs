@@ -16,11 +16,12 @@
 
 import js from '@eslint/js';
 import ts from 'typescript-eslint';
+import { sharedBase } from '../../dev/eslint.base.config.mjs';
 
 export default ts.config(
   {
     ignores: ['coverage/', 'lib/'],
   },
   js.configs.recommended,
-  ...ts.configs.recommended,
+  ...sharedBase,
 );
