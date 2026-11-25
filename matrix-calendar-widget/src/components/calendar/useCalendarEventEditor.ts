@@ -59,6 +59,7 @@ import {
 
 import { createAlarmHandlers } from './calendarEventAlarmHandlers';
 import { createAttachmentHandlers } from './calendarEventAttachmentHandlers';
+import { createTimingHandlers } from './calendarEventTimingHandlers';
 
 export const WEEKDAYS: CalendarEventWeekday[] = [
   'MO',
@@ -290,22 +291,10 @@ export function useCalendarEventEditor({
   const { handleAttachmentOperationChange, handleAttachmentSourceChange } =
     createAttachmentHandlers(setValues);
 
-  const handleCalendarChange = (change: ChangeEvent<HTMLInputElement>) => {
-    const calendarId = change.target.value;
-    const calendar = calendars.find((candidate) => candidate.id === calendarId);
-
-    setValues((current) =>
-      current
-        ? {
-            ...current,
-            calendarId,
-            timezone: calendar?.timezone ?? current.timezone,
-            timingChanged: true,
-            timezoneChanged: true,
-          }
-        : current,
-    );
-  };
+  const { handleCalendarChange, handleTimingTypeChange } = createTimingHandlers(
+    setValues,
+    calendars,
+  );
 
   const handleRecurrenceToggle = (change: ChangeEvent<HTMLInputElement>) => {
     setValues((current) =>
@@ -572,34 +561,6 @@ export function useCalendarEventEditor({
         recurrenceWeekdays:
           nextWeekdays.length === 1 ? undefined : nextWeekdays,
         recurrenceChanged: true,
-      };
-    });
-  };
-
-  const handleTimingTypeChange = (change: ChangeEvent<HTMLInputElement>) => {
-    const timingType = change.target.checked ? 'all-day' : 'timed';
-
-    setValues((current) => {
-      if (!current || current.timingType === timingType) {
-        return current;
-      }
-
-      if (timingType === 'all-day') {
-        return {
-          ...current,
-          timingType,
-          start: current.start.slice(0, 10),
-          end: current.end.slice(0, 10),
-          timingChanged: true,
-        };
-      }
-
-      return {
-        ...current,
-        timingType,
-        start: `${current.start}T09:00`,
-        end: `${current.end}T10:00`,
-        timingChanged: true,
       };
     });
   };
