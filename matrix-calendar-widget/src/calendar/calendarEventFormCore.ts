@@ -17,13 +17,10 @@
 import {
   Calendar,
   CalendarEvent,
-  CalendarEventConferenceInput,
   CalendarEventConferenceValidationError,
   CalendarEventDateTime,
-  CalendarEventInput,
   CalendarEventOccurrenceTextField,
   CalendarEventOccurrenceTextOperation,
-  CalendarEventPatch,
   CalendarEventRecurrenceDate,
   CalendarEventTiming,
   CalendarEventWeekday,
@@ -32,16 +29,16 @@ import {
   calendarEventRecurrenceIdentity,
   isAllDayCalendarEvent,
   isTimedCalendarEvent,
-  normalizeCalendarEventConferenceInput,
 } from '@matrix-calendar-widget/calendar';
 import { DateTime } from 'luxon';
+import {
+  calendarEventEditableFieldsFromForm,
+  conferenceFromForm,
+} from './calendarEventFormPatch';
 import {
   recurrenceExdateFormValues,
   recurrenceFormValues,
   recurrenceRdateFormValues,
-  recurrenceRuleFromForm,
-  recurrenceUntilNeedsAnchorUpdate,
-  recurrenceWeekdayNeedsAnchorUpdate,
   startWeekdayForTiming,
   validateExdateOperation,
   validateRdateOperation,
@@ -49,10 +46,13 @@ import {
 } from './calendarEventFormRecurrence';
 import {
   defaultEventTimedRange,
-  editableTimedEndpoint,
   formEndpointTimezone,
   timedKindForTiming,
 } from './calendarEventFormTiming';
+export {
+  calendarEventInputFromForm,
+  calendarEventPatchFromForm,
+} from './calendarEventFormPatch';
 export {
   calendarEventRdatePeriodDurationFromForm,
   calendarEventRdatePeriodIsEditable,
@@ -62,15 +62,10 @@ export {
 
 import {
   alarmFormValues,
-  alarmFromForm,
   emptyAlarmFormValues,
   validateAlarm,
 } from './calendarEventFormAlarms';
-import {
-  attachmentInputFromForm,
-  attachmentPatchFromForm,
-  validateAttachment,
-} from './calendarEventFormAttachments';
+import { validateAttachment } from './calendarEventFormAttachments';
 
 export type CalendarEventFormValues = {
   calendarId: CalendarId;
@@ -409,15 +404,6 @@ function conferenceFormValues(
   };
 }
 
-function conferenceFromForm(
-  values: CalendarEventFormValues,
-): CalendarEventConferenceInput {
-  return normalizeCalendarEventConferenceInput({
-    url: (values.conferenceUrl ?? '').trim(),
-    label: values.conferenceLabel ?? '',
-  });
-}
-
 function validateConference(
   values: CalendarEventFormValues,
 ): CalendarEventValidationError | undefined {
@@ -438,76 +424,6 @@ function validateConference(
     }
     throw error;
   }
-}
-
-export function calendarEventInputFromForm(
-  values: CalendarEventFormValues,
-  uid: string,
-): CalendarEventInput {
-  const editableFields = calendarEventEditableFieldsFromForm(values);
-  return {
-    uid,
-    ...editableFields,
-    ...(values.alarmEnabled ? { alarm: alarmFromForm(values) } : {}),
-    ...((values.conferenceUrl ?? '').trim()
-      ? { conference: conferenceFromForm(values) }
-      : {}),
-    ...(values.attachmentChanged && values.attachmentOperation === 'add'
-      ? { attachment: attachmentInputFromForm(values) }
-      : {}),
-    ...(values.repeats
-      ? {
-          recurrence: {
-            rrule: recurrenceRuleFromForm(values, editableFields.timing),
-          },
-        }
-      : {}),
-  };
-}
-
-export function calendarEventPatchFromForm(
-  values: CalendarEventFormValues,
-): CalendarEventPatch {
-  const editableFields = calendarEventEditableFieldsFromForm(values);
-  const { timing, ...fields } = editableFields;
-  const recurrenceNeedsAnchorUpdate =
-    recurrenceUntilNeedsAnchorUpdate(values, timing) ||
-    recurrenceWeekdayNeedsAnchorUpdate(values, timing);
-
-  return {
-    ...fields,
-    ...(values.timingChanged === false ? {} : { timing }),
-    ...(values.alarmChanged
-      ? {
-          alarm: values.alarmEnabled
-            ? alarmFromForm(values)
-            : { operation: 'remove' },
-        }
-      : {}),
-    ...(values.conferenceChanged && values.conferenceEditable !== false
-      ? {
-          conference: (values.conferenceUrl ?? '').trim()
-            ? { action: 'set' as const, ...conferenceFromForm(values) }
-            : { action: 'remove' as const },
-        }
-      : {}),
-    ...(values.attachmentChanged && values.attachmentEditable !== false
-      ? { attachment: attachmentPatchFromForm(values) }
-      : {}),
-    description: normalizeOptional(values.description),
-    location: normalizeOptional(values.location),
-    ...(values.exdateChanged && values.exdateOperation
-      ? { recurrence: { exdate: values.exdateOperation } }
-      : values.rdateChanged && values.rdateOperation
-        ? { recurrence: { rdate: values.rdateOperation } }
-        : values.recurrenceChanged || recurrenceNeedsAnchorUpdate
-          ? {
-              recurrence: values.repeats
-                ? { rrule: recurrenceRuleFromForm(values, timing) }
-                : {},
-            }
-          : {}),
-  };
 }
 
 export function validateCalendarEventForm(
@@ -591,36 +507,4 @@ export function calendarEventFormStartWeekday(
   return startWeekdayForTiming(
     calendarEventEditableFieldsFromForm(values).timing,
   );
-}
-
-function calendarEventEditableFieldsFromForm(
-  values: CalendarEventFormValues,
-): Omit<CalendarEventInput, 'uid' | 'conference' | 'attachment'> {
-  const description = normalizeOptional(values.description);
-  const location = normalizeOptional(values.location);
-
-  return {
-    title: values.title.trim(),
-    ...(description ? { description } : {}),
-    ...(location ? { location } : {}),
-    timing:
-      values.timingType === 'all-day'
-        ? {
-            type: 'all-day',
-            startDate: values.start,
-            endDate:
-              DateTime.fromISO(values.end).plus({ days: 1 }).toISODate() ??
-              values.end,
-          }
-        : {
-            type: 'timed',
-            start: editableTimedEndpoint(values, 'start'),
-            end: editableTimedEndpoint(values, 'end'),
-          },
-  };
-}
-
-function normalizeOptional(value: string): string | undefined {
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : undefined;
 }
