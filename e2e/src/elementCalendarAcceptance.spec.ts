@@ -127,6 +127,7 @@ import type {
   OuterRenderBucket,
   User,
 } from './elementAcceptanceTypes';
+import { runElementFunctionalAcceptanceJourney } from './elementFunctionalAcceptanceJourney';
 import {
   acceptancePrincipal,
   runElementG6AcceptanceJourney,
@@ -590,7 +591,7 @@ type Phase =
   | 'g6-member-a-room-context'
   | 'g6-member-b-room-context'
   | G6Phase;
-type BrowserActor = 'member-a' | 'member-b' | 'outsider';
+export type BrowserActor = 'member-a' | 'member-b' | 'outsider';
 type BlockedRequestClass =
   | 'fixture-host-origin-mismatch'
   | 'matrix-client-well-known-discovery'
@@ -621,7 +622,7 @@ type BlockedRequestDiagnostic = {
   resourceType: BlockedRequestResourceType;
   count: number;
 };
-type BlockedRequestEvidence = {
+export type BlockedRequestEvidence = {
   diagnostics: Map<string, BlockedRequestDiagnostic>;
   overflow: boolean;
 };
@@ -927,7 +928,7 @@ type WidgetPageErrorClass =
 
 type OpenIdProtocolState = 'none' | 'allowed' | 'request' | 'blocked' | 'other';
 
-type AcceptanceRuntimeObservation = {
+export type AcceptanceRuntimeObservation = {
   requestCounts: Record<GatewayEndpointKind, number>;
   optionsRequestCount: number;
   failedRequestCount: number;
@@ -2003,404 +2004,56 @@ function createPerformanceApiObserver(
   };
 }
 
+function createFunctionalJourneyContext() {
+  return {
+    get fixture() {
+      return fixture;
+    },
+    set fixture(value: Fixture) {
+      fixture = value;
+    },
+    get activePhase() {
+      return activePhase;
+    },
+    set activePhase(value: Phase) {
+      activePhase = value;
+    },
+    readFixture,
+    blockedExternalRequestsByContext,
+    recordBlockedRequest,
+    safeBlockedRequestResourceType,
+    classifyBlockedRequest,
+    recordRuntimeVersions,
+    authenticateInElement,
+    observeAcceptanceRuntime,
+    record,
+    openMemberARoomWithDiagnostics,
+    recordMemberARoomObservation,
+    requireMemberARoom,
+    waitForGatewayResponse,
+    openCalendarWidget,
+    recordWidgetRuntimeObservation,
+    observePostCreateVisibility,
+    appendPostCreateVisibilityObservation,
+    openFixtureRoom,
+    openEventEditor,
+    requestRoomEventsStatus,
+    recordBlockedRequestFailure,
+    recordJourneyFailure,
+  };
+}
+
+export type FunctionalJourneyContext = ReturnType<
+  typeof createFunctionalJourneyContext
+>;
+
 test('Element Web members share events and enforce room authorization', async ({
   browser,
 }) => {
-  fixture = readFixture();
-  const contexts: BrowserContext[] = [];
-  let blockedExternalRequests = 0;
-  const blockedRequestEvidence: BlockedRequestEvidence = {
-    diagnostics: new Map(),
-    overflow: false,
-  };
-  const allowedOrigins = new Set([
-    new URL(fixture.elementUrl).origin,
-    new URL(fixture.homeserverUrl).origin,
-    'http://localhost:8008',
-    new URL(fixture.gatewayUrl).origin,
-    'http://127.0.0.1:8080',
-  ]);
-  const fixtureHosts = new Set([
-    ...Array.from(allowedOrigins, (origin) => new URL(origin).hostname),
-    'synapse',
-    'radicale',
-    'gateway',
-    'widget',
-    'element',
-  ]);
-
-  const makeContext = async (actor: BrowserActor) => {
-    const context = await browser.newContext({
-      locale: 'en-US',
-      timezoneId: 'Europe/Stockholm',
-      viewport: { width: 1440, height: 900 },
-    });
-    const contextBlockedRequests = { count: 0 };
-    blockedExternalRequestsByContext.set(context, contextBlockedRequests);
-    contexts.push(context);
-    await context.route('**/*', async (route) => {
-      let requestUrl: URL;
-      try {
-        requestUrl = new URL(route.request().url());
-      } catch {
-        blockedExternalRequests += 1;
-        contextBlockedRequests.count = Math.min(
-          contextBlockedRequests.count + 1,
-          100_000,
-        );
-        const request = route.request();
-        recordBlockedRequest(
-          blockedRequestEvidence,
-          actor,
-          activePhase,
-          'invalid-url',
-          safeBlockedRequestResourceType(request.resourceType()),
-        );
-        await route.abort('blockedbyclient');
-        return;
-      }
-
-      if (!allowedOrigins.has(requestUrl.origin)) {
-        blockedExternalRequests += 1;
-        contextBlockedRequests.count = Math.min(
-          contextBlockedRequests.count + 1,
-          100_000,
-        );
-        const request = route.request();
-        recordBlockedRequest(
-          blockedRequestEvidence,
-          actor,
-          activePhase,
-          classifyBlockedRequest(requestUrl, fixtureHosts),
-          safeBlockedRequestResourceType(request.resourceType()),
-        );
-        await route.abort('blockedbyclient');
-        return;
-      }
-      await route.continue();
-    });
-    return context;
-  };
-
-  let contextA: BrowserContext | undefined;
-  let contextB: BrowserContext | undefined;
-  let contextC: BrowserContext | undefined;
-  let pageA: Page | undefined;
-  let pageB: Page | undefined;
-  let pageC: Page | undefined;
-  let memberARuntimeObservation: AcceptanceRuntimeObservation | undefined;
-  let failureHttpStatus: number | undefined;
-  let failureTeamRoomMatches: boolean | undefined;
-  let failureAlreadyReported = false;
-
-  try {
-    recordRuntimeVersions(browser.version());
-
-    activePhase = 'member-a-authenticated';
-    contextA = await makeContext('member-a');
-    pageA = await authenticateInElement(contextA, fixture.users.memberA, true);
-    memberARuntimeObservation = await observeAcceptanceRuntime(pageA, {
-      gatewayUrl: fixture.gatewayUrl,
-      homeserverUrl: fixture.homeserverUrl,
-      widgetUrl: fixture.widgetUrl,
-    });
-    record(activePhase, 'passed');
-
-    activePhase = 'member-b-authenticated';
-    contextB = await makeContext('member-b');
-    pageB = await authenticateInElement(contextB, fixture.users.memberB);
-    record(activePhase, 'passed');
-
-    activePhase = 'outsider-authenticated';
-    contextC = await makeContext('outsider');
-    pageC = await authenticateInElement(contextC, fixture.users.outsider);
-    record(activePhase, 'passed');
-
-    activePhase = 'member-a-room-navigation';
-    const memberARoom = await openMemberARoomWithDiagnostics(
-      pageA,
-      fixture.roomName,
-      fixture.teamRoomId,
-      fixture.users.memberA.userId,
-    );
-    record(activePhase, memberARoom.navigationCompleted ? 'passed' : 'failed');
-    activePhase = 'member-a-room-context';
-    recordMemberARoomObservation(memberARoom);
-    failureAlreadyReported = Boolean(memberARoom.failureCode);
-    const elementA = requireMemberARoom(memberARoom);
-    activePhase = 'widget-a-approved';
-    const firstRead = waitForGatewayResponse(
-      pageA,
-      'GET',
-      '/v1/calendar/events',
-    );
-    void firstRead.catch(() => undefined);
-    const frameA = await openCalendarWidget(elementA, pageA, {
-      expectWidgetWarning: false,
-      waitForCalendar: false,
-      captureMemberADiagnostics: true,
-    });
-    activePhase = 'gateway-backed-read';
-    let firstReadResponse: Response;
-    try {
-      firstReadResponse = await firstRead;
-    } catch {
-      await recordWidgetRuntimeObservation(
-        pageA,
-        frameA,
-        memberARuntimeObservation,
-      );
-      throw new Error('Initial calendar event request was not observed');
-    }
-    await recordWidgetRuntimeObservation(
-      pageA,
-      frameA,
-      memberARuntimeObservation,
-    );
-    failureHttpStatus = firstReadResponse.status();
-    expect(failureHttpStatus).toBe(200);
-    record(activePhase, 'passed', failureHttpStatus);
-    failureHttpStatus = undefined;
-    activePhase = 'widget-a-iframe-ready';
-    await frameA
-      .getByRole('button', { name: 'Create event', exact: true })
-      .waitFor({ timeout: 30_000 });
-    record(activePhase, 'passed');
-    activePhase = 'widget-a-approved';
-    record('widget-a-approved', 'passed');
-
-    const eventTitle = `Acceptance ${randomUUID()}`;
-    activePhase = 'event-create-dialog';
-    await frameA
-      .getByRole('button', { name: 'Create event', exact: true })
-      .click();
-    const createDialog = frameA.getByRole('dialog').last();
-    await expect(createDialog).toBeVisible({ timeout: 15_000 });
-    record(activePhase, 'passed');
-
-    activePhase = 'event-create-calendar-selected';
-    await createDialog
-      .getByRole('combobox', { name: 'Calendar' })
-      .selectOption({
-        value: `matrix-calendar-target://room/${encodeURIComponent(fixture.calendarId)}`,
-      });
-    record(activePhase, 'passed');
-
-    activePhase = 'event-create-title-entered';
-    await createDialog.getByRole('textbox', { name: 'Title' }).fill(eventTitle);
-    record(activePhase, 'passed');
-
-    activePhase = 'event-create-submit';
-    const createResponse = waitForGatewayResponse(
-      pageA,
-      'POST',
-      '/v1/calendar/events',
-    );
-    const postCreateVisibility = observePostCreateVisibility(pageA, {
-      expectedCalendarId: fixture.calendarId,
-      expectedRoomId: fixture.teamRoomId,
-      expectedTitle: eventTitle,
-    });
-    await createDialog
-      .getByRole('button', { name: 'Create event', exact: true })
-      .click();
-    record(activePhase, 'passed');
-
-    activePhase = 'event-create-response';
-    const createResponseResult = await createResponse;
-    failureHttpStatus = createResponseResult.status();
-    expect(createResponseResult.status()).toBeGreaterThanOrEqual(200);
-    expect(createResponseResult.status()).toBeLessThan(300);
-    record(activePhase, 'passed', failureHttpStatus);
-    failureHttpStatus = undefined;
-    await postCreateVisibility.observeCreatedEvent(createResponseResult);
-
-    activePhase = 'event-create-visible';
-    record(activePhase, 'started');
-    const eventRow = frameA.getByRole('listitem', { name: eventTitle });
-    let eventVisible = false;
-    try {
-      await expect(eventRow).toBeVisible({ timeout: 15_000 });
-      eventVisible = true;
-    } catch {
-      // The bounded observation below distinguishes the gateway refresh from
-      // the widget's rendered list without retaining the failed assertion.
-    }
-    const postCreateObservation = await postCreateVisibility.collect(
-      frameA,
-      eventRow,
-    );
-    appendPostCreateVisibilityObservation(postCreateObservation);
-    expect(eventVisible).toBe(true);
-    record(activePhase, 'passed');
-
-    activePhase = 'event-created';
-    record(activePhase, 'passed', createResponseResult.status());
-
-    activePhase = 'member-b-room-context';
-    const elementB = await openFixtureRoom(
-      pageB,
-      fixture.roomName,
-      fixture.teamRoomId,
-    );
-    record(activePhase, 'passed');
-    activePhase = 'widget-b-approved';
-    const memberBRead = waitForGatewayResponse(
-      pageB,
-      'GET',
-      '/v1/calendar/events',
-    );
-    const frameB = await openCalendarWidget(elementB, pageB, {
-      expectWidgetWarning: true,
-    });
-    const memberBReadResult = await memberBRead;
-    expect(memberBReadResult.status()).toBe(200);
-    record(activePhase, 'passed');
-
-    activePhase = 'shared-visibility';
-    await expect(
-      frameB.getByRole('listitem', { name: eventTitle }),
-    ).toBeVisible();
-    await openEventEditor(frameB, eventTitle);
-    await frameB
-      .getByRole('dialog')
-      .last()
-      .getByRole('textbox', { name: 'Title' })
-      .fill('Member B stale draft');
-    record(activePhase, 'passed');
-
-    activePhase = 'member-a-edited';
-    await openEventEditor(frameA, eventTitle);
-    const updateResponse = waitForGatewayResponse(
-      pageA,
-      'PATCH',
-      '/v1/calendar/events',
-    );
-    await frameA
-      .getByRole('dialog')
-      .last()
-      .getByRole('textbox', { name: 'Title' })
-      .fill('Member A canonical edit');
-    await frameA
-      .getByRole('dialog')
-      .last()
-      .getByRole('button', { name: 'Save', exact: true })
-      .click();
-    const updateResponseResult = await updateResponse;
-    expect(updateResponseResult.status()).toBeGreaterThanOrEqual(200);
-    expect(updateResponseResult.status()).toBeLessThan(300);
-    record(activePhase, 'passed', updateResponseResult.status());
-
-    activePhase = 'outsider-room-context';
-    const elementC = await openFixtureRoom(
-      pageC,
-      fixture.outsiderRoomName,
-      fixture.outsiderRoomId,
-    );
-    record(activePhase, 'passed');
-    expect(fixture.outsiderRoomId).not.toBe(fixture.teamRoomId);
-    activePhase = 'outsider-widget-approved';
-    const outsiderContextRead = waitForGatewayResponse(
-      pageC,
-      'GET',
-      '/v1/calendar/context',
-    );
-    await openCalendarWidget(elementC, pageC, {
-      expectWidgetWarning: false,
-      waitForCalendar: false,
-    });
-    record(activePhase, 'passed');
-
-    activePhase = 'outsider-room-widget-team-target';
-    const outsiderContextResponse = await outsiderContextRead;
-    failureHttpStatus = outsiderContextResponse.status();
-    failureTeamRoomMatches =
-      new URL(outsiderContextResponse.url()).searchParams.get('roomId') ===
-      fixture.teamRoomId;
-    expect(failureTeamRoomMatches).toBe(true);
-    expect(failureHttpStatus).toBe(403);
-    record(activePhase, 'passed', failureHttpStatus, undefined, {
-      teamRoomMatches: failureTeamRoomMatches,
-    });
-    failureHttpStatus = undefined;
-    failureTeamRoomMatches = undefined;
-
-    activePhase = 'outsider-room-events-api-team-target';
-    failureHttpStatus = await requestRoomEventsStatus(pageC, {
-      gatewayUrl: fixture.gatewayUrl,
-      roomId: fixture.teamRoomId,
-      calendarId: fixture.calendarId,
-    });
-    expect(failureHttpStatus).toBe(403);
-    record(activePhase, 'passed', failureHttpStatus);
-    failureHttpStatus = undefined;
-
-    activePhase = 'outsider-own-unbound-room';
-    failureHttpStatus = await requestRoomEventsStatus(pageC, {
-      gatewayUrl: fixture.gatewayUrl,
-      roomId: fixture.outsiderRoomId,
-      calendarId: fixture.calendarId,
-    });
-    expect(failureHttpStatus).toBe(404);
-    record(activePhase, 'passed', failureHttpStatus);
-    failureHttpStatus = undefined;
-
-    activePhase = 'stale-etag-conflict';
-    const staleUpdate = waitForGatewayResponse(
-      pageB,
-      'PATCH',
-      '/v1/calendar/events',
-    );
-    await frameB
-      .getByRole('dialog')
-      .last()
-      .getByRole('button', { name: 'Save', exact: true })
-      .click();
-    const staleUpdateResult = await staleUpdate;
-    expect(staleUpdateResult.status()).toBe(409);
-    await expect(
-      frameB.getByText(
-        'This event changed elsewhere. Reload the latest version before retrying.',
-      ),
-    ).toBeVisible();
-    record(activePhase, 'passed', staleUpdateResult.status());
-
-    activePhase = 'canonical-read-after-denial';
-    const reloadResponse = waitForGatewayResponse(
-      pageB,
-      'GET',
-      '/v1/calendar/event',
-    );
-    await frameB
-      .getByRole('dialog')
-      .last()
-      .getByRole('button', { name: 'Reload latest', exact: true })
-      .click();
-    const reloadResponseResult = await reloadResponse;
-    expect(reloadResponseResult.status()).toBe(200);
-    await expect(frameB.getByRole('textbox', { name: 'Title' })).toHaveValue(
-      'Member A canonical edit',
-    );
-    record(activePhase, 'passed', reloadResponseResult.status());
-
-    activePhase = 'browser-egress';
-    failureAlreadyReported = recordBlockedRequestFailure(
-      blockedExternalRequests,
-      blockedRequestEvidence,
-    );
-    expect(blockedExternalRequests).toBe(0);
-    record(activePhase, 'passed', undefined, blockedExternalRequests);
-  } catch {
-    recordJourneyFailure(
-      activePhase,
-      failureHttpStatus,
-      failureAlreadyReported,
-      failureTeamRoomMatches,
-    );
-    throw new Error('Element acceptance journey failed');
-  } finally {
-    await Promise.all(contexts.map((context) => context.close()));
-  }
+  await runElementFunctionalAcceptanceJourney(
+    browser,
+    createFunctionalJourneyContext(),
+  );
 });
 
 const ELEMENT_ERROR_SOURCE_MAP_MAX_BYTES = 64 * 1024 * 1024;
