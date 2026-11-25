@@ -57,6 +57,8 @@ import {
   validateCalendarEventForm,
 } from '../../calendar';
 
+import { createAttachmentHandlers } from './calendarEventAttachmentHandlers';
+
 export const WEEKDAYS: CalendarEventWeekday[] = [
   'MO',
   'TU',
@@ -284,47 +286,8 @@ export function useCalendarEventEditor({
       );
     };
 
-  const handleAttachmentOperationChange = (
-    change: ChangeEvent<HTMLInputElement>,
-  ) => {
-    const operation = change.target.value as NonNullable<
-      CalendarEventFormValues['attachmentOperation']
-    >;
-    setValues((current) => {
-      if (!current) {
-        return current;
-      }
-      const sourceUrl =
-        operation === 'set' || operation === 'remove'
-          ? current.attachmentSourceUrl || current.attachmentUrls?.[0] || ''
-          : '';
-      return {
-        ...current,
-        attachmentOperation: operation,
-        attachmentSourceUrl: sourceUrl,
-        attachmentUrl: operation === 'set' ? sourceUrl : '',
-        attachmentChanged: operation !== 'none',
-      };
-    });
-  };
-
-  const handleAttachmentSourceChange = (
-    change: ChangeEvent<HTMLInputElement>,
-  ) => {
-    const sourceUrl = change.target.value;
-    setValues((current) =>
-      current
-        ? {
-            ...current,
-            attachmentSourceUrl: sourceUrl,
-            ...(current.attachmentOperation === 'set'
-              ? { attachmentUrl: sourceUrl }
-              : {}),
-            attachmentChanged: true,
-          }
-        : current,
-    );
-  };
+  const { handleAttachmentOperationChange, handleAttachmentSourceChange } =
+    createAttachmentHandlers(setValues);
 
   const handleCalendarChange = (change: ChangeEvent<HTMLInputElement>) => {
     const calendarId = change.target.value;
