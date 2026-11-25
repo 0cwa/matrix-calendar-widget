@@ -20,8 +20,7 @@ export type RoomMentionMessage = {
     readonly msgtype: 'm.text';
     readonly body: string;
     readonly 'm.mentions':
-      | Readonly<{ room: true }>
-      | Readonly<{ user_ids: readonly string[] }>;
+      Readonly<{ room: true }> | Readonly<{ user_ids: readonly string[] }>;
   };
 };
 

@@ -62,12 +62,7 @@ type CalendarPrivateClientDialogProps = {
 };
 
 type PrivateClientError =
-  | 'capability-unavailable'
-  | 'capacity'
-  | 'load'
-  | 'create'
-  | 'revoke'
-  | 'copy';
+  'capability-unavailable' | 'capacity' | 'load' | 'create' | 'revoke' | 'copy';
 
 type CopiedCredentialField = 'url' | 'username' | 'password';
 

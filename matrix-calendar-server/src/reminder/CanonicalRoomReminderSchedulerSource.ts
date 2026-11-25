@@ -78,10 +78,7 @@ const NO_MATCH_CODES = new Set([
 ]);
 
 export type CanonicalReminderSourceErrorCode =
-  | 'unavailable'
-  | 'ambiguous-resource'
-  | 'unsupported-source'
-  | 'scan-limit';
+  'unavailable' | 'ambiguous-resource' | 'unsupported-source' | 'scan-limit';
 
 /** Fixed safe failure; never includes the CalDAV URL, ICS, or event text. */
 export class CanonicalReminderSourceError extends Error {

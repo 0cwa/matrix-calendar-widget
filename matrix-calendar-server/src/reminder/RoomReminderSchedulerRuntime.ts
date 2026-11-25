@@ -67,8 +67,7 @@ export class ConfiguredReminderSchedulerRuntimeSource implements ReminderSchedul
 
     let bindings: unknown = [];
     let roomCalendarPrincipalIdentity:
-      | RoomCalendarPrincipalIdentity
-      | undefined;
+      RoomCalendarPrincipalIdentity | undefined;
     if (configured) {
       try {
         const validated = await resolveWithAbort(

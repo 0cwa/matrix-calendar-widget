@@ -49,8 +49,7 @@ export const paramExtractor: IParamExtractor = (
       switch (paramName) {
         case ParamName.MATRIX_OPENID_CREDENTIAL:
           return request[MATRIX_OPENID_CREDENTIAL_CONTEXT] as
-            | IMatrixOpenIdCredential
-            | undefined;
+            IMatrixOpenIdCredential | undefined;
         case ParamName.ROOM_ID:
           return undefined;
         case ParamName.USER_CONTEXT:

@@ -60,11 +60,7 @@ export type G6Phase =
 
 export type G6NeighborTitleOutcome = 'matched' | 'mismatched' | 'unavailable';
 export type G6CanonicalTitleReadbackOutcome =
-  | 'not-needed'
-  | 'not-owned'
-  | 'matched'
-  | 'mismatched'
-  | 'unavailable';
+  'not-needed' | 'not-owned' | 'matched' | 'mismatched' | 'unavailable';
 export type G6PostSaveListResponseOutcome =
   | 'not-observed'
   | 'decoding'
@@ -99,17 +95,9 @@ export type G6PostSaveListUiObservation =
   | { state: 'unavailable' };
 
 export type G6SidePanelControlVisibility =
-  | 'absent'
-  | 'visible'
-  | 'hidden'
-  | 'ambiguous'
-  | 'unavailable';
+  'absent' | 'visible' | 'hidden' | 'ambiguous' | 'unavailable';
 export type G6SidePanelControlEnabled =
-  | 'absent'
-  | 'enabled'
-  | 'disabled'
-  | 'ambiguous'
-  | 'unavailable';
+  'absent' | 'enabled' | 'disabled' | 'ambiguous' | 'unavailable';
 export type G6SidePanelToolbarObservation = {
   managementToolbarNavCountCapped: number | null;
   managementToolbarNavVisibility: G6SidePanelControlVisibility;
@@ -254,17 +242,10 @@ export type MatrixSyncState =
   | 'UNKNOWN';
 
 export type OuterRenderBucket =
-  | 'room-page'
-  | 'other-page'
-  | 'no-shell'
-  | 'inconsistent'
-  | 'unavailable';
+  'room-page' | 'other-page' | 'no-shell' | 'inconsistent' | 'unavailable';
 export type MatrixChatViewBucket = 'logged-in' | 'other-view' | 'unavailable';
 export type MatrixChatPageTypeBucket =
-  | 'room-view'
-  | 'other-page'
-  | 'missing'
-  | 'unavailable';
+  'room-view' | 'other-page' | 'missing' | 'unavailable';
 export type RoomNavigationReadinessSnapshot = {
   firstSyncComplete: boolean | null;
   ready: boolean | null;

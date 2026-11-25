@@ -5009,11 +5009,7 @@ export function createElementAcceptanceSupport() {
       expectedRoomId,
     }: typeof observerArgs) => {
       type WidgetApiState =
-        | 'none'
-        | 'allowed'
-        | 'request'
-        | 'blocked'
-        | 'other';
+        'none' | 'allowed' | 'request' | 'blocked' | 'other';
       type WidgetParameters = Record<string, string | undefined>;
       type WidgetApiMessage = {
         api?: unknown;

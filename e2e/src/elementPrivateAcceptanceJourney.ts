@@ -31,8 +31,7 @@ import type {
 export async function runElementPrivateAcceptanceJourney(
   browser: Browser,
   privateUiJournal:
-    | ReturnType<typeof createPrivateUiCheckpointJournal>
-    | undefined,
+    ReturnType<typeof createPrivateUiCheckpointJournal> | undefined,
   journey: PrivateJourneyContext,
 ): Promise<void> {
   const {
@@ -82,8 +81,7 @@ export async function runElementPrivateAcceptanceJourney(
   const contexts: BrowserContext[] = [];
   let blockedExternalRequests = 0;
   let calendarListRequestObserver:
-    | PrivateCalendarListRequestObserver
-    | undefined;
+    PrivateCalendarListRequestObserver | undefined;
   const makeContext = async () => {
     const context = await browser.newContext({
       locale: 'en-US',

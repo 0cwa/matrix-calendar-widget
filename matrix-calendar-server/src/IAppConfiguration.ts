@@ -31,8 +31,7 @@ export interface IAppConfiguration {
   private_calendar_client_origin?: string;
   private_calendar_client_database_url?: string;
   private_calendar_client_database_tls_mode?:
-    | 'verify-full'
-    | 'trusted-private-network';
+    'verify-full' | 'trusted-private-network';
   private_calendar_client_epoch_key?: Buffer;
   private_calendar_client_callback_key?: Buffer;
   caldav_max_event_response_bytes?: number;
@@ -40,8 +39,7 @@ export interface IAppConfiguration {
   room_calendar_principal_mode: RoomCalendarPrincipalMode;
   room_calendar_binding_database_url?: string;
   room_calendar_binding_database_tls_mode:
-    | 'verify-full'
-    | 'trusted-private-network';
+    'verify-full' | 'trusted-private-network';
   room_calendar_setup_enabled: boolean;
   room_calendar_setup_allowed_actor_server_names: readonly string[];
   room_calendar_access_enabled: boolean;

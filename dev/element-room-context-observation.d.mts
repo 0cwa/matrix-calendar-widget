@@ -36,10 +36,7 @@ export type RoomReadinessSyncState =
   | 'UNKNOWN';
 
 export type RoomNavigationPageType =
-  | 'room-view'
-  | 'other-page'
-  | 'missing'
-  | 'unavailable';
+  'room-view' | 'other-page' | 'missing' | 'unavailable';
 
 export type RoomNavigationReadinessSnapshot = {
   firstSyncComplete: boolean | null;
