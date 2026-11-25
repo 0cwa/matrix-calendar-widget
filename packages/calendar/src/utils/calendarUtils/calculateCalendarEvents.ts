@@ -87,8 +87,7 @@ type CalculateCalendarEventsProps = {
    */
   limit?: number;
 } & (
-  | { toDate?: undefined; limit: number }
-  | { toDate: string; limit?: number }
+  { toDate?: undefined; limit: number } | { toDate: string; limit?: number }
 );
 
 /**

@@ -67,9 +67,7 @@ const localDateTimePattern = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})(?::(\d{2}))?$/;
 export class CalendarEventTimezoneError extends Error {
   constructor(
     public readonly code:
-      | 'unsupported-timezone'
-      | 'invalid-local-time'
-      | 'invalid-timezone-data',
+      'unsupported-timezone' | 'invalid-local-time' | 'invalid-timezone-data',
   ) {
     super(code);
     this.name = 'CalendarEventTimezoneError';

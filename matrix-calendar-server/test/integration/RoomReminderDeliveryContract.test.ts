@@ -97,10 +97,7 @@ type ReminderSetupStage =
   | 'initialize-scheduler';
 
 type ReminderSetupFailure =
-  | 'transport'
-  | 'http-status'
-  | 'invalid-response'
-  | 'other';
+  'transport' | 'http-status' | 'invalid-response' | 'other';
 
 const REMINDER_MATRIX_ERROR_CODES = new Set([
   'M_BAD_JSON',

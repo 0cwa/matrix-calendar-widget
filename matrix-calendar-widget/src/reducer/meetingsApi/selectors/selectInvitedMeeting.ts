@@ -67,14 +67,12 @@ export function makeSelectInvitedMeeting(): (
       const participants = filterAllRoomMemberEventsByRoomId(
         roomMemberEvents,
         createEvent.room_id,
-      ).map(
-        (e, _, all): MeetingParticipant => ({
-          userId: e.state_key,
-          displayName: getRoomMemberDisplayName(e, all),
-          membership: e.content.membership === 'join' ? 'join' : 'invite',
-          rawEvent: e,
-        }),
-      );
+      ).map((e, _, all): MeetingParticipant => ({
+        userId: e.state_key,
+        displayName: getRoomMemberDisplayName(e, all),
+        membership: e.content.membership === 'join' ? 'join' : 'invite',
+        rawEvent: e,
+      }));
 
       const { room_id: parentRoomId } =
         allChildEvents

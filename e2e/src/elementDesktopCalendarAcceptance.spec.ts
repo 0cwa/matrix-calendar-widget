@@ -489,8 +489,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
     unavailableDesktopRoomNavigationClickProgress();
   let roomNavigationClickStartedAt: number | undefined;
   let desktopRefreshRoomNavigationDiagnostic:
-    | DesktopRefreshRoomNavigationDiagnostic
-    | undefined;
+    DesktopRefreshRoomNavigationDiagnostic | undefined;
   let desktopRefreshRoomNavigationClickStartedAt: number | undefined;
   let roomsReadyIdentity: { memberAId: string; roomId: string } | undefined;
   const recorded = new Set<DesktopJourneyPhase>();
@@ -504,8 +503,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
   let desktopEventCreateTitle: string | undefined;
   let desktopGatewayReadObserver: DesktopGatewayReadRequestObserver | undefined;
   let desktopEventCreatePostObserver:
-    | DesktopEventCreatePostObserver
-    | undefined;
+    DesktopEventCreatePostObserver | undefined;
   let webBEventListReadObserver: WebBEventListReadObserver | undefined;
   const desktopWidgetPromptObservation =
     unavailableDesktopWidgetPromptObservation();
@@ -1105,8 +1103,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
     }
     if (currentPhase && evidenceInitialized && !recorded.has(currentPhase)) {
       let gatewayReadDiagnostic:
-        | DesktopGatewayReadFailureDiagnostic
-        | undefined;
+        DesktopGatewayReadFailureDiagnostic | undefined;
       if (
         currentPhase === 'desktop-room-widget-read' &&
         currentFailurePoint !== undefined &&
@@ -1173,8 +1170,7 @@ test('Element Desktop room event journey', async ({ browser }) => {
         };
       }
       let desktopEventCreateDiagnostic:
-        | DesktopEventCreateFailureDiagnostic
-        | undefined;
+        DesktopEventCreateFailureDiagnostic | undefined;
       if (currentPhase === 'desktop-event-create') {
         desktopEventCreateDiagnostic =
           (await desktopEventCreatePostObserver
@@ -2115,9 +2111,7 @@ function observeDesktopEventCreatePost(
               hasVisibleRenderedMatch(matchingRow),
             ]);
             calendarEventsRegionCountCapped = Math.min(regionCount, 2) as
-              | 0
-              | 1
-              | 2;
+              0 | 1 | 2;
             calendarEventsRegionVisible = regionVisible;
             progressbarVisible = loading;
             errorAlertVisible = error;

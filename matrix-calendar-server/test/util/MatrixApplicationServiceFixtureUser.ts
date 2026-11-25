@@ -15,14 +15,10 @@
  */
 
 export type MatrixApplicationServiceFixtureStage =
-  | 'registration'
-  | 'application-service-login'
-  | 'identity-verification';
+  'registration' | 'application-service-login' | 'identity-verification';
 
 export type MatrixApplicationServiceFixtureFailureCategory =
-  | 'transport'
-  | 'http-status'
-  | 'invalid-response';
+  'transport' | 'http-status' | 'invalid-response';
 
 const ALLOWED_MATRIX_ERROR_CODES = new Set([
   'M_BAD_JSON',
