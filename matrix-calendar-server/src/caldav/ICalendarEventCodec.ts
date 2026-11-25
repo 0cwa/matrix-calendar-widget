@@ -89,6 +89,10 @@ import {
   textValue,
 } from './ICalendarEventFields';
 import { hasUnsupportedTimezoneRules } from './ICalendarTimezoneProjectionSafety';
+import {
+  compactUtcTimestampToIso,
+  isValidCompactUtcDateTime,
+} from './ICalendarUtcTimestamp';
 import { readCalendarLinks } from './readCalendarLinks';
 
 type RevisionPropertyState<T> =
@@ -5815,56 +5819,6 @@ function isRevisionPropertyName(
     name === 'last-modified' ||
     name === 'sequence'
   );
-}
-
-function compactUtcTimestampToIso(value: string): string {
-  return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(
-    6,
-    8,
-  )}T${value.slice(9, 11)}:${value.slice(11, 13)}:${value.slice(13, 15)}Z`;
-}
-
-function isValidCompactUtcDateTime(value: string): boolean {
-  const match = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(value);
-  if (!match) {
-    return false;
-  }
-
-  const [, yearText, monthText, dayText, hourText, minuteText, secondText] =
-    match;
-  const year = Number(yearText);
-  const month = Number(monthText);
-  const day = Number(dayText);
-  const hour = Number(hourText);
-  const minute = Number(minuteText);
-  const second = Number(secondText);
-  const daysInMonth = [
-    31,
-    isGregorianLeapYear(year) ? 29 : 28,
-    31,
-    30,
-    31,
-    30,
-    31,
-    31,
-    30,
-    31,
-    30,
-    31,
-  ][month - 1];
-
-  return (
-    daysInMonth !== undefined &&
-    day >= 1 &&
-    day <= daysInMonth &&
-    hour <= 23 &&
-    minute <= 59 &&
-    second <= 59
-  );
-}
-
-function isGregorianLeapYear(year: number): boolean {
-  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
 }
 
 function inspectUtcTimestamp(
