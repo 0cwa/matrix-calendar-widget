@@ -21,6 +21,7 @@ import pluginPromise from 'eslint-plugin-promise';
 import path from 'path';
 import ts from 'typescript-eslint';
 import { fileURLToPath } from 'url';
+import { sharedBase } from '../dev/eslint.base.config.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -30,7 +31,7 @@ export default ts.config(
     ignores: ['coverage/', 'lib/'],
   },
   js.configs.recommended,
-  ...ts.configs.recommended,
+  ...sharedBase,
   pluginPromise.configs['flat/recommended'],
   {
     plugins: {
