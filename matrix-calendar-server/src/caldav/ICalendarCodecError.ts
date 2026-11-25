@@ -39,3 +39,10 @@ export function unsupportedAttachmentPatch(): ICalendarEventCodecError {
     'Only one uniquely addressed safe URI attachment can be edited',
   );
 }
+
+export function unsupportedConferencePatch(): ICalendarEventCodecError {
+  return new ICalendarEventCodecError(
+    'unsupported-patch',
+    'Only one explicitly URI-typed safe conference link can be edited',
+  );
+}
