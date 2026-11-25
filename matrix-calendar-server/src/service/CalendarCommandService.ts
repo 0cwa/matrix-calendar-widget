@@ -338,8 +338,7 @@ export class CalendarCommandService {
     sender: string,
     mode: 'read' | 'write',
     writeRequest?:
-      | { action: 'create-event' }
-      | { action: 'delete-event'; eventId: string },
+      { action: 'create-event' } | { action: 'delete-event'; eventId: string },
   ): Promise<{ access: CalendarCommandEventAccess }> {
     if (!this.appConfig.room_calendar_access_enabled) {
       throw new CalendarCommandFailure('disabled');

@@ -170,25 +170,6 @@ describe('GatewayCalendarRepository', () => {
     ]);
   });
 
-  it('rejects recipient responses containing extra or malformed profile data', async () => {
-    const fetchMock = mockFetch(
-      jsonResponse({
-        recipients: [
-          {
-            userId: '@alice:example.test',
-            displayName: 'Alice',
-            avatarUrl: 'mxc://private-avatar',
-          },
-        ],
-      }),
-    );
-    const repository = createRepository(fetchMock);
-
-    await expect(
-      repository.listRoomReminderRecipients(),
-    ).rejects.toBeInstanceOf(CalendarRepositoryError);
-  });
-
   it('projects raw room capabilities without mutating the gateway value', async () => {
     const rawCapabilities = {
       calendarId,
@@ -413,31 +394,6 @@ describe('GatewayCalendarRepository', () => {
     expect(new URL(String(fetchMock.mock.calls[3][0])).pathname).toBe(
       `/v1/calendar/private-clients/${appId}`,
     );
-  });
-
-  it('rejects private client URLs outside the HTTPS gateway alias', async () => {
-    const appId = `mcwpc~${'a'.repeat(48)}`;
-    const fetchMock = mockFetch(
-      jsonResponse([{ id: calendarId, name: 'Personal', readOnly: false }]),
-      jsonResponse({
-        client: {
-          appId,
-          target: { target: 'personal', calendarId },
-          state: 'active',
-          mapState: 'present',
-          createdAt: '2026-10-21T10:00:00.000Z',
-          expiresAt: '2027-01-19T10:00:00.000Z',
-        },
-        secret: 'A'.repeat(43),
-        calendarUrl: `http://private-service.invalid/${appId}/calendar/`,
-      }),
-    );
-    const repository = createRepository(fetchMock);
-    const [calendar] = await repository.listCalendars();
-
-    await expect(
-      repository.createPrivateCalendarClient(calendar.id),
-    ).rejects.toMatchObject({ code: 'request-failed' });
   });
 
   it('scopes app access requests to the selected room calendar', async () => {

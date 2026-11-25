@@ -28,9 +28,7 @@ import {
 } from './RoomCalendarBindingResolver';
 
 export type RoomCalendarBindingRegistryErrorCode =
-  | 'invalid_stored_record'
-  | 'configured_binding_limit_exceeded'
-  | 'aborted';
+  'invalid_stored_record' | 'configured_binding_limit_exceeded' | 'aborted';
 
 /** Safe error for an invalid persisted registry or bounded-read failure. */
 export class RoomCalendarBindingRegistryError extends Error {

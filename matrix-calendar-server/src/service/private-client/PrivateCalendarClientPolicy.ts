@@ -29,18 +29,10 @@ import {
 } from './PrivateCalendarClientCredentials';
 
 export type PrivateCalendarClientDavScope =
-  | 'principal'
-  | 'collection'
-  | 'resource';
+  'principal' | 'collection' | 'resource';
 
 export type PrivateCalendarClientDavMethod =
-  | 'OPTIONS'
-  | 'PROPFIND'
-  | 'REPORT'
-  | 'GET'
-  | 'HEAD'
-  | 'PUT'
-  | 'DELETE';
+  'OPTIONS' | 'PROPFIND' | 'REPORT' | 'GET' | 'HEAD' | 'PUT' | 'DELETE';
 
 type CurrentPolicy = Readonly<{ read: boolean; write: boolean }>;
 

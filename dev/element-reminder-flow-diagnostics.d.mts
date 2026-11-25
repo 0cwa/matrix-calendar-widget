@@ -9,12 +9,7 @@ export type ReminderFlowDiagnosticStage =
   | 'delivery'
   | 'complete';
 export type ReminderFlowTestStatus =
-  | 'passed'
-  | 'failed'
-  | 'timedOut'
-  | 'skipped'
-  | 'interrupted'
-  | 'unknown';
+  'passed' | 'failed' | 'timedOut' | 'skipped' | 'interrupted' | 'unknown';
 export type ReminderFlowExceptionClass =
   | 'Error'
   | 'TypeError'

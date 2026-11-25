@@ -2170,8 +2170,7 @@ async function availablePort(): Promise<number> {
 
 function listen(
   server:
-    | ReturnType<typeof createHttpServer>
-    | ReturnType<typeof createHttpsServer>,
+    ReturnType<typeof createHttpServer> | ReturnType<typeof createHttpsServer>,
   host = '127.0.0.1',
   port = 0,
 ): Promise<void> {
@@ -2186,8 +2185,7 @@ function listen(
 
 function portOf(
   server:
-    | ReturnType<typeof createHttpServer>
-    | ReturnType<typeof createHttpsServer>,
+    ReturnType<typeof createHttpServer> | ReturnType<typeof createHttpsServer>,
 ): number {
   const address = server.address() as AddressInfo | null;
   if (!address || typeof address === 'string') {
@@ -2198,8 +2196,7 @@ function portOf(
 
 function closeServer(
   server:
-    | ReturnType<typeof createHttpServer>
-    | ReturnType<typeof createHttpsServer>,
+    ReturnType<typeof createHttpServer> | ReturnType<typeof createHttpsServer>,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()));
