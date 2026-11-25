@@ -20,7 +20,6 @@ import {
   CalendarEventDateTime,
   CalendarEventInput,
   CalendarEventOccurrenceTextField,
-  CalendarEventRecurrenceDate,
   CalendarEventRecurrenceTiming,
   CalendarEventTiming,
   CalendarEventWeekday,
@@ -40,7 +39,6 @@ import {
 import { useTranslation } from 'react-i18next';
 import {
   CalendarEventFormValues,
-  calendarEventFormStartWeekday,
   calendarEventInputFromForm,
   calendarEventOccurrenceTextOperationsFromForm,
   calendarEventOccurrenceToFormValues,
@@ -48,7 +46,6 @@ import {
   calendarEventRdatePeriodDurationFromForm,
   calendarEventRdatePeriodIsEditable,
   calendarEventRdatePeriodValueFromForm,
-  calendarEventRdateValueFromForm,
   calendarEventToFormValues,
   createCalendarEventFormValues,
   useCalendarRepository,
@@ -56,6 +53,11 @@ import {
   useUpdateCalendarEvent,
   validateCalendarEventForm,
 } from '../../calendar';
+
+import { createAlarmHandlers } from './calendarEventAlarmHandlers';
+import { createAttachmentHandlers } from './calendarEventAttachmentHandlers';
+import { createRecurrenceHandlers } from './calendarEventRecurrenceHandlers';
+import { createTimingHandlers } from './calendarEventTimingHandlers';
 
 export const WEEKDAYS: CalendarEventWeekday[] = [
   'MO',
@@ -284,389 +286,37 @@ export function useCalendarEventEditor({
       );
     };
 
-  const handleAttachmentOperationChange = (
-    change: ChangeEvent<HTMLInputElement>,
-  ) => {
-    const operation = change.target.value as NonNullable<
-      CalendarEventFormValues['attachmentOperation']
-    >;
-    setValues((current) => {
-      if (!current) {
-        return current;
-      }
-      const sourceUrl =
-        operation === 'set' || operation === 'remove'
-          ? current.attachmentSourceUrl || current.attachmentUrls?.[0] || ''
-          : '';
-      return {
-        ...current,
-        attachmentOperation: operation,
-        attachmentSourceUrl: sourceUrl,
-        attachmentUrl: operation === 'set' ? sourceUrl : '',
-        attachmentChanged: operation !== 'none',
-      };
-    });
-  };
+  const { handleAttachmentOperationChange, handleAttachmentSourceChange } =
+    createAttachmentHandlers(setValues);
 
-  const handleAttachmentSourceChange = (
-    change: ChangeEvent<HTMLInputElement>,
-  ) => {
-    const sourceUrl = change.target.value;
-    setValues((current) =>
-      current
-        ? {
-            ...current,
-            attachmentSourceUrl: sourceUrl,
-            ...(current.attachmentOperation === 'set'
-              ? { attachmentUrl: sourceUrl }
-              : {}),
-            attachmentChanged: true,
-          }
-        : current,
-    );
-  };
+  const { handleCalendarChange, handleTimingTypeChange } = createTimingHandlers(
+    setValues,
+    calendars,
+  );
 
-  const handleCalendarChange = (change: ChangeEvent<HTMLInputElement>) => {
-    const calendarId = change.target.value;
-    const calendar = calendars.find((candidate) => candidate.id === calendarId);
+  const {
+    handleAlarmToggle,
+    handleAlarmDurationChange,
+    handleAlarmModeChange,
+  } = createAlarmHandlers(setValues);
 
-    setValues((current) =>
-      current
-        ? {
-            ...current,
-            calendarId,
-            timezone: calendar?.timezone ?? current.timezone,
-            timingChanged: true,
-            timezoneChanged: true,
-          }
-        : current,
-    );
-  };
-
-  const handleRecurrenceToggle = (change: ChangeEvent<HTMLInputElement>) => {
-    setValues((current) =>
-      current
-        ? {
-            ...current,
-            repeats: change.target.checked,
-            recurrenceChanged: true,
-          }
-        : current,
-    );
-  };
-
-  const handleAlarmToggle = (change: ChangeEvent<HTMLInputElement>) => {
-    setValues((current) =>
-      current
-        ? {
-            ...current,
-            alarmEnabled: change.target.checked,
-            alarmChanged: true,
-          }
-        : current,
-    );
-  };
-
-  const handleAlarmDurationChange =
-    (field: keyof CalendarEventFormValues) =>
-    (change: ChangeEvent<HTMLInputElement>) => {
-      setValues((current) =>
-        current
-          ? {
-              ...current,
-              [field]: change.target.value,
-              alarmChanged: true,
-            }
-          : current,
-      );
-    };
-
-  const handleAlarmModeChange = (change: ChangeEvent<HTMLInputElement>) => {
-    const alarmMode =
-      change.target.value === 'absolute' ? 'absolute' : 'relative';
-    setValues((current) =>
-      current ? { ...current, alarmMode, alarmChanged: true } : current,
-    );
-  };
-
-  const handleRdateDraftChange = (change: ChangeEvent<HTMLInputElement>) => {
-    setValues((current) =>
-      current ? { ...current, rdateDraft: change.target.value } : current,
-    );
-  };
-
-  const handleRdatePeriodEndChange = (
-    change: ChangeEvent<HTMLInputElement>,
-  ) => {
-    setValues((current) =>
-      current ? { ...current, rdateEndDraft: change.target.value } : current,
-    );
-  };
-
-  const handleRdatePeriodDurationChange =
-    (field: keyof CalendarEventFormValues) =>
-    (change: ChangeEvent<HTMLInputElement>) => {
-      setValues((current) =>
-        current ? { ...current, [field]: change.target.value } : current,
-      );
-    };
-
-  const handleAddRdate = () => {
-    const value = calendarEventRdateValueFromForm(values);
-    if (!value) {
-      return;
-    }
-    setValues((current) =>
-      current
-        ? {
-            ...current,
-            rdateChanged: true,
-            rdateOperation: { action: 'add', value },
-          }
-        : current,
-    );
-  };
-
-  const handleAddPeriodRdate = () => {
-    const value = calendarEventRdatePeriodValueFromForm(values);
-    if (!value) {
-      return;
-    }
-    setValues((current) =>
-      current
-        ? {
-            ...current,
-            rdateChanged: true,
-            rdateOperation: { action: 'add-period', value },
-          }
-        : current,
-    );
-  };
-
-  const handleEditPeriodRdate = (
-    value: Extract<CalendarEventRecurrenceDate, { type: 'period' }>,
-  ) => {
-    if (!calendarEventRdatePeriodIsEditable(value)) {
-      return;
-    }
-    setValues((current) =>
-      current
-        ? {
-            ...current,
-            rdateEditSource: value,
-            rdateDraft: periodDateTimeDraft(value.timing.start),
-            rdateEndDraft:
-              value.timing.type === 'end'
-                ? periodDateTimeDraft(value.timing.end)
-                : undefined,
-            rdatePeriodWeeks:
-              value.timing.type === 'duration'
-                ? String(value.timing.duration.weeks)
-                : undefined,
-            rdatePeriodDays:
-              value.timing.type === 'duration'
-                ? String(value.timing.duration.days)
-                : undefined,
-            rdatePeriodHours:
-              value.timing.type === 'duration'
-                ? String(value.timing.duration.hours)
-                : undefined,
-            rdatePeriodMinutes:
-              value.timing.type === 'duration'
-                ? String(value.timing.duration.minutes)
-                : undefined,
-            rdatePeriodSeconds:
-              value.timing.type === 'duration'
-                ? String(value.timing.duration.seconds)
-                : undefined,
-            rdateChanged: false,
-            rdateOperation: undefined,
-          }
-        : current,
-    );
-  };
-
-  const handleSavePeriodEdit = () => {
-    const source = values.rdateEditSource;
-    const replacement = periodValue;
-    if (!source || !replacement) {
-      return;
-    }
-    setValues((current) =>
-      current
-        ? {
-            ...current,
-            rdateChanged: true,
-            rdateOperation: {
-              action: 'replace-period',
-              value: source,
-              replacement,
-            },
-          }
-        : current,
-    );
-  };
-
-  const handleRemoveRdate = (
-    value: NonNullable<CalendarEventFormValues['rdateValues']>[number],
-  ) => {
-    setValues((current) =>
-      current
-        ? {
-            ...current,
-            rdateChanged: true,
-            rdateOperation:
-              value.type === 'period'
-                ? { action: 'remove-period', value }
-                : { action: 'remove', value },
-          }
-        : current,
-    );
-  };
-
-  const handleCancelRdate = () => {
-    setValues((current) =>
-      current
-        ? {
-            ...current,
-            rdateChanged: false,
-            rdateOperation: undefined,
-            rdateEditSource: undefined,
-            rdateDraft:
-              current.originalTiming?.type === 'all-day'
-                ? current.originalTiming.startDate
-                : current.originalTiming?.type === 'timed'
-                  ? current.originalTiming.start.local.slice(0, 16)
-                  : '',
-            rdateEndDraft: undefined,
-            rdatePeriodWeeks: undefined,
-            rdatePeriodDays: undefined,
-            rdatePeriodHours: undefined,
-            rdatePeriodMinutes: undefined,
-            rdatePeriodSeconds: undefined,
-          }
-        : current,
-    );
-  };
-
-  const handleRemoveExdate = (
-    recurrenceId: NonNullable<CalendarEventFormValues['exdateValues']>[number],
-  ) => {
-    setValues((current) =>
-      current
-        ? {
-            ...current,
-            exdateChanged: true,
-            exdateOperation: { action: 'remove', recurrenceId },
-          }
-        : current,
-    );
-  };
-
-  const handleCancelExdate = () => {
-    setValues((current) =>
-      current
-        ? { ...current, exdateChanged: false, exdateOperation: undefined }
-        : current,
-    );
-  };
-
-  const handleWeekdayModeChange = (change: ChangeEvent<HTMLInputElement>) => {
-    setValues((current) =>
-      current
-        ? {
-            ...current,
-            recurrenceWeekdays: change.target.checked
-              ? [calendarEventFormStartWeekday(current)]
-              : undefined,
-            recurrenceChanged: true,
-          }
-        : current,
-    );
-  };
-
-  const handleMonthlyByDayChange = (change: ChangeEvent<HTMLInputElement>) => {
-    setValues((current) => {
-      if (!current) {
-        return current;
-      }
-      const startDate = DateTime.fromISO(current.start.slice(0, 10), {
-        zone: 'UTC',
-      });
-      return {
-        ...current,
-        recurrenceMonthlyByDay: change.target.checked,
-        ...(change.target.checked
-          ? {
-              recurrenceMonthlyOrdinal:
-                current.recurrenceMonthlyOrdinal ??
-                (startDate.isValid
-                  ? String(Math.ceil(startDate.day / 7))
-                  : '1'),
-              recurrenceMonthlyWeekday:
-                current.recurrenceMonthlyWeekday ??
-                WEEKDAYS[startDate.weekday - 1] ??
-                'MO',
-            }
-          : {}),
-        recurrenceChanged: true,
-      };
-    });
-  };
-
-  const handleWeekdayChange = (weekday: CalendarEventWeekday) => {
-    setValues((current) => {
-      if (!current) {
-        return current;
-      }
-
-      const requiredWeekday = calendarEventFormStartWeekday(current);
-      const selected = new Set(current.recurrenceWeekdays ?? [requiredWeekday]);
-      selected.add(requiredWeekday);
-      if (selected.has(weekday)) {
-        selected.delete(weekday);
-      } else {
-        selected.add(weekday);
-      }
-      selected.add(requiredWeekday);
-      const nextWeekdays = WEEKDAYS.filter((day) => selected.has(day));
-
-      return {
-        ...current,
-        recurrenceWeekdays:
-          nextWeekdays.length === 1 ? undefined : nextWeekdays,
-        recurrenceChanged: true,
-      };
-    });
-  };
-
-  const handleTimingTypeChange = (change: ChangeEvent<HTMLInputElement>) => {
-    const timingType = change.target.checked ? 'all-day' : 'timed';
-
-    setValues((current) => {
-      if (!current || current.timingType === timingType) {
-        return current;
-      }
-
-      if (timingType === 'all-day') {
-        return {
-          ...current,
-          timingType,
-          start: current.start.slice(0, 10),
-          end: current.end.slice(0, 10),
-          timingChanged: true,
-        };
-      }
-
-      return {
-        ...current,
-        timingType,
-        start: `${current.start}T09:00`,
-        end: `${current.end}T10:00`,
-        timingChanged: true,
-      };
-    });
-  };
+  const {
+    handleRecurrenceToggle,
+    handleRdateDraftChange,
+    handleRdatePeriodEndChange,
+    handleRdatePeriodDurationChange,
+    handleAddRdate,
+    handleAddPeriodRdate,
+    handleEditPeriodRdate,
+    handleSavePeriodEdit,
+    handleRemoveRdate,
+    handleCancelRdate,
+    handleRemoveExdate,
+    handleCancelExdate,
+    handleWeekdayModeChange,
+    handleMonthlyByDayChange,
+    handleWeekdayChange,
+  } = createRecurrenceHandlers(setValues, values, periodValue, WEEKDAYS);
 
   const validationErrorCode = validateCalendarEventForm(values);
   const weeklyByDayEnabled =
@@ -1098,10 +748,6 @@ function recurrenceTimingFromEventTiming(
 
 function localDateTimeWithSeconds(local: string): string {
   return local.length === 16 ? `${local}:00` : local;
-}
-
-function periodDateTimeDraft(value: CalendarEventDateTime): string {
-  return value.type === 'date-time' ? value.value.local : value.value;
 }
 
 export function createEventUid(): string {

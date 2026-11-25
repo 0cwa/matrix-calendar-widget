@@ -107,6 +107,8 @@
       "./setupJest.js"
     ],
     "preset": "ts-jest",
+    "maxWorkers": "25%",
+    "workerIdleMemoryLimit": "512MB",
     "verbose": true,
     "transform": {
       "^.+\\.(ts|tsx)$": "ts-jest"
