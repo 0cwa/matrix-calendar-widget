@@ -26,6 +26,7 @@ export default {
     2,
     Math.min(8, Math.floor(os.availableParallelism() / 2)),
   ),
+  workerIdleMemoryLimit: '1536MB',
   verbose: true,
   transform: {
     '^.+\\.(ts|tsx)$': 'ts-jest',
