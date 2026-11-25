@@ -81,6 +81,10 @@ import { CommandService } from './service/CommandService';
 import { ConfiguredRoomCalendarPrincipalIdentityProvider } from './service/ConfiguredRoomCalendarPrincipalIdentityProvider';
 import { ControlRoomMigrationService } from './service/ControlRoomMigrationService';
 import { DisabledRoomCalendarBindingStore } from './service/DisabledRoomCalendarBindingStore';
+import { GatewayAccessService } from './service/GatewayAccessService';
+import { GatewayCalendarService } from './service/GatewayCalendarService';
+import { GatewayContextService } from './service/GatewayContextService';
+import { GatewayEventService } from './service/GatewayEventService';
 import { GuestMemberService } from './service/GuestMemberService';
 import type { RoomCalendarBindingRegistry } from './service/IRoomCalendarBindingRegistry';
 import { MatrixCalendarAuthorizationFactory } from './service/MatrixCalendarAuthorization';
@@ -547,6 +551,10 @@ const i18nFactory: FactoryProvider<void> = {
     JitsiClient,
     MeetingClient,
     MatrixCalendarAuthorizationFactory,
+    GatewayAccessService,
+    GatewayContextService,
+    GatewayEventService,
+    GatewayCalendarService,
     MatrixAuthMiddleware,
     LegacyMeetingDisabledGuard,
     {

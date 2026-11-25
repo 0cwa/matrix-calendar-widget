@@ -39,6 +39,10 @@ import { MatrixAuthGuard } from '../src/guard/MatrixAuthGuard';
 import { MatrixRoomMembershipGuard } from '../src/guard/MatrixRoomMembershipGuard';
 import { IUserContext } from '../src/model/IUserContext';
 import { DisabledRoomCalendarBindingStore } from '../src/service/DisabledRoomCalendarBindingStore';
+import { GatewayAccessService } from '../src/service/GatewayAccessService';
+import { GatewayCalendarService } from '../src/service/GatewayCalendarService';
+import { GatewayContextService } from '../src/service/GatewayContextService';
+import { GatewayEventService } from '../src/service/GatewayEventService';
 import { MatrixCalendarAuthorizationFactory } from '../src/service/MatrixCalendarAuthorization';
 import { RoomCalendarBindingRegistryAdapter } from '../src/service/RoomCalendarBindingRegistryAdapter';
 import { RoomCalendarCalDavAccess } from '../src/service/RoomCalendarCalDavAccess';
@@ -113,6 +117,10 @@ const testConfiguration = {
       provide: ModuleProviderToken.ROOM_CALENDAR_CALDAV_ACCESS,
       useClass: RoomCalendarCalDavAccess,
     },
+    GatewayAccessService,
+    GatewayContextService,
+    GatewayEventService,
+    GatewayCalendarService,
     MatrixAuthGuard,
     MatrixRoomMembershipGuard,
   ],

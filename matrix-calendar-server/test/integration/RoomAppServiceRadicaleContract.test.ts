@@ -70,6 +70,10 @@ import {
 import { CommandService } from '../../src/service/CommandService';
 import { ConfiguredRoomCalendarPrincipalIdentityProvider } from '../../src/service/ConfiguredRoomCalendarPrincipalIdentityProvider';
 import { DisabledRoomCalendarBindingStore } from '../../src/service/DisabledRoomCalendarBindingStore';
+import { GatewayAccessService } from '../../src/service/GatewayAccessService';
+import { GatewayCalendarService } from '../../src/service/GatewayCalendarService';
+import { GatewayContextService } from '../../src/service/GatewayContextService';
+import { GatewayEventService } from '../../src/service/GatewayEventService';
 import type { RoomCalendarBindingRegistry } from '../../src/service/IRoomCalendarBindingRegistry';
 import {
   MATRIX_CALENDAR_MANAGE_POLICY,
@@ -1007,6 +1011,10 @@ const matrixClient = {
 @Module({
   controllers: [CalendarGatewayController],
   providers: [
+    GatewayAccessService,
+    GatewayContextService,
+    GatewayEventService,
+    GatewayCalendarService,
     {
       provide: ModuleProviderToken.APP_CONFIGURATION,
       useValue: testConfiguration,

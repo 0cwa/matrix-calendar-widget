@@ -39,6 +39,10 @@ import { MatrixAuthGuard } from '../../src/guard/MatrixAuthGuard';
 import { MatrixRoomMembershipGuard } from '../../src/guard/MatrixRoomMembershipGuard';
 import { IUserContext } from '../../src/model/IUserContext';
 import { DisabledRoomCalendarBindingStore } from '../../src/service/DisabledRoomCalendarBindingStore';
+import { GatewayAccessService } from '../../src/service/GatewayAccessService';
+import { GatewayCalendarService } from '../../src/service/GatewayCalendarService';
+import { GatewayContextService } from '../../src/service/GatewayContextService';
+import { GatewayEventService } from '../../src/service/GatewayEventService';
 import { MatrixCalendarAuthorizationFactory } from '../../src/service/MatrixCalendarAuthorization';
 import { RoomCalendarBindingRegistryAdapter } from '../../src/service/RoomCalendarBindingRegistryAdapter';
 import { RoomCalendarCalDavAccess } from '../../src/service/RoomCalendarCalDavAccess';
@@ -119,6 +123,10 @@ const radicaleBaseUrl = process.env.CALDAV_BASE_URL ?? 'http://localhost:5232/';
 @Module({
   controllers: [CalendarGatewayController],
   providers: [
+    GatewayAccessService,
+    GatewayContextService,
+    GatewayEventService,
+    GatewayCalendarService,
     {
       provide: ModuleProviderToken.APP_CONFIGURATION,
       useValue: { radicale_url: radicaleBaseUrl } as IAppConfiguration,
