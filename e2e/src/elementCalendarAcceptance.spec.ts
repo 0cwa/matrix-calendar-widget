@@ -65,8 +65,7 @@ test('Element Web preserves unsupported events and supports client interactions'
 if (process.env.ELEMENT_ACCEPTANCE_PRIVATE_UI === 'true') {
   test.describe('private calendar app acceptance', () => {
     let privateUiJournal:
-      | ReturnType<typeof createPrivateUiCheckpointJournal>
-      | undefined;
+      ReturnType<typeof createPrivateUiCheckpointJournal> | undefined;
 
     test.beforeEach(() => {
       const stageFile = process.env.ELEMENT_ACCEPTANCE_STAGE_FILE;

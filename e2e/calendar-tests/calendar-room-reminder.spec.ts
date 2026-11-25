@@ -126,8 +126,6 @@ declare global {
   interface Window {
     __updateSyntheticRoomMember: (event: unknown) => void;
     __syntheticRoomReminderTarget?:
-      | { kind: 'room' }
-      | { kind: 'users'; userIds: string[] }
-      | null;
+      { kind: 'room' } | { kind: 'users'; userIds: string[] } | null;
   }
 }

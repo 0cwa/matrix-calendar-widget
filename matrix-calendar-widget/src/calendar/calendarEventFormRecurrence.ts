@@ -175,8 +175,7 @@ export function recurrenceFormValues(
     recurrence?.overrides?.length,
   );
   let parsed:
-    | ReturnType<typeof parseSupportedCalendarEventRecurrenceRule>
-    | undefined;
+    ReturnType<typeof parseSupportedCalendarEventRecurrenceRule> | undefined;
   let unsupportedRule = false;
   const hasRRule = Boolean(
     recurrence && Object.prototype.hasOwnProperty.call(recurrence, 'rrule'),

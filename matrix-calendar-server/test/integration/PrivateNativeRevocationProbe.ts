@@ -46,12 +46,7 @@ export type NativeRevocationProbeState = Readonly<{
   acceptedProbeObserved: boolean;
   canonicalUnchanged: boolean;
   responseClass:
-    | 'not_seen'
-    | 'unauthorized'
-    | 'forbidden'
-    | 'accepted'
-    | 'other'
-    | 'mixed';
+    'not_seen' | 'unauthorized' | 'forbidden' | 'accepted' | 'other' | 'mixed';
   proofPassed: boolean;
 }>;
 

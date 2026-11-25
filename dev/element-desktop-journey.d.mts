@@ -104,10 +104,7 @@ export type DesktopRefreshRoomNavigationDiagnostic = {
 
 export type DesktopRefreshRoomNavigationProgress = {
   stage:
-    | 'target_observed'
-    | 'click_started'
-    | 'click_resolved'
-    | 'click_failed';
+    'target_observed' | 'click_started' | 'click_resolved' | 'click_failed';
   roomListItemCountCapped: 0 | 1 | 2 | null;
   fixtureRoomTargetVisible: boolean | null;
   elapsedBucket:
@@ -121,10 +118,7 @@ export type DesktopRefreshRoomNavigationProgress = {
 };
 
 export type DesktopJourneyErrorClass =
-  | 'timeout'
-  | 'assertion'
-  | 'runtime'
-  | 'unknown';
+  'timeout' | 'assertion' | 'runtime' | 'unknown';
 
 export type DesktopEventCreateFailurePoint =
   | 'event-create-setup'
@@ -254,8 +248,7 @@ export function unavailableWebBEditRowRenderDiagnostic(): WebBEditRowRenderDiagn
 
 export function observeWebBEditRowRenderWithinDeadline(
   observe: () =>
-    | WebBEditRowRenderDiagnostic
-    | Promise<WebBEditRowRenderDiagnostic>,
+    WebBEditRowRenderDiagnostic | Promise<WebBEditRowRenderDiagnostic>,
 ): Promise<WebBEditRowRenderDiagnostic>;
 
 export type WebBEventListReadDiagnostic = {
@@ -442,17 +435,10 @@ export type DesktopJourneySummary = {
 };
 
 export type DesktopChildOutcome =
-  | 'spawn_error'
-  | 'timeout'
-  | 'signaled'
-  | 'exited'
-  | 'unknown';
+  'spawn_error' | 'timeout' | 'signaled' | 'exited' | 'unknown';
 
 export type DesktopJourneyEvidenceState =
-  | 'absent'
-  | 'valid'
-  | 'invalid'
-  | 'unreadable';
+  'absent' | 'valid' | 'invalid' | 'unreadable';
 
 export type DesktopJourneyEvidenceFailureCode =
   | 'path_file_rejected'
@@ -547,11 +533,7 @@ export type DesktopChildCompletion = {
 };
 
 export type DesktopPlaywrightResult =
-  | 'passed'
-  | 'failed'
-  | 'timed_out'
-  | 'interrupted'
-  | 'unknown';
+  'passed' | 'failed' | 'timed_out' | 'interrupted' | 'unknown';
 
 export declare const DESKTOP_JOURNEY_PHASES: readonly DesktopJourneyPhase[];
 export declare const DESKTOP_A_REFRESH_FAILURE_POINTS: readonly DesktopARefreshFailurePoint[];

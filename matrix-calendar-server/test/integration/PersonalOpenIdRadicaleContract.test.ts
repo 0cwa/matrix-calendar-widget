@@ -83,10 +83,7 @@ type PersonalOpenIdSetupStage =
   | 'gateway-init'
   | 'gateway-listen';
 type PersonalOpenIdFailureCategory =
-  | 'transport'
-  | 'http-status'
-  | 'json-or-token-parse'
-  | 'other';
+  'transport' | 'http-status' | 'json-or-token-parse' | 'other';
 const PERSONAL_OPENID_MATRIX_ERROR_CODES = new Set([
   'M_BAD_JSON',
   'M_FORBIDDEN',

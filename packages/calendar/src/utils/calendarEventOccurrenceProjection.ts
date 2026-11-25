@@ -151,10 +151,7 @@ type ParsedUntil =
   | { type: 'utc-date-time'; value: string; instant: number };
 
 export type SupportedCalendarEventRecurrenceFrequency =
-  | 'DAILY'
-  | 'WEEKLY'
-  | 'MONTHLY'
-  | 'YEARLY';
+  'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
 
 export type SupportedCalendarEventRecurrenceEnd =
   | { type: 'never' }

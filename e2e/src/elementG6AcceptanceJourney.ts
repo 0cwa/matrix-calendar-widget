@@ -884,9 +884,7 @@ export async function runElementG6AcceptanceJourney(
   let blockedRequests = 0;
   let activeG6Phase: G6Phase = 'g6-fixture-ready';
   let activeRoomPhase:
-    | 'g6-member-a-room-context'
-    | 'g6-member-b-room-context'
-    | undefined;
+    'g6-member-a-room-context' | 'g6-member-b-room-context' | undefined;
   let calDavClient: G6CalDavClient | undefined;
   let journeyFailed = false;
   let neighborPostSaveListObserver: G6PostSaveListObserver | undefined;
