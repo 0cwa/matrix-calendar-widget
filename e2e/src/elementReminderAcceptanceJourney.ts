@@ -22,7 +22,7 @@ import type {
   ReminderFlow,
   ReminderJourneyContext,
   ReminderReadbackReference,
-} from './elementCalendarAcceptance.spec';
+} from './elementAcceptanceSupport';
 
 export async function runElementReminderAcceptanceJourney(
   browser: Browser,
@@ -66,18 +66,16 @@ export async function runElementReminderAcceptanceJourney(
   } catch (error) {
     failActiveReminderFlow(error);
     record('reminder-ui-readback', 'failed', undefined, 0);
-    throw new Error('Reminder acceptance journey.fixture state is unavailable');
+    throw new Error('Reminder acceptance fixture state is unavailable');
   }
   const expectedPriorCount =
     flow === 'initial' ? 0 : flow === 'restart' ? 1 : 2;
   if (eventTitles.length !== expectedPriorCount) {
     failActiveReminderFlow(
-      new Error('Reminder acceptance journey.fixture state is inconsistent'),
+      new Error('Reminder acceptance fixture state is inconsistent'),
     );
     record('reminder-ui-readback', 'failed', undefined, eventTitles.length);
-    throw new Error(
-      'Reminder acceptance journey.fixture state is inconsistent',
-    );
+    throw new Error('Reminder acceptance fixture state is inconsistent');
   }
 
   enterActiveReminderFlowStage('room-context');

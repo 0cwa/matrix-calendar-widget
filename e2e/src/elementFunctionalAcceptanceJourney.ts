@@ -28,7 +28,7 @@ import type {
   BlockedRequestEvidence,
   BrowserActor,
   FunctionalJourneyContext,
-} from './elementCalendarAcceptance.spec';
+} from './elementAcceptanceSupport';
 
 export async function runElementFunctionalAcceptanceJourney(
   browser: Browser,

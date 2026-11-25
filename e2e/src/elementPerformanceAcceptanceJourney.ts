@@ -44,7 +44,7 @@ import type {
   PerformancePageErrorObservation,
   PerformancePageErrorStage,
   PerformanceSampleKey,
-} from './elementCalendarAcceptance.spec';
+} from './elementAcceptanceSupport';
 import { fillDatePicker } from './pages/helper';
 
 export async function runElementPerformanceAcceptanceJourney(

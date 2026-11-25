@@ -26,7 +26,7 @@ import type { createPrivateUiCheckpointJournal } from '../../dev/element-accepta
 import type {
   PrivateCalendarListRequestObserver,
   PrivateJourneyContext,
-} from './elementCalendarAcceptance.spec';
+} from './elementAcceptanceSupport';
 
 export async function runElementPrivateAcceptanceJourney(
   browser: Browser,
