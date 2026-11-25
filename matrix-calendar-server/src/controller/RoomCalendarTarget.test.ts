@@ -22,6 +22,7 @@ import { MatrixOpenIdCalDavCredentialProviderFactory } from '../caldav/MatrixOpe
 import { DisabledRoomCalendarBindingStore } from '../service/DisabledRoomCalendarBindingStore';
 import { GatewayAccessService } from '../service/GatewayAccessService';
 import { GatewayContextService } from '../service/GatewayContextService';
+import { GatewayEventService } from '../service/GatewayEventService';
 import { MatrixCalendarAuthorizationFactory } from '../service/MatrixCalendarAuthorization';
 import { RoomCalendarBindingRegistryAdapter } from '../service/RoomCalendarBindingRegistryAdapter';
 import { RoomCalendarCalDavAccess } from '../service/RoomCalendarCalDavAccess';
@@ -219,8 +220,19 @@ describe('room calendar event listing', () => {
           ),
         ),
       ),
-      undefined,
-      undefined,
+      new GatewayEventService(
+        config,
+        authorizationFactory,
+        new MatrixOpenIdCalDavCredentialProviderFactory(),
+        roomAccess,
+        new GatewayAccessService(
+          authorizationFactory,
+          new RoomCalendarBindingRegistryAdapter(
+            config.room_calendar_bindings,
+            new DisabledRoomCalendarBindingStore(),
+          ),
+        ),
+      ),
     );
   }
 });
