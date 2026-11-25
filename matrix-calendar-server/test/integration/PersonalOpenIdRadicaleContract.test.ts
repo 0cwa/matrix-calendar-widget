@@ -42,6 +42,8 @@ import { MatrixAuthGuard } from '../../src/guard/MatrixAuthGuard';
 import { MatrixRoomMembershipGuard } from '../../src/guard/MatrixRoomMembershipGuard';
 import { MatrixAuthMiddleware } from '../../src/middleware/MatrixAuthMiddleware';
 import { DisabledRoomCalendarBindingStore } from '../../src/service/DisabledRoomCalendarBindingStore';
+import { GatewayAccessService } from '../../src/service/GatewayAccessService';
+import { GatewayContextService } from '../../src/service/GatewayContextService';
 import { MatrixCalendarAuthorizationFactory } from '../../src/service/MatrixCalendarAuthorization';
 import { RoomCalendarBindingRegistryAdapter } from '../../src/service/RoomCalendarBindingRegistryAdapter';
 import { RoomCalendarCalDavAccess } from '../../src/service/RoomCalendarCalDavAccess';
@@ -199,6 +201,8 @@ const matrixClient = {
     },
     { provide: MatrixClient, useValue: matrixClient },
     MatrixCalendarAuthorizationFactory,
+    GatewayAccessService,
+    GatewayContextService,
     {
       provide: MatrixOpenIdCalDavCredentialProviderFactory,
       useValue: credentialProviderFactory,
