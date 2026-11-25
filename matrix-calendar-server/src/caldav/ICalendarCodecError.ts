@@ -53,3 +53,10 @@ export function unsupportedAlarmPatch(): ICalendarEventCodecError {
     'Only one non-repeating DISPLAY alarm with a supported trigger is supported',
   );
 }
+
+export function unsupportedRecurrencePatch(): ICalendarEventCodecError {
+  return new ICalendarEventCodecError(
+    'unsupported-patch',
+    'Only simple whole-series RRULE changes are supported',
+  );
+}
