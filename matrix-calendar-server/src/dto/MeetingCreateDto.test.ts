@@ -79,7 +79,7 @@ describe('MeetingCreateDto', () => {
         ),
       ],
       ['widget-0'],
-      [{ user_id: '@user-id' }],
+      [new ParticipantDto('@user-id:matrix.org', undefined)],
       undefined,
       true,
       { 'my.provider': { 'my.property': 'text' } },

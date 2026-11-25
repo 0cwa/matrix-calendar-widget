@@ -342,8 +342,7 @@ function createConfiguration() {
     ),
     private_calendar_client_database_tls_mode: (process.env
       .MATRIX_CALENDAR_PRIVATE_CLIENT_DATABASE_TLS_MODE ?? 'verify-full') as
-      | 'verify-full'
-      | 'trusted-private-network',
+      'verify-full' | 'trusted-private-network',
     private_calendar_client_epoch_key: privateCalendarClientEpochKey,
     private_calendar_client_callback_key: privateCalendarClientCallbackKey,
     caldav_max_event_response_bytes: toNumber(
@@ -360,8 +359,7 @@ function createConfiguration() {
     ),
     room_calendar_binding_database_tls_mode: (process.env
       .MATRIX_CALENDAR_BINDING_DATABASE_TLS_MODE ?? 'verify-full') as
-      | 'verify-full'
-      | 'trusted-private-network',
+      'verify-full' | 'trusted-private-network',
     room_calendar_setup_enabled: toBoolean(
       process.env.ROOM_CALENDAR_SETUP_ENABLED,
       false,
@@ -403,9 +401,7 @@ function createConfiguration() {
     reminder_database_url: process.env.MATRIX_CALENDAR_REMINDER_DATABASE_URL,
     reminder_database_tls_mode: process.env
       .MATRIX_CALENDAR_REMINDER_DATABASE_TLS_MODE as
-      | 'verify-full'
-      | 'trusted-private-network'
-      | undefined,
+      'verify-full' | 'trusted-private-network' | undefined,
     room_reminder_configuration_enabled: toBoolean(
       process.env.MATRIX_CALENDAR_REMINDER_CONFIGURATION_ENABLED,
       false,

@@ -43,8 +43,7 @@ type CallbackPayload =
   | Readonly<{ username: string; path: string }>;
 
 type CallbackResult =
-  | Readonly<{ allowed: boolean }>
-  | Readonly<{ rights: string }>;
+  Readonly<{ allowed: boolean }> | Readonly<{ rights: string }>;
 
 /** Single-process bounded replay cache; multi-replica mode is not supported. */
 export class PrivateCalendarClientCallbackReplayCache {

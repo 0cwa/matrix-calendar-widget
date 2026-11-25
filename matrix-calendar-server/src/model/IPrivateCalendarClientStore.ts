@@ -26,11 +26,7 @@ export type PrivateCalendarClientTarget =
 
 export type PrivateCalendarClientState = 'pending' | 'active' | 'revoked';
 export type PrivateCalendarClientMapState =
-  | 'pending'
-  | 'bootstrap'
-  | 'present'
-  | 'cleanup-pending'
-  | 'removed';
+  'pending' | 'bootstrap' | 'present' | 'cleanup-pending' | 'removed';
 
 /** Persistent data only; never includes the displayed client secret. */
 export type PrivateCalendarClientRecord = Readonly<{

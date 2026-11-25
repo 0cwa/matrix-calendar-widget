@@ -142,11 +142,9 @@ export function createElementAcceptanceSupport() {
     activePhase: 'member-a-authenticated' as Phase,
     activeReminderFailureRecorded: false,
     activeReminderFlowDiagnostic: undefined as
-      | ReminderFlowDiagnosticState
-      | undefined,
+      ReminderFlowDiagnosticState | undefined,
     pendingPinnedControlObservation: undefined as
-      | PinnedControlObservation
-      | undefined,
+      PinnedControlObservation | undefined,
     memberRoomHomeserverHttpFailures: new WeakMap<
       Page,
       HomeserverHttpFailures

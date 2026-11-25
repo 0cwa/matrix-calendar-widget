@@ -148,12 +148,7 @@ export class ScheduleMeetingWidgetPage {
 
   getRecurrenceWeekdayButton(
     name:
-      | 'Monday'
-      | 'Tuesday'
-      | 'Wednesday'
-      | 'Thursday'
-      | 'Friday'
-      | 'Saturday',
+      'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday',
   ): Locator {
     const repeatOnWeekdayGroup = this.customRecurrenceRuleGroup.getByRole(
       'group',

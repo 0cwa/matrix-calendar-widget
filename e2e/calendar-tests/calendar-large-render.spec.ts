@@ -145,8 +145,7 @@ async function runSample(
       }
     | undefined;
   let returnedListOverflow:
-    | Awaited<ReturnType<typeof readAndCheckOverflow>>
-    | undefined;
+    Awaited<ReturnType<typeof readAndCheckOverflow>> | undefined;
 
   if (view === 'list') {
     titles = await readAndCheckExactEventTitles(page);
