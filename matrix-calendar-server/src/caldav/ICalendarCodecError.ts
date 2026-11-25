@@ -46,3 +46,10 @@ export function unsupportedConferencePatch(): ICalendarEventCodecError {
     'Only one explicitly URI-typed safe conference link can be edited',
   );
 }
+
+export function unsupportedAlarmPatch(): ICalendarEventCodecError {
+  return new ICalendarEventCodecError(
+    'unsupported-patch',
+    'Only one non-repeating DISPLAY alarm with a supported trigger is supported',
+  );
+}
