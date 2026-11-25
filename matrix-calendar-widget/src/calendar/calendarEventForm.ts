@@ -17,9 +17,6 @@
 import {
   Calendar,
   CalendarEvent,
-  CalendarEventAttachmentInput,
-  CalendarEventAttachmentPatch,
-  CalendarEventAttachmentValidationError,
   CalendarEventConferenceInput,
   CalendarEventConferenceValidationError,
   CalendarEventDateTime,
@@ -44,13 +41,16 @@ import {
   isCalendarTimezoneSupported,
   isSupportedCalendarEventOccurrenceExclusion,
   isTimedCalendarEvent,
-  normalizeCalendarEventAttachmentInput,
-  normalizeCalendarEventAttachmentPatch,
   normalizeCalendarEventConferenceInput,
   parseSupportedCalendarEventRecurrenceRule,
   type TimedCalendarEventTiming,
 } from '@matrix-calendar-widget/calendar';
 import { DateTime } from 'luxon';
+import {
+  attachmentInputFromForm,
+  attachmentPatchFromForm,
+  validateAttachment,
+} from './calendarEventFormAttachments';
 
 export type CalendarEventFormValues = {
   calendarId: CalendarId;
@@ -470,66 +470,6 @@ function conferenceFormValues(
     conferenceEditable: !event.unsupportedConference && links.length <= 1,
     conferenceChanged: false,
   };
-}
-
-function attachmentInputFromForm(
-  values: CalendarEventFormValues,
-): CalendarEventAttachmentInput {
-  return normalizeCalendarEventAttachmentInput({
-    url: values.attachmentUrl ?? '',
-  });
-}
-
-function attachmentPatchFromForm(
-  values: CalendarEventFormValues,
-): CalendarEventAttachmentPatch {
-  const operation = values.attachmentOperation;
-  if (operation === 'add') {
-    return normalizeCalendarEventAttachmentPatch({
-      action: 'add',
-      url: values.attachmentUrl ?? '',
-    });
-  }
-  if (operation === 'set') {
-    return normalizeCalendarEventAttachmentPatch({
-      action: 'set',
-      sourceUrl: values.attachmentSourceUrl ?? '',
-      url: values.attachmentUrl ?? '',
-    });
-  }
-  if (operation === 'remove') {
-    return normalizeCalendarEventAttachmentPatch({
-      action: 'remove',
-      sourceUrl: values.attachmentSourceUrl ?? '',
-    });
-  }
-  throw new CalendarEventAttachmentValidationError();
-}
-
-function validateAttachment(
-  values: CalendarEventFormValues,
-): CalendarEventValidationError | undefined {
-  if (
-    values.attachmentEditable === false ||
-    (!values.attachmentChanged &&
-      (values.attachmentOperation === undefined ||
-        values.attachmentOperation === 'none'))
-  ) {
-    return undefined;
-  }
-  try {
-    if (values.attachmentOperation === 'add') {
-      attachmentInputFromForm(values);
-    } else {
-      attachmentPatchFromForm(values);
-    }
-    return undefined;
-  } catch (error) {
-    if (error instanceof CalendarEventAttachmentValidationError) {
-      return 'invalid-attachment';
-    }
-    throw error;
-  }
 }
 
 function conferenceFromForm(
