@@ -57,6 +57,7 @@ import {
   validateCalendarEventForm,
 } from '../../calendar';
 
+import { createAlarmHandlers } from './calendarEventAlarmHandlers';
 import { createAttachmentHandlers } from './calendarEventAttachmentHandlers';
 
 export const WEEKDAYS: CalendarEventWeekday[] = [
@@ -318,39 +319,11 @@ export function useCalendarEventEditor({
     );
   };
 
-  const handleAlarmToggle = (change: ChangeEvent<HTMLInputElement>) => {
-    setValues((current) =>
-      current
-        ? {
-            ...current,
-            alarmEnabled: change.target.checked,
-            alarmChanged: true,
-          }
-        : current,
-    );
-  };
-
-  const handleAlarmDurationChange =
-    (field: keyof CalendarEventFormValues) =>
-    (change: ChangeEvent<HTMLInputElement>) => {
-      setValues((current) =>
-        current
-          ? {
-              ...current,
-              [field]: change.target.value,
-              alarmChanged: true,
-            }
-          : current,
-      );
-    };
-
-  const handleAlarmModeChange = (change: ChangeEvent<HTMLInputElement>) => {
-    const alarmMode =
-      change.target.value === 'absolute' ? 'absolute' : 'relative';
-    setValues((current) =>
-      current ? { ...current, alarmMode, alarmChanged: true } : current,
-    );
-  };
+  const {
+    handleAlarmToggle,
+    handleAlarmDurationChange,
+    handleAlarmModeChange,
+  } = createAlarmHandlers(setValues);
 
   const handleRdateDraftChange = (change: ChangeEvent<HTMLInputElement>) => {
     setValues((current) =>
