@@ -80,7 +80,7 @@ export class ICalendarEventCodec {
     eventId: CalendarEventId,
     input: CalendarEventInput,
   ): EncodedICalendarEvent {
-    return createICalendarEvent(calendarId, eventId, input, this.clock);
+    return createICalendarEvent(calendarId, eventId, input, () => this.clock());
   }
 
   parse(
