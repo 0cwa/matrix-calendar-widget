@@ -40,6 +40,7 @@ import { MatrixRoomMembershipGuard } from '../src/guard/MatrixRoomMembershipGuar
 import { IUserContext } from '../src/model/IUserContext';
 import { DisabledRoomCalendarBindingStore } from '../src/service/DisabledRoomCalendarBindingStore';
 import { GatewayAccessService } from '../src/service/GatewayAccessService';
+import { GatewayCalendarService } from '../src/service/GatewayCalendarService';
 import { GatewayContextService } from '../src/service/GatewayContextService';
 import { GatewayEventService } from '../src/service/GatewayEventService';
 import { MatrixCalendarAuthorizationFactory } from '../src/service/MatrixCalendarAuthorization';
@@ -119,6 +120,7 @@ const testConfiguration = {
     GatewayAccessService,
     GatewayContextService,
     GatewayEventService,
+    GatewayCalendarService,
     MatrixAuthGuard,
     MatrixRoomMembershipGuard,
   ],

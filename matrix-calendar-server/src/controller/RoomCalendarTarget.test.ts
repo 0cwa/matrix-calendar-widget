@@ -21,6 +21,7 @@ import { IAppConfiguration } from '../IAppConfiguration';
 import { MatrixOpenIdCalDavCredentialProviderFactory } from '../caldav/MatrixOpenIdCalDavCredentialProviderFactory';
 import { DisabledRoomCalendarBindingStore } from '../service/DisabledRoomCalendarBindingStore';
 import { GatewayAccessService } from '../service/GatewayAccessService';
+import { GatewayCalendarService } from '../service/GatewayCalendarService';
 import { GatewayContextService } from '../service/GatewayContextService';
 import { GatewayEventService } from '../service/GatewayEventService';
 import { MatrixCalendarAuthorizationFactory } from '../service/MatrixCalendarAuthorization';
@@ -198,17 +199,6 @@ describe('room calendar event listing', () => {
     config: IAppConfiguration = configuration,
   ): CalendarGatewayController {
     return new CalendarGatewayController(
-      config,
-      authorizationFactory,
-      new MatrixOpenIdCalDavCredentialProviderFactory(),
-      roomAccess,
-      new GatewayAccessService(
-        authorizationFactory,
-        new RoomCalendarBindingRegistryAdapter(
-          config.room_calendar_bindings,
-          new DisabledRoomCalendarBindingStore(),
-        ),
-      ),
       new GatewayContextService(
         config,
         authorizationFactory,
@@ -221,6 +211,19 @@ describe('room calendar event listing', () => {
         ),
       ),
       new GatewayEventService(
+        config,
+        authorizationFactory,
+        new MatrixOpenIdCalDavCredentialProviderFactory(),
+        roomAccess,
+        new GatewayAccessService(
+          authorizationFactory,
+          new RoomCalendarBindingRegistryAdapter(
+            config.room_calendar_bindings,
+            new DisabledRoomCalendarBindingStore(),
+          ),
+        ),
+      ),
+      new GatewayCalendarService(
         config,
         authorizationFactory,
         new MatrixOpenIdCalDavCredentialProviderFactory(),
