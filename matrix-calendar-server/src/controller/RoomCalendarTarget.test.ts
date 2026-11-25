@@ -203,6 +203,7 @@ describe('room calendar event listing', () => {
         config,
         authorizationFactory,
         new GatewayAccessService(
+          config,
           authorizationFactory,
           new RoomCalendarBindingRegistryAdapter(
             config.room_calendar_bindings,
@@ -216,6 +217,7 @@ describe('room calendar event listing', () => {
         new MatrixOpenIdCalDavCredentialProviderFactory(),
         roomAccess,
         new GatewayAccessService(
+          config,
           authorizationFactory,
           new RoomCalendarBindingRegistryAdapter(
             config.room_calendar_bindings,
@@ -229,6 +231,7 @@ describe('room calendar event listing', () => {
         new MatrixOpenIdCalDavCredentialProviderFactory(),
         roomAccess,
         new GatewayAccessService(
+          config,
           authorizationFactory,
           new RoomCalendarBindingRegistryAdapter(
             config.room_calendar_bindings,

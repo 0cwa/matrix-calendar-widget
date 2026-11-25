@@ -15,7 +15,6 @@
  */
 
 import {
-  CalendarAuthorizationRequest,
   CalendarEventInput,
   CalendarEventPatch,
   CalendarTimeRange,
@@ -26,7 +25,6 @@ import {
 import {
   BadRequestException,
   ConflictException,
-  ForbiddenException,
   Inject,
   Injectable,
   Optional,
@@ -132,15 +130,16 @@ export class GatewayEventService {
         message: 'timezone must be a supported IANA time zone',
       });
     }
-    const scope = await this.eventScope(
-      userContext,
-      roomId,
-      requestedCalendarId,
-      {
-        action: 'read-events',
-        calendarId: requestedCalendarId,
-      },
-    );
+    const scope =
+      await this.gatewayAccessService.authorizePersonalCalendarRequest(
+        userContext,
+        roomId,
+        requestedCalendarId,
+        {
+          action: 'read-events',
+          calendarId: requestedCalendarId,
+        },
+      );
     const range: CalendarTimeRange = {
       start: this.requireQuery(start, 'start'),
       end: this.requireQuery(end, 'end'),
@@ -188,15 +187,16 @@ export class GatewayEventService {
     }
 
     const requestedCalendarId = this.requireQuery(calendarId, 'calendarId');
-    const scope = await this.eventScope(
-      userContext,
-      roomId,
-      requestedCalendarId,
-      {
-        action: 'read-events',
-        calendarId: requestedCalendarId,
-      },
-    );
+    const scope =
+      await this.gatewayAccessService.authorizePersonalCalendarRequest(
+        userContext,
+        roomId,
+        requestedCalendarId,
+        {
+          action: 'read-events',
+          calendarId: requestedCalendarId,
+        },
+      );
     const normalizedEventId = this.normalizeEventUrl(
       this.requireQuery(eventId, 'eventId'),
       scope.calendarId,
@@ -258,15 +258,16 @@ export class GatewayEventService {
     }
 
     const requestedCalendarId = this.requireQuery(calendarId, 'calendarId');
-    const scope = await this.eventScope(
-      userContext,
-      roomId,
-      requestedCalendarId,
-      {
-        action: 'create-event',
-        calendarId: requestedCalendarId,
-      },
-    );
+    const scope =
+      await this.gatewayAccessService.authorizePersonalCalendarRequest(
+        userContext,
+        roomId,
+        requestedCalendarId,
+        {
+          action: 'create-event',
+          calendarId: requestedCalendarId,
+        },
+      );
 
     if (!input || typeof input.uid !== 'string' || input.uid.length === 0) {
       throw new BadRequestException('event uid is required');
@@ -348,16 +349,17 @@ export class GatewayEventService {
       this.requireQuery(eventId, 'eventId'),
       normalizedCalendarId,
     );
-    const scope = await this.eventScope(
-      userContext,
-      roomId,
-      normalizedCalendarId,
-      {
-        action: 'update-event',
-        calendarId: normalizedCalendarId,
-        eventId: normalizedEventId,
-      },
-    );
+    const scope =
+      await this.gatewayAccessService.authorizePersonalCalendarRequest(
+        userContext,
+        roomId,
+        normalizedCalendarId,
+        {
+          action: 'update-event',
+          calendarId: normalizedCalendarId,
+          eventId: normalizedEventId,
+        },
+      );
     const etag = this.requireQuery(ifMatch, 'If-Match');
     if (!isConcreteStrongEtag(etag)) {
       throw new BadRequestException({
@@ -434,11 +436,16 @@ export class GatewayEventService {
       this.requireQuery(eventId, 'eventId'),
       normalizedCalendarId,
     );
-    await this.eventScope(userContext, roomId, normalizedCalendarId, {
-      action: 'delete-event',
-      calendarId: normalizedCalendarId,
-      eventId: normalizedEventId,
-    });
+    await this.gatewayAccessService.authorizePersonalCalendarRequest(
+      userContext,
+      roomId,
+      normalizedCalendarId,
+      {
+        action: 'delete-event',
+        calendarId: normalizedCalendarId,
+        eventId: normalizedEventId,
+      },
+    );
     const etag = this.requireQuery(ifMatch, 'If-Match');
     if (!isConcreteStrongEtag(etag)) {
       throw new BadRequestException({
@@ -511,60 +518,6 @@ export class GatewayEventService {
     } catch {
       // CalDAV already committed. Matrix audit delivery is best effort.
     }
-  }
-
-  private async eventScope(
-    userContext: IUserContext,
-    roomId: string | undefined,
-    calendarId: string,
-    request: CalendarAuthorizationRequest,
-  ): Promise<{ roomId: string; calendarId: string }> {
-    const requiredRoomId = this.requireQuery(roomId, 'roomId');
-    const normalizedCalendarId = this.normalizeRadicaleUrl(
-      calendarId,
-      'calendarId',
-    );
-    let normalizedRequest: CalendarAuthorizationRequest;
-    switch (request.action) {
-      case 'read-events':
-      case 'create-event':
-      case 'manage-calendar':
-        normalizedRequest = {
-          action: request.action,
-          calendarId: normalizedCalendarId,
-        };
-        break;
-      case 'update-event':
-      case 'delete-event':
-        normalizedRequest = {
-          action: request.action,
-          calendarId: normalizedCalendarId,
-          eventId: this.normalizeEventUrl(
-            request.eventId,
-            normalizedCalendarId,
-          ),
-        };
-        break;
-      case 'list-calendars':
-      case 'create-calendar':
-        normalizedRequest = request;
-        break;
-    }
-    const authorization = this.authorizationFactory.forRoom(
-      userContext.userId,
-      requiredRoomId,
-    );
-
-    if (!(await authorization.isAllowed(normalizedRequest))) {
-      throw new ForbiddenException(
-        `Not allowed to ${request.action} for this Matrix room`,
-      );
-    }
-
-    return {
-      roomId: requiredRoomId,
-      calendarId: normalizedCalendarId,
-    };
   }
 
   private eventClient(

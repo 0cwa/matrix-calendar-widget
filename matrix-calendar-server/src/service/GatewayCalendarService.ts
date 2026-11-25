@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-import { CalendarAuthorizationRequest } from '@matrix-calendar-widget/calendar';
 import {
   BadRequestException,
   ConflictException,
@@ -435,15 +434,16 @@ export class GatewayCalendarService {
     }
 
     const requestedCalendarId = this.requireQuery(calendarId, 'calendarId');
-    const scope = await this.eventScope(
-      userContext,
-      roomId,
-      requestedCalendarId,
-      {
-        action: 'manage-calendar',
-        calendarId: requestedCalendarId,
-      },
-    );
+    const scope =
+      await this.gatewayAccessService.authorizePersonalCalendarRequest(
+        userContext,
+        roomId,
+        requestedCalendarId,
+        {
+          action: 'manage-calendar',
+          calendarId: requestedCalendarId,
+        },
+      );
     const client = new CalDavDiscoveryClient(
       this.requireRadicaleBaseUrl(),
       this.credentialProviderFactory.forRequest(userContext, openIdCredential),
@@ -490,60 +490,6 @@ export class GatewayCalendarService {
       code: 'room-calendar-collection-operator-managed',
       message: 'Room calendar collection changes are managed by the operator',
     });
-  }
-
-  private async eventScope(
-    userContext: IUserContext,
-    roomId: string | undefined,
-    calendarId: string,
-    request: CalendarAuthorizationRequest,
-  ): Promise<{ roomId: string; calendarId: string }> {
-    const requiredRoomId = this.requireQuery(roomId, 'roomId');
-    const normalizedCalendarId = this.normalizeRadicaleUrl(
-      calendarId,
-      'calendarId',
-    );
-    let normalizedRequest: CalendarAuthorizationRequest;
-    switch (request.action) {
-      case 'read-events':
-      case 'create-event':
-      case 'manage-calendar':
-        normalizedRequest = {
-          action: request.action,
-          calendarId: normalizedCalendarId,
-        };
-        break;
-      case 'update-event':
-      case 'delete-event':
-        normalizedRequest = {
-          action: request.action,
-          calendarId: normalizedCalendarId,
-          eventId: this.normalizeEventUrl(
-            request.eventId,
-            normalizedCalendarId,
-          ),
-        };
-        break;
-      case 'list-calendars':
-      case 'create-calendar':
-        normalizedRequest = request;
-        break;
-    }
-    const authorization = this.authorizationFactory.forRoom(
-      userContext.userId,
-      requiredRoomId,
-    );
-
-    if (!(await authorization.isAllowed(normalizedRequest))) {
-      throw new ForbiddenException(
-        `Not allowed to ${request.action} for this Matrix room`,
-      );
-    }
-
-    return {
-      roomId: requiredRoomId,
-      calendarId: normalizedCalendarId,
-    };
   }
 
   private requireRadicaleBaseUrl(): string {

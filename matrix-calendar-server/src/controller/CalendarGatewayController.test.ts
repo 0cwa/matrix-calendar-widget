@@ -201,14 +201,14 @@ describe('CalendarGatewayController', () => {
       new GatewayContextService(
         config,
         authorizationFactory,
-        new GatewayAccessService(authorizationFactory, bindingRegistry),
+        new GatewayAccessService(config, authorizationFactory, bindingRegistry),
       ),
       new GatewayEventService(
         config,
         authorizationFactory,
         credentialProviderFactory,
         roomAccess,
-        new GatewayAccessService(authorizationFactory, bindingRegistry),
+        new GatewayAccessService(config, authorizationFactory, bindingRegistry),
         roomEventOperations,
         roomEventAuditService,
       ),
@@ -217,7 +217,7 @@ describe('CalendarGatewayController', () => {
         authorizationFactory,
         credentialProviderFactory,
         roomAccess,
-        new GatewayAccessService(authorizationFactory, bindingRegistry),
+        new GatewayAccessService(config, authorizationFactory, bindingRegistry),
       ),
     );
   }

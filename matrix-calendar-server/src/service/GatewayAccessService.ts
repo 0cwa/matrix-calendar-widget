@@ -23,6 +23,7 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { IAppConfiguration } from '../IAppConfiguration';
 import { ModuleProviderToken } from '../ModuleProviderToken';
 import { IUserContext } from '../model/IUserContext';
 import type { RoomCalendarBindingRegistry } from './IRoomCalendarBindingRegistry';
@@ -33,6 +34,8 @@ import { RoomCalendarTarget } from './RoomCalendarCalDavAccess';
 @Injectable()
 export class GatewayAccessService {
   constructor(
+    @Inject(ModuleProviderToken.APP_CONFIGURATION)
+    private readonly appConfig: IAppConfiguration,
     private readonly authorizationFactory: MatrixCalendarAuthorizationFactory,
     @Inject(ModuleProviderToken.ROOM_CALENDAR_BINDING_REGISTRY)
     private readonly roomCalendarBindingRegistry?: RoomCalendarBindingRegistry,
@@ -57,6 +60,120 @@ export class GatewayAccessService {
     }
 
     return this.resolveRoomTarget(requiredRoomId, requestedCalendarId);
+  }
+
+  async authorizePersonalCalendarRequest(
+    userContext: IUserContext,
+    roomId: string | undefined,
+    calendarId: string,
+    request: CalendarAuthorizationRequest,
+  ): Promise<{ roomId: string; calendarId: string }> {
+    const requiredRoomId = this.requireQuery(roomId, 'roomId');
+    const normalizedCalendarId = this.normalizeRadicaleUrl(
+      calendarId,
+      'calendarId',
+    );
+    let normalizedRequest: CalendarAuthorizationRequest;
+    switch (request.action) {
+      case 'read-events':
+      case 'create-event':
+      case 'manage-calendar':
+        normalizedRequest = {
+          action: request.action,
+          calendarId: normalizedCalendarId,
+        };
+        break;
+      case 'update-event':
+      case 'delete-event':
+        normalizedRequest = {
+          action: request.action,
+          calendarId: normalizedCalendarId,
+          eventId: this.normalizeEventUrl(
+            request.eventId,
+            normalizedCalendarId,
+          ),
+        };
+        break;
+      case 'list-calendars':
+      case 'create-calendar':
+        normalizedRequest = request;
+        break;
+    }
+    const authorization = this.authorizationFactory.forRoom(
+      userContext.userId,
+      requiredRoomId,
+    );
+
+    if (!(await authorization.isAllowed(normalizedRequest))) {
+      throw new ForbiddenException(
+        `Not allowed to ${request.action} for this Matrix room`,
+      );
+    }
+
+    return {
+      roomId: requiredRoomId,
+      calendarId: normalizedCalendarId,
+    };
+  }
+
+  private requireRadicaleBaseUrl(): string {
+    if (!this.appConfig.radicale_url) {
+      throw new ServiceUnavailableException({
+        code: 'radicale-not-configured',
+        message: 'RADICALE_URL is required for calendar discovery',
+      });
+    }
+
+    return new URL(this.appConfig.radicale_url).toString();
+  }
+
+  private normalizeRadicaleUrl(value: string, field: string): string {
+    const base = new URL(this.requireRadicaleBaseUrl());
+    let target: URL;
+
+    try {
+      target = new URL(value);
+    } catch {
+      throw new BadRequestException(`${field} must be an absolute URL`);
+    }
+
+    const basePath = base.pathname.endsWith('/')
+      ? base.pathname
+      : `${base.pathname}/`;
+
+    if (
+      target.username ||
+      target.password ||
+      target.origin !== base.origin ||
+      !target.pathname.startsWith(basePath)
+    ) {
+      throw new BadRequestException(
+        `${field} must be within the configured Radicale service`,
+      );
+    }
+
+    return target.toString();
+  }
+
+  private normalizeEventUrl(value: string, calendarId: string): string {
+    const eventUrl = new URL(this.normalizeRadicaleUrl(value, 'eventId'));
+    const calendarUrl = new URL(this.asCollectionUrl(calendarId));
+
+    if (!eventUrl.pathname.startsWith(calendarUrl.pathname)) {
+      throw new BadRequestException(
+        'eventId must be within the selected calendar',
+      );
+    }
+
+    return eventUrl.toString();
+  }
+
+  private asCollectionUrl(calendarId: string): string {
+    const url = new URL(calendarId);
+    if (!url.pathname.endsWith('/')) {
+      url.pathname = `${url.pathname}/`;
+    }
+    return url.toString();
   }
 
   private async resolveRoomTarget(
