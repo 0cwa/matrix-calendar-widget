@@ -236,27 +236,26 @@ export function createElementAcceptanceSupport() {
 
   const REMINDER_TIMED_TIMEZONE = 'Europe/Stockholm';
 
-  let fixture: Fixture;
-
-  let activePhase: Phase = 'member-a-authenticated';
-
-  let activeReminderFailureRecorded = false;
-
-  let activeReminderFlowDiagnostic: ReminderFlowDiagnosticState | undefined;
-
-  let pendingPinnedControlObservation: PinnedControlObservation | undefined;
-
-  const memberRoomHomeserverHttpFailures = new WeakMap<
-    Page,
-    HomeserverHttpFailures
-  >();
-
-  const blockedExternalRequestsByContext = new WeakMap<
-    BrowserContext,
-    { count: number }
-  >();
-
-  const memberABlockedExternalRequests = new WeakMap<Page, { count: number }>();
+  const supportContext = {
+    fixture: undefined as unknown as Fixture,
+    activePhase: 'member-a-authenticated' as Phase,
+    activeReminderFailureRecorded: false,
+    activeReminderFlowDiagnostic: undefined as
+      | ReminderFlowDiagnosticState
+      | undefined,
+    pendingPinnedControlObservation: undefined as
+      | PinnedControlObservation
+      | undefined,
+    memberRoomHomeserverHttpFailures: new WeakMap<
+      Page,
+      HomeserverHttpFailures
+    >(),
+    blockedExternalRequestsByContext: new WeakMap<
+      BrowserContext,
+      { count: number }
+    >(),
+    memberABlockedExternalRequests: new WeakMap<Page, { count: number }>(),
+  };
 
   const BLOCKED_REQUEST_RESOURCE_TYPES = new Set<BlockedRequestResourceType>([
     'document',
@@ -479,8 +478,9 @@ export function createElementAcceptanceSupport() {
     expectedDayTitles: ReadonlySet<string>,
     initialDate: { year: number; month: number; day: number },
   ): PerformanceApiObserver {
-    const gatewayOrigin = new URL(fixture.gatewayUrl).origin;
-    const homeserverOrigin = new URL(fixture.homeserverUrl).origin;
+    const gatewayOrigin = new URL(supportContext.fixture.gatewayUrl).origin;
+    const homeserverOrigin = new URL(supportContext.fixture.homeserverUrl)
+      .origin;
     const pending = new Map<Request, PerformancePendingRequest>();
     const pendingBySample = new Map<PerformanceSampleKey, number>();
     const otherOriginCalendarPathCountBySample = new Map<
@@ -556,8 +556,10 @@ export function createElementAcceptanceSupport() {
               : 'none';
         calendarMatches =
           target === 'room' &&
-          requestUrl.searchParams.get('calendarId') === fixture.calendarId &&
-          requestUrl.searchParams.get('roomId') === fixture.teamRoomId;
+          requestUrl.searchParams.get('calendarId') ===
+            supportContext.fixture.calendarId &&
+          requestUrl.searchParams.get('roomId') ===
+            supportContext.fixture.teamRoomId;
         const expected = performanceRangeExpectation(
           activeSample,
           year,
@@ -643,7 +645,8 @@ export function createElementAcceptanceSupport() {
           calendarMatches =
             metadata.calendarMatches === true &&
             eventObjects.every(
-              (event) => event?.calendarId === fixture.calendarId,
+              (event) =>
+                event?.calendarId === supportContext.fixture.calendarId,
             );
         } else {
           eventCount = resources?.length ?? null;
@@ -772,19 +775,20 @@ export function createElementAcceptanceSupport() {
   function createFunctionalJourneyContext() {
     return {
       get fixture() {
-        return fixture;
+        return supportContext.fixture;
       },
       set fixture(value: Fixture) {
-        fixture = value;
+        supportContext.fixture = value;
       },
       get activePhase() {
-        return activePhase;
+        return supportContext.activePhase;
       },
       set activePhase(value: Phase) {
-        activePhase = value;
+        supportContext.activePhase = value;
       },
       readFixture,
-      blockedExternalRequestsByContext,
+      blockedExternalRequestsByContext:
+        supportContext.blockedExternalRequestsByContext,
       recordBlockedRequest,
       safeBlockedRequestResourceType,
       classifyBlockedRequest,
@@ -861,16 +865,16 @@ export function createElementAcceptanceSupport() {
   function createPerformanceJourneyContext() {
     return {
       get fixture() {
-        return fixture;
+        return supportContext.fixture;
       },
       set fixture(value: Fixture) {
-        fixture = value;
+        supportContext.fixture = value;
       },
       get activePhase() {
-        return activePhase;
+        return supportContext.activePhase;
       },
       set activePhase(value: Phase) {
-        activePhase = value;
+        supportContext.activePhase = value;
       },
       readFixture,
       localCalendarDate,
@@ -900,30 +904,30 @@ export function createElementAcceptanceSupport() {
   function createReminderJourneyContext() {
     return {
       get fixture() {
-        return fixture;
+        return supportContext.fixture;
       },
       set fixture(value: Fixture) {
-        fixture = value;
+        supportContext.fixture = value;
       },
       get activePhase() {
-        return activePhase;
+        return supportContext.activePhase;
       },
       set activePhase(value: Phase) {
-        activePhase = value;
+        supportContext.activePhase = value;
       },
       get activeReminderFlowDiagnostic() {
-        return activeReminderFlowDiagnostic;
+        return supportContext.activeReminderFlowDiagnostic;
       },
       set activeReminderFlowDiagnostic(
         value: ReminderFlowDiagnosticState | undefined,
       ) {
-        activeReminderFlowDiagnostic = value;
+        supportContext.activeReminderFlowDiagnostic = value;
       },
       get activeReminderFailureRecorded() {
-        return activeReminderFailureRecorded;
+        return supportContext.activeReminderFailureRecorded;
       },
       set activeReminderFailureRecorded(value: boolean) {
-        activeReminderFailureRecorded = value;
+        supportContext.activeReminderFailureRecorded = value;
       },
       readReminderFlow,
       enterActiveReminderFlowStage,
@@ -1015,8 +1019,8 @@ export function createElementAcceptanceSupport() {
     title: string,
     markerPlan: ReminderPlan,
   ): Promise<ReminderCreationResult> {
-    activePhase = 'reminder-event-create-dialog';
-    record(activePhase, 'started');
+    supportContext.activePhase = 'reminder-event-create-dialog';
+    record(supportContext.activePhase, 'started');
     await frame
       .getByRole('button', { name: 'Create event', exact: true })
       .click();
@@ -1048,7 +1052,7 @@ export function createElementAcceptanceSupport() {
       ...(eventStartDate ? { allDayEventDate: eventStartDate } : {}),
     };
     await editor.getByRole('combobox', { name: 'Calendar' }).selectOption({
-      value: `matrix-calendar-target://room/${encodeURIComponent(fixture.calendarId)}`,
+      value: `matrix-calendar-target://room/${encodeURIComponent(supportContext.fixture.calendarId)}`,
     });
     await editor.getByRole('textbox', { name: 'Title' }).fill(title);
     const alarmToggle = editor.getByLabel('CalDAV reminder');
@@ -1066,10 +1070,10 @@ export function createElementAcceptanceSupport() {
         .getByRole('textbox', { name: 'Time zone' })
         .fill(REMINDER_TIMED_TIMEZONE);
     }
-    record(activePhase, 'passed');
+    record(supportContext.activePhase, 'passed');
 
-    activePhase = 'reminder-event-created';
-    record(activePhase, 'started');
+    supportContext.activePhase = 'reminder-event-created';
+    record(supportContext.activePhase, 'started');
     const createResponse = waitForGatewayResponse(
       page,
       'POST',
@@ -1081,27 +1085,27 @@ export function createElementAcceptanceSupport() {
     const response = await createResponse;
     const status = response.status();
     if (status < 200 || status >= 300) {
-      record(activePhase, 'failed', status);
-      activeReminderFailureRecorded = true;
+      record(supportContext.activePhase, 'failed', status);
+      supportContext.activeReminderFailureRecorded = true;
       throw new Error('The reminder event was not created');
     }
-    record(activePhase, 'passed', status);
+    record(supportContext.activePhase, 'passed', status);
 
-    activePhase = 'reminder-event-visible';
+    supportContext.activePhase = 'reminder-event-visible';
     try {
       await expect(frame.getByRole('listitem', { name: title })).toBeVisible({
         timeout: 20_000,
       });
     } catch {
-      record(activePhase, 'failed', status, 0);
-      activeReminderFailureRecorded = true;
+      record(supportContext.activePhase, 'failed', status, 0);
+      supportContext.activeReminderFailureRecorded = true;
       throw new Error(
         'The created reminder event was not visible in the widget',
       );
     }
-    record(activePhase, 'passed', status, 1);
+    record(supportContext.activePhase, 'passed', status, 1);
 
-    activePhase = 'reminder-alarm-ui-readback';
+    supportContext.activePhase = 'reminder-alarm-ui-readback';
     const alarmObservation: ReminderAlarmUiObservation = {
       alarmUiStep: 'event-row-visible',
       alarmUiPatchStatus: 0,
@@ -1132,7 +1136,7 @@ export function createElementAcceptanceSupport() {
       ));
     if (!alarmReadback) {
       record(
-        activePhase,
+        supportContext.activePhase,
         'failed',
         alarmObservation.alarmUiPatchStatus || undefined,
         1,
@@ -1141,17 +1145,23 @@ export function createElementAcceptanceSupport() {
           relativeAlarmReadback: false,
         },
       );
-      activeReminderFailureRecorded = true;
+      supportContext.activeReminderFailureRecorded = true;
       throw new Error('The relative alarm did not reload from the event');
     }
     alarmObservation.alarmUiStep = 'complete';
     alarmObservation.alarmUiRelativeAlarmReadback = true;
-    record(activePhase, 'passed', alarmObservation.alarmUiPatchStatus, 1, {
-      ...alarmObservation,
-      relativeAlarmReadback: true,
-    });
+    record(
+      supportContext.activePhase,
+      'passed',
+      alarmObservation.alarmUiPatchStatus,
+      1,
+      {
+        ...alarmObservation,
+        relativeAlarmReadback: true,
+      },
+    );
 
-    activePhase = 'reminder-room-configuration-enabled';
+    supportContext.activePhase = 'reminder-room-configuration-enabled';
     const reminderConfiguration = await setRoomReminder(
       frame,
       page,
@@ -1379,7 +1389,7 @@ export function createElementAcceptanceSupport() {
         (response) => {
           const url = new URL(response.url());
           return (
-            url.origin === new URL(fixture.gatewayUrl).origin &&
+            url.origin === new URL(supportContext.fixture.gatewayUrl).origin &&
             url.pathname === '/v1/calendar/events' &&
             response.request().method() === 'PATCH'
           );
@@ -1505,8 +1515,8 @@ export function createElementAcceptanceSupport() {
         observation.memberPickerObservationError = 'multiple';
       }
     };
-    const roomPath = `/v1/calendar/rooms/${fixture.teamRoomId}/reminders`;
-    const gatewayOrigin = new URL(fixture.gatewayUrl).origin;
+    const roomPath = `/v1/calendar/rooms/${supportContext.fixture.teamRoomId}/reminders`;
+    const gatewayOrigin = new URL(supportContext.fixture.gatewayUrl).origin;
     const classifyRequest = (urlValue: string, method: string) => {
       try {
         const url = new URL(urlValue);
@@ -1571,7 +1581,7 @@ export function createElementAcceptanceSupport() {
             observation.reminderTargetMatches =
               plan.recipient === 'selected' &&
               target.userIds.length === 1 &&
-              target.userIds[0] === fixture.users.memberB.userId;
+              target.userIds[0] === supportContext.fixture.users.memberB.userId;
           }
           const allDaySchedule = isRecord(body)
             ? body.allDaySchedule
@@ -1640,7 +1650,7 @@ export function createElementAcceptanceSupport() {
       try {
         const roster = summarizeReminderRecipientRoster(
           await response.json(),
-          fixture.users.memberB.userId,
+          supportContext.fixture.users.memberB.userId,
         );
         observation.recipientRosterCount = roster.recipientRosterCount;
         observation.recipientRosterShapeValid =
@@ -1663,11 +1673,11 @@ export function createElementAcceptanceSupport() {
         observation.reminderOptionsGetStatus ||
         observation.reminderConfigGetStatus ||
         undefined;
-      record(activePhase, 'failed', httpStatus, undefined, {
+      record(supportContext.activePhase, 'failed', httpStatus, undefined, {
         ...observation,
         reminderEnabled: false,
       });
-      activeReminderFailureRecorded = true;
+      supportContext.activeReminderFailureRecorded = true;
     };
 
     page.on('request', onRequest);
@@ -2043,7 +2053,8 @@ export function createElementAcceptanceSupport() {
             controlledIds[0] === tokens[0]
           );
         };
-        const expectedMemberUserId = fixture.users.memberB.userId;
+        const expectedMemberUserId =
+          supportContext.fixture.users.memberB.userId;
         const memberInputProbeKey = '__calendarRoomReminderInputProbe';
         observation.recipientSelectionStep = 'member-input-probe-install';
         const beforeFill = await memberInput
@@ -2210,7 +2221,8 @@ export function createElementAcceptanceSupport() {
         observation.recipientSelectionStep = 'member-option-ready';
         await memberOption.waitFor({ state: 'visible', timeout: 15_000 });
         observation.memberQueryMatchesTargetAtOptionCount =
-          (await memberInput.inputValue()) === fixture.users.memberB.userId;
+          (await memberInput.inputValue()) ===
+          supportContext.fixture.users.memberB.userId;
         observation.memberOptionCount = Math.min(
           await memberOptions.count(),
           2,
@@ -2221,7 +2233,7 @@ export function createElementAcceptanceSupport() {
               options.filter((option) =>
                 option.textContent?.includes(expectedId),
               ).length,
-            fixture.users.memberB.userId,
+            supportContext.fixture.users.memberB.userId,
           ),
           2,
         );
@@ -2375,17 +2387,23 @@ export function createElementAcceptanceSupport() {
       await details.getByRole('button', { name: 'Close', exact: true }).click();
       observation.reminderStep = 'complete';
       await sampleRecipientRosterResponse();
-      record(activePhase, 'passed', observation.reminderPutStatus, 1, {
-        ...observation,
-        reminderEnabled: true,
-      });
+      record(
+        supportContext.activePhase,
+        'passed',
+        observation.reminderPutStatus,
+        1,
+        {
+          ...observation,
+          reminderEnabled: true,
+        },
+      );
       return {
         enabled: true,
         httpStatus: observation.reminderPutStatus,
         ...(dueAt === undefined ? {} : { dueAt }),
       };
     } catch {
-      if (!activeReminderFailureRecorded) await writeFailure();
+      if (!supportContext.activeReminderFailureRecorded) await writeFailure();
       throw new Error('Room reminder configuration could not be confirmed');
     } finally {
       page.off('request', onRequest);
@@ -2588,14 +2606,14 @@ export function createElementAcceptanceSupport() {
     let response: Awaited<ReturnType<typeof fetch>>;
     try {
       const endpoint = new URL(
-        `/_matrix/client/v3/rooms/${encodeURIComponent(fixture.teamRoomId)}/messages`,
-        fixture.homeserverUrl,
+        `/_matrix/client/v3/rooms/${encodeURIComponent(supportContext.fixture.teamRoomId)}/messages`,
+        supportContext.fixture.homeserverUrl,
       );
       endpoint.searchParams.set('dir', 'b');
       endpoint.searchParams.set('limit', '100');
       response = await fetch(endpoint, {
         headers: {
-          Authorization: `Bearer ${fixture.serviceSender.accessToken}`,
+          Authorization: `Bearer ${supportContext.fixture.serviceSender.accessToken}`,
         },
         signal: AbortSignal.timeout(10_000),
       });
@@ -2643,7 +2661,7 @@ export function createElementAcceptanceSupport() {
       markerCounts.push(Math.min(matching.length, 2));
       const serviceEvent =
         matching.length === 1 &&
-        matching[0].sender === fixture.serviceSender.userId;
+        matching[0].sender === supportContext.fixture.serviceSender.userId;
       const content =
         serviceEvent && isRecord(matching[0].content)
           ? matching[0].content
@@ -2665,7 +2683,7 @@ export function createElementAcceptanceSupport() {
         (!Object.hasOwn(mentions, 'room') || mentions.room === false) &&
         Array.isArray(userIds) &&
         userIds.length === 1 &&
-        userIds[0] === fixture.users.memberB.userId;
+        userIds[0] === supportContext.fixture.users.memberB.userId;
       markerRoomMentions.push(roomMention);
       markerSelectedMemberMentions.push(selectedMemberMention);
       markerTargetsMatch.push(
@@ -2721,7 +2739,7 @@ export function createElementAcceptanceSupport() {
     method: 'GET' | 'PUT' | 'DELETE',
     targetScope: 'any' | 'fixture-room' = 'any',
   ): Promise<Response> {
-    const gatewayOrigin = new URL(fixture.gatewayUrl).origin;
+    const gatewayOrigin = new URL(supportContext.fixture.gatewayUrl).origin;
     return page.waitForResponse(
       (response) => {
         const url = new URL(response.url());
@@ -2740,11 +2758,12 @@ export function createElementAcceptanceSupport() {
     try {
       const url = new URL(response.url());
       return (
-        url.origin === new URL(fixture.gatewayUrl).origin &&
+        url.origin === new URL(supportContext.fixture.gatewayUrl).origin &&
         url.pathname === '/v1/calendar-feeds/publication' &&
         url.searchParams.get('target') === 'room' &&
-        url.searchParams.get('calendarId') === fixture.calendarId &&
-        url.searchParams.get('roomId') === fixture.teamRoomId
+        url.searchParams.get('calendarId') ===
+          supportContext.fixture.calendarId &&
+        url.searchParams.get('roomId') === supportContext.fixture.teamRoomId
       );
     } catch {
       return false;
@@ -2788,8 +2807,8 @@ export function createElementAcceptanceSupport() {
     page: Page,
     eventTitle: string,
   ): Promise<void> {
-    activePhase = 'public-feed-browser-lifecycle';
-    record(activePhase, 'started');
+    supportContext.activePhase = 'public-feed-browser-lifecycle';
+    record(supportContext.activePhase, 'started');
     const observation: PublicFeedBrowserObservation = {
       publicFeedLifecycleStep: 'opening-dialog',
       publicConsentGateObserved: false,
@@ -2968,7 +2987,8 @@ export function createElementAcceptanceSupport() {
       }
       observation.publicUrlOriginAndRouteMatch =
         parsedPublicUrl !== undefined &&
-        parsedPublicUrl.origin === new URL(fixture.gatewayUrl).origin &&
+        parsedPublicUrl.origin ===
+          new URL(supportContext.fixture.gatewayUrl).origin &&
         /^\/v1\/public-calendar-feeds\/[A-Za-z0-9_.-]+$/u.test(
           parsedPublicUrl.pathname,
         ) &&
@@ -3062,15 +3082,21 @@ export function createElementAcceptanceSupport() {
 
       observation.publicFeedLifecycleStep = 'complete';
       record(
-        activePhase,
+        supportContext.activePhase,
         'passed',
         observation.publicFeedRevokedGetStatus,
         undefined,
         observation,
       );
     } catch {
-      activeReminderFailureRecorded = true;
-      record(activePhase, 'failed', undefined, undefined, observation);
+      supportContext.activeReminderFailureRecorded = true;
+      record(
+        supportContext.activePhase,
+        'failed',
+        undefined,
+        undefined,
+        observation,
+      );
       throw new Error('Public calendar feed lifecycle could not be confirmed');
     } finally {
       if (publicationCreated && dialog) {
@@ -3200,9 +3226,13 @@ export function createElementAcceptanceSupport() {
     page.setDefaultTimeout(30_000);
     page.setDefaultNavigationTimeout(30_000);
     if (captureHomeserverHttpErrors) {
-      const homeserverOrigin = new URL(fixture.homeserverUrl).origin;
+      const homeserverOrigin = new URL(supportContext.fixture.homeserverUrl)
+        .origin;
       const homeserverHttpFailures: HomeserverHttpFailures = { count: 0 };
-      memberRoomHomeserverHttpFailures.set(page, homeserverHttpFailures);
+      supportContext.memberRoomHomeserverHttpFailures.set(
+        page,
+        homeserverHttpFailures,
+      );
       page.on('response', (response) => {
         try {
           if (
@@ -3222,22 +3252,33 @@ export function createElementAcceptanceSupport() {
     }
     if (captureMemberADiagnostics) {
       const contextBlockedRequests =
-        blockedExternalRequestsByContext.get(context);
+        supportContext.blockedExternalRequestsByContext.get(context);
       if (contextBlockedRequests) {
-        memberABlockedExternalRequests.set(page, contextBlockedRequests);
+        supportContext.memberABlockedExternalRequests.set(
+          page,
+          contextBlockedRequests,
+        );
       }
-      activePhase = 'member-a-origin-navigation';
+      supportContext.activePhase = 'member-a-origin-navigation';
     }
     const originResponse = await page.goto(
-      new URL('/welcome/images/logo.svg', fixture.elementUrl).href,
+      new URL('/welcome/images/logo.svg', supportContext.fixture.elementUrl)
+        .href,
     );
     if (captureMemberADiagnostics) {
       const originMatchesElement =
-        new URL(page.url()).origin === new URL(fixture.elementUrl).origin;
-      record(activePhase, 'passed', originResponse?.status(), undefined, {
-        originMatchesElement,
-      });
-      activePhase = 'member-a-credentials-seeded';
+        new URL(page.url()).origin ===
+        new URL(supportContext.fixture.elementUrl).origin;
+      record(
+        supportContext.activePhase,
+        'passed',
+        originResponse?.status(),
+        undefined,
+        {
+          originMatchesElement,
+        },
+      );
+      supportContext.activePhase = 'member-a-credentials-seeded';
     }
 
     await page.evaluate(
@@ -3261,17 +3302,20 @@ export function createElementAcceptanceSupport() {
         window.localStorage.setItem('notifications_hidden', 'true');
         window.localStorage.setItem('audio_notifications_enabled', 'false');
       },
-      { homeserverUrl: fixture.homeserverUrl, credentials: user },
+      {
+        homeserverUrl: supportContext.fixture.homeserverUrl,
+        credentials: user,
+      },
     );
     if (captureMemberADiagnostics) {
-      record(activePhase, 'passed');
-      activePhase = 'member-a-root-navigation';
+      record(supportContext.activePhase, 'passed');
+      supportContext.activePhase = 'member-a-root-navigation';
     }
 
-    const rootResponse = await page.goto(fixture.elementUrl);
+    const rootResponse = await page.goto(supportContext.fixture.elementUrl);
     if (captureMemberADiagnostics) {
-      record(activePhase, 'passed', rootResponse?.status());
-      activePhase = 'member-a-session-observed';
+      record(supportContext.activePhase, 'passed', rootResponse?.status());
+      supportContext.activePhase = 'member-a-session-observed';
     }
 
     const sessionReady = await page
@@ -3352,7 +3396,7 @@ export function createElementAcceptanceSupport() {
         }, user.userId)
         .catch(() => undefined);
       recordMemberASessionObservation(sessionObservation);
-      activePhase = 'member-a-authenticated';
+      supportContext.activePhase = 'member-a-authenticated';
     }
 
     if (!sessionReady) {
@@ -3366,7 +3410,7 @@ export function createElementAcceptanceSupport() {
     roomName: string,
     roomId: string,
   ): Promise<ElementWebPage> {
-    const roomUrl = new URL(fixture.elementUrl);
+    const roomUrl = new URL(supportContext.fixture.elementUrl);
     roomUrl.hash = `/room/${roomId}`;
     await page.goto(roomUrl.href);
 
@@ -3404,7 +3448,7 @@ export function createElementAcceptanceSupport() {
       if (options.useNormalRoomSelection) {
         await element.navigateToRoomOrInvitation(roomName);
       } else {
-        const roomUrl = new URL(fixture.elementUrl);
+        const roomUrl = new URL(supportContext.fixture.elementUrl);
         roomUrl.hash = `/room/${roomId}`;
         await page.goto(roomUrl.href, { timeout: 20_000 });
       }
@@ -3898,14 +3942,13 @@ export function createElementAcceptanceSupport() {
     } catch {
       // The URL is represented only as an equality result.
     }
-    const homeserverHttpFailures = memberRoomHomeserverHttpFailures.get(
-      page,
-    ) ?? {
-      count: 0,
-    };
+    const homeserverHttpFailures =
+      supportContext.memberRoomHomeserverHttpFailures.get(page) ?? {
+        count: 0,
+      };
     const blockedExternalRequests =
       blockedExternalRequestsOverride?.count ??
-      memberABlockedExternalRequests.get(page)?.count ??
+      supportContext.memberABlockedExternalRequests.get(page)?.count ??
       0;
     return {
       ...matrixState,
@@ -3959,8 +4002,8 @@ export function createElementAcceptanceSupport() {
   ) {
     if (!alreadyRecorded) {
       const observation =
-        pendingPinnedControlObservation?.phase === phase
-          ? pendingPinnedControlObservation
+        supportContext.pendingPinnedControlObservation?.phase === phase
+          ? supportContext.pendingPinnedControlObservation
           : undefined;
       record(phase, 'failed', httpStatus, observation?.count, {
         ...(observation
@@ -3974,7 +4017,7 @@ export function createElementAcceptanceSupport() {
         ...(teamRoomMatches === undefined ? {} : { teamRoomMatches }),
       });
     }
-    pendingPinnedControlObservation = undefined;
+    supportContext.pendingPinnedControlObservation = undefined;
   }
 
   async function openCalendarWidget(
@@ -3996,16 +4039,18 @@ export function createElementAcceptanceSupport() {
     );
     onTiming?.('activation', elapsedMilliseconds(activationStartedAt));
     if (captureMemberADiagnostics) {
-      if (!expectWidgetWarning) activePhase = 'widget-a-warning-not-required';
+      if (!expectWidgetWarning)
+        supportContext.activePhase = 'widget-a-warning-not-required';
     }
     if (expectWidgetWarning) {
       await element.approveWidgetWarning();
-      if (captureMemberADiagnostics) record(activePhase, 'passed');
+      if (captureMemberADiagnostics)
+        record(supportContext.activePhase, 'passed');
     } else if (captureMemberADiagnostics) {
-      record(activePhase, 'passed');
+      record(supportContext.activePhase, 'passed');
     }
     if (captureMemberADiagnostics) {
-      activePhase = 'widget-a-capabilities-approval';
+      supportContext.activePhase = 'widget-a-capabilities-approval';
     }
     const capabilityApprovalStartedAt = performance.now();
     await element.approveWidgetCapabilities();
@@ -4013,9 +4058,9 @@ export function createElementAcceptanceSupport() {
       'capability-approval',
       elapsedMilliseconds(capabilityApprovalStartedAt),
     );
-    if (captureMemberADiagnostics) record(activePhase, 'passed');
+    if (captureMemberADiagnostics) record(supportContext.activePhase, 'passed');
     if (captureMemberADiagnostics) {
-      activePhase = 'widget-a-identity-approval';
+      supportContext.activePhase = 'widget-a-identity-approval';
     }
     const identityContinue = page
       .getByRole('dialog')
@@ -4052,28 +4097,28 @@ export function createElementAcceptanceSupport() {
     }
     if (identityDialogShown) {
       if (captureMemberADiagnostics) {
-        activePhase = 'widget-a-identity-approval';
+        supportContext.activePhase = 'widget-a-identity-approval';
       }
       await element.approveWidgetIdentity();
       identityApprovalDurationMs = elapsedMilliseconds(
         identityApprovalStartedAt,
       );
       if (captureMemberADiagnostics) {
-        record(activePhase, 'passed');
-        activePhase = 'widget-a-iframe-ready';
+        record(supportContext.activePhase, 'passed');
+        supportContext.activePhase = 'widget-a-iframe-ready';
       }
     } else if (captureMemberADiagnostics) {
-      activePhase = 'widget-a-iframe-ready';
+      supportContext.activePhase = 'widget-a-iframe-ready';
     }
     onTiming?.('identity-approval', identityApprovalDurationMs);
     const iframeReadyStartedAt = performance.now();
     if (captureMemberADiagnostics) {
-      activePhase = 'widget-a-iframe-attached';
+      supportContext.activePhase = 'widget-a-iframe-attached';
       await page
         .locator('iframe[title="Matrix Calendar"]')
         .waitFor({ state: 'attached', timeout: 30_000 });
-      record(activePhase, 'passed');
-      activePhase = 'widget-a-iframe-ready';
+      record(supportContext.activePhase, 'passed');
+      supportContext.activePhase = 'widget-a-iframe-ready';
     }
     if (waitForCalendar) {
       await frame
@@ -4122,7 +4167,7 @@ export function createElementAcceptanceSupport() {
       return;
     }
 
-    activePhase = diagnosticPhase;
+    supportContext.activePhase = diagnosticPhase;
     await control.waitFor({ state: 'visible', timeout: 8_000 }).catch(() => {});
     const count = Math.min(await control.count(), 2);
     const visibleControl = control.filter({ visible: true });
@@ -4131,7 +4176,7 @@ export function createElementAcceptanceSupport() {
     const panelPresent = panel
       ? (await panel.filter({ visible: true }).count()) > 0
       : undefined;
-    pendingPinnedControlObservation = {
+    supportContext.pendingPinnedControlObservation = {
       phase: diagnosticPhase,
       count,
       controlVisible,
@@ -4152,7 +4197,7 @@ export function createElementAcceptanceSupport() {
       controlVisible,
       ...(panelPresent === undefined ? {} : { panelPresent }),
     });
-    pendingPinnedControlObservation = undefined;
+    supportContext.pendingPinnedControlObservation = undefined;
   }
 
   async function openEventEditor(
@@ -4224,7 +4269,7 @@ export function createElementAcceptanceSupport() {
       (response) => {
         const url = new URL(response.url());
         return (
-          url.origin === new URL(fixture.gatewayUrl).origin &&
+          url.origin === new URL(supportContext.fixture.gatewayUrl).origin &&
           url.pathname === pathname &&
           response.request().method() === method
         );
@@ -4252,7 +4297,7 @@ export function createElementAcceptanceSupport() {
     bestEffortDeleteOwnedPrivateDavResource,
     revokedPrivateDavCredentialDenied,
   } = createPrivateAcceptanceHelpers(
-    () => fixture,
+    () => supportContext.fixture,
     PRIVATE_ACCEPTANCE_GATEWAY_ORIGIN,
   );
 
@@ -4261,8 +4306,8 @@ export function createElementAcceptanceSupport() {
     roomId: string,
   ): ReminderWidgetContextResponseObserver {
     let responseStatus: number | undefined;
-    const gatewayOrigin = new URL(fixture.gatewayUrl).origin;
-    const widgetOrigin = new URL(fixture.widgetUrl).origin;
+    const gatewayOrigin = new URL(supportContext.fixture.gatewayUrl).origin;
+    const widgetOrigin = new URL(supportContext.fixture.widgetUrl).origin;
     // eslint-disable-next-line playwright/missing-playwright-await -- Register before room/widget actions to avoid a response race; the caller awaits reminderContextResponseObserver.response after openCalendarWidget.
     const response = page.waitForResponse(
       (candidate) => {
@@ -4352,7 +4397,8 @@ export function createElementAcceptanceSupport() {
       expectedTitle: string;
     },
   ) {
-    const expectedGatewayOrigin = new URL(fixture.gatewayUrl).origin;
+    const expectedGatewayOrigin = new URL(supportContext.fixture.gatewayUrl)
+      .origin;
     const observation: PostCreateVisibilityObservation = {
       postCreateEventGetRequestCount: 0,
       roomTargetRangeRequestCount: 0,
@@ -4593,7 +4639,7 @@ export function createElementAcceptanceSupport() {
             calendarId: expectedCalendarId,
             eventUid: createdEventUid,
             range: expectedRoomRange,
-            fixture,
+            fixture: supportContext.fixture,
           });
           if (caldavProbe) {
             observation.caldavReportProbeCompleted = caldavProbe.completed;
@@ -4704,7 +4750,7 @@ export function createElementAcceptanceSupport() {
     try {
       const url = new URL(rawUrl);
       return (
-        url.origin === new URL(fixture.gatewayUrl).origin &&
+        url.origin === new URL(supportContext.fixture.gatewayUrl).origin &&
         url.pathname === '/v1/calendar/events'
       );
     } catch {
@@ -4744,10 +4790,10 @@ export function createElementAcceptanceSupport() {
     const homeserverOrigin = new URL(homeserverUrl).origin;
     const widgetOrigin = new URL(widgetUrl).origin;
     const observerArgs = {
-      expectedElementOrigin: new URL(fixture.elementUrl).origin,
+      expectedElementOrigin: new URL(supportContext.fixture.elementUrl).origin,
       expectedWidgetOrigin: widgetOrigin,
       expectedGatewayOrigin: gatewayOrigin,
-      expectedRoomId: fixture.teamRoomId,
+      expectedRoomId: supportContext.fixture.teamRoomId,
     };
     const installAcceptanceObserver = ({
       expectedElementOrigin,
@@ -5306,8 +5352,9 @@ export function createElementAcceptanceSupport() {
             };
           },
           {
-            expectedGatewayOrigin: new URL(fixture.gatewayUrl).origin,
-            expectedRoomId: fixture.teamRoomId,
+            expectedGatewayOrigin: new URL(supportContext.fixture.gatewayUrl)
+              .origin,
+            expectedRoomId: supportContext.fixture.teamRoomId,
           },
         );
       observation.iframeObservationAvailable = true;
@@ -5318,7 +5365,7 @@ export function createElementAcceptanceSupport() {
       // The raw iframe URL and any navigation error stay out of the evidence.
     }
 
-    const widgetOrigin = new URL(fixture.widgetUrl).origin;
+    const widgetOrigin = new URL(supportContext.fixture.widgetUrl).origin;
     const widgetFrame = page.frames().find((candidate) => {
       if (candidate === page.mainFrame()) return false;
       try {
@@ -5727,27 +5774,27 @@ export function createElementAcceptanceSupport() {
   function enterActiveReminderFlowStage(
     stage: ReminderFlowDiagnosticStage,
   ): void {
-    const state = activeReminderFlowDiagnostic;
+    const state = supportContext.activeReminderFlowDiagnostic;
     if (state) enterReminderFlowDiagnosticStage(state, stage);
   }
 
   function completeActiveReminderFlowStage(
     stage: ReminderFlowDiagnosticStage,
   ): void {
-    const state = activeReminderFlowDiagnostic;
+    const state = supportContext.activeReminderFlowDiagnostic;
     if (state) completeReminderFlowDiagnosticStage(state, stage);
   }
 
   function failActiveReminderFlow(error: unknown): void {
-    const state = activeReminderFlowDiagnostic;
+    const state = supportContext.activeReminderFlowDiagnostic;
     if (state) failReminderFlowDiagnostic(state, error);
   }
 
   function finishActiveReminderFlowDiagnostic(
     status: string | undefined,
   ): void {
-    const state = activeReminderFlowDiagnostic;
-    activeReminderFlowDiagnostic = undefined;
+    const state = supportContext.activeReminderFlowDiagnostic;
+    supportContext.activeReminderFlowDiagnostic = undefined;
     if (!state) return;
 
     const knownStatuses = new Set<ReminderFlowTestStatus>([
@@ -5918,10 +5965,10 @@ export function createElementAcceptanceSupport() {
   function createPrivateJourneyContext() {
     return {
       get fixture() {
-        return fixture;
+        return supportContext.fixture;
       },
       set fixture(value: Fixture) {
-        fixture = value;
+        supportContext.fixture = value;
       },
       requirePrivateUiCheckpointJournal,
       readFixture,
@@ -5955,11 +6002,11 @@ export function createElementAcceptanceSupport() {
     createReminderJourneyContext,
     finishActiveReminderFlowDiagnostic,
     async runG6(browser: Browser) {
-      fixture = readFixture();
+      supportContext.fixture = readFixture();
       recordRuntimeVersions(browser.version());
       await runElementG6AcceptanceJourney({
         browser,
-        fixture,
+        fixture: supportContext.fixture,
         record,
         isRecord,
         authenticateInElement,
