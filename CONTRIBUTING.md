@@ -24,7 +24,7 @@ These requirements apply to every contribution:
 - **Keep Matrix reminder state separate from iCalendar.** Notification targeting belongs in the sidecar store and uses standard `m.mentions`.
 - **Keep changes reviewable.** Separate feature work from unrelated dependency upgrades, broad renames, and legacy-code removal.
 
-See the [data model](./docs/data-model.md), [threat model](./docs/threat-model.md), and [architecture decisions](./docs/adrs/README.md) for the reasons and detailed contracts. Changes to persistence, authentication, public APIs, permissions, calendar semantics, or deployment topology need an ADR. Use the [ADR template](./docs/adrs/adr000-template.md); update or supersede an existing decision when its contract changes. ADR001–ADR003 describe inherited NeoDateFix behavior and are historical unless a fork decision explicitly adopts them.
+See the [data model](./docs/data-model.md), [threat model](./docs/threat-model.md), and [architecture decisions](./docs/adrs/README.md) for the reasons and detailed contracts. Write an ADR for a genuinely new persistence, authentication, public API, or deployment decision; bounded changes to existing behavior do not need one. Use the [ADR template](./docs/adrs/adr000-template.md); update or supersede an existing decision when its contract changes. ADR001–ADR003 describe inherited NeoDateFix behavior and are historical unless a fork decision explicitly adopts them. For agent-specific policy, including ADR scope, [AGENTS.md](./AGENTS.md) is authoritative.
 
 ## Check your work
 
@@ -56,7 +56,7 @@ A useful PR description explains:
 - Screenshots for visible widget changes and keyboard/focus coverage for interaction changes.
 - Relevant issues, ADRs, and any deliberately deferred follow-up.
 
-Update the guide that owns the behavior you changed. Update [project status](./docs/STATUS.md), the [roadmap](./docs/ROADMAP.md), or [implementation plan](./docs/PLAN.md) when the change materially affects them. Keep detailed run evidence in the appropriate validation document or [release ledger](./docs/RELEASE.md), with the tested commit and scope; avoid copying the same status narrative into several guides.
+Update the guide that owns the behavior you changed. Human contributors should update [project status](./docs/STATUS.md), the [roadmap](./docs/ROADMAP.md), or [implementation plan](./docs/PLAN.md) when a change materially affects them, and keep release evidence in the appropriate validation document or [release ledger](./docs/RELEASE.md), with the tested commit and scope. Agents must follow [AGENTS.md](./AGENTS.md), which prohibits updating STATUS.md or PLAN.md as part of a change, evidence-only PRs, and rebinding evidence to exact SHAs.
 
 ## Documentation conventions
 

@@ -128,6 +128,80 @@ yarn ci
 
 This runs documentation checks and their regressions, formatting, dependency checks, lint, configured workspace type checks, shared-package builds, widget and server translation checks, non-interactive unit tests, and builds. The [CI workflow](../.github/workflows/ci.yml) adds checks such as PostgreSQL contracts, deployment validation, and package-content checks. Keep all protected contexts and the integration contracts relevant to your change; focused local checks are an editing aid.
 
+### Checks by area
+
+Use these sets for a fast local pass when a change is limited to one area. A shared package change must also be checked in its consumers: both the widget and server use `@matrix-calendar-widget/calendar` and `@matrix-calendar-widget/ical-timezones`. Build changed packages before dependent checks so they resolve generated output from this checkout. Changes spanning areas should combine the applicable sets.
+
+**Server only** (gateway/server source and tests):
+
+```bash
+yarn workspace @matrix-calendar-widget/server lint
+yarn workspace @matrix-calendar-widget/server exec -- tsc --noEmit
+yarn workspace @matrix-calendar-widget/server test:all
+yarn workspace @matrix-calendar-widget/server test:migrate-postgres-cli
+```
+
+**Widget only** (widget source and tests):
+
+```bash
+yarn workspace @matrix-calendar-widget/widget translate --ci --dry-run
+yarn workspace @matrix-calendar-widget/widget lint
+yarn workspace @matrix-calendar-widget/widget tsc
+yarn workspace @matrix-calendar-widget/widget test:all
+```
+
+**Shared packages only** (`packages/*`):
+
+```bash
+yarn workspace @matrix-calendar-widget/ical-timezones lint
+yarn workspace @matrix-calendar-widget/ical-timezones tsc
+yarn workspace @matrix-calendar-widget/ical-timezones test:all
+yarn workspace @matrix-calendar-widget/ical-timezones build
+yarn workspace @matrix-calendar-widget/calendar lint
+yarn workspace @matrix-calendar-widget/calendar test:all
+yarn workspace @matrix-calendar-widget/calendar build
+yarn workspace @matrix-calendar-widget/widget lint
+yarn workspace @matrix-calendar-widget/widget tsc
+yarn workspace @matrix-calendar-widget/widget test:all
+yarn workspace @matrix-calendar-widget/server lint
+yarn workspace @matrix-calendar-widget/server exec -- tsc --noEmit
+yarn workspace @matrix-calendar-widget/server test:all
+```
+
+Run checks for the changed package and its dependents; for example, a timezone package change needs the timezone checks and both consumer sets. If a shared-package change affects translation catalogs, run the corresponding consumer translation dry-run too.
+
+**Documentation only:**
+
+```bash
+yarn docs:test
+yarn docs:check
+yarn prettier:check
+```
+
+These focused sets shorten the edit/review loop; **`yarn ci` remains the merge gate**.
+
+### `yarn ci` step timings
+
+The table records one run of each serial command in the root `ci` script on 2026-11-25. Timings are specific to this machine and checkout; they are a planning reference, not a performance target. Each row corresponds to one `&&`-separated step, with the two shared-package builds listed separately.
+
+| Step | Command                                                                   |      Time |
+| ---- | ------------------------------------------------------------------------- | --------: |
+| 1    | `yarn docs:test`                                                          |     0.5 s |
+| 2    | `yarn docs:check`                                                         |     0.5 s |
+| 3    | `yarn prettier:check`                                                     |    27.2 s |
+| 4    | `yarn depcheck`                                                           |    14.6 s |
+| 5    | `yarn lint`                                                               |    21.8 s |
+| 6    | `yarn tsc`                                                                |    27.2 s |
+| 7    | `yarn workspace @matrix-calendar-widget/ical-timezones build`             |     2.3 s |
+| 8    | `yarn workspace @matrix-calendar-widget/calendar build`                   |     3.4 s |
+| 9    | `yarn workspace @matrix-calendar-widget/widget translate --ci --dry-run`  |     2.2 s |
+| 10   | `yarn workspace @matrix-calendar-widget/server translate --ci --dry-run`  |     2.3 s |
+| 11   | `yarn test:all`                                                           | 233.2 s\* |
+| 12   | `yarn workspace @matrix-calendar-widget/server test:migrate-postgres-cli` |     0.9 s |
+| 13   | `yarn build`                                                              |    30.2 s |
+
+- `test:all` took 233.2 seconds with a 16 GB `agent-heavy` cap and failed when server Jest workers were killed for memory. The first serial run also failed this step with an 8 GB cap. Other CI steps passed in the serial run.
+
 Useful individual commands:
 
 | Command               | Purpose                                                                    |
