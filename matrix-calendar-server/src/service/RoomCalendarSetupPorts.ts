@@ -40,10 +40,7 @@ export interface RoomCalendarSetupMatrixPreconditionsPort {
 export type RoomCalendarSetupCalDavMode = 'create-if-missing' | 'verify-only';
 
 export type RoomCalendarSetupCalDavOutcome =
-  | 'created'
-  | 'existing'
-  | 'missing'
-  | 'conflict';
+  'created' | 'existing' | 'missing' | 'conflict';
 
 export interface RoomCalendarSetupCalDavPort {
   reconcile(
@@ -53,15 +50,10 @@ export interface RoomCalendarSetupCalDavPort {
 }
 
 export type RoomCalendarSetupWidgetOutcome =
-  | 'installed'
-  | 'already-present'
-  | 'conflict'
-  | 'unavailable';
+  'installed' | 'already-present' | 'conflict' | 'unavailable';
 
 export type RoomCalendarSetupWidgetPreflightOutcome =
-  | 'ready'
-  | 'conflict'
-  | 'unavailable';
+  'ready' | 'conflict' | 'unavailable';
 
 export interface RoomCalendarSetupWidgetPort {
   /** Checks existing widget state and new-widget URL before persistence. */

@@ -29,9 +29,7 @@ import {
 } from './ICalendarUtcTimestamp';
 
 type RevisionPropertyState<T> =
-  | { kind: 'missing' }
-  | { kind: 'valid'; value: T }
-  | { kind: 'invalid' };
+  { kind: 'missing' } | { kind: 'valid'; value: T } | { kind: 'invalid' };
 
 export type RawRevisionProperty = ICalendarContentLine & {
   name: 'dtstamp' | 'created' | 'last-modified' | 'sequence';
