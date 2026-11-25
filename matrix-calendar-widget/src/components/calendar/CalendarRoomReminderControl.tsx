@@ -43,19 +43,18 @@ import {
   Typography,
 } from '@mui/material';
 import type { TFunction } from 'i18next';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   CalendarRoomReminderAlarmOption,
   CalendarRoomReminderAllDaySchedule,
   CalendarRoomReminderConfiguration,
   CalendarRoomReminderIdentity,
-  CalendarRoomReminderRecipient,
   CalendarRoomReminderTarget,
   isCalendarRoomReminderRepository,
   useCalendarRepository,
 } from '../../calendar';
-import { isBotUser } from '../../lib/utils';
+import { useRoomReminderRoster } from './useRoomReminderRoster';
 
 type CalendarReminderMember = Readonly<{
   userId: string;
@@ -126,67 +125,21 @@ export function CalendarRoomReminderControl({
   const [memberSearchQueries, setMemberSearchQueries] = useState<
     Record<string, string>
   >({});
-  const [roomRecipients, setRoomRecipients] = useState<
-    CalendarRoomReminderRecipient[]
-  >([]);
-  const [roomMembersUnavailable, setRoomMembersUnavailable] = useState(false);
-  const [roomMembersLoading, setRoomMembersLoading] = useState(false);
+  const {
+    members,
+    joinedMemberIds,
+    memberById,
+    roomMembersUnavailable,
+    roomMembersLoading,
+    loadRoomRecipients,
+    setRoomRecipients,
+    setRoomMembersUnavailable,
+    setRoomMembersLoading,
+    rosterRequestSequence,
+  } = useRoomReminderRoster(reminderRepository, roomId);
   const requestSequence = useRef(0);
-  const rosterRequestSequence = useRef(0);
   const lastHandledOpenRequest = useRef(0);
-  const members = useMemo(
-    () =>
-      roomRecipients
-        .filter((recipient) => !isBotUser(recipient.userId))
-        .map((recipient) => ({
-          userId: recipient.userId,
-          displayName: recipient.displayName?.trim() || recipient.userId,
-        })),
-    [roomRecipients],
-  );
-  const joinedMemberIds = useMemo(
-    () => new Set(members.map((member) => member.userId)),
-    [members],
-  );
   const eventTimingIdentity = JSON.stringify(eventTiming);
-  const memberById = useMemo(
-    () => new Map(members.map((member) => [member.userId, member])),
-    [members],
-  );
-  const loadRoomRecipients = useCallback(async () => {
-    const requestId = ++rosterRequestSequence.current;
-    const listRecipients = reminderRepository?.listRoomReminderRecipients;
-    if (!roomId || typeof listRecipients !== 'function') {
-      setRoomRecipients([]);
-      setRoomMembersUnavailable(true);
-      setRoomMembersLoading(false);
-      return undefined;
-    }
-
-    setRoomMembersLoading(true);
-    try {
-      const recipients = await listRecipients.call(reminderRepository);
-      if (rosterRequestSequence.current !== requestId) return undefined;
-      setRoomRecipients(recipients);
-      setRoomMembersUnavailable(false);
-      return recipients
-        .filter((recipient) => !isBotUser(recipient.userId))
-        .map((recipient) => ({
-          userId: recipient.userId,
-          displayName: recipient.displayName?.trim() || recipient.userId,
-        }));
-    } catch {
-      if (rosterRequestSequence.current === requestId) {
-        setRoomRecipients([]);
-        setRoomMembersUnavailable(true);
-      }
-      return undefined;
-    } finally {
-      if (rosterRequestSequence.current === requestId) {
-        setRoomMembersLoading(false);
-      }
-    }
-  }, [reminderRepository, roomId]);
   const load = useCallback(async () => {
     if (!canManageReminders || !reminderRepository) {
       return;
