@@ -118,7 +118,6 @@ import {
 import { ElementWebPage } from './pages/elementWebPage';
 
 import {
-  PROJECTION_DIAGNOSTIC_REASONS,
   PUBLIC_FEED_MANAGEMENT_ERROR_CODES,
   type AcceptanceRuntimeObservation,
   type AnonymousPublicFeedResponse,
@@ -127,7 +126,6 @@ import {
   type BlockedRequestEvidence,
   type BlockedRequestResourceType,
   type BrowserActor,
-  type CalDavProjectionObservation,
   type CalDavReportProbeResult,
   type ExpectedRoomRange,
   type GatewayEndpointKind,
@@ -151,9 +149,6 @@ import {
   type Phase,
   type PinnedControlObservation,
   type PostCreateVisibilityObservation,
-  type ProjectionDiagnosticCounts,
-  type ProjectionDiagnosticReason,
-  type ProjectionDiagnosticSummary,
   type PublicFeedBrowserObservation,
   type PublicFeedManagementErrorCode,
   type ReminderAlarmUiObservation,
@@ -166,7 +161,6 @@ import {
   type ReminderWidgetContextResponseObserver,
   type ReminderWidgetContextResponseSnapshot,
   type RoomRenderStateObservation,
-  type TimezoneSafetyObservation,
   type WidgetDocumentReadyState,
   type WidgetPageErrorClass,
   type WidgetResourceKind,
@@ -183,6 +177,14 @@ import {
   runOrdinaryPerformanceSeed,
   shiftCalendarDate,
 } from './elementAcceptancePerformanceHelpers';
+
+import {
+  emptyProjectionDiagnosticCounts,
+  isCalDavProjectionObservation,
+  isOptionalHttpStatus,
+  summarizeProjectionDiagnostics,
+  unavailableTimezoneAudit,
+} from './elementAcceptanceProjectionHelpers';
 
 import { createPrivateAcceptanceHelpers } from './elementAcceptancePrivateHelpers';
 
@@ -315,48 +317,6 @@ export function createElementAcceptanceSupport() {
       return { recipient: 'room', allDay: false };
     }
     throw new Error('Reminder acceptance marker plan is unavailable');
-  }
-
-  function unavailableTimezoneAudit(): TimezoneSafetyObservation {
-    return {
-      completed: false,
-      parsedEventUnsupportedTimezone: null,
-      bundledZoneId: null,
-      embeddedDefinitionCount: 0,
-      canonicalEmbeddedDefinitionMatches: null,
-      classification: 'inconclusive',
-    };
-  }
-
-  function emptyProjectionDiagnosticCounts(): ProjectionDiagnosticCounts {
-    return Object.fromEntries(
-      PROJECTION_DIAGNOSTIC_REASONS.map((reason) => [reason, 0]),
-    ) as ProjectionDiagnosticCounts;
-  }
-
-  function summarizeProjectionDiagnostics(
-    value: unknown,
-  ): ProjectionDiagnosticSummary {
-    const counts = emptyProjectionDiagnosticCounts();
-    if (!Array.isArray(value)) return { complete: false, counts };
-
-    for (const diagnostic of value) {
-      if (
-        !isRecord(diagnostic) ||
-        typeof diagnostic.reason !== 'string' ||
-        !PROJECTION_DIAGNOSTIC_REASONS.includes(
-          diagnostic.reason as ProjectionDiagnosticReason,
-        ) ||
-        !Number.isInteger(diagnostic.count) ||
-        Number(diagnostic.count) < 0
-      ) {
-        return { complete: false, counts: emptyProjectionDiagnosticCounts() };
-      }
-      const reason = diagnostic.reason as ProjectionDiagnosticReason;
-      counts[reason] = Math.min(counts[reason] + Number(diagnostic.count), 2);
-    }
-
-    return { complete: true, counts };
   }
 
   let fixture: Fixture;
@@ -4821,136 +4781,6 @@ export function createElementAcceptanceSupport() {
       containsCreatedEvent: value.containsCreatedEvent,
       projection: value.projection,
     };
-  }
-
-  function isProjectionDiagnosticCounts(
-    value: unknown,
-  ): value is ProjectionDiagnosticCounts {
-    if (!isRecord(value)) return false;
-    const keys = Object.keys(value);
-    return (
-      keys.length === PROJECTION_DIAGNOSTIC_REASONS.length &&
-      PROJECTION_DIAGNOSTIC_REASONS.every(
-        (reason) =>
-          Object.hasOwn(value, reason) &&
-          Number.isInteger(value[reason]) &&
-          Number(value[reason]) >= 0 &&
-          Number(value[reason]) <= 2,
-      )
-    );
-  }
-
-  function isCalDavProjectionObservation(
-    value: unknown,
-  ): value is CalDavProjectionObservation {
-    if (!isRecord(value)) return false;
-    const expectedKeys = [
-      'completed',
-      'includesCreatedEvent',
-      'diagnosticCode',
-      'diagnosticCounts',
-      'timezoneAudit',
-    ];
-    return (
-      Object.keys(value).length === expectedKeys.length &&
-      expectedKeys.every((key) => Object.hasOwn(value, key)) &&
-      typeof value.completed === 'boolean' &&
-      (value.includesCreatedEvent === null ||
-        typeof value.includesCreatedEvent === 'boolean') &&
-      (value.diagnosticCode === 'none' ||
-        value.diagnosticCode === 'inconclusive' ||
-        PROJECTION_DIAGNOSTIC_REASONS.includes(
-          value.diagnosticCode as ProjectionDiagnosticReason,
-        )) &&
-      isProjectionDiagnosticCounts(value.diagnosticCounts) &&
-      isTimezoneSafetyObservation(value.timezoneAudit) &&
-      value.completed === (value.includesCreatedEvent !== null) &&
-      (value.completed || value.diagnosticCode === 'inconclusive')
-    );
-  }
-
-  function isTimezoneSafetyObservation(
-    value: unknown,
-  ): value is TimezoneSafetyObservation {
-    if (!isRecord(value)) return false;
-    const expectedKeys = [
-      'completed',
-      'parsedEventUnsupportedTimezone',
-      'bundledZoneId',
-      'embeddedDefinitionCount',
-      'canonicalEmbeddedDefinitionMatches',
-      'classification',
-    ];
-    return (
-      Object.keys(value).length === expectedKeys.length &&
-      expectedKeys.every((key) => Object.hasOwn(value, key)) &&
-      typeof value.completed === 'boolean' &&
-      (value.parsedEventUnsupportedTimezone === null ||
-        typeof value.parsedEventUnsupportedTimezone === 'boolean') &&
-      (value.bundledZoneId === null ||
-        typeof value.bundledZoneId === 'boolean') &&
-      typeof value.embeddedDefinitionCount === 'number' &&
-      Number.isInteger(value.embeddedDefinitionCount) &&
-      value.embeddedDefinitionCount >= 0 &&
-      value.embeddedDefinitionCount <= 2 &&
-      (value.canonicalEmbeddedDefinitionMatches === null ||
-        typeof value.canonicalEmbeddedDefinitionMatches === 'boolean') &&
-      (value.classification === 'unsupported-zone-id' ||
-        value.classification === 'no-embedded-definition' ||
-        value.classification === 'duplicate-definitions' ||
-        value.classification === 'embedded-definition-mismatch' ||
-        value.classification === 'embedded-definition-matches' ||
-        value.classification === 'other-unsupported-timezone' ||
-        value.classification === 'no-zoned-start' ||
-        value.classification === 'inconclusive') &&
-      (value.completed ||
-        (value.parsedEventUnsupportedTimezone === null &&
-          value.bundledZoneId === null &&
-          value.embeddedDefinitionCount === 0 &&
-          value.canonicalEmbeddedDefinitionMatches === null &&
-          value.classification === 'inconclusive')) &&
-      (value.canonicalEmbeddedDefinitionMatches === null ||
-        (value.embeddedDefinitionCount === 1 &&
-          value.bundledZoneId === true)) &&
-      (value.classification === 'inconclusive'
-        ? !value.completed
-        : value.completed) &&
-      (value.classification !== 'unsupported-zone-id' ||
-        (value.bundledZoneId === false &&
-          value.parsedEventUnsupportedTimezone === true)) &&
-      (value.classification !== 'no-embedded-definition' ||
-        (value.bundledZoneId === true &&
-          value.embeddedDefinitionCount === 0 &&
-          value.parsedEventUnsupportedTimezone === false)) &&
-      (value.classification !== 'duplicate-definitions' ||
-        (value.bundledZoneId === true &&
-          value.embeddedDefinitionCount === 2 &&
-          value.parsedEventUnsupportedTimezone === true)) &&
-      (value.classification !== 'embedded-definition-mismatch' ||
-        (value.bundledZoneId === true &&
-          value.embeddedDefinitionCount === 1 &&
-          value.parsedEventUnsupportedTimezone === true &&
-          value.canonicalEmbeddedDefinitionMatches === false)) &&
-      (value.classification !== 'embedded-definition-matches' ||
-        (value.bundledZoneId === true &&
-          value.embeddedDefinitionCount === 1 &&
-          value.parsedEventUnsupportedTimezone === false &&
-          value.canonicalEmbeddedDefinitionMatches === true)) &&
-      (value.classification !== 'other-unsupported-timezone' ||
-        value.parsedEventUnsupportedTimezone === true) &&
-      (value.classification !== 'no-zoned-start' ||
-        (value.parsedEventUnsupportedTimezone === false &&
-          value.bundledZoneId === null &&
-          value.embeddedDefinitionCount === 0 &&
-          value.canonicalEmbeddedDefinitionMatches === null))
-    );
-  }
-
-  function isOptionalHttpStatus(value: unknown): value is number | null {
-    return (
-      value === null ||
-      (Number.isInteger(value) && Number(value) >= 100 && Number(value) <= 599)
-    );
   }
 
   function isCalendarEventsEndpoint(rawUrl: string): boolean {
