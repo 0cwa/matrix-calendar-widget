@@ -40,10 +40,8 @@ import {
   CalendarEventRecurrenceTiming,
   CalendarEventRecurrenceWrite,
   CalendarEventRevision,
-  CalendarEventStatus,
   CalendarEventTimedDateTime,
   CalendarEventTiming,
-  CalendarEventTransparency,
   CalendarId,
   MAX_CALENDAR_EVENT_AUTHORABLE_ATTACHMENTS,
   boundCalendarEventExternalLinkLabel,
@@ -83,6 +81,13 @@ import {
   splitContentLineHeader,
   type ICalendarContentLine,
 } from './ICalendarContentLine';
+import {
+  numberValue,
+  readCategories,
+  readStatus,
+  readTransparency,
+  textValue,
+} from './ICalendarEventFields';
 import { hasUnsupportedTimezoneRules } from './ICalendarTimezoneProjectionSafety';
 import { readCalendarLinks } from './readCalendarLinks';
 
@@ -4109,61 +4114,6 @@ function formatLocalDateTime(time: ICAL.Time): string {
   return `${formatDate(time)}T${String(time.hour).padStart(2, '0')}:${String(
     time.minute,
   ).padStart(2, '0')}:${String(time.second).padStart(2, '0')}`;
-}
-
-function readStatus(value: unknown): CalendarEventStatus | undefined {
-  switch (textValue(value)?.toUpperCase()) {
-    case 'CONFIRMED':
-      return 'confirmed';
-    case 'TENTATIVE':
-      return 'tentative';
-    case 'CANCELLED':
-      return 'cancelled';
-    default:
-      return undefined;
-  }
-}
-
-function readTransparency(
-  value: unknown,
-): CalendarEventTransparency | undefined {
-  switch (textValue(value)?.toUpperCase()) {
-    case 'OPAQUE':
-      return 'opaque';
-    case 'TRANSPARENT':
-      return 'transparent';
-    default:
-      return undefined;
-  }
-}
-
-function readCategories(vevent: ICAL.Component): string[] | undefined {
-  const categories = vevent
-    .getAllProperties('categories')
-    .flatMap((property) => property.getValues())
-    .flatMap((value) => {
-      const text = textValue(value);
-      return text ? [text] : [];
-    });
-
-  return categories.length > 0 ? categories : undefined;
-}
-
-function textValue(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined;
-}
-
-function numberValue(value: unknown): number | undefined {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value;
-  }
-
-  if (typeof value === 'string' && value.trim().length > 0) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : undefined;
-  }
-
-  return undefined;
 }
 
 function readCalendarEventRevision(
