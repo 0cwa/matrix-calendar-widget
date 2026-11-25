@@ -23,13 +23,13 @@ import {
   FormControlLabel,
   FormHelperText,
   Stack,
-  Switch,
   TextField,
   Typography,
 } from '@mui/material';
 import { CalendarEventAlarmFields } from './CalendarEventAlarmFields';
 import { CalendarEventAttachmentFields } from './CalendarEventAttachmentFields';
 import { CalendarEventRecurrenceFields } from './CalendarEventRecurrenceFields';
+import { CalendarEventTimingFields } from './CalendarEventTimingFields';
 import type { CalendarEventEditorModel } from './useCalendarEventEditor';
 
 export function CalendarEventEditorFields({
@@ -52,11 +52,8 @@ export function CalendarEventEditorFields({
     editingFollowing,
     occurrenceHasAlarm,
     followingSupported,
-    followingTimingUnchanged,
-    timingHelpText,
     handleChange,
     handleCalendarChange,
-    handleTimingTypeChange,
     validationError,
     handleReloadLatest,
     chooseOccurrenceScope,
@@ -213,44 +210,7 @@ export function CalendarEventEditorFields({
                 </FormControl>
               );
             })}
-          <TextField
-            InputLabelProps={{ shrink: true }}
-            label={t('calendarEvents.editor.start', 'Start')}
-            onChange={handleChange('start')}
-            required
-            type={values.timingType === 'all-day' ? 'date' : 'datetime-local'}
-            value={values.start}
-          />
-          <TextField
-            InputLabelProps={{ shrink: true }}
-            label={t('calendarEvents.editor.end', 'End')}
-            onChange={handleChange('end')}
-            required
-            type={values.timingType === 'all-day' ? 'date' : 'datetime-local'}
-            value={values.end}
-          />
-          {values.timingType === 'timed' &&
-            (values.timedKind ?? 'zoned') === 'zoned' && (
-              <TextField
-                label={t('calendarEvents.editor.timezone', 'Time zone')}
-                onChange={handleChange('timezone')}
-                required
-                value={values.timezone}
-              />
-            )}
-          {timingHelpText && (
-            <Typography color="text.secondary" variant="body2">
-              {timingHelpText}
-            </Typography>
-          )}
-          {followingTimingUnchanged && (
-            <Typography color="text.secondary" variant="body2">
-              {t(
-                'calendarEvents.editor.followingChangeRequired',
-                'Change the start or end before saving this and following occurrences.',
-              )}
-            </Typography>
-          )}
+          <CalendarEventTimingFields model={model} occurrence />
           {validationError && (
             <Alert severity="warning">{validationError}</Alert>
           )}
@@ -288,48 +248,7 @@ export function CalendarEventEditorFields({
             value={values.title}
           />
 
-          <FormControlLabel
-            control={
-              <Switch
-                checked={values.timingType === 'all-day'}
-                onChange={handleTimingTypeChange}
-              />
-            }
-            label={t('calendarEvents.editor.allDay', 'All day')}
-          />
-
-          <TextField
-            InputLabelProps={{ shrink: true }}
-            label={t('calendarEvents.editor.start', 'Start')}
-            onChange={handleChange('start')}
-            required
-            type={values.timingType === 'all-day' ? 'date' : 'datetime-local'}
-            value={values.start}
-          />
-
-          <TextField
-            InputLabelProps={{ shrink: true }}
-            label={t('calendarEvents.editor.end', 'End')}
-            onChange={handleChange('end')}
-            required
-            type={values.timingType === 'all-day' ? 'date' : 'datetime-local'}
-            value={values.end}
-          />
-
-          {values.timingType === 'timed' &&
-            (values.timedKind ?? 'zoned') === 'zoned' && (
-              <TextField
-                label={t('calendarEvents.editor.timezone', 'Time zone')}
-                onChange={handleChange('timezone')}
-                required
-                value={values.timezone}
-              />
-            )}
-          {values.timingType === 'timed' && timingHelpText && (
-            <Typography color="text.secondary" variant="body2">
-              {timingHelpText}
-            </Typography>
-          )}
+          <CalendarEventTimingFields model={model} />
 
           <TextField
             label={t('calendarEvents.editor.location', 'Location')}
