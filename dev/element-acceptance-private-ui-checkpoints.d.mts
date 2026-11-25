@@ -35,21 +35,13 @@ export type PrivateUiCheckpointPhase =
   | 'private-ui-egress-check'
   | 'private-ui-context-cleanup';
 export type PrivateUiCleanupPhase =
-  | 'private-ui-dav-cleanup'
-  | 'private-ui-context-cleanup';
+  'private-ui-dav-cleanup' | 'private-ui-context-cleanup';
 
 export type PrivateUiCalendarListEndpoint =
-  | 'personal-list'
-  | 'room-context'
-  | 'room-list';
+  'personal-list' | 'room-context' | 'room-list';
 export type PrivateUiCalendarListMethod = 'GET' | 'OPTIONS';
 export type PrivateUiCalendarListFailureCategory =
-  | 'blocked'
-  | 'dns'
-  | 'tls'
-  | 'timeout'
-  | 'connection'
-  | 'other';
+  'blocked' | 'dns' | 'tls' | 'timeout' | 'connection' | 'other';
 export type PrivateUiCalendarListTransportObservation =
   | Readonly<{
       endpoint: PrivateUiCalendarListEndpoint;

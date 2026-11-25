@@ -86,23 +86,12 @@ export type ReminderConfigurationStep =
 export type ReminderLayoutPredicate = boolean | 'not-observed';
 export type ReminderLayoutDimension = number | 'not-observed';
 export type MemberInputExpandedState =
-  | 'true'
-  | 'false'
-  | 'absent'
-  | 'other'
-  | 'not-observed';
+  'true' | 'false' | 'absent' | 'other' | 'not-observed';
 export type MemberAriaHiddenState =
-  | 'true'
-  | 'false'
-  | 'absent'
-  | 'other'
-  | 'not-observed';
+  'true' | 'false' | 'absent' | 'other' | 'not-observed';
 export type MemberInertState = 'true' | 'false' | 'not-observed';
 export type MemberCssVisibility =
-  | 'visible'
-  | 'hidden'
-  | 'unknown'
-  | 'not-observed';
+  'visible' | 'hidden' | 'unknown' | 'not-observed';
 export type MemberPickerObservationError =
   | 'none'
   | 'input-missing'
@@ -129,11 +118,7 @@ export type ReminderConfigurationObservation = {
   recipientRosterShapeValid: boolean;
   recipientRosterTargetPresent: boolean;
   recipientRosterOutcome:
-    | 'unobserved'
-    | 'http_error'
-    | 'empty'
-    | 'invalid_shape'
-    | 'nonempty';
+    'unobserved' | 'http_error' | 'empty' | 'invalid_shape' | 'nonempty';
   reminderDestinationControlCount: number;
   recipientKind: 'room' | 'selected' | 'unknown';
   recipientSelectionAttempted: boolean;
@@ -270,8 +255,7 @@ export type PublicFeedBrowserObservation = {
   anonymousHeadDeniedAfterUnpublish: boolean;
 };
 export type PublicFeedManagementErrorCode =
-  | (typeof PUBLIC_FEED_MANAGEMENT_ERROR_CODES)[number]
-  | 'unclassified';
+  (typeof PUBLIC_FEED_MANAGEMENT_ERROR_CODES)[number] | 'unclassified';
 export type PublicFeedLifecycleStep =
   | 'opening-dialog'
   | 'loading-settings'
@@ -603,8 +587,7 @@ export type OrdinaryPerformanceReport = {
   pageErrorObservationOverflow: boolean;
 };
 export type PerformanceReportData =
-  | PerformanceReport
-  | OrdinaryPerformanceReport;
+  PerformanceReport | OrdinaryPerformanceReport;
 export type PerformancePendingRequest = {
   sample: PerformanceSampleKey;
   endpoint: PerformanceEndpoint;
@@ -650,26 +633,12 @@ export type PinnedControlObservation = {
   panelPresent?: boolean;
 };
 export type GatewayEndpointKind =
-  | 'context'
-  | 'calendars'
-  | 'events'
-  | 'other-calendar'
-  | 'other-api';
+  'context' | 'calendars' | 'events' | 'other-calendar' | 'other-api';
 export type GatewayRequestMethod =
-  | 'GET'
-  | 'POST'
-  | 'PATCH'
-  | 'PUT'
-  | 'DELETE'
-  | 'OPTIONS'
-  | 'HEAD'
-  | 'OTHER';
+  'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE' | 'OPTIONS' | 'HEAD' | 'OTHER';
 export type WidgetResourceKind = 'document' | 'script' | 'stylesheet';
 export type WidgetDocumentReadyState =
-  | 'loading'
-  | 'interactive'
-  | 'complete'
-  | 'unavailable';
+  'loading' | 'interactive' | 'complete' | 'unavailable';
 export type WidgetPageErrorClass =
   | 'Error'
   | 'TypeError'
@@ -682,11 +651,7 @@ export type WidgetPageErrorClass =
   | 'OTHER'
   | 'NONE';
 export type OpenIdProtocolState =
-  | 'none'
-  | 'allowed'
-  | 'request'
-  | 'blocked'
-  | 'other';
+  'none' | 'allowed' | 'request' | 'blocked' | 'other';
 export type AcceptanceRuntimeObservation = {
   requestCounts: Record<GatewayEndpointKind, number>;
   optionsRequestCount: number;
@@ -779,9 +744,7 @@ export type ProjectionDiagnosticSummary = {
   counts: ProjectionDiagnosticCounts;
 };
 export type CalDavProjectionDiagnosticCode =
-  | ProjectionDiagnosticReason
-  | 'none'
-  | 'inconclusive';
+  ProjectionDiagnosticReason | 'none' | 'inconclusive';
 export type TimezoneAuditClassification =
   | 'unsupported-zone-id'
   | 'no-embedded-definition'

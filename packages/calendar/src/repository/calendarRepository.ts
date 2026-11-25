@@ -26,8 +26,7 @@ import {
 import type { CalendarEventProjectionDiagnosticReason } from '../utils/calendarEventOccurrenceProjection';
 
 export type CalendarEventListDiagnosticReason =
-  | CalendarEventProjectionDiagnosticReason
-  | 'range-this-and-future';
+  CalendarEventProjectionDiagnosticReason | 'range-this-and-future';
 
 /** A count-only warning that does not identify or expose a source event. */
 export type CalendarEventProjectionDiagnosticSummary = {

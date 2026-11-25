@@ -185,8 +185,7 @@ export class Room implements IRoom {
   }
 
   public get encryptionEvent():
-    | IStateEvent<EncryptionEventContent>
-    | undefined {
+    IStateEvent<EncryptionEventContent> | undefined {
     return this.roomEventsByName(
       StateEventName.M_ROOM_ENCRYPTION,
     )[0] as IStateEvent<EncryptionEventContent>;

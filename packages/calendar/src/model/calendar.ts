@@ -65,8 +65,7 @@ export type AllDayCalendarEventTiming = {
 };
 
 export type CalendarEventTiming =
-  | TimedCalendarEventTiming
-  | AllDayCalendarEventTiming;
+  TimedCalendarEventTiming | AllDayCalendarEventTiming;
 
 export type CalendarEventDateTime =
   | { type: 'date-time'; value: ZonedCalendarDateTime }
@@ -117,8 +116,7 @@ export type CalendarEventAlarmRemoval = { operation: 'remove' };
 
 /** Alarm value accepted by an event patch, including its remove operation. */
 export type CalendarEventAlarmPatch =
-  | CalendarEventDisplayAlarmInput
-  | CalendarEventAlarmRemoval;
+  CalendarEventDisplayAlarmInput | CalendarEventAlarmRemoval;
 
 /** Alarm data retained by CalDAV but outside the editor's supported shape. */
 export type CalendarEventUnsupportedAlarm = true;
@@ -166,13 +164,7 @@ export type CalendarEventRevision = Readonly<{
 
 /** RFC 5545 weekday tokens used by the bounded weekly recurrence editor. */
 export type CalendarEventWeekday =
-  | 'MO'
-  | 'TU'
-  | 'WE'
-  | 'TH'
-  | 'FR'
-  | 'SA'
-  | 'SU';
+  'MO' | 'TU' | 'WE' | 'TH' | 'FR' | 'SA' | 'SU';
 
 /** One bounded MONTHLY BYDAY selector supported by the recurrence editor. */
 export type CalendarEventWeekdayOrdinal = {
@@ -187,13 +179,10 @@ export type CalendarEventTransparency = 'opaque' | 'transparent';
  * recurring CalDAV resource.
  */
 export type CalendarEventOccurrenceTextField =
-  | 'title'
-  | 'description'
-  | 'location';
+  'title' | 'description' | 'location';
 
 export type CalendarEventOccurrenceTextOperation =
-  | { action: 'set'; value: string }
-  | { action: 'inherit' };
+  { action: 'set'; value: string } | { action: 'inherit' };
 
 /** Sparse text/timing changes for exactly one original occurrence identity. */
 export type CalendarEventOccurrenceWrite =
@@ -320,8 +309,7 @@ export type CalendarEventConferenceInput = {
 
 /** Explicit whole-property operation accepted on a master-event patch. */
 export type CalendarEventConferencePatch =
-  | ({ action: 'set' } & CalendarEventConferenceInput)
-  | { action: 'remove' };
+  ({ action: 'set' } & CalendarEventConferenceInput) | { action: 'remove' };
 
 /** Read-only warning for CONFERENCE source data outside the write subset. */
 export type CalendarEventUnsupportedConference = true;

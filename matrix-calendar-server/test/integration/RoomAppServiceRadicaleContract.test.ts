@@ -138,8 +138,7 @@ const roomPrincipalIdentity = Object.freeze({
   userId: serviceUserId,
 });
 let roomPrincipalIdentityProvider:
-  | RoomCalendarPrincipalIdentityProvider
-  | undefined;
+  RoomCalendarPrincipalIdentityProvider | undefined;
 let principalUserId = serviceUserId;
 let principalAccessToken = '';
 let normalBotClient: MatrixClient | undefined;
@@ -283,8 +282,7 @@ let roomIds: string[];
 let calendarIds: string[];
 let nonmemberRoomId: string;
 let activeCalDavRequests:
-  | Array<{ method: string; pathname: string; hasIfMatch: boolean }>
-  | undefined;
+  Array<{ method: string; pathname: string; hasIfMatch: boolean }> | undefined;
 const serviceOpenIdTokens: string[] = [];
 const serviceUserAccessTokens: string[] = [];
 const principalOpenIdRequests: Array<{
@@ -389,25 +387,13 @@ describe('normal bot account registration command', () => {
 });
 
 type MatrixSdkErrorClass =
-  | 'none'
-  | 'error'
-  | 'matrix-error'
-  | 'type-error'
-  | 'other';
+  'none' | 'error' | 'matrix-error' | 'type-error' | 'other';
 type MatrixSdkRequestMethod = 'unobserved' | 'get' | 'other';
 type MatrixSdkResponseShape =
-  | 'unobserved'
-  | 'missing'
-  | 'object'
-  | 'invalid-json'
-  | 'other';
+  'unobserved' | 'missing' | 'object' | 'invalid-json' | 'other';
 type MatrixSdkResponseUserId = 'unobserved' | 'string' | 'missing' | 'other';
 type MatrixSdkWhoAmIOutcome =
-  | 'api-unavailable'
-  | 'matched'
-  | 'mismatched'
-  | 'missing-user-id'
-  | 'rejected';
+  'api-unavailable' | 'matched' | 'mismatched' | 'missing-user-id' | 'rejected';
 
 interface MatrixSdkWhoAmIObservation {
   readonly getUserIdAvailable: boolean;
@@ -914,9 +900,7 @@ type RoomAppServiceCase =
   | 'bot-command-denial'
   | 'private-client-live-policy';
 type RoomAppServiceFailureCase =
-  | 'subject-binding'
-  | 'cross-room-denial'
-  | 'private-client-live-policy';
+  'subject-binding' | 'cross-room-denial' | 'private-client-live-policy';
 type RoomAppServiceCaseFailureStage =
   | 'identities'
   | 'room-setup'
@@ -942,10 +926,7 @@ type RoomAppServiceCaseFailureStage =
   | 'no-new-openid-proof'
   | 'logs-secret-free';
 type PrivatePolicyCleanupOperation =
-  | 'restore-power-levels'
-  | 'lookup-members'
-  | 'leave-issuer'
-  | 'leave-reader';
+  'restore-power-levels' | 'lookup-members' | 'leave-issuer' | 'leave-reader';
 type PrivatePolicyCleanupFailure = PrivatePolicyCleanupOperation;
 type PrivatePolicyBodyResult = 'completed' | 'failed';
 type RoomAppServiceTeardownStage =

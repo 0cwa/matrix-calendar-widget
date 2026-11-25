@@ -34,10 +34,7 @@ export type PerformancePageErrorSubtype =
   | 'unavailable';
 
 export type PerformancePageErrorSource =
-  | 'widget'
-  | 'element'
-  | 'ambiguous'
-  | 'unclassified';
+  'widget' | 'element' | 'ambiguous' | 'unclassified';
 
 export type PerformancePageErrorClassification = {
   errorClass: Exclude<PerformancePageErrorClass, 'none'>;
