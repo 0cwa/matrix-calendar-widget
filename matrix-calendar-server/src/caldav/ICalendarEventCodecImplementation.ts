@@ -16,10 +16,8 @@
 
 import {
   CalendarEvent,
-  CalendarEventAttachmentInput,
   CalendarEventAttachmentPatch,
   CalendarEventAttachmentValidationError,
-  CalendarEventConferenceInput,
   CalendarEventConferencePatch,
   CalendarEventConferenceValidationError,
   CalendarEventDateTime,
@@ -40,14 +38,10 @@ import {
   isCalendarEventAlarmRemoval,
   isCalendarTimezoneSupported,
   isSupportedCalendarEventOccurrenceExclusion,
-  normalizeCalendarEventAttachmentInput,
   normalizeCalendarEventAttachmentPatch,
-  normalizeCalendarEventConferenceInput,
   normalizeCalendarEventConferencePatch,
   parseSupportedCalendarEventRecurrenceRule,
   projectCalendarEventOccurrenceByRecurrenceId,
-  validateCalendarEventInputAttachment,
-  validateCalendarEventInputConference,
   validateCalendarEventPatchAttachment,
   validateCalendarEventPatchConference,
   validateCalendarEventPatchOccurrence,
@@ -85,6 +79,7 @@ import {
   readContentLines,
   type ICalendarContentLine,
 } from './ICalendarContentLine';
+import { createICalendarEvent } from './ICalendarEventCreate';
 import {
   numberValue,
   readCategories,
@@ -154,14 +149,12 @@ import {
 import {
   readCalendarEventRevision,
   readUpdatedCalendarEventRevision,
-  setInitialRevisionMetadata,
   updateRevisionMetadata,
   type RawRevisionProperty,
 } from './ICalendarRevision';
 import { hasUnsupportedTimezoneRules } from './ICalendarTimezoneProjectionSafety';
 import { readDateTimeProperty, readTiming } from './ICalendarTiming';
 import {
-  addNewEventTimezoneDefinitions,
   setCategories,
   setOptionalProperty,
   setTextProperty,
@@ -1567,111 +1560,7 @@ export class ICalendarEventCodec {
     eventId: CalendarEventId,
     input: CalendarEventInput,
   ): EncodedICalendarEvent {
-    let conferenceInput: CalendarEventConferenceInput | undefined;
-    let attachmentInput: CalendarEventAttachmentInput | undefined;
-    try {
-      validateCalendarEventInputConference(input);
-      validateCalendarEventInputAttachment(input);
-      conferenceInput = input.conference
-        ? normalizeCalendarEventConferenceInput(input.conference)
-        : undefined;
-      attachmentInput = input.attachment
-        ? normalizeCalendarEventAttachmentInput(input.attachment)
-        : undefined;
-    } catch (error) {
-      if (error instanceof CalendarEventConferenceValidationError) {
-        throw unsupportedConferencePatch();
-      }
-      if (error instanceof CalendarEventAttachmentValidationError) {
-        throw unsupportedAttachmentPatch();
-      }
-      throw error;
-    }
-    if (input.alarm !== undefined) {
-      validateDisplayAlarm(input.alarm);
-    }
-    const recurrenceWrite = recurrenceWriteFromUnknown(input.recurrence);
-    if (input.recurrence) {
-      if (
-        !recurrenceWrite ||
-        !('rrule' in recurrenceWrite) ||
-        !recurrenceWrite.rrule
-      ) {
-        throw unsupportedRecurrencePatch();
-      }
-      validateRecurrenceRule(
-        recurrenceWrite.rrule,
-        timingStartAsDateTime(input.timing),
-      );
-    }
-
-    const calendar = new ICAL.Component('vcalendar');
-    calendar.addPropertyWithValue('version', '2.0');
-    calendar.addPropertyWithValue('prodid', '-//Matrix Calendar Widget//EN');
-    addNewEventTimezoneDefinitions(calendar, input.timing);
-
-    const vevent = new ICAL.Component('vevent');
-    calendar.addSubcomponent(vevent);
-
-    setTextProperty(vevent, 'uid', input.uid);
-    setInitialRevisionMetadata(vevent, this.clock());
-    setTextProperty(vevent, 'summary', input.title);
-    setTiming(vevent, input.timing);
-    setOptionalProperty(vevent, 'description', input.description);
-    setOptionalProperty(vevent, 'status', input.status?.toUpperCase());
-    setOptionalProperty(
-      vevent,
-      'transp',
-      input.transparency === undefined
-        ? undefined
-        : input.transparency === 'transparent'
-          ? 'TRANSPARENT'
-          : 'OPAQUE',
-    );
-    setOptionalProperty(vevent, 'location', input.location);
-    setOptionalProperty(vevent, 'url', input.url);
-    setCategories(vevent, input.categories);
-    setOptionalProperty(vevent, 'priority', input.priority);
-    if (conferenceInput) {
-      setConferenceProperty(vevent, { action: 'set', ...conferenceInput });
-    }
-    if (attachmentInput) {
-      setAttachmentProperty(vevent, {
-        action: 'add',
-        url: attachmentInput.url,
-      });
-    }
-    const recurrenceRule =
-      recurrenceWrite && 'rrule' in recurrenceWrite
-        ? recurrenceWrite.rrule
-        : undefined;
-    setRecurrenceRule(vevent, recurrenceRule);
-    const alarmUid = input.alarm
-      ? setDisplayAlarm(calendar, vevent, input.alarm, input.title)
-      : undefined;
-
-    const {
-      conference: _conferenceInput,
-      attachment: _attachmentInput,
-      ...eventInput
-    } = input;
-    return {
-      event: {
-        ...eventInput,
-        ...(attachmentInput
-          ? { attachments: [{ url: attachmentInput.url }] }
-          : {}),
-        id: eventId,
-        calendarId,
-        revision: readCalendarEventRevision(vevent),
-        externalLinks: readCalendarLinks(vevent),
-        ...(input.alarm ? { alarm: { ...input.alarm, uid: alarmUid } } : {}),
-        recurrence: recurrenceRule
-          ? { rrule: canonicalizeRecurrenceRule(recurrenceRule) }
-          : undefined,
-      },
-      icalendar: calendar.toString(),
-    };
+    return createICalendarEvent(calendarId, eventId, input, this.clock);
   }
 
   parse(
