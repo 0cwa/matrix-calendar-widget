@@ -20,6 +20,8 @@ import fetch from 'jest-fetch-mock';
 import { IAppConfiguration } from '../IAppConfiguration';
 import { MatrixOpenIdCalDavCredentialProviderFactory } from '../caldav/MatrixOpenIdCalDavCredentialProviderFactory';
 import { DisabledRoomCalendarBindingStore } from '../service/DisabledRoomCalendarBindingStore';
+import { GatewayAccessService } from '../service/GatewayAccessService';
+import { GatewayContextService } from '../service/GatewayContextService';
 import { MatrixCalendarAuthorizationFactory } from '../service/MatrixCalendarAuthorization';
 import { RoomCalendarBindingRegistryAdapter } from '../service/RoomCalendarBindingRegistryAdapter';
 import { RoomCalendarCalDavAccess } from '../service/RoomCalendarCalDavAccess';
@@ -199,12 +201,26 @@ describe('room calendar event listing', () => {
       authorizationFactory,
       new MatrixOpenIdCalDavCredentialProviderFactory(),
       roomAccess,
-      undefined,
-      undefined,
-      new RoomCalendarBindingRegistryAdapter(
-        config.room_calendar_bindings,
-        new DisabledRoomCalendarBindingStore(),
+      new GatewayAccessService(
+        authorizationFactory,
+        new RoomCalendarBindingRegistryAdapter(
+          config.room_calendar_bindings,
+          new DisabledRoomCalendarBindingStore(),
+        ),
       ),
+      new GatewayContextService(
+        config,
+        authorizationFactory,
+        new GatewayAccessService(
+          authorizationFactory,
+          new RoomCalendarBindingRegistryAdapter(
+            config.room_calendar_bindings,
+            new DisabledRoomCalendarBindingStore(),
+          ),
+        ),
+      ),
+      undefined,
+      undefined,
     );
   }
 });

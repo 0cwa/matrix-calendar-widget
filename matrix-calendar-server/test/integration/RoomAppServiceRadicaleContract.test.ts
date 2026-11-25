@@ -70,6 +70,8 @@ import {
 import { CommandService } from '../../src/service/CommandService';
 import { ConfiguredRoomCalendarPrincipalIdentityProvider } from '../../src/service/ConfiguredRoomCalendarPrincipalIdentityProvider';
 import { DisabledRoomCalendarBindingStore } from '../../src/service/DisabledRoomCalendarBindingStore';
+import { GatewayAccessService } from '../../src/service/GatewayAccessService';
+import { GatewayContextService } from '../../src/service/GatewayContextService';
 import type { RoomCalendarBindingRegistry } from '../../src/service/IRoomCalendarBindingRegistry';
 import {
   MATRIX_CALENDAR_MANAGE_POLICY,
@@ -1042,6 +1044,8 @@ const matrixClient = {
     },
     { provide: MatrixClient, useValue: matrixClient },
     MatrixCalendarAuthorizationFactory,
+    GatewayAccessService,
+    GatewayContextService,
     MatrixOpenIdCalDavCredentialProviderFactory,
     {
       provide: ModuleProviderToken.ROOM_CALENDAR_CALDAV_ACCESS,
