@@ -11,7 +11,8 @@
     "**/cross-spawn": "^7.0.5",
     "**/@mui/material/react-is": "18.3.1",
     "**/@mui/utils/react-is": "18.3.1",
-    "msw/cookie": "^0.7.2",
+    "msw/cookie": "^2.0.1",
+    "msw/tough-cookie": "^6.0.2",
     "**/form-data": "^4.0.4",
     "**/ip": "https://registry.npmjs.org/neoip/-/neoip-2.1.0.tgz",
     "**/micromatch": "^4.0.8",
@@ -32,7 +33,7 @@
     "prettier": "^3.10.1",
     "prettier-plugin-organize-imports": "^4.3.0",
     "source-map-js": "^1.2.4",
-    "typescript": "^5.7.3",
+    "typescript": "^5.9.3",
     "typescript-eslint": "^8.73.0",
     "yarn-deduplicate": "^6.0.2"
   },
