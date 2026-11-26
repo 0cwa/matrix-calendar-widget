@@ -14,7 +14,7 @@
     "docker:inspect": "docker inspect 0cwa/matrix-calendar-server",
     "prestart": "yarn build",
     "build": "nest build && yarn copyfiles && yarn copyImages && yarn translation:smoke && yarn widget-avatar:smoke",
-    "depcheck": "depcheck --ignores=\"@types/jest\"",
+    "depcheck": "depcheck --ignores=\"@types/jest,ts-jest\"",
     "start": "PORT=3001 nest start",
     "start:dev": "PORT=3001 nest start --watch",
     "start:debug": "PORT=3001 nest start --debug --watch",
@@ -98,41 +98,6 @@
     "ts-jest": "29.4.15",
     "ts-mockito": "2.6.1",
     "typescript-eslint": "^8.73.0"
-  },
-  "jest": {
-    "testEnvironment": "node",
-    "automock": false,
-    "resetMocks": true,
-    "setupFiles": [
-      "./setupJest.js"
-    ],
-    "preset": "ts-jest",
-    "maxWorkers": "25%",
-    "workerIdleMemoryLimit": "512MB",
-    "verbose": true,
-    "transform": {
-      "^.+\\.(ts|tsx)$": "ts-jest"
-    },
-    "moduleDirectories": [
-      "node_modules",
-      "lib"
-    ],
-    "testRegex": "(/__tests__/.*|\\.(test|spec))\\.(ts|tsx|js)$",
-    "moduleFileExtensions": [
-      "ts",
-      "tsx",
-      "js"
-    ],
-    "setupFilesAfterEnv": [
-      "<rootDir>/setupTests.ts"
-    ],
-    "roots": [
-      "<rootDir>/src",
-      "<rootDir>/test"
-    ],
-    "moduleNameMapper": {
-      "@matrix-calendar-widget/(.*)": "<rootDir>/../packages/$1/src/index.ts"
-    }
   },
   "files": [
     "test/*",
