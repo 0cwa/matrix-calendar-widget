@@ -6,7 +6,7 @@ Start here to install the repository, find the code for a task, and choose a use
 
 ## Install the toolchain
 
-- **Node.js 22.12.0 or newer** for the full development toolchain. CI uses Node 22; use that line when reproducing CI. The server package's production runtime minimum is separately declared as Node 20.
+- **Node.js 22.12.0 or newer** for the full development toolchain. CI uses Node 22; use that line when reproducing CI. The server package declares the same minimum.
 - **Yarn Classic 1.22.x**; the root `packageManager` field pins 1.22.22.
 - **Git** for the checkout.
 - **Docker with Compose v2, Bash, and curl** only when running the container integration stack. Unit tests and the synthetic browser fixture do not require Docker.
