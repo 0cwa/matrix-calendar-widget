@@ -22,7 +22,7 @@ jobs:
   element-web-acceptance:
     name: Element Web acceptance
     if: ${{ github.event_name != 'workflow_dispatch' || !inputs.private_ui }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     env:
       MATRIX_CALENDAR_DEV_USER: calendar
@@ -45,7 +45,7 @@ jobs:
 
   normal-bot-account-acceptance:
     name: Normal bot account acceptance
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     env:
       MATRIX_CALENDAR_DEV_USER: calendar
