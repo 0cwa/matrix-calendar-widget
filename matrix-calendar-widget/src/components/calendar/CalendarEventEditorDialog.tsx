@@ -15,8 +15,10 @@
  */
 
 import { LoadingButton } from '@mui/lab';
-import { Button, Dialog, DialogActions, DialogTitle } from '@mui/material';
+import { Box, Button, Dialog, DialogActions, DialogTitle } from '@mui/material';
+import { useId } from 'react';
 import { CalendarEventEditorFields } from './CalendarEventEditorFields';
+import { CalendarEventEditorStatus } from './CalendarEventEditorStatus';
 import type { CalendarEventEditorProps } from './useCalendarEventEditor';
 import { useCalendarEventEditor } from './useCalendarEventEditor';
 
@@ -24,6 +26,7 @@ export type { CalendarEventEditorProps } from './useCalendarEventEditor';
 
 export function CalendarEventEditorDialog(props: CalendarEventEditorProps) {
   const model = useCalendarEventEditor(props);
+  const blockingReasonId = useId();
 
   if (!model) {
     return null;
@@ -53,12 +56,18 @@ export function CalendarEventEditorDialog(props: CalendarEventEditorProps) {
       onClose={saving ? undefined : onClose}
       open={open}
     >
-      <form
+      {/* A shrinking column keeps the title and actions in place while only
+          the fields between them scroll. */}
+      <Box
         aria-label={
           event
             ? t('calendarEvents.editor.editTitle', 'Edit event')
             : t('calendarEvents.editor.createTitle', 'Create event')
         }
+        component="form"
+        display="flex"
+        flexDirection="column"
+        minHeight={0}
         onSubmit={handleSubmit}
       >
         <DialogTitle>
@@ -69,11 +78,21 @@ export function CalendarEventEditorDialog(props: CalendarEventEditorProps) {
 
         <CalendarEventEditorFields model={model} />
 
+        <CalendarEventEditorStatus
+          blockingReasonId={blockingReasonId}
+          model={model}
+        />
+
         <DialogActions>
           <Button disabled={saving} onClick={onClose}>
             {t('cancel', 'Cancel')}
           </Button>
           <LoadingButton
+            aria-describedby={
+              !chooseScope && (validationError || readOnly)
+                ? blockingReasonId
+                : undefined
+            }
             disabled={
               saving ||
               Boolean(validationError) ||
@@ -92,7 +111,7 @@ export function CalendarEventEditorDialog(props: CalendarEventEditorProps) {
               : t('calendarEvents.editor.create', 'Create event')}
           </LoadingButton>
         </DialogActions>
-      </form>
+      </Box>
     </Dialog>
   );
 }

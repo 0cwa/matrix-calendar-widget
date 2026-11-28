@@ -31,6 +31,7 @@ export function CalendarEventTimingFields({
     timingHelpText,
     followingTimingUnchanged,
     handleTimingTypeChange,
+    validationErrorCode,
   } = model;
   if (!values) return null;
   return occurrence ? (
@@ -44,6 +45,7 @@ export function CalendarEventTimingFields({
         value={values.start}
       />
       <TextField
+        error={validationErrorCode === 'invalid-range'}
         InputLabelProps={{ shrink: true }}
         label={t('calendarEvents.editor.end', 'End')}
         onChange={handleChange('end')}
@@ -54,6 +56,7 @@ export function CalendarEventTimingFields({
       {values.timingType === 'timed' &&
         (values.timedKind ?? 'zoned') === 'zoned' && (
           <TextField
+            error={validationErrorCode === 'invalid-timezone'}
             label={t('calendarEvents.editor.timezone', 'Time zone')}
             onChange={handleChange('timezone')}
             required
@@ -96,6 +99,7 @@ export function CalendarEventTimingFields({
       />
 
       <TextField
+        error={validationErrorCode === 'invalid-range'}
         InputLabelProps={{ shrink: true }}
         label={t('calendarEvents.editor.end', 'End')}
         onChange={handleChange('end')}
@@ -107,6 +111,7 @@ export function CalendarEventTimingFields({
       {values.timingType === 'timed' &&
         (values.timedKind ?? 'zoned') === 'zoned' && (
           <TextField
+            error={validationErrorCode === 'invalid-timezone'}
             label={t('calendarEvents.editor.timezone', 'Time zone')}
             onChange={handleChange('timezone')}
             required

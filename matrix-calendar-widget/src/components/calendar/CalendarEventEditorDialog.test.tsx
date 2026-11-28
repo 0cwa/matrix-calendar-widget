@@ -139,6 +139,14 @@ function renderEditorScenario({
   return { repository };
 }
 
+async function revealLinkFields() {
+  await userEvent.click(
+    await screen.findByRole('button', {
+      name: 'Add conference or attachment link',
+    }),
+  );
+}
+
 describe('<CalendarEventEditorDialog />', () => {
   it('uses crypto.randomUUID when available', () => {
     const crypto = {
@@ -265,6 +273,174 @@ describe('<CalendarEventEditorDialog />', () => {
     reportValidity.mockRestore();
   });
 
+  it('keeps actions and blocking reasons outside the scrolling fields', async () => {
+    renderEditorScenario({
+      repositoryOptions: { calendars: [calendar] },
+      editorProps: { calendars: [calendar], onClose: vi.fn(), open: true },
+    });
+
+    const content = await screen.findByTestId('calendar-event-editor-fields');
+    const create = screen.getByRole('button', { name: 'Create event' });
+
+    // The form must be a shrinkable column, or the whole dialog scrolls and
+    // carries the actions out of view.
+    expect(screen.getByRole('form', { name: 'Create event' })).toHaveStyle({
+      display: 'flex',
+      flexDirection: 'column',
+      minHeight: '0',
+    });
+
+    expect(content).not.toContainElement(create);
+    expect(content).not.toContainElement(
+      screen.getByRole('button', { name: 'Cancel' }),
+    );
+    expect(content).not.toContainElement(screen.getByRole('alert'));
+    expect(create).toBeDisabled();
+    expect(create).toHaveAccessibleDescription('A title is required.');
+  });
+
+  it('orders recurrence with timing, ahead of the optional details', async () => {
+    renderEditorScenario({
+      repositoryOptions: { calendars: [calendar] },
+      editorProps: { calendars: [calendar], onClose: vi.fn(), open: true },
+    });
+
+    const optional = await screen.findByRole('group', {
+      name: 'Optional details',
+    });
+    const repeats = screen.getByRole('checkbox', { name: 'Repeats' });
+
+    expect(
+      screen.getByLabelText(/^Time zone/).compareDocumentPosition(repeats),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(repeats.compareDocumentPosition(optional)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(optional).toContainElement(
+      screen.getByRole('textbox', { name: 'Location' }),
+    );
+    expect(optional).toContainElement(
+      screen.getByRole('textbox', { name: 'Description' }),
+    );
+    expect(optional).toContainElement(
+      screen.getByRole('checkbox', { name: 'CalDAV reminder' }),
+    );
+  });
+
+  it('submits the form with Enter from a field', async () => {
+    const onClose = vi.fn();
+    const { repository } = renderEditorScenario({
+      repositoryOptions: { calendars: [calendar] },
+      editorProps: { calendars: [calendar], onClose, open: true },
+    });
+    const createEvent = vi.spyOn(repository, 'createEvent');
+
+    const title = await screen.findByRole('textbox', { name: /Title/i });
+    expect(title).toHaveFocus();
+    await userEvent.type(title, 'Entered{Enter}');
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(createEvent).toHaveBeenCalledOnce();
+  });
+
+  it('reveals empty link fields on request with create wording and focus', async () => {
+    const onClose = vi.fn();
+    const { repository } = renderEditorScenario({
+      repositoryOptions: { calendars: [calendar] },
+      editorProps: { calendars: [calendar], onClose, open: true },
+    });
+    const createEvent = vi.spyOn(repository, 'createEvent');
+
+    await screen.findByRole('textbox', { name: /Title/i });
+    expect(
+      screen.queryByRole('textbox', { name: 'Conference URL' }),
+    ).not.toBeInTheDocument();
+
+    screen
+      .getByRole('button', { name: 'Add conference or attachment link' })
+      .focus();
+    await userEvent.keyboard('{Enter}');
+
+    const conference = screen.getByRole('textbox', { name: 'Conference URL' });
+    expect(conference).toHaveFocus();
+    expect(conference).toHaveAccessibleDescription(
+      'Optional. Use an HTTP(S) link.',
+    );
+    expect(
+      screen.getByRole('combobox', { name: 'Attachment link' }),
+    ).toHaveTextContent('No attachment');
+    expect(screen.queryByText('No change')).not.toBeInTheDocument();
+    // Revealing the fields is not a form submission.
+    expect(createEvent).not.toHaveBeenCalled();
+
+    await userEvent.click(
+      screen.getByRole('combobox', { name: 'Attachment link' }),
+    );
+    await userEvent.click(
+      await screen.findByRole('option', { name: 'Add link' }),
+    );
+    expect(
+      screen.getByText('The link will be added when you create the event.'),
+    ).toBeInTheDocument();
+  });
+
+  it('shows stored link values without asking and keeps cleared fields open', async () => {
+    const linkedEvent: CalendarEvent = {
+      ...event,
+      externalLinks: [
+        { kind: 'conference', href: 'https://meet.example.test/room' },
+      ],
+    };
+    renderEditorScenario({
+      repositoryOptions: { calendars: [calendar], events: [linkedEvent] },
+      editorProps: {
+        calendars: [calendar],
+        event: linkedEvent,
+        onClose: vi.fn(),
+        open: true,
+      },
+    });
+
+    const conference = await screen.findByRole('textbox', {
+      name: 'Conference URL',
+    });
+    expect(conference).toHaveValue('https://meet.example.test/room');
+    expect(conference).toHaveAccessibleDescription(
+      'Use an HTTP(S) link. Clear the URL to remove the conference link.',
+    );
+
+    await userEvent.clear(conference);
+
+    expect(conference).toBeInTheDocument();
+    expect(conference).toHaveFocus();
+    expect(
+      screen.queryByRole('button', {
+        name: 'Add conference or attachment link',
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('marks the field behind a blocking time zone error', async () => {
+    renderEditorScenario({
+      repositoryOptions: { calendars: [calendar], events: [event] },
+      editorProps: {
+        calendars: [calendar],
+        event,
+        onClose: vi.fn(),
+        open: true,
+      },
+    });
+
+    const timezone = await screen.findByRole('textbox', { name: /Time zone/ });
+    await userEvent.clear(timezone);
+    await userEvent.type(timezone, 'Nowhere/Invalid');
+
+    expect(timezone).toHaveAttribute('aria-invalid', 'true');
+    expect(
+      screen.getByRole('button', { name: 'Save' }),
+    ).toHaveAccessibleDescription('Enter a valid IANA time zone.');
+  });
+
   it('creates one attachment link and exposes accessible edit controls', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [calendar],
@@ -286,6 +462,7 @@ describe('<CalendarEventEditorDialog />', () => {
       await screen.findByRole('textbox', { name: /Title/i }),
       'Attachment event',
     );
+    await revealLinkFields();
     await userEvent.click(
       screen.getByRole('combobox', { name: 'Attachment link' }),
     );
@@ -570,6 +747,7 @@ describe('<CalendarEventEditorDialog />', () => {
     fireEvent.change(await screen.findByRole('textbox', { name: /Title/i }), {
       target: { value: 'Planning call' },
     });
+    await revealLinkFields();
     fireEvent.change(screen.getByRole('textbox', { name: 'Conference URL' }), {
       target: { value: 'https://meet.example.test/planning' },
     });
@@ -691,6 +869,7 @@ describe('<CalendarEventEditorDialog />', () => {
       await screen.findByRole('textbox', { name: /Title/i }),
       'Unsafe meeting',
     );
+    await revealLinkFields();
     fireEvent.change(screen.getByRole('textbox', { name: 'Conference URL' }), {
       target: { value: 'javascript:alert(1)' },
     });
