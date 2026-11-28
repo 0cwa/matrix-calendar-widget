@@ -2211,14 +2211,15 @@ async function observeDesktopKeyboardFocus(
   let escapeClosedDialog = false;
   let focusReturnedToEvent = false;
   if (editActionFocused) {
-    await page.keyboard.press('Tab');
-    desktopDetailsTabCount += 1;
-    deleteActionFocused = await deleteButton
-      .evaluate((element) => element === element.ownerDocument.activeElement)
-      .catch(() => false);
-    await page.keyboard.press('Tab');
+    // Footer order is Delete, Close, Edit.
+    await page.keyboard.press('Shift+Tab');
     desktopDetailsTabCount += 1;
     closeActionFocused = await closeButton
+      .evaluate((element) => element === element.ownerDocument.activeElement)
+      .catch(() => false);
+    await page.keyboard.press('Shift+Tab');
+    desktopDetailsTabCount += 1;
+    deleteActionFocused = await deleteButton
       .evaluate((element) => element === element.ownerDocument.activeElement)
       .catch(() => false);
     await page.keyboard.press('Escape');

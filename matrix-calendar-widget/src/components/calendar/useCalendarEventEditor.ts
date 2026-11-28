@@ -24,7 +24,6 @@ import {
   CalendarEventTiming,
   CalendarEventWeekday,
   CalendarRepositoryError,
-  isSupportedCalendarEventFollowingTimingEdit,
   projectCalendarEventOccurrenceByRecurrenceId,
 } from '@matrix-calendar-widget/calendar';
 import { DateTime } from 'luxon';
@@ -57,6 +56,7 @@ import {
 import { createAlarmHandlers } from './calendarEventAlarmHandlers';
 import { createAttachmentHandlers } from './calendarEventAttachmentHandlers';
 import { createRecurrenceHandlers } from './calendarEventRecurrenceHandlers';
+import { calendarEventScopeAvailability } from './calendarEventScopes';
 import { createTimingHandlers } from './calendarEventTimingHandlers';
 
 export const WEEKDAYS: CalendarEventWeekday[] = [
@@ -166,7 +166,12 @@ export function useCalendarEventEditor({
   const editingFollowing = Boolean(
     event && occurrence && editScope === 'following',
   );
-  const occurrenceHasAlarm = Boolean(event?.alarm || event?.unsupportedAlarm);
+  const { occurrenceHasAlarm, followingSupported } =
+    calendarEventScopeAvailability(
+      event,
+      occurrence?.recurrenceId,
+      viewerTimezone,
+    );
   const attachmentControlsDisabled = Boolean(
     readOnly ||
     chooseScope ||
@@ -174,15 +179,6 @@ export function useCalendarEventEditor({
     editingFollowing ||
     values.attachmentEditable === false ||
     saving,
-  );
-  const followingSupported = Boolean(
-    event &&
-    occurrence &&
-    isSupportedCalendarEventFollowingTimingEdit(
-      event,
-      occurrence.recurrenceId,
-      viewerTimezone,
-    ),
   );
   const periodDuration = calendarEventRdatePeriodDurationFromForm(values);
   const periodValue = calendarEventRdatePeriodValueFromForm(values);

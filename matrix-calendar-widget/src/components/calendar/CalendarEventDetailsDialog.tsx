@@ -31,6 +31,7 @@ import {
 } from '@matrix-calendar-widget/calendar';
 import {
   Alert,
+  Box,
   Button,
   Dialog,
   DialogActions,
@@ -41,7 +42,13 @@ import {
   Typography,
 } from '@mui/material';
 import { DateTime } from 'luxon';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  PropsWithChildren,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   isCalendarRoomReminderRepository,
@@ -51,8 +58,12 @@ import {
   useUpdateCalendarEvent,
 } from '../../calendar';
 import { ConfirmDeleteDialog } from '../common/ConfirmDeleteDialog';
+import { CalendarEventDetailsSchedule } from './CalendarEventDetailsSchedule';
 import { CalendarEventEditorDialog } from './CalendarEventEditorDialog';
 import { CalendarRoomReminderControl } from './CalendarRoomReminderControl';
+import { calendarEventRecurrenceSummary } from './calendarEventRecurrenceSummary';
+import { calendarEventSchedule } from './calendarEventSchedule';
+import { calendarEventScopeAvailability } from './calendarEventScopes';
 
 export function CalendarEventDetailsDialog({
   event,
@@ -265,6 +276,91 @@ export function CalendarEventDetailsDialog({
             calendarEventRecurrenceIdentity(currentRecurrenceId),
         )
       : [];
+  const canEdit =
+    canMutate && !currentOccurrenceExcluded && !missingOccurrenceSelectionKey;
+  const isSeriesOccurrence = Boolean(
+    deletesRecurringSeries &&
+    (currentRecurrenceId || currentEvent?.id !== currentSourceEvent?.id),
+  );
+  const showsRecurrence = Boolean(
+    deletesRecurringSeries || currentSourceEvent?.unsupportedRecurrence,
+  );
+  const deleteLabel = deletesRecurringSeries
+    ? t('calendarEvents.details.deleteSeries', 'Delete series')
+    : t('calendarEvents.details.delete', 'Delete');
+  const actionNotes = (): string[] => {
+    if (
+      !deletesRecurringSeries ||
+      !canMutate ||
+      missingOccurrenceSelectionKey
+    ) {
+      return [];
+    }
+    const deleteNote = t(
+      'calendarEvents.details.deleteSeriesScope',
+      'Delete series removes every occurrence.',
+    );
+    if (currentOccurrenceExcluded) {
+      return [
+        t(
+          'calendarEvents.details.occurrenceSkipped',
+          'This date is skipped. Restore it before editing.',
+        ),
+        deleteNote,
+      ];
+    }
+    // The editor asks for a scope only when an occurrence was selected.
+    let editNote = t(
+      'calendarEvents.details.editSeriesScope',
+      'Edit changes the entire series.',
+    );
+    if (currentRecurrenceId) {
+      const scopes = calendarEventScopeAvailability(
+        currentSourceEvent,
+        currentRecurrenceId,
+        viewerTimezone,
+      );
+      editNote = scopes.occurrenceHasAlarm
+        ? t(
+            'calendarEvents.details.editSeriesReminderScope',
+            'Edit changes the entire series because it contains reminder data.',
+          )
+        : scopes.followingSupported
+          ? t(
+              'calendarEvents.details.editAllScopes',
+              'Edit can change this occurrence, this and following, or the entire series.',
+            )
+          : t(
+              'calendarEvents.details.editOccurrenceScopes',
+              'Edit can change this occurrence or the entire series.',
+            );
+    }
+    return [
+      editNote,
+      ...(canChangeCurrentOccurrence
+        ? [
+            t(
+              'calendarEvents.details.skipScope',
+              'Skip removes only this date.',
+            ),
+          ]
+        : []),
+      deleteNote,
+    ];
+  };
+
+  const recurrenceNotes = [
+    ...(isSeriesOccurrence
+      ? [
+          t(
+            'calendarEvents.details.seriesOccurrence',
+            'This is one occurrence of a recurring series.',
+          ),
+        ]
+      : []),
+    ...actionNotes(),
+  ].join(' ');
+
   const visibleExternalLinks = currentEvent
     ? getVisibleCalendarExternalLinks(currentEvent, t)
     : [];
@@ -378,7 +474,7 @@ export function CalendarEventDetailsDialog({
               {currentEvent.title}
             </DialogTitle>
             <DialogContent tabIndex={0}>
-              <Stack spacing={1} sx={{ overflowWrap: 'anywhere' }}>
+              <Stack spacing={2} sx={{ overflowWrap: 'anywhere' }}>
                 {eventCalendar?.readOnly && (
                   <Alert severity="info">
                     {t(
@@ -397,112 +493,162 @@ export function CalendarEventDetailsDialog({
                   </Alert>
                 )}
 
-                {currentEvent.id !== currentSourceEvent?.id &&
-                  deletesRecurringSeries && (
-                    <Alert severity="info">
-                      {t(
-                        'calendarEvents.details.seriesOccurrenceActions',
-                        'This is one occurrence of a recurring series. Editing or deleting applies to the whole series.',
-                      )}
-                    </Alert>
+                <Stack component="dl" spacing={2} sx={{ m: 0 }}>
+                  {eventCalendar && (
+                    <DetailField
+                      label={t('calendarEvents.details.calendar', 'Calendar')}
+                    >
+                      <Typography>{eventCalendar.name}</Typography>
+                    </DetailField>
                   )}
 
-                {canChangeCurrentOccurrence && currentRecurrenceId && (
-                  <Stack spacing={1}>
-                    <Button
-                      disabled={occurrenceLoading}
-                      onClick={() =>
-                        void changeOccurrenceException(
-                          currentOccurrenceExcluded ? 'remove' : 'add',
-                          currentRecurrenceId,
+                  <DetailField label={t('calendarEvents.details.when', 'When')}>
+                    <CalendarEventDetailsSchedule
+                      formatRange={(timezone) =>
+                        formatCalendarEventTime(
+                          currentEvent,
+                          i18n.language,
+                          t('calendarEvents.details.allDay', 'All day'),
+                          timezone,
                         )
                       }
+                      schedule={calendarEventSchedule(
+                        currentEvent,
+                        viewerTimezone,
+                      )}
+                      viewerTimezone={viewerTimezone}
+                    />
+                  </DetailField>
+
+                  {showsRecurrence && currentSourceEvent && (
+                    <DetailField
+                      label={t('calendarEvents.details.repeats', 'Repeats')}
                     >
-                      {currentOccurrenceExcluded
-                        ? t(
-                            'calendarEvents.details.restoreOccurrence',
-                            'Restore this occurrence',
-                          )
-                        : t(
-                            'calendarEvents.details.skipOccurrence',
-                            'Skip this occurrence',
-                          )}
-                    </Button>
+                      <Typography>
+                        {calendarEventRecurrenceSummary(
+                          currentSourceEvent,
+                          i18n.language,
+                          viewerTimezone,
+                          t,
+                        ).join(' ')}
+                      </Typography>
 
-                    {otherSkippedOccurrences.length > 0 && (
-                      <Stack spacing={0.5}>
-                        <Typography>
-                          {t(
-                            'calendarEvents.details.skippedOccurrences',
-                            'Skipped occurrences',
-                          )}
+                      {recurrenceNotes && (
+                        <Typography color="text.secondary" variant="body2">
+                          {recurrenceNotes}
                         </Typography>
-                        {otherSkippedOccurrences.map((exdate) => (
-                          <Stack
-                            alignItems="center"
-                            direction="row"
-                            key={calendarEventRecurrenceIdentity(exdate)}
-                            justifyContent="space-between"
+                      )}
+
+                      {canChangeCurrentOccurrence && currentRecurrenceId && (
+                        <Stack alignItems="flex-start" spacing={1} pt={1}>
+                          <Button
+                            disabled={occurrenceLoading}
+                            onClick={() =>
+                              void changeOccurrenceException(
+                                currentOccurrenceExcluded ? 'remove' : 'add',
+                                currentRecurrenceId,
+                              )
+                            }
+                            variant="outlined"
                           >
-                            <Typography>
-                              {formatRecurrenceIdentity(exdate, i18n.language)}
-                            </Typography>
-                            <Button
-                              disabled={occurrenceLoading}
-                              onClick={() =>
-                                void changeOccurrenceException('remove', exdate)
+                            {currentOccurrenceExcluded
+                              ? t(
+                                  'calendarEvents.details.restoreOccurrence',
+                                  'Restore this occurrence',
+                                )
+                              : t(
+                                  'calendarEvents.details.skipOccurrence',
+                                  'Skip this occurrence',
+                                )}
+                          </Button>
+
+                          {otherSkippedOccurrences.length > 0 && (
+                            <Stack alignSelf="stretch" spacing={0.5}>
+                              <Typography>
+                                {t(
+                                  'calendarEvents.details.skippedOccurrences',
+                                  'Skipped occurrences',
+                                )}
+                              </Typography>
+                              {otherSkippedOccurrences.map((exdate) => (
+                                <Stack
+                                  alignItems="center"
+                                  direction="row"
+                                  key={calendarEventRecurrenceIdentity(exdate)}
+                                  justifyContent="space-between"
+                                >
+                                  <Typography>
+                                    {formatRecurrenceIdentity(
+                                      exdate,
+                                      i18n.language,
+                                      viewerTimezone,
+                                    )}
+                                  </Typography>
+                                  <Button
+                                    disabled={occurrenceLoading}
+                                    onClick={() =>
+                                      void changeOccurrenceException(
+                                        'remove',
+                                        exdate,
+                                      )
+                                    }
+                                  >
+                                    {t(
+                                      'calendarEvents.details.restoreSkippedOccurrence',
+                                      'Restore',
+                                    )}
+                                  </Button>
+                                </Stack>
+                              ))}
+                            </Stack>
+                          )}
+
+                          {occurrenceError && (
+                            <Alert
+                              severity={
+                                occurrenceError === 'conflict'
+                                  ? 'warning'
+                                  : 'error'
                               }
+                              sx={{ alignSelf: 'stretch' }}
                             >
-                              {t(
-                                'calendarEvents.details.restoreSkippedOccurrence',
-                                'Restore',
-                              )}
-                            </Button>
-                          </Stack>
-                        ))}
-                      </Stack>
-                    )}
-
-                    {occurrenceError && (
-                      <Alert
-                        severity={
-                          occurrenceError === 'conflict' ? 'warning' : 'error'
-                        }
-                      >
-                        {occurrenceError === 'conflict'
-                          ? t(
-                              'calendarEvents.details.occurrenceConflict',
-                              'This event changed elsewhere. Reload the calendar and retry.',
-                            )
-                          : t(
-                              'calendarEvents.details.occurrenceError',
-                              'The occurrence could not be updated.',
-                            )}
-                      </Alert>
-                    )}
-                  </Stack>
-                )}
-
-                <Typography>
-                  {formatCalendarEventTime(
-                    currentEvent,
-                    i18n.language,
-                    t('calendarEvents.details.allDay', 'All day'),
+                              {occurrenceError === 'conflict'
+                                ? t(
+                                    'calendarEvents.details.occurrenceConflict',
+                                    'This event changed elsewhere. Reload the calendar and retry.',
+                                  )
+                                : t(
+                                    'calendarEvents.details.occurrenceError',
+                                    'The occurrence could not be updated.',
+                                  )}
+                            </Alert>
+                          )}
+                        </Stack>
+                      )}
+                    </DetailField>
                   )}
-                </Typography>
 
-                {currentEvent.location && (
-                  <Typography>
-                    {t('calendarEvents.details.location', 'Location')}:{' '}
-                    {currentEvent.location}
-                  </Typography>
-                )}
+                  {currentEvent.location && (
+                    <DetailField
+                      label={t('calendarEvents.details.location', 'Location')}
+                    >
+                      <Typography>{currentEvent.location}</Typography>
+                    </DetailField>
+                  )}
 
-                {currentEvent.description && (
-                  <Typography sx={{ whiteSpace: 'pre-wrap' }}>
-                    {currentEvent.description}
-                  </Typography>
-                )}
+                  {currentEvent.description && (
+                    <DetailField
+                      label={t(
+                        'calendarEvents.details.description',
+                        'Description',
+                      )}
+                    >
+                      <Typography sx={{ whiteSpace: 'pre-wrap' }}>
+                        {currentEvent.description}
+                      </Typography>
+                    </DetailField>
+                  )}
+                </Stack>
 
                 {matrixRoomHref && (
                   <Link
@@ -558,27 +704,36 @@ export function CalendarEventDetailsDialog({
                 )}
               </Stack>
             </DialogContent>
-            <DialogActions>
-              <Button
-                disabled={
-                  !canMutate ||
-                  currentOccurrenceExcluded ||
-                  Boolean(missingOccurrenceSelectionKey)
-                }
-                onClick={() => setEditing(true)}
-              >
-                {t('calendarEvents.details.edit', 'Edit')}
-              </Button>
+            {/* Deleting sits apart from the safe actions. The most useful
+                safe action is the filled one. */}
+            <DialogActions
+              disableSpacing
+              sx={{ flexWrap: 'wrap', gap: 1, px: 3, py: 2 }}
+            >
               <Button
                 color="error"
                 disabled={!canMutate || Boolean(missingOccurrenceSelectionKey)}
                 onClick={() => setDeleteOpen(true)}
+                sx={{ mr: 'auto' }}
               >
-                {t('calendarEvents.details.delete', 'Delete')}
+                {deleteLabel}
               </Button>
-              <Button onClick={onClose}>
-                {t('calendarEvents.details.close', 'Close')}
-              </Button>
+              {/* The safe actions wrap together on narrow panels. */}
+              <Stack direction="row" ml="auto" spacing={1}>
+                <Button
+                  onClick={onClose}
+                  variant={canEdit ? 'text' : 'contained'}
+                >
+                  {t('calendarEvents.details.close', 'Close')}
+                </Button>
+                <Button
+                  disabled={!canEdit}
+                  onClick={() => setEditing(true)}
+                  variant={canEdit ? 'contained' : 'text'}
+                >
+                  {t('calendarEvents.details.edit', 'Edit')}
+                </Button>
+              </Stack>
             </DialogActions>
           </>
         )}
@@ -630,7 +785,11 @@ export function CalendarEventDetailsDialog({
 
       {currentEvent && (
         <ConfirmDeleteDialog
-          confirmTitle={t('calendarEvents.delete.confirm', 'Delete')}
+          confirmTitle={
+            deletesRecurringSeries
+              ? deleteLabel
+              : t('calendarEvents.delete.confirm', 'Delete')
+          }
           description={
             deletesRecurringSeries
               ? t(
@@ -651,7 +810,11 @@ export function CalendarEventDetailsDialog({
           }}
           onConfirm={handleDelete}
           open={deleteOpen}
-          title={t('calendarEvents.delete.title', 'Delete event')}
+          title={
+            deletesRecurringSeries
+              ? t('calendarEvents.delete.seriesTitle', 'Delete series')
+              : t('calendarEvents.delete.title', 'Delete event')
+          }
         >
           {deleteError && (
             <Alert severity={deleteError === 'conflict' ? 'warning' : 'error'}>
@@ -669,6 +832,22 @@ export function CalendarEventDetailsDialog({
         </ConfirmDeleteDialog>
       )}
     </>
+  );
+}
+
+function DetailField({
+  label,
+  children,
+}: PropsWithChildren<{ label: string }>) {
+  return (
+    <Box>
+      <Typography color="text.secondary" component="dt" variant="body2">
+        {label}
+      </Typography>
+      <Box component="dd" sx={{ m: 0 }}>
+        {children}
+      </Box>
+    </Box>
   );
 }
 
