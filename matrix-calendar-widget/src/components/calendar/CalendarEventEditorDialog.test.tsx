@@ -300,9 +300,11 @@ describe('<CalendarEventEditorDialog />', () => {
     expect(content).not.toContainElement(
       screen.getByRole('button', { name: 'Cancel' }),
     );
-    expect(content).not.toContainElement(screen.getByRole('alert'));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(create).toBeDisabled();
     expect(create).toHaveAccessibleDescription('A title is required.');
+    fireEvent.blur(screen.getByRole('textbox', { name: /Title/i }));
+    expect(screen.getByRole('alert')).toHaveTextContent('A title is required.');
   });
 
   it('orders recurrence with timing, ahead of the optional details', async () => {
@@ -2865,12 +2867,27 @@ describe('<CalendarEventEditorDialog />', () => {
       wrapper: createWrapper(repository),
     });
 
-    await userEvent.type(
-      await screen.findByRole('textbox', { name: /Title/i }),
-      'Alarm event',
-    );
+    fireEvent.change(await screen.findByRole('textbox', { name: /Title/i }), {
+      target: { value: 'Alarm event' },
+    });
     await userEvent.click(screen.getByLabelText('Calendar app alert'));
-    fireEvent.change(screen.getByLabelText('Minutes before'), {
+    expect(screen.getByRole('button', { name: '15 min' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    for (const preset of ['1 hour', '1 day', '15 min']) {
+      const button = screen.getByRole('button', { name: preset, exact: true });
+      fireEvent.click(button);
+      expect(button).toHaveAttribute('aria-pressed', 'true');
+    }
+    await userEvent.click(screen.getByRole('button', { name: 'Custom' }));
+    const unit = screen.getByRole('combobox', { name: 'Unit' });
+    const leadTime = screen.getByLabelText('Lead time');
+    fireEvent.change(unit, { target: { value: 'alarmHours' } });
+    fireEvent.change(leadTime, { target: { value: '' } });
+    expect(unit).toHaveValue('alarmHours');
+    fireEvent.change(unit, { target: { value: 'alarmMinutes' } });
+    fireEvent.change(leadTime, {
       target: { value: '25' },
     });
     await userEvent.click(screen.getByRole('button', { name: 'Create event' }));
@@ -2883,8 +2900,8 @@ describe('<CalendarEventEditorDialog />', () => {
 
     view.rerender(<CalendarEventEditorDialog {...props} event={created} />);
     expect(await screen.findByLabelText('Calendar app alert')).toBeChecked();
-    expect(screen.getByLabelText('Minutes before')).toHaveValue(25);
-    fireEvent.change(screen.getByLabelText('Minutes before'), {
+    expect(screen.getByLabelText('Lead time')).toHaveValue(25);
+    fireEvent.change(screen.getByLabelText('Lead time'), {
       target: { value: '40' },
     });
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -2906,6 +2923,58 @@ describe('<CalendarEventEditorDialog />', () => {
     ).resolves.toMatchObject({ alarm: undefined });
   });
 
+  it('preserves an untouched multi-unit alert and edits its original units exactly', async () => {
+    const trigger = { weeks: 0, days: 1, hours: 2, minutes: 30, seconds: 0 };
+    const savedEvent = {
+      ...event,
+      alarm: { action: 'display' as const, trigger },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [savedEvent],
+    });
+    const updateEvent = vi.spyOn(repository, 'updateEvent');
+    const props = { calendars: [calendar], onClose: vi.fn(), open: true };
+    const view = render(
+      <CalendarEventEditorDialog {...props} event={savedEvent} />,
+      {
+        wrapper: createWrapper(repository),
+      },
+    );
+    expect(screen.getByRole('button', { name: 'Custom' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByLabelText('Days before')).toHaveValue(1);
+    expect(screen.getByLabelText('Hours before')).toHaveValue(2);
+    expect(screen.getByLabelText('Minutes before')).toHaveValue(30);
+    fireEvent.change(screen.getByRole('textbox', { name: /Title/i }), {
+      target: { value: 'New title, same alert' },
+    });
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(props.onClose).toHaveBeenCalledTimes(1));
+    expect(updateEvent.mock.calls[0][2]).not.toHaveProperty('alarm');
+    const renamed = await repository.getEvent('team', savedEvent.id);
+    expect(renamed.alarm?.trigger).toEqual(trigger);
+
+    view.rerender(<CalendarEventEditorDialog {...props} event={renamed} />);
+    fireEvent.change(screen.getByLabelText('Days before'), {
+      target: { value: '0' },
+    });
+    fireEvent.change(screen.getByLabelText('Hours before'), {
+      target: { value: '0' },
+    });
+    expect(screen.getByLabelText('Minutes before')).toHaveValue(30);
+    fireEvent.change(screen.getByLabelText('Seconds before'), {
+      target: { value: '25' },
+    });
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(props.onClose).toHaveBeenCalledTimes(2));
+    expect(
+      (await repository.getEvent('team', savedEvent.id)).alarm?.trigger,
+    ).toEqual({ weeks: 0, days: 0, hours: 0, minutes: 30, seconds: 25 });
+  });
+
   it('creates, reloads, updates, and removes one absolute UTC alarm', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [calendar],
@@ -2921,18 +2990,16 @@ describe('<CalendarEventEditorDialog />', () => {
       wrapper: createWrapper(repository),
     });
 
-    await userEvent.type(
-      await screen.findByRole('textbox', { name: /Title/i }),
-      'Absolute alarm event',
-    );
+    fireEvent.change(await screen.findByRole('textbox', { name: /Title/i }), {
+      target: { value: 'Absolute alarm event' },
+    });
     await userEvent.click(screen.getByLabelText('Calendar app alert'));
     await userEvent.click(
       await screen.findByRole('radio', { name: 'At an exact UTC time' }),
     );
-    fireEvent.change(
-      screen.getByRole('textbox', { name: 'Exact time (UTC)' }),
-      { target: { value: '2026-10-01T08:45:00+02:00' } },
-    );
+    fireEvent.change(screen.getByLabelText('Exact time (UTC)'), {
+      target: { value: '' },
+    });
     expect(
       screen.getByText(
         'Enter a valid UTC date and time in YYYY-MM-DDTHH:mm:ssZ format.',
@@ -2940,34 +3007,40 @@ describe('<CalendarEventEditorDialog />', () => {
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Create event' })).toBeDisabled();
 
-    fireEvent.change(
-      screen.getByRole('textbox', { name: 'Exact time (UTC)' }),
-      { target: { value: '2026-10-01T08:45:00Z' } },
-    );
+    fireEvent.change(screen.getByLabelText('Exact time (UTC)'), {
+      target: { value: '2026-10-01T08:45:30' },
+    });
     expect(
       screen.getByText(
         'Calendar apps receive this alert at the exact time. A Matrix room notification cannot use it. To notify the room too, choose “Before the event”.',
       ),
     ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: 'Before the event' }));
+    fireEvent.click(screen.getByRole('button', { name: '1 hour' }));
+    fireEvent.click(
+      screen.getByRole('radio', { name: 'At an exact UTC time' }),
+    );
+    expect(screen.getByLabelText('Exact time (UTC)')).toHaveValue(
+      '2026-10-01T08:45:30',
+    );
     await userEvent.click(screen.getByRole('button', { name: 'Create event' }));
 
     const created = await repository.getEvent('team', 'absolute-alarm-event');
     expect(created.alarm).toEqual({
       action: 'display',
-      trigger: { type: 'absolute', value: '2026-10-01T08:45:00Z' },
+      trigger: { type: 'absolute', value: '2026-10-01T08:45:30Z' },
     });
 
     view.rerender(<CalendarEventEditorDialog {...props} event={created} />);
     expect(
       await screen.findByRole('radio', { name: 'At an exact UTC time' }),
     ).toBeChecked();
-    expect(
-      screen.getByRole('textbox', { name: 'Exact time (UTC)' }),
-    ).toHaveValue('2026-10-01T08:45:00Z');
-    fireEvent.change(
-      screen.getByRole('textbox', { name: 'Exact time (UTC)' }),
-      { target: { value: '2026-10-01T08:30:00Z' } },
+    expect(screen.getByLabelText('Exact time (UTC)')).toHaveValue(
+      '2026-10-01T08:45:30',
     );
+    fireEvent.change(screen.getByLabelText('Exact time (UTC)'), {
+      target: { value: '2026-10-01T08:30:00' },
+    });
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     const updated = await repository.getEvent('team', 'absolute-alarm-event');

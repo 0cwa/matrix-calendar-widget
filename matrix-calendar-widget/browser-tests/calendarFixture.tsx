@@ -125,6 +125,7 @@ declare global {
   interface Window {
     __updateSyntheticRoomMember: (event: StateEvent) => void;
     __syntheticRoomReminderTarget?: CalendarRoomReminderTarget;
+    __syntheticRoomReminderSchedule?: CalendarRoomReminderAllDaySchedule;
   }
 }
 window.__updateSyntheticRoomMember = (event) => {
@@ -378,6 +379,8 @@ function CalendarFixture({
 }) {
   const query = new URLSearchParams(window.location.search);
   const roomMode = query.get('mode');
+  const allDayReminder = query.get('all-day') === '1';
+  const multiUnitAlert = query.get('multi-alert') === '1';
   const initialView: CalendarSurfaceView =
     query.get('view') === 'month' ? 'month' : 'list';
   const [view, setView] = useState<CalendarSurfaceView>(initialView);
@@ -398,23 +401,46 @@ function CalendarFixture({
         : undefined,
     [roomMode],
   );
-  const roomRepository = useMemo(
-    () =>
-      roomMode === 'room-read-only' ||
-      roomMode === 'room-manager' ||
-      galleryMode
-        ? new SyntheticRoomCalendarRepository(
-            roomMode !== 'room-read-only',
-            galleryMode
-              ? {
-                  calendars: [galleryCalendar],
-                  events: monthLayoutMode ? monthLayoutEvents : galleryEvents,
-                }
-              : undefined,
-          )
-        : undefined,
-    [galleryMode, monthLayoutMode, roomMode],
-  );
+  const roomRepository = useMemo(() => {
+    if (
+      roomMode !== 'room-read-only' &&
+      roomMode !== 'room-manager' &&
+      !galleryMode
+    ) {
+      return undefined;
+    }
+    const manager = roomMode !== 'room-read-only';
+    if (galleryMode) {
+      return new SyntheticRoomCalendarRepository(manager, {
+        calendars: [galleryCalendar],
+        events: monthLayoutMode ? monthLayoutEvents : galleryEvents,
+      });
+    }
+
+    let fixtureEvent = roomEvent;
+    if (allDayReminder) {
+      fixtureEvent = {
+        ...roomEvent,
+        timing: {
+          type: 'all-day',
+          startDate: '2026-10-05',
+          endDate: '2026-10-06',
+        },
+      };
+    } else if (multiUnitAlert) {
+      fixtureEvent = {
+        ...roomEvent,
+        alarm: {
+          action: 'display',
+          trigger: { weeks: 0, days: 1, hours: 2, minutes: 30, seconds: 0 },
+        },
+      };
+    }
+    return new SyntheticRoomCalendarRepository(manager, {
+      calendars: [roomCalendar],
+      events: [fixtureEvent],
+    });
+  }, [allDayReminder, galleryMode, monthLayoutMode, multiUnitAlert, roomMode]);
   const activeRepository =
     roomRepository ?? (largeCalendarMode ? largeCalendarRepository : undefined);
   const [filters, setFilters] = useState({
@@ -590,7 +616,19 @@ class SyntheticRoomCalendarRepository
     eventId: string,
   ): Promise<CalendarRoomReminderAlarmOption[]> {
     const event = await super.getEvent(calendarId, eventId);
-    return event.uid === roomAlarmOption.eventUid ? [roomAlarmOption] : [];
+    if (event.uid !== roomAlarmOption.eventUid) {
+      return [];
+    }
+    if (event.timing.type === 'all-day') {
+      return [
+        {
+          ...roomAlarmOption,
+          timingType: 'all-day',
+          requiresAllDaySchedule: true,
+        },
+      ];
+    }
+    return [roomAlarmOption];
   }
 
   async listRoomReminderRecipients(): Promise<CalendarRoomReminderRecipient[]> {
@@ -638,6 +676,7 @@ class SyntheticRoomCalendarRepository
     };
     this.reminderConfigurations.set(alarmUid, configuration);
     window.__syntheticRoomReminderTarget = target;
+    window.__syntheticRoomReminderSchedule = allDaySchedule ?? undefined;
     return configuration;
   }
 

@@ -132,18 +132,27 @@ export function validateAllDayDraft(
     schedule.daysBefore < 0 ||
     schedule.daysBefore > 366 ||
     !/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(schedule.localTime) ||
-    schedule.timezone.trim() !== schedule.timezone ||
-    schedule.timezone.length === 0 ||
-    schedule.timezone.length > 64
+    !isValidRoomReminderTimezone(schedule.timezone)
   ) {
     return null;
   }
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: schedule.timezone });
-  } catch {
-    return null;
-  }
   return { ...schedule };
+}
+
+export function isValidRoomReminderTimezone(timezone: string): boolean {
+  if (
+    timezone.trim() !== timezone ||
+    timezone.length === 0 ||
+    timezone.length > 64
+  ) {
+    return false;
+  }
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: timezone });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function reminderOptionKey(

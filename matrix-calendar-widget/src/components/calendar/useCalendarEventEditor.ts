@@ -112,6 +112,8 @@ export function useCalendarEventEditor({
     writableCalendars[0] ??
     calendars[0];
   const [values, setValues] = useState<CalendarEventFormValues | undefined>();
+  const [titleTouched, setTitleTouched] = useState(false);
+  const [submitAttempted, setSubmitAttempted] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savingRoomReminderSetup, setSavingRoomReminderSetup] = useState(false);
   const [error, setError] = useState<Error>();
@@ -133,6 +135,8 @@ export function useCalendarEventEditor({
       return;
     }
 
+    setTitleTouched(false);
+    setSubmitAttempted(false);
     setValues(
       event
         ? calendarEventToFormValues(event, initialCalendar)
@@ -258,6 +262,7 @@ export function useCalendarEventEditor({
   const handleChange =
     (field: keyof CalendarEventFormValues) =>
     (change: ChangeEvent<HTMLInputElement>) => {
+      if (field === 'title') setTitleTouched(true);
       setValues((current) =>
         current
           ? {
@@ -385,6 +390,7 @@ export function useCalendarEventEditor({
                       : undefined;
 
   const submit = async (intent: CalendarEventEditorSubmissionIntent) => {
+    setSubmitAttempted(true);
     const configureRoomRemindersAfterSave =
       intent.kind === 'save-and-configure-room-reminders' &&
       Boolean(onSaveAndConfigureRoomReminders);
@@ -681,6 +687,7 @@ export function useCalendarEventEditor({
     handleAlarmToggle,
     handleAlarmDurationChange,
     handleAlarmModeChange,
+    setValues,
     handleRdateDraftChange,
     handleRdatePeriodEndChange,
     handleRdatePeriodDurationChange,
@@ -697,6 +704,10 @@ export function useCalendarEventEditor({
     handleWeekdayChange,
     handleTimingTypeChange,
     validationErrorCode,
+    showTitleRequiredError:
+      validationErrorCode === 'title-required' &&
+      (titleTouched || submitAttempted),
+    setTitleTouched,
     weeklyByDayEnabled,
     recurrenceInterval,
     canChooseWeekdays,

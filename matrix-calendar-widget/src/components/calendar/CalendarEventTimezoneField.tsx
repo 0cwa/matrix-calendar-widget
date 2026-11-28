@@ -14,16 +14,12 @@
  * limitations under the License.
  */
 
-import { listCalendarTimezones } from '@matrix-calendar-widget/calendar';
-import { Autocomplete, Stack, TextField, Typography } from '@mui/material';
+import { Stack, Typography } from '@mui/material';
 import { DateTime } from 'luxon';
-import { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { describeCalendarWallTime } from './calendarEventSchedule';
+import { IanaTimezoneAutocomplete } from './IanaTimezoneAutocomplete';
 import type { CalendarEventEditorModel } from './useCalendarEventEditor';
-
-const timezones = listCalendarTimezones();
-const listedTimezones = new Set(timezones);
 
 /**
  * A searchable IANA zone picker next to the event times. Free text stays
@@ -43,7 +39,6 @@ export function CalendarEventTimezoneField({
     editingFollowing,
   } = model;
   const { i18n } = useTranslation();
-  const rootRef = useRef<HTMLDivElement>(null);
   if (!values) return null;
 
   const timezone = values.timezone;
@@ -123,40 +118,13 @@ export function CalendarEventTimezoneField({
 
   return (
     <Stack spacing={0.5}>
-      <Autocomplete
-        autoHighlight
-        disableClearable
-        filterOptions={filterTimezones}
-        forcePopupIcon
-        freeSolo
-        inputValue={timezone}
-        onChange={(_, selected) => handleTimezoneChange(selected)}
-        onInputChange={(_, input, reason) => {
-          if (reason === 'input') handleTimezoneChange(input);
-        }}
-        options={timezones}
-        ref={rootRef}
-        // Keep the list inside the dialog's modal root, where it stays
-        // reachable for assistive technology.
-        slotProps={{
-          popper: {
-            container: () =>
-              rootRef.current?.closest('.MuiDialog-root') ?? document.body,
-          },
-        }}
-        renderInput={(params) => (
-          <TextField
-            {...params}
-            error={validationErrorCode === 'invalid-timezone'}
-            helperText={offsetText}
-            label={t('calendarEvents.editor.timezone', 'Time zone')}
-            required
-          />
-        )}
-        // MUI shows the unfiltered list while the input equals the selection,
-        // including right after a paste opens it. Only a listed identifier
-        // counts as selected, so partial searches always filter.
-        value={listedTimezones.has(timezone) ? timezone : ''}
+      <IanaTimezoneAutocomplete
+        error={validationErrorCode === 'invalid-timezone'}
+        helperText={offsetText}
+        label={t('calendarEvents.editor.timezone', 'Time zone')}
+        onChange={handleTimezoneChange}
+        required
+        value={timezone}
       />
       {notes.map((note) => (
         <Typography color="text.secondary" key={note} variant="body2">
@@ -165,36 +133,6 @@ export function CalendarEventTimezoneField({
       ))}
     </Stack>
   );
-}
-
-/** Match every typed word, so "new york" finds America/New_York. */
-export function filterTimezones(
-  options: string[],
-  { inputValue }: { inputValue: string },
-): string[] {
-  const query = searchableTimezone(inputValue);
-  if (!query) {
-    return options;
-  }
-
-  const words = query.split(' ');
-  const matches = options.filter((option) => {
-    const candidate = searchableTimezone(option);
-    return words.every((word) => candidate.includes(word));
-  });
-  // An exact identifier leads, so Enter never swaps it for a longer alias.
-  return matches.sort(
-    (left, right) =>
-      Number(searchableTimezone(right) === query) -
-      Number(searchableTimezone(left) === query),
-  );
-}
-
-function searchableTimezone(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[_/\s]+/g, ' ')
-    .trim();
 }
 
 /** The viewer's clock reading, only when it differs from the event's. */

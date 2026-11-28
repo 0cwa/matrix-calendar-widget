@@ -17,12 +17,14 @@
 import { InMemoryCalendarRepository } from '@matrix-calendar-widget/calendar';
 import type { WidgetApi } from '@matrix-widget-toolkit/api';
 import { WidgetApiMockProvider } from '@matrix-widget-toolkit/react';
+import { Dialog, DialogTitle } from '@mui/material';
 import {
   act,
   fireEvent,
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ComponentProps, PropsWithChildren } from 'react';
@@ -168,8 +170,9 @@ function renderControl(
   repository: InMemoryCalendarRepository,
   overrides: Partial<ComponentProps<typeof CalendarRoomReminderControl>> = {},
   memberObserver?: Subject<unknown>,
+  insideDialog = false,
 ) {
-  return render(
+  const control = (
     <CalendarRoomReminderControl
       calendarId={calendarId}
       eventId={eventId}
@@ -194,10 +197,18 @@ function renderControl(
       canManageReminders
       onEditCalendarReminder={vi.fn()}
       {...overrides}
-    />,
-    {
-      wrapper: createWrapper(repository, memberObserver),
-    },
+    />
+  );
+  return render(
+    insideDialog ? (
+      <Dialog data-testid="reminder-dialog-root" open>
+        <DialogTitle>Event details</DialogTitle>
+        {control}
+      </Dialog>
+    ) : (
+      control
+    ),
+    { wrapper: createWrapper(repository, memberObserver) },
   );
 }
 
@@ -603,13 +614,18 @@ describe('<CalendarRoomReminderControl />', () => {
       new Date('2026-10-20T05:00:00.000Z').getTime(),
     );
     const { repository, enableRoomReminder } = createRepository([allDayOption]);
-    renderControl(repository, {
-      eventTiming: {
-        type: 'all-day',
-        startDate: '2026-10-21',
-        endDate: '2026-10-22',
+    renderControl(
+      repository,
+      {
+        eventTiming: {
+          type: 'all-day',
+          startDate: '2026-10-21',
+          endDate: '2026-10-22',
+        },
       },
-    });
+      undefined,
+      true,
+    );
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Matrix room notifications' }),
@@ -635,9 +651,10 @@ describe('<CalendarRoomReminderControl />', () => {
         'Preview: Matrix will ping Alice in this room on 2026-10-20 at 08:30 (Europe/Stockholm).',
       ),
     ).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Notification time zone'), {
-      target: { value: '' },
+    const timezone = screen.getByRole('combobox', {
+      name: 'Notification time zone',
     });
+    await userEvent.clear(timezone);
     expect(
       screen.queryByText(/Preview: Matrix will ping/),
     ).not.toBeInTheDocument();
@@ -646,9 +663,19 @@ describe('<CalendarRoomReminderControl />', () => {
         /Enter the days before, local time and a valid time zone/,
       ),
     ).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Notification time zone'), {
-      target: { value: 'Europe/Stockholm' },
-    });
+    fireEvent.change(timezone, { target: { value: 'berlin' } });
+    const dialogRoot = screen.getByTestId('reminder-dialog-root');
+    expect(
+      await within(dialogRoot).findByRole('option', { name: 'Europe/Berlin' }),
+    ).toBeVisible();
+    await userEvent.keyboard('{ArrowDown}{Enter}');
+    expect(timezone).toHaveValue('Europe/Berlin');
+    fireEvent.change(timezone, { target: { value: 'new york' } });
+    await userEvent.keyboard('{ArrowDown}{Enter}');
+    expect(timezone).toHaveValue('America/New_York');
+    fireEvent.change(timezone, { target: { value: 'US/Eastern' } });
+    await userEvent.tab();
+    expect(timezone).toHaveValue('US/Eastern');
     await userEvent.click(
       screen.getByRole('button', { name: 'Save room notification' }),
     );
@@ -663,7 +690,7 @@ describe('<CalendarRoomReminderControl />', () => {
       {
         daysBefore: 1,
         localTime: '08:30',
-        timezone: 'Europe/Stockholm',
+        timezone: 'US/Eastern',
       },
     );
   });

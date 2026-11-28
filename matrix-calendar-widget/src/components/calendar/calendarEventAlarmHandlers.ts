@@ -34,7 +34,7 @@ export function createAlarmHandlers(
 
   const handleAlarmDurationChange =
     (field: keyof CalendarEventFormValues) =>
-    (change: ChangeEvent<HTMLInputElement>) => {
+    (change: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
       setValues((current) =>
         current
           ? {

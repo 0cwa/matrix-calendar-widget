@@ -41,6 +41,9 @@ export function CalendarEventEditorFields({
 }) {
   const {
     t,
+    showTitleRequiredError,
+    validationError,
+    setTitleTouched,
     writableCalendars,
     initialCalendar,
     values,
@@ -170,6 +173,17 @@ export function CalendarEventEditorFields({
                       readOnly || saving || unsupported || mode === 'series'
                     }
                     label={label}
+                    error={field === 'title' && showTitleRequiredError}
+                    helperText={
+                      field === 'title' && showTitleRequiredError
+                        ? validationError
+                        : undefined
+                    }
+                    onBlur={
+                      field === 'title'
+                        ? () => setTitleTouched(true)
+                        : undefined
+                    }
                     onChange={handleChange(field)}
                     value={values[field]}
                   />
@@ -205,6 +219,9 @@ export function CalendarEventEditorFields({
 
           <TextField
             autoFocus
+            error={showTitleRequiredError}
+            helperText={showTitleRequiredError ? validationError : undefined}
+            onBlur={() => setTitleTouched(true)}
             label={t('calendarEvents.editor.title', 'Title')}
             onChange={handleChange('title')}
             required

@@ -80,6 +80,13 @@ export function calendarActionContrast(theme: Theme): ThemeOptions {
       overline: { textTransform: 'none' },
     },
     components: {
+      MuiInputLabel: {
+        styleOverrides: {
+          root: {
+            '&.Mui-focused:not(.Mui-error)': { color: primaryText },
+          },
+        },
+      },
       MuiButton: {
         styleOverrides: {
           root: ({ ownerState }) => {
