@@ -128,12 +128,19 @@ export const DateRangePicker = ({
         desktopPaper: {
           sx: {
             width: 'min(320px, calc(100vw - 16px))',
+            overflowX: 'hidden',
             '& .MuiPickersLayout-root, & .MuiDateCalendar-root': {
               maxWidth: '100%',
             },
           },
         },
         popper: {
+          modifiers: [
+            {
+              name: 'preventOverflow',
+              options: { boundary: document.body, padding: 0 },
+            },
+          ],
           sx: {
             '& .MuiDialogActions-root': {
               p: (theme) => theme.spacing(1),
@@ -210,6 +217,8 @@ function RangeStepLayout({
         gap={1}
         justifyContent="space-between"
         maxWidth={320}
+        width="100%"
+        boxSizing="border-box"
         mx="auto"
         px={2}
         pt={1.5}

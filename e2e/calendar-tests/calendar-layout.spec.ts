@@ -423,6 +423,19 @@ for (const height of [640, 520]) {
     await expect(day('14')).toBeDisabled();
     await expect(recover).toBeVisible();
     await readBounds('end');
+    const daysFit = await picker.getByRole('gridcell').evaluateAll((cells) => {
+      const paper = cells[0]
+        ?.closest('.MuiPickersPopper-paper')
+        ?.getBoundingClientRect();
+      return (
+        Boolean(paper) &&
+        cells.every((cell) => {
+          const day = cell.getBoundingClientRect();
+          return day.left >= paper!.left - 1 && day.right <= paper!.right + 1;
+        })
+      );
+    });
+    expect(daysFit).toBe(true);
     const accessibility = await new AxeBuilder({ page })
       .include('[role="dialog"]')
       .analyze();
