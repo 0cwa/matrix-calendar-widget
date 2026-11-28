@@ -19,6 +19,7 @@ import {
   Button,
   Checkbox,
   DialogContent,
+  Divider,
   FormControl,
   FormControlLabel,
   FormHelperText,
@@ -26,8 +27,9 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
+import { useId } from 'react';
 import { CalendarEventAlarmFields } from './CalendarEventAlarmFields';
-import { CalendarEventAttachmentFields } from './CalendarEventAttachmentFields';
+import { CalendarEventLinkFields } from './CalendarEventLinkFields';
 import { CalendarEventRecurrenceFields } from './CalendarEventRecurrenceFields';
 import { CalendarEventTimingFields } from './CalendarEventTimingFields';
 import type { CalendarEventEditorModel } from './useCalendarEventEditor';
@@ -58,6 +60,7 @@ export function CalendarEventEditorFields({
     calendars,
     event,
   } = model;
+  const optionalHeadingId = useId();
   if (!values || !initialCalendar) {
     return null;
   }
@@ -210,56 +213,37 @@ export function CalendarEventEditorFields({
 
           <CalendarEventTimingFields model={model} />
 
-          <TextField
-            label={t('calendarEvents.editor.location', 'Location')}
-            onChange={handleChange('location')}
-            value={values.location}
-          />
-
-          {values.conferenceEditable === false && (
-            <Alert severity="info">
-              {t(
-                'calendarEvents.editor.unsupportedConferenceReadOnly',
-                'Conference editing is unavailable for source data this editor cannot safely reconcile. Other edits will preserve it.',
-              )}
-            </Alert>
-          )}
-
-          <TextField
-            disabled={values.conferenceEditable === false}
-            helperText={t(
-              'calendarEvents.editor.conferenceUrlHelp',
-              'Use an HTTP(S) link. Clear the URL to remove the conference link.',
-            )}
-            label={t('calendarEvents.editor.conferenceUrl', 'Conference URL')}
-            onChange={handleChange('conferenceUrl')}
-            type="url"
-            value={values.conferenceUrl}
-          />
-
-          <TextField
-            disabled={values.conferenceEditable === false}
-            label={t(
-              'calendarEvents.editor.conferenceLabel',
-              'Conference label',
-            )}
-            onChange={handleChange('conferenceLabel')}
-            value={values.conferenceLabel}
-          />
-
-          <CalendarEventAttachmentFields model={model} />
-
-          <TextField
-            label={t('calendarEvents.editor.description', 'Description')}
-            multiline
-            minRows={3}
-            onChange={handleChange('description')}
-            value={values.description}
-          />
-
-          <CalendarEventAlarmFields model={model} />
-
           <CalendarEventRecurrenceFields model={model} />
+
+          <Divider />
+
+          <Stack aria-labelledby={optionalHeadingId} role="group" spacing={2}>
+            <Typography
+              component="h3"
+              id={optionalHeadingId}
+              variant="subtitle1"
+            >
+              {t('calendarEvents.editor.optionalDetails', 'Optional details')}
+            </Typography>
+
+            <TextField
+              label={t('calendarEvents.editor.location', 'Location')}
+              onChange={handleChange('location')}
+              value={values.location}
+            />
+
+            <TextField
+              label={t('calendarEvents.editor.description', 'Description')}
+              multiline
+              minRows={3}
+              onChange={handleChange('description')}
+              value={values.description}
+            />
+
+            <CalendarEventLinkFields model={model} />
+
+            <CalendarEventAlarmFields model={model} />
+          </Stack>
         </Stack>
       )}
     </DialogContent>

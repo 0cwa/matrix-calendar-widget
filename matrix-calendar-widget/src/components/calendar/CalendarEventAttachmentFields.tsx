@@ -25,6 +25,7 @@ export function CalendarEventAttachmentFields({
   const {
     values,
     t,
+    event,
     attachmentControlsDisabled,
     validationErrorCode,
     handleChange,
@@ -54,7 +55,9 @@ export function CalendarEventAttachmentFields({
         value={values.attachmentOperation ?? 'none'}
       >
         <MenuItem value="none">
-          {t('calendarEvents.editor.attachmentNoChange', 'No change')}
+          {event
+            ? t('calendarEvents.editor.attachmentNoChange', 'No change')
+            : t('calendarEvents.editor.attachmentNone', 'No attachment')}
         </MenuItem>
         <MenuItem value="add">
           {t('calendarEvents.editor.attachmentAdd', 'Add link')}
@@ -109,10 +112,15 @@ export function CalendarEventAttachmentFields({
 
       {values.attachmentChanged && (
         <Typography color="text.secondary" variant="body2">
-          {t(
-            'calendarEvents.editor.attachmentWillBeSaved',
-            'One attachment link change will be applied when you save.',
-          )}
+          {event
+            ? t(
+                'calendarEvents.editor.attachmentWillBeSaved',
+                'One attachment link change will be applied when you save.',
+              )
+            : t(
+                'calendarEvents.editor.attachmentWillBeAdded',
+                'The link will be added when you create the event.',
+              )}
         </Typography>
       )}
     </>
