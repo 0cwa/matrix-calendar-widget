@@ -420,11 +420,24 @@ export function createReminderAcceptanceHelpers(
         .isChecked();
       observation.alarmUiStep = 'readback-offset';
       const allDayEvent = await editor.getByLabel('All day').isChecked();
-      const leadMinutes = Number(
-        await editor
-          .getByRole('spinbutton', { name: 'Minutes before' })
-          .inputValue(),
-      );
+      const leadMinutes =
+        (await editor
+          .getByRole('button', { name: '15 min' })
+          .getAttribute('aria-pressed')) === 'true'
+          ? 15
+          : (await editor
+                .getByRole('button', { name: '1 hour' })
+                .getAttribute('aria-pressed')) === 'true'
+            ? 60
+            : (await editor
+                  .getByRole('button', { name: '1 day' })
+                  .getAttribute('aria-pressed')) === 'true'
+              ? 1440
+              : Number(
+                  await editor
+                    .getByRole('spinbutton', { name: 'Lead time' })
+                    .inputValue(),
+                );
       const expectedLeadMinutes = readbackReference?.expectedAlarmLeadMinutes;
       let timedRangeMatches = allDayEvent;
       let dueMatchesReference = allDayEvent;
@@ -552,8 +565,12 @@ export function createReminderAcceptanceHelpers(
       observation.alarmUiStep = 'relative-option-selected';
       await editor.getByRole('radio', { name: 'Before the event' }).check();
       observation.alarmUiStep = 'offset-entered';
+      await editor.getByRole('button', { name: 'Custom' }).click();
       await editor
-        .getByRole('spinbutton', { name: 'Minutes before' })
+        .getByRole('combobox', { name: 'Unit' })
+        .selectOption('alarmMinutes');
+      await editor
+        .getByRole('spinbutton', { name: 'Lead time' })
         .fill(String(leadMinutes));
       const saveResponse = page.waitForResponse(
         (response) => {

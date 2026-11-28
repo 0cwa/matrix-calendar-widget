@@ -354,6 +354,7 @@ function CalendarFixture({
   const query = new URLSearchParams(window.location.search);
   const roomMode = query.get('mode');
   const allDayReminder = query.get('all-day') === '1';
+  const multiUnitAlert = query.get('multi-alert') === '1';
   const initialView: CalendarSurfaceView =
     query.get('view') === 'month' ? 'month' : 'list';
   const [view, setView] = useState<CalendarSurfaceView>(initialView);
@@ -396,10 +397,29 @@ function CalendarFixture({
                       },
                     ],
                   }
-                : undefined,
+                : multiUnitAlert
+                  ? {
+                      calendars: [roomCalendar],
+                      events: [
+                        {
+                          ...roomEvent,
+                          alarm: {
+                            action: 'display',
+                            trigger: {
+                              weeks: 0,
+                              days: 1,
+                              hours: 2,
+                              minutes: 30,
+                              seconds: 0,
+                            },
+                          },
+                        },
+                      ],
+                    }
+                  : undefined,
           )
         : undefined,
-    [allDayReminder, galleryMode, roomMode],
+    [allDayReminder, galleryMode, multiUnitAlert, roomMode],
   );
   const activeRepository =
     roomRepository ?? (largeCalendarMode ? largeCalendarRepository : undefined);

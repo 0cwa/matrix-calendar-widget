@@ -14,7 +14,8 @@
  * limitations under the License.
  */
 
-import { Alert, Button, Stack } from '@mui/material';
+import { Alert, Box, Button, Stack } from '@mui/material';
+import { visuallyHidden } from '@mui/utils';
 import type { CalendarEventEditorModel } from './useCalendarEventEditor';
 
 /**
@@ -37,14 +38,24 @@ export function CalendarEventEditorStatus({
     readOnly,
     chooseScope,
     validationError,
+    validationErrorCode,
+    showTitleRequiredError,
     handleReloadLatest,
     onClose,
   } = model;
   const blockingValidation = chooseScope ? undefined : validationError;
+  const visibleBlockingValidation =
+    validationErrorCode === 'title-required' && !showTitleRequiredError
+      ? undefined
+      : blockingValidation;
   const blockingReadOnly = !chooseScope && readOnly;
 
-  if (!error && !blockingValidation && !blockingReadOnly) {
-    return null;
+  if (!error && !visibleBlockingValidation && !blockingReadOnly) {
+    return blockingValidation ? (
+      <Box component="span" id={blockingReasonId} sx={visuallyHidden}>
+        {blockingValidation}
+      </Box>
+    ) : null;
   }
 
   return (
@@ -79,10 +90,10 @@ export function CalendarEventEditorStatus({
           {error.message}
         </Alert>
       )}
-      {(blockingValidation || blockingReadOnly) && (
+      {(visibleBlockingValidation || blockingReadOnly) && (
         <Stack id={blockingReasonId} spacing={1}>
-          {blockingValidation && (
-            <Alert severity="warning">{blockingValidation}</Alert>
+          {visibleBlockingValidation && (
+            <Alert severity="warning">{visibleBlockingValidation}</Alert>
           )}
           {blockingReadOnly && (
             <Alert severity="warning">
