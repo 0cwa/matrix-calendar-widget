@@ -315,9 +315,12 @@ describe('<CalendarEventsList />', () => {
     const dialog = await screen.findByRole('dialog', {
       name: 'Team planning',
     });
+    // Scrollable content, then Delete apart from Close and Edit.
     await userEvent.tab();
-    await userEvent.tab();
-    expect(within(dialog).getByRole('button', { name: 'Edit' })).toHaveFocus();
+    for (const name of ['Delete', 'Close', 'Edit']) {
+      await userEvent.tab();
+      expect(within(dialog).getByRole('button', { name })).toHaveFocus();
+    }
 
     await userEvent.keyboard('{Escape}');
     await waitFor(() =>

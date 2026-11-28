@@ -40,3 +40,8 @@ export function getVTimezoneBlock(timezoneId: unknown): string | undefined {
 
   return timezoneBlocks[timezoneId];
 }
+
+/** Every IANA identifier in this data release, including link aliases. */
+export function listVTimezoneIds(): string[] {
+  return Object.keys(timezoneBlocks).sort();
+}

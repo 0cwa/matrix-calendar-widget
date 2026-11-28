@@ -233,9 +233,12 @@ export function createReminderAcceptanceHelpers(
     } else {
       await editor.getByRole('textbox', { name: 'Start' }).fill(startValue);
       await editor.getByRole('textbox', { name: 'End' }).fill(endValue);
-      await editor
-        .getByRole('textbox', { name: 'Time zone' })
-        .fill(REMINDER_TIMED_TIMEZONE);
+      const timezoneField = editor.getByRole('combobox', {
+        name: 'Time zone',
+      });
+      await timezoneField.fill(REMINDER_TIMED_TIMEZONE);
+      // Close the zone suggestions so they cannot cover the dialog actions.
+      await timezoneField.press('Tab');
     }
     record(supportContext.activePhase, 'passed');
 
@@ -433,7 +436,7 @@ export function createReminderAcceptanceHelpers(
           .getByRole('textbox', { name: 'End' })
           .inputValue();
         const timezone = await editor
-          .getByRole('textbox', { name: 'Time zone' })
+          .getByRole('combobox', { name: 'Time zone' })
           .inputValue();
         const startAt = reminderFixtureLocalDateTimeToUnixMillis(
           startValue,

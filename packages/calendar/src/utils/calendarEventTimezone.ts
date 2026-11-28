@@ -14,7 +14,10 @@
  * limitations under the License.
  */
 
-import { getVTimezoneBlock } from '@matrix-calendar-widget/ical-timezones';
+import {
+  getVTimezoneBlock,
+  listVTimezoneIds,
+} from '@matrix-calendar-widget/ical-timezones';
 import ICAL from 'ical.js';
 import { DateTime } from 'luxon';
 
@@ -78,6 +81,11 @@ const timezones = new Map<string, CalendarTimezone>();
 
 export function isCalendarTimezoneSupported(timezoneId: string): boolean {
   return Boolean(getVTimezoneBlock(timezoneId));
+}
+
+/** The bundled IANA identifiers that timed events can be saved with. */
+export function listCalendarTimezones(): string[] {
+  return listVTimezoneIds();
 }
 
 /** Interpret a typed DATE-TIME wall value using the bundled IANA rules. */
