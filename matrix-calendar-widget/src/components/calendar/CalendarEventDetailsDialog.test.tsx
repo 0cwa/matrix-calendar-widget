@@ -194,6 +194,7 @@ function createRoomCalendarRepository(
         diagnostics: [],
         partialAvailability: false,
       }),
+      listRoomReminderRecipients: vi.fn().mockResolvedValue([]),
       listRoomReminderAlarmOptions: vi.fn().mockResolvedValue([]),
       listRoomReminderConfigurations: vi.fn().mockResolvedValue([]),
       enableRoomReminder: vi.fn(),
@@ -414,7 +415,11 @@ describe('<CalendarEventDetailsDialog />', () => {
         screen.queryByRole('dialog', { name: 'Edit event' }),
       ).not.toBeInTheDocument(),
     );
-    expect(repository.listRoomReminderAlarmOptions).toHaveBeenCalledTimes(1);
+    expect(repository.listRoomReminderAlarmOptions).toHaveBeenCalledTimes(2);
+    expect(repository.listRoomReminderRecipients).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByRole('button', { name: 'Matrix room notifications' }),
+    ).toHaveAttribute('aria-expanded', 'false');
     expect(repository.enableRoomReminder).not.toHaveBeenCalled();
   });
 

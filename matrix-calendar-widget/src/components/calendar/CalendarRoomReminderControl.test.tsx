@@ -213,6 +213,44 @@ function renderControl(
 }
 
 describe('<CalendarRoomReminderControl />', () => {
+  it('deduplicates an immediate expansion and keeps the roster lazy', async () => {
+    const { repository } = createRepository([timedOption]);
+    let resolveOptions!: (
+      value: readonly CalendarRoomReminderAlarmOption[],
+    ) => void;
+    repository.listRoomReminderAlarmOptions.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveOptions = resolve;
+      }),
+    );
+    renderControl(repository);
+    expect(repository.listRoomReminderAlarmOptions).toHaveBeenCalledTimes(1);
+    expect(repository.listRoomReminderConfigurations).toHaveBeenCalledTimes(1);
+    expect(repository.listRoomReminderRecipients).not.toHaveBeenCalled();
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Matrix room notifications' }),
+    );
+    expect(repository.listRoomReminderAlarmOptions).toHaveBeenCalledTimes(1);
+    expect(repository.listRoomReminderConfigurations).toHaveBeenCalledTimes(1);
+    expect(repository.listRoomReminderRecipients).toHaveBeenCalledTimes(1);
+    await act(async () => resolveOptions([timedOption]));
+    await screen.findByRole('combobox', { name: 'Who to notify in this room' });
+  });
+
+  it('retries a failed summary when expanded', async () => {
+    const { repository } = createRepository([timedOption]);
+    repository.listRoomReminderAlarmOptions.mockRejectedValueOnce(
+      new Error('unavailable'),
+    );
+    renderControl(repository);
+    await act(async () => {});
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Matrix room notifications' }),
+    );
+    await screen.findByRole('combobox', { name: 'Who to notify in this room' });
+    expect(repository.listRoomReminderAlarmOptions).toHaveBeenCalledTimes(2);
+  });
+
   it('shows both calendar app alert timing and room notification controls for timed events', async () => {
     const { repository, enableRoomReminder } = createRepository([
       timedOption,
