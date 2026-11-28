@@ -174,7 +174,7 @@ export function CalendarRoomReminderPicker({
     return (
       <Stack key={key} spacing={1.25} sx={{ py: 1.25 }}>
         <Stack spacing={0.35}>
-          <Typography variant="subtitle2">
+          <Typography component="h3" variant="subtitle2">
             {formatOption(option, index + 1, t)}
           </Typography>
           {!option.supported && (
@@ -409,7 +409,7 @@ export function CalendarRoomReminderPicker({
     const key = reminderOptionKey(configuration);
     return (
       <Stack key={key} spacing={0.75} sx={{ py: 1 }}>
-        <Typography variant="subtitle2">
+        <Typography component="h3" variant="subtitle2">
           {t(
             'calendarEvents.roomReminder.missingCalDavAlarm',
             'Calendar app alert no longer available',
@@ -675,7 +675,7 @@ function AllDayScheduleFields({
 }) {
   return (
     <Stack spacing={1}>
-      <Typography variant="subtitle2">
+      <Typography component="h4" variant="subtitle2">
         {t(
           'calendarEvents.roomReminder.allDaySchedule',
           'When to notify for this all-day event',

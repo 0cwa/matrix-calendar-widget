@@ -16,6 +16,7 @@
 
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
+import { waitForDialogTransitions } from './waitForDialogTransitions';
 
 for (const theme of ['light', 'dark']) {
   test(`saved and draft notification status is accessible at 360 pixels in ${theme}`, async ({
@@ -35,6 +36,7 @@ for (const theme of ['light', 'dark']) {
     });
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
     await expect(dialog.getByTestId('room-reminder-summary')).toHaveText('Off');
+    await waitForDialogTransitions(dialog);
     const collapsed = await new AxeBuilder({ page })
       .include('[role="dialog"]')
       .analyze();
@@ -59,6 +61,7 @@ for (const theme of ['light', 'dark']) {
     await expect(
       dialog.getByText(/Everyone in the room can still read the message/i),
     ).toBeVisible();
+    await waitForDialogTransitions(dialog);
     const expanded = await new AxeBuilder({ page })
       .include('[role="dialog"]')
       .analyze();
@@ -225,6 +228,7 @@ test('all-day notification time zones are searchable inside Event Details', asyn
   await expect(
     listbox.getByRole('option', { name: 'Europe/Berlin', exact: true }),
   ).toBeVisible();
+  await waitForDialogTransitions(dialog);
   const suggestions = await new AxeBuilder({ page })
     .include('.MuiDialog-root')
     .analyze();
