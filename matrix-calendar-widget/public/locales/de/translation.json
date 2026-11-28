@@ -491,6 +491,7 @@
     "copy-to-clipboard": "In die Zwischenablage kopieren"
   },
   "dateRangePicker": {
+    "changeStart": "Start ändern",
     "chooseDate": "Datumsbereich auswählen, ausgewählter Bereich ist {{range, daterange}}",
     "chooseEnd": "Beginn: {{date, datetime}}. Wähle jetzt ein Enddatum.",
     "chooseStart": "Wähle ein Startdatum.",
