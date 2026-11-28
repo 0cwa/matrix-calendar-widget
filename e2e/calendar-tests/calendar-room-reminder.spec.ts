@@ -14,7 +14,62 @@
  * limitations under the License.
  */
 
+import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
+
+for (const theme of ['light', 'dark']) {
+  test(`saved and draft notification status is accessible at 360 pixels in ${theme}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 360, height: 740 });
+    await page.goto(
+      `/browser-tests/index.html?mode=room-manager&theme=${theme}&meetings_bot_user_id=%40calendar-bot%3Aexample.test`,
+    );
+    await page.getByRole('button', { name: /Synthetic room planning/ }).click();
+    const dialog = page.getByRole('dialog', {
+      name: 'Synthetic room planning',
+    });
+    const toggle = dialog.getByRole('button', {
+      name: 'Matrix room notifications',
+      exact: true,
+    });
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(dialog.getByTestId('room-reminder-summary')).toHaveText('Off');
+    const collapsed = await new AxeBuilder({ page })
+      .include('[role="dialog"]')
+      .analyze();
+    expect(collapsed.violations).toEqual([]);
+
+    await toggle.click();
+    await expect(
+      dialog.getByRole('button', { name: 'Close Matrix room notifications' }),
+    ).toHaveAttribute('aria-expanded', 'true');
+    await dialog
+      .getByRole('combobox', { name: 'Who to notify in this room' })
+      .click();
+    await page.getByRole('option', { name: 'Selected people' }).click();
+    const recipients = dialog.getByRole('combobox', {
+      name: 'Selected people',
+    });
+    await recipients.fill('Alice');
+    await page.getByRole('option', { name: 'Alice', exact: true }).click();
+    await expect(dialog.getByTestId('room-reminder-status')).toHaveText([
+      /^Unsaved change: Matrix will ping Alice in this room/,
+    ]);
+    await expect(
+      dialog.getByText(/Everyone in the room can still read the message/i),
+    ).toBeVisible();
+    const expanded = await new AxeBuilder({ page })
+      .include('[role="dialog"]')
+      .analyze();
+    expect(expanded.violations).toEqual([]);
+    const bounds = await dialog.evaluate((element) => ({
+      width: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+    }));
+    expect(bounds.scrollWidth).toBeLessThanOrEqual(bounds.width + 1);
+  });
+}
 
 test('room manager can search and save an exact Matrix reminder recipient while membership updates', async ({
   page,
@@ -170,6 +225,10 @@ test('all-day notification time zones are searchable inside Event Details', asyn
   await expect(
     listbox.getByRole('option', { name: 'Europe/Berlin', exact: true }),
   ).toBeVisible();
+  const suggestions = await new AxeBuilder({ page })
+    .include('.MuiDialog-root')
+    .analyze();
+  expect(suggestions.violations).toEqual([]);
   await timezone.press('ArrowDown');
   await timezone.press('Enter');
   await expect(timezone).toHaveValue('Europe/Berlin');
