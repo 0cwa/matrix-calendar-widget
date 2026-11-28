@@ -30,7 +30,7 @@ export async function readReminderAllDayScheduleFields(details, allDay) {
     .inputValue()
     .catch(() => '');
   const timezone = await details
-    .getByRole('textbox', { name: 'Time zone (IANA)' })
+    .getByRole('textbox', { name: 'Notification time zone' })
     .inputValue()
     .catch(() => '');
 

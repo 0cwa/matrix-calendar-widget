@@ -51,11 +51,11 @@ async function chooseDestination(
   label: string,
 ) {
   await userEvent.click(
-    screen.getByRole('combobox', { name: 'Matrix destination' }),
+    screen.getByRole('combobox', { name: 'Who to notify in this room' }),
   );
   await userEvent.click(await screen.findByRole('option', { name: label }));
   expect(
-    screen.getByRole('combobox', { name: 'Matrix destination' }),
+    screen.getByRole('combobox', { name: 'Who to notify in this room' }),
   ).toHaveTextContent(value === 'room' ? 'Whole room' : label);
 }
 
@@ -202,7 +202,7 @@ function renderControl(
 }
 
 describe('<CalendarRoomReminderControl />', () => {
-  it('shows both CalDAV alarm timing and Matrix destination controls for timed events', async () => {
+  it('shows both calendar app alert timing and room notification controls for timed events', async () => {
     const { repository, enableRoomReminder } = createRepository([
       timedOption,
       unsupportedOption,
@@ -211,35 +211,53 @@ describe('<CalendarRoomReminderControl />', () => {
     renderControl(repository, { onEditCalendarReminder });
 
     await userEvent.click(
-      screen.getByRole('button', { name: 'Reminder settings' }),
+      screen.getByRole('button', { name: 'Matrix room notifications' }),
     );
 
     expect(
-      await screen.findByText('Alarm 1: −15m relative to event start'),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/CalDAV keeps the calendar alert/),
+      await screen.findByText(
+        'Calendar app alert 1: 15 minutes before the event starts',
+      ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        /CalDAV alerts are saved in the event for calendar apps\. Matrix destinations control who this room bot pings/,
+        /Follows this calendar app alert\. Event time zone: Europe\/Stockholm\./,
       ),
     ).toBeInTheDocument();
-    expect(screen.getByLabelText('Matrix destination')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /Calendar app alerts are saved with the event for calendar apps\. Matrix room notifications are separate messages from the room bot in this room/,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByLabelText('Who to notify in this room'),
+    ).toBeInTheDocument();
     expect(
       screen.queryByLabelText('Days before event'),
     ).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Local time')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Time zone (IANA)')).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText('Notification time zone'),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByText(
-        'This alarm fires at an exact UTC time, so Matrix cannot follow the event if it moves.',
+        'This alert is set to an exact UTC time, so a Matrix room notification cannot follow the event if it moves.',
       ),
     ).toBeInTheDocument();
 
+    // An alert without a room notification pings nobody.
+    expect(
+      screen.queryByText(/Preview: Matrix will ping/),
+    ).not.toBeInTheDocument();
+
     await chooseDestination('room', 'Whole room');
+    expect(
+      screen.getByText(
+        'Preview: Matrix will ping everyone in this room when this alert is due.',
+      ),
+    ).toBeInTheDocument();
     await userEvent.click(
-      screen.getByRole('button', { name: 'Save Matrix destination' }),
+      screen.getByRole('button', { name: 'Save room notification' }),
     );
 
     await waitFor(() => expect(enableRoomReminder).toHaveBeenCalledTimes(1));
@@ -259,9 +277,11 @@ describe('<CalendarRoomReminderControl />', () => {
     const { rerender } = renderControl(repository);
 
     await userEvent.click(
-      screen.getByRole('button', { name: 'Reminder settings' }),
+      screen.getByRole('button', { name: 'Matrix room notifications' }),
     );
-    await screen.findByText('Alarm 1: −15m relative to event start');
+    await screen.findByText(
+      'Calendar app alert 1: 15 minutes before the event starts',
+    );
     await chooseDestination('room', 'Whole room');
 
     rerender(
@@ -293,17 +313,19 @@ describe('<CalendarRoomReminderControl />', () => {
 
     await waitFor(() =>
       expect(
-        screen.getByRole('button', { name: 'Reminder settings' }),
+        screen.getByRole('button', { name: 'Matrix room notifications' }),
       ).toHaveAttribute('aria-expanded', 'false'),
     );
     await userEvent.click(
-      screen.getByRole('button', { name: 'Reminder settings' }),
+      screen.getByRole('button', { name: 'Matrix room notifications' }),
     );
     expect(
-      await screen.findByText(/There is no CalDAV reminder in this event yet/),
+      await screen.findByText(
+        /There is no calendar app alert on this event yet/,
+      ),
     ).toBeInTheDocument();
     expect(
-      screen.queryByLabelText('Matrix destination'),
+      screen.queryByLabelText('Who to notify in this room'),
     ).not.toBeInTheDocument();
     expect(enableRoomReminder).not.toHaveBeenCalled();
   });
@@ -356,23 +378,27 @@ describe('<CalendarRoomReminderControl />', () => {
     const view = render(renderWithRepository(first.repository));
 
     await userEvent.click(
-      screen.getByRole('button', { name: 'Reminder settings' }),
+      screen.getByRole('button', { name: 'Matrix room notifications' }),
     );
-    await screen.findByText('Alarm 1: −15m relative to event start');
+    await screen.findByText(
+      'Calendar app alert 1: 15 minutes before the event starts',
+    );
     await chooseDestination('room', 'Whole room');
 
     view.rerender(renderWithRepository(second.repository));
     await waitFor(() =>
       expect(
-        screen.getByRole('button', { name: 'Reminder settings' }),
+        screen.getByRole('button', { name: 'Matrix room notifications' }),
       ).toHaveAttribute('aria-expanded', 'false'),
     );
     await userEvent.click(
-      screen.getByRole('button', { name: 'Reminder settings' }),
+      screen.getByRole('button', { name: 'Matrix room notifications' }),
     );
 
     expect(
-      await screen.findByRole('combobox', { name: 'Matrix destination' }),
+      await screen.findByRole('combobox', {
+        name: 'Who to notify in this room',
+      }),
     ).toHaveTextContent('Selected people');
     expect(first.enableRoomReminder).not.toHaveBeenCalled();
     expect(second.enableRoomReminder).not.toHaveBeenCalled();
@@ -392,7 +418,7 @@ describe('<CalendarRoomReminderControl />', () => {
     renderControl(repository);
 
     await userEvent.click(
-      screen.getByRole('button', { name: 'Reminder settings' }),
+      screen.getByRole('button', { name: 'Matrix room notifications' }),
     );
     expect(
       await screen.findByText(/1 saved recipient\(s\) are no longer joined/),
@@ -404,8 +430,13 @@ describe('<CalendarRoomReminderControl />', () => {
     await userEvent.click(autocomplete);
     await userEvent.type(autocomplete, 'Bob');
     await userEvent.keyboard('{ArrowDown}{Enter}');
+    expect(
+      screen.getByText(
+        'Preview: Matrix will ping Alice and Bob in this room when this alert is due.',
+      ),
+    ).toBeInTheDocument();
     await userEvent.click(
-      screen.getByRole('button', { name: 'Save Matrix destination' }),
+      screen.getByRole('button', { name: 'Save room notification' }),
     );
 
     await waitFor(() => expect(enableRoomReminder).toHaveBeenCalledTimes(1));
@@ -434,12 +465,16 @@ describe('<CalendarRoomReminderControl />', () => {
     const { repository, enableRoomReminder } = createRepository([allDayOption]);
     renderControl(repository, { eventTiming: allDayEventTiming });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reminder settings' }));
-    await screen.findByText('Alarm 1: −15m relative to event start');
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Matrix room notifications' }),
+    );
+    await screen.findByText(
+      'Calendar app alert 1: 15 minutes before the event starts',
+    );
     await chooseDestination('room', 'Whole room');
     expect(
       await screen.findByText(
-        /This reminder time has already passed\. Matrix does not send past reminders\./,
+        /This notification time has already passed\. Matrix does not send past notifications\./,
       ),
     ).toBeInTheDocument();
     expect(screen.getByText(/Preview: Matrix will ping/)).toHaveTextContent(
@@ -447,7 +482,7 @@ describe('<CalendarRoomReminderControl />', () => {
     );
 
     expect(
-      screen.getByRole('button', { name: 'Save Matrix destination' }),
+      screen.getByRole('button', { name: 'Save room notification' }),
     ).toBeDisabled();
     fireEvent.change(screen.getByLabelText('Local time'), {
       target: { value: '10:00' },
@@ -456,11 +491,11 @@ describe('<CalendarRoomReminderControl />', () => {
       screen.queryByText(/Choose a future time before saving/),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Save Matrix destination' }),
+      screen.getByRole('button', { name: 'Save room notification' }),
     ).toBeEnabled();
 
     fireEvent.click(
-      screen.getByRole('button', { name: 'Save Matrix destination' }),
+      screen.getByRole('button', { name: 'Save room notification' }),
     );
     await waitFor(() => expect(enableRoomReminder).toHaveBeenCalledTimes(1));
     expect(enableRoomReminder.mock.calls[0][5]).toEqual({
@@ -486,8 +521,12 @@ describe('<CalendarRoomReminderControl />', () => {
     );
     renderControl(repository, { eventTiming: allDayEventTiming });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reminder settings' }));
-    await screen.findByText('Alarm 1: −15m relative to event start');
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Matrix room notifications' }),
+    );
+    await screen.findByText(
+      'Calendar app alert 1: 15 minutes before the event starts',
+    );
     await chooseDestination('users', 'Selected people');
     const autocomplete = screen.getByRole('combobox', {
       name: 'Selected people',
@@ -497,10 +536,10 @@ describe('<CalendarRoomReminderControl />', () => {
     await userEvent.keyboard('{ArrowDown}{Enter}');
 
     expect(
-      screen.getByRole('button', { name: 'Save Matrix destination' }),
+      screen.getByRole('button', { name: 'Save room notification' }),
     ).toBeEnabled();
     await userEvent.click(
-      screen.getByRole('button', { name: 'Save Matrix destination' }),
+      screen.getByRole('button', { name: 'Save room notification' }),
     );
     await waitFor(() => expect(enableRoomReminder).toHaveBeenCalledTimes(1));
     expect(enableRoomReminder).toHaveBeenCalledWith(
@@ -526,7 +565,9 @@ describe('<CalendarRoomReminderControl />', () => {
     );
     renderControl(repository);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reminder settings' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Matrix room notifications' }),
+    );
     expect(
       await screen.findByText(
         /calendar server could not load joined room members/i,
@@ -536,7 +577,12 @@ describe('<CalendarRoomReminderControl />', () => {
       screen.queryByText(/saved recipient\(s\) are no longer joined/),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Save Matrix destination' }),
+      screen.getByText(
+        'Preview: Matrix will ping @alice:example.test in this room when this alert is due.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Save room notification' }),
     ).toBeDisabled();
     expect(enableRoomReminder).not.toHaveBeenCalled();
 
@@ -565,8 +611,12 @@ describe('<CalendarRoomReminderControl />', () => {
       },
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reminder settings' }));
-    await screen.findByText('Alarm 1: −15m relative to event start');
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Matrix room notifications' }),
+    );
+    await screen.findByText(
+      'Calendar app alert 1: 15 minutes before the event starts',
+    );
     await chooseDestination('users', 'Selected people');
     const autocomplete = screen.getByRole('combobox', {
       name: 'Selected people',
@@ -580,8 +630,27 @@ describe('<CalendarRoomReminderControl />', () => {
     fireEvent.change(screen.getByLabelText('Local time'), {
       target: { value: '08:30' },
     });
+    expect(
+      screen.getByText(
+        'Preview: Matrix will ping Alice in this room on 2026-10-20 at 08:30 (Europe/Stockholm).',
+      ),
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Notification time zone'), {
+      target: { value: '' },
+    });
+    expect(
+      screen.queryByText(/Preview: Matrix will ping/),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /Enter the days before, local time and a valid time zone/,
+      ),
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Notification time zone'), {
+      target: { value: 'Europe/Stockholm' },
+    });
     await userEvent.click(
-      screen.getByRole('button', { name: 'Save Matrix destination' }),
+      screen.getByRole('button', { name: 'Save room notification' }),
     );
 
     await waitFor(() => expect(enableRoomReminder).toHaveBeenCalledTimes(1));
@@ -613,17 +682,92 @@ describe('<CalendarRoomReminderControl />', () => {
       isRecurringSeries: true,
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reminder settings' }));
-    await screen.findByText('Alarm 1: −15m relative to event start');
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Matrix room notifications' }),
+    );
+    await screen.findByText(
+      'Calendar app alert 1: 15 minutes before the event starts',
+    );
     await chooseDestination('room', 'Whole room');
     expect(
       await screen.findByText(
-        /This time has passed for the selected occurrence\. Matrix does not send past reminders/,
+        /This time has passed for the selected occurrence\. Matrix does not send past notifications/,
       ),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Save Matrix destination' }),
+      screen.getByRole('button', { name: 'Save room notification' }),
     ).toBeEnabled();
+  });
+
+  it('words alert timing in full units for either end of the event', async () => {
+    const { repository } = createRepository([
+      {
+        ...timedOption,
+        relatedTo: 'end',
+        trigger: {
+          weeks: 0,
+          days: 1,
+          hours: 2,
+          minutes: 0,
+          seconds: 0,
+          isNegative: true,
+        },
+      },
+      {
+        ...timedOption,
+        alarmUid: 'alarm-at-start',
+        trigger: {
+          weeks: 0,
+          days: 0,
+          hours: 0,
+          minutes: 0,
+          seconds: 0,
+          isNegative: false,
+        },
+      },
+    ]);
+    renderControl(repository);
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Matrix room notifications' }),
+    );
+
+    expect(
+      await screen.findByText(
+        'Calendar app alert 1: 1 day 2 hours before the event ends',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('Calendar app alert 2: when the event starts'),
+    ).toBeInTheDocument();
+  });
+
+  it('tells people with the same display name apart', async () => {
+    const { repository } = createRepository([timedOption]);
+    repository.listRoomReminderRecipients.mockResolvedValue([
+      { userId: '@alex:one.test', displayName: 'Alex' },
+      { userId: '@alex:two.test', displayName: 'Alex' },
+    ]);
+    renderControl(repository);
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Matrix room notifications' }),
+    );
+    await screen.findByText(
+      'Calendar app alert 1: 15 minutes before the event starts',
+    );
+    await chooseDestination('users', 'Selected people');
+    await userEvent.type(
+      screen.getByRole('combobox', { name: 'Selected people' }),
+      'two.test',
+    );
+    await userEvent.keyboard('{ArrowDown}{Enter}');
+
+    expect(
+      screen.getByText(
+        'Preview: Matrix will ping Alex (@alex:two.test) in this room when this alert is due.',
+      ),
+    ).toBeInTheDocument();
   });
 
   it('keeps unsupported alarms visible and opens CalDAV editing', async () => {
@@ -632,18 +776,18 @@ describe('<CalendarRoomReminderControl />', () => {
     renderControl(repository, { onEditCalendarReminder });
 
     await userEvent.click(
-      screen.getByRole('button', { name: 'Reminder settings' }),
+      screen.getByRole('button', { name: 'Matrix room notifications' }),
     );
     expect(
       await screen.findByText(
-        'This alarm fires at an exact UTC time, so Matrix cannot follow the event if it moves.',
+        'This alert is set to an exact UTC time, so a Matrix room notification cannot follow the event if it moves.',
       ),
     ).toBeInTheDocument();
     expect(
-      screen.queryByLabelText('Matrix destination'),
+      screen.queryByLabelText('Who to notify in this room'),
     ).not.toBeInTheDocument();
     await userEvent.click(
-      screen.getByRole('button', { name: 'Edit CalDAV reminder' }),
+      screen.getByRole('button', { name: 'Edit calendar app alert' }),
     );
     expect(onEditCalendarReminder).toHaveBeenCalledTimes(1);
   });
@@ -654,7 +798,7 @@ describe('<CalendarRoomReminderControl />', () => {
 
     expect(repository.listRoomReminderAlarmOptions).not.toHaveBeenCalled();
     expect(
-      screen.queryByRole('button', { name: 'Reminder settings' }),
+      screen.queryByRole('button', { name: 'Matrix room notifications' }),
     ).not.toBeInTheDocument();
   });
 
@@ -691,9 +835,11 @@ describe('<CalendarRoomReminderControl />', () => {
     try {
       renderControl(repository, {}, memberObserver);
       await userEvent.click(
-        screen.getByRole('button', { name: 'Reminder settings' }),
+        screen.getByRole('button', { name: 'Matrix room notifications' }),
       );
-      await screen.findByText('Alarm 1: −15m relative to event start');
+      await screen.findByText(
+        'Calendar app alert 1: 15 minutes before the event starts',
+      );
       await chooseDestination('users', 'Selected people');
       const input = screen.getByRole('combobox', { name: 'Selected people' });
 
@@ -802,9 +948,11 @@ describe('<CalendarRoomReminderControl />', () => {
 
     renderControl(repository as unknown as InMemoryCalendarRepository);
     await userEvent.click(
-      screen.getByRole('button', { name: 'Reminder settings' }),
+      screen.getByRole('button', { name: 'Matrix room notifications' }),
     );
-    await screen.findByText('Alarm 1: −15m relative to event start');
+    await screen.findByText(
+      'Calendar app alert 1: 15 minutes before the event starts',
+    );
     await chooseDestination('users', 'Selected people');
 
     const input = screen.getByRole('combobox', { name: 'Selected people' });
@@ -829,7 +977,7 @@ describe('<CalendarRoomReminderControl />', () => {
     await userEvent.keyboard('{ArrowDown}{Enter}');
     expect(screen.getByRole('button', { name: 'Member B' })).toBeVisible();
     await userEvent.click(
-      screen.getByRole('button', { name: 'Save Matrix destination' }),
+      screen.getByRole('button', { name: 'Save room notification' }),
     );
     await waitFor(() => expect(enableRoomReminder).toHaveBeenCalledTimes(1));
     expect(enableRoomReminder).toHaveBeenCalledWith(

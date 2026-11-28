@@ -245,11 +245,17 @@ describe('<CalendarEventDetailsDialog />', () => {
     await documentRoot.findByRole('dialog', { name: roomEvent.title });
     expect(document.body).not.toHaveAttribute('aria-hidden', 'true');
     await userEvent.click(
-      await documentRoot.findByRole('button', { name: 'Reminder settings' }),
+      await documentRoot.findByRole('button', {
+        name: 'Matrix room notifications',
+      }),
     );
-    await documentRoot.findByText('Alarm 1: −15m relative to event start');
+    await documentRoot.findByText(
+      'Calendar app alert 1: 15 minutes before the event starts',
+    );
     await userEvent.click(
-      documentRoot.getByRole('combobox', { name: 'Matrix destination' }),
+      documentRoot.getByRole('combobox', {
+        name: 'Who to notify in this room',
+      }),
     );
     await userEvent.click(
       await documentRoot.findByRole('option', { name: 'Selected people' }),
@@ -345,10 +351,10 @@ describe('<CalendarEventDetailsDialog />', () => {
     });
 
     await userEvent.click(
-      await screen.findByRole('button', { name: 'Reminder settings' }),
+      await screen.findByRole('button', { name: 'Matrix room notifications' }),
     );
     await userEvent.click(
-      await screen.findByRole('button', { name: 'Edit CalDAV reminder' }),
+      await screen.findByRole('button', { name: 'Edit calendar app alert' }),
     );
 
     expect(
@@ -370,11 +376,11 @@ describe('<CalendarEventDetailsDialog />', () => {
     });
 
     await userEvent.click(
-      await screen.findByRole('button', { name: 'Reminder settings' }),
+      await screen.findByRole('button', { name: 'Matrix room notifications' }),
     );
-    await screen.findByText(/There is no CalDAV reminder in this event yet/);
+    await screen.findByText(/There is no calendar app alert on this event yet/);
     await userEvent.click(
-      screen.getByRole('button', { name: 'Edit CalDAV reminder' }),
+      screen.getByRole('button', { name: 'Edit calendar app alert' }),
     );
 
     await userEvent.type(
@@ -428,37 +434,41 @@ describe('<CalendarEventDetailsDialog />', () => {
     });
 
     await userEvent.click(
-      await screen.findByRole('button', { name: 'Reminder settings' }),
+      await screen.findByRole('button', { name: 'Matrix room notifications' }),
     );
-    await screen.findByText(/There is no CalDAV reminder in this event yet/);
+    await screen.findByText(/There is no calendar app alert on this event yet/);
     await userEvent.click(
-      screen.getByRole('button', { name: 'Edit CalDAV reminder' }),
+      screen.getByRole('button', { name: 'Edit calendar app alert' }),
     );
     expect(
       await screen.findByText(
-        /Supported timed Matrix reminders follow the saved CalDAV alert; all-day events need a separate local time and time zone/,
+        /For a timed event, a supported alert sets when the room is notified\. For an all-day event, you choose a separate day, time and time zone/,
       ),
     ).toBeInTheDocument();
-    await userEvent.click(await screen.findByLabelText('CalDAV reminder'));
+    await userEvent.click(await screen.findByLabelText('Calendar app alert'));
     expect(
       await screen.findByRole('button', {
-        name: 'Save and configure Matrix reminders',
+        name: 'Save and set up room notifications',
       }),
     ).toBeEnabled();
 
     await userEvent.click(
       screen.getByRole('button', {
-        name: 'Save and configure Matrix reminders',
+        name: 'Save and set up room notifications',
       }),
     );
 
     expect(
-      await screen.findByText('Alarm 1: −15m relative to event start'),
+      await screen.findByText(
+        'Calendar app alert 1: 15 minutes before the event starts',
+      ),
     ).toBeInTheDocument();
-    expect(screen.getByLabelText('Matrix destination')).toBeInTheDocument();
+    expect(
+      screen.getByLabelText('Who to notify in this room'),
+    ).toBeInTheDocument();
     expect(
       screen.getByText(
-        'CalDAV alerts are saved in the event for calendar apps. Matrix destinations control who this room bot pings. Reminder delivery also requires current room permissions.',
+        'Calendar app alerts are saved with the event for calendar apps. Matrix room notifications are separate messages from the room bot in this room. Delivery also requires current room permissions.',
       ),
     ).toBeInTheDocument();
     expect(repository.listRoomReminderAlarmOptions).toHaveBeenCalledTimes(2);
@@ -482,15 +492,15 @@ describe('<CalendarEventDetailsDialog />', () => {
     });
 
     await userEvent.click(
-      await screen.findByRole('button', { name: 'Reminder settings' }),
+      await screen.findByRole('button', { name: 'Matrix room notifications' }),
     );
     await userEvent.click(
-      screen.getByRole('button', { name: 'Edit CalDAV reminder' }),
+      screen.getByRole('button', { name: 'Edit calendar app alert' }),
     );
-    await userEvent.click(await screen.findByLabelText('CalDAV reminder'));
+    await userEvent.click(await screen.findByLabelText('Calendar app alert'));
     await userEvent.click(
       screen.getByRole('button', {
-        name: 'Save and configure Matrix reminders',
+        name: 'Save and set up room notifications',
       }),
     );
 

@@ -222,7 +222,7 @@ export function createReminderAcceptanceHelpers(
       value: `matrix-calendar-target://room/${encodeURIComponent(supportContext.fixture.calendarId)}`,
     });
     await editor.getByRole('textbox', { name: 'Title' }).fill(title);
-    const alarmToggle = editor.getByLabel('CalDAV reminder');
+    const alarmToggle = editor.getByLabel('Calendar app alert');
     if (await alarmToggle.isChecked()) await alarmToggle.uncheck();
     if (markerPlan.allDay) {
       await editor.getByLabel('All day').check();
@@ -409,7 +409,7 @@ export function createReminderAcceptanceHelpers(
       ).toBeVisible();
       observation.alarmUiStep = 'readback-alarm-toggle';
       observation.alarmUiAlarmToggleReadback = await editor
-        .getByLabel('CalDAV reminder')
+        .getByLabel('Calendar app alert')
         .isChecked();
       observation.alarmUiStep = 'readback-relative-option';
       observation.alarmUiRelativeTriggerReadback = await editor
@@ -524,10 +524,10 @@ export function createReminderAcceptanceHelpers(
       await expect(details).toBeVisible();
       observation.alarmUiStep = 'settings-open';
       await details
-        .getByRole('button', { name: 'Reminder settings', exact: true })
+        .getByRole('button', { name: 'Matrix room notifications', exact: true })
         .click();
       const editCalDavButton = details.getByRole('button', {
-        name: 'Edit CalDAV reminder',
+        name: 'Edit calendar app alert',
         exact: true,
       });
       observation.alarmUiStep = 'edit-button-ready';
@@ -540,7 +540,7 @@ export function createReminderAcceptanceHelpers(
       });
       observation.alarmUiStep = 'editor-ready';
       await expect(editor).toBeVisible();
-      const alarmToggle = editor.getByLabel('CalDAV reminder');
+      const alarmToggle = editor.getByLabel('Calendar app alert');
       observation.alarmUiStep = 'alarm-toggle-read';
       if (!(await alarmToggle.isChecked())) {
         observation.alarmUiStep = 'alarm-toggle-enabled';
@@ -856,7 +856,7 @@ export function createReminderAcceptanceHelpers(
       await expect(details).toBeVisible();
       observation.reminderStep = 'settings-control';
       const settingsButton = details.getByRole('button', {
-        name: 'Reminder settings',
+        name: 'Matrix room notifications',
         exact: true,
       });
       observation.reminderSettingsButtonCount = Math.min(
@@ -873,7 +873,7 @@ export function createReminderAcceptanceHelpers(
       observation.reminderStep = 'options-load';
       await settingsButton.click();
       const destination = details.getByRole('combobox', {
-        name: 'Matrix destination',
+        name: 'Who to notify in this room',
       });
       await destination
         .waitFor({ state: 'visible', timeout: 20_000 })
@@ -1456,7 +1456,7 @@ export function createReminderAcceptanceHelpers(
           .fill(String(schedule.daysBefore));
         await details.getByLabel('Local time').fill(schedule.localTime);
         await details
-          .getByRole('textbox', { name: 'Time zone (IANA)' })
+          .getByRole('textbox', { name: 'Notification time zone' })
           .fill(schedule.timezone);
       }
 
@@ -1470,7 +1470,7 @@ export function createReminderAcceptanceHelpers(
         )
         .catch(() => undefined);
       await details
-        .getByRole('button', { name: 'Save Matrix destination', exact: true })
+        .getByRole('button', { name: 'Save room notification', exact: true })
         .click();
       const response = await putResponse;
       if (response) observation.reminderPutStatus = response.status();
@@ -1495,7 +1495,10 @@ export function createReminderAcceptanceHelpers(
       }
 
       await details
-        .getByRole('button', { name: 'Close reminder settings', exact: true })
+        .getByRole('button', {
+          name: 'Close Matrix room notifications',
+          exact: true,
+        })
         .click();
       await settingsButton.click();
       await destination.waitFor({ state: 'visible', timeout: 20_000 });
@@ -1549,7 +1552,10 @@ export function createReminderAcceptanceHelpers(
       }
 
       await details
-        .getByRole('button', { name: 'Close reminder settings', exact: true })
+        .getByRole('button', {
+          name: 'Close Matrix room notifications',
+          exact: true,
+        })
         .click();
       await details.getByRole('button', { name: 'Close', exact: true }).click();
       observation.reminderStep = 'complete';
@@ -1670,10 +1676,10 @@ export function createReminderAcceptanceHelpers(
       await expect(editor).toBeHidden({ timeout: 20_000 });
     }
     await details
-      .getByRole('button', { name: 'Reminder settings', exact: true })
+      .getByRole('button', { name: 'Matrix room notifications', exact: true })
       .click();
     const destination = details.getByRole('combobox', {
-      name: 'Matrix destination',
+      name: 'Who to notify in this room',
     });
     const available = await destination
       .waitFor({ state: 'visible', timeout: 20_000 })
@@ -1748,7 +1754,10 @@ export function createReminderAcceptanceHelpers(
         deliveryMatchesDue
       : true;
     await details
-      .getByRole('button', { name: 'Close reminder settings', exact: true })
+      .getByRole('button', {
+        name: 'Close Matrix room notifications',
+        exact: true,
+      })
       .click();
     await details.getByRole('button', { name: 'Close', exact: true }).click();
     return {

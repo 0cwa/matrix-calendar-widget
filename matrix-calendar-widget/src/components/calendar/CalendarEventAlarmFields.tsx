@@ -64,23 +64,23 @@ export function CalendarEventAlarmFields({
               onChange={handleAlarmToggle}
             />
           }
-          label={t('calendarEvents.editor.caldavAlarm', 'CalDAV reminder')}
+          label={t('calendarEvents.editor.caldavAlarm', 'Calendar app alert')}
         />
         {values.alarmDisabledReason && (
           <Alert severity="info">
             {t(
               'calendarEvents.editor.unsupportedAlarmReadOnly',
-              'This event contains alarm data this editor cannot safely change. Other event edits will preserve it.',
+              'This event has calendar app alert data this editor cannot safely change. Other event edits will preserve it.',
             )}
           </Alert>
         )}
         {values.alarmEnabled && values.alarmEditable !== false && (
           <Stack spacing={1}>
             <FormLabel component="legend">
-              {t('calendarEvents.editor.alarmMode', 'Alarm timing')}
+              {t('calendarEvents.editor.alarmMode', 'Alert timing')}
             </FormLabel>
             <RadioGroup
-              aria-label={t('calendarEvents.editor.alarmMode', 'Alarm timing')}
+              aria-label={t('calendarEvents.editor.alarmMode', 'Alert timing')}
               onChange={handleAlarmModeChange}
               row
               value={values.alarmMode ?? 'relative'}
@@ -121,7 +121,7 @@ export function CalendarEventAlarmFields({
                 <Typography color="text.secondary" variant="body2">
                   {t(
                     'calendarEvents.editor.absoluteAlarmBoundary',
-                    'This absolute alarm is saved to the calendar and cannot be delivered as a Matrix room reminder.',
+                    'Calendar apps receive this alert at the exact time. A Matrix room notification cannot use it. To notify the room too, choose “Before the event”.',
                   )}
                 </Typography>
               </Stack>
@@ -156,7 +156,7 @@ export function CalendarEventAlarmFields({
                 <Typography color="text.secondary" variant="body2">
                   {t(
                     'calendarEvents.editor.alarmBoundary',
-                    'This stores a CalDAV display alarm for clients that support it. Matrix reminder delivery is separate.',
+                    'Saved with the event for calendar apps that support alerts. On its own, it does not notify anyone in the Matrix room.',
                   )}
                 </Typography>
               </Stack>
@@ -168,10 +168,16 @@ export function CalendarEventAlarmFields({
       {onSaveAndConfigureRoomReminders && (
         <Alert severity="info">
           <Stack spacing={1}>
+            <Typography variant="subtitle2">
+              {t(
+                'calendarEvents.editor.matrixReminderHeading',
+                'Matrix room notifications',
+              )}
+            </Typography>
             <Typography variant="body2">
               {t(
                 'calendarEvents.editor.matrixReminderSaveFirst',
-                'Save this event first. Supported timed Matrix reminders follow the saved CalDAV alert; all-day events need a separate local time and time zone. Choose who Matrix should ping after the save.',
+                'Set these up after saving. Each one needs a saved calendar app alert on this event. For a timed event, a supported alert sets when the room is notified. For an all-day event, you choose a separate day, time and time zone. Then choose who to notify.',
               )}
             </Typography>
             <LoadingButton
@@ -200,7 +206,7 @@ export function CalendarEventAlarmFields({
             >
               {t(
                 'calendarEvents.editor.saveAndConfigureMatrixReminders',
-                'Save and configure Matrix reminders',
+                'Save and set up room notifications',
               )}
             </LoadingButton>
           </Stack>

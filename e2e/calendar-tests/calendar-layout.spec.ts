@@ -243,7 +243,10 @@ test('room visitor sees read-only event controls at a narrow width', async ({
   await expect(dialog.getByRole('button', { name: 'Edit' })).toBeDisabled();
   await expect(dialog.getByRole('button', { name: 'Delete' })).toBeDisabled();
   await expect(
-    dialog.getByRole('button', { name: 'Reminder settings', exact: true }),
+    dialog.getByRole('button', {
+      name: 'Matrix room notifications',
+      exact: true,
+    }),
   ).toHaveCount(0);
 
   await waitForDialogTransitions(dialog);
@@ -317,13 +320,15 @@ test('room manager sees writable event controls at a narrow width', async ({
   await expect(dialog.getByRole('button', { name: 'Delete' })).toBeEnabled();
   await expect(page.locator('body')).not.toHaveAttribute('aria-hidden', 'true');
   await dialog
-    .getByRole('button', { name: 'Reminder settings', exact: true })
+    .getByRole('button', { name: 'Matrix room notifications', exact: true })
     .click();
   await expect(
-    dialog.getByText('Alarm 1: −15m relative to event start'),
+    dialog.getByText(
+      'Calendar app alert 1: 15 minutes before the event starts',
+    ),
   ).toBeVisible();
   const destination = dialog.getByRole('combobox', {
-    name: 'Matrix destination',
+    name: 'Who to notify in this room',
   });
   await destination.click();
   await expect(page.getByRole('option', { name: 'Whole room' })).toBeVisible();
@@ -344,26 +349,34 @@ test('room manager sees writable event controls at a narrow width', async ({
   await expect(page.getByRole('listbox')).toBeHidden();
   await expect(dialog.locator('.MuiAutocomplete-tag')).toHaveText(['Bob']);
   await dialog
-    .getByRole('button', { name: 'Save Matrix destination', exact: true })
+    .getByRole('button', { name: 'Save room notification', exact: true })
     .click();
   await expect(
     dialog.getByText('Matrix pings the selected people.', { exact: true }),
   ).toBeVisible();
   await dialog
-    .getByRole('button', { name: 'Close reminder settings', exact: true })
+    .getByRole('button', {
+      name: 'Close Matrix room notifications',
+      exact: true,
+    })
     .click();
   await dialog
-    .getByRole('button', { name: 'Reminder settings', exact: true })
+    .getByRole('button', { name: 'Matrix room notifications', exact: true })
     .click();
   await expect(
-    dialog.getByText('Alarm 1: −15m relative to event start'),
+    dialog.getByText(
+      'Calendar app alert 1: 15 minutes before the event starts',
+    ),
   ).toBeVisible();
   await expect(
     dialog.getByText('Matrix pings the selected people.', { exact: true }),
   ).toBeVisible();
   await expect(dialog.locator('.MuiAutocomplete-tag')).toHaveText(['Bob']);
   await dialog
-    .getByRole('button', { name: 'Close reminder settings', exact: true })
+    .getByRole('button', {
+      name: 'Close Matrix room notifications',
+      exact: true,
+    })
     .click();
 
   await waitForDialogTransitions(dialog);
