@@ -35,9 +35,12 @@ export function CalendarEventsListGroup({
     <Box
       aria-labelledby={titleId}
       component="li"
-      m={0}
+      maxWidth={720}
+      mx="auto"
+      my={0}
       p={0}
       sx={{ listStyleType: 'none' }}
+      width="100%"
     >
       <SectionHeadingDivider
         id={titleId}
@@ -46,9 +49,11 @@ export function CalendarEventsListGroup({
           formatParams: {
             date: {
               weekday: 'long',
-              month: '2-digit',
+              month: 'long',
               year: 'numeric',
-              day: '2-digit',
+              day: 'numeric',
+              // The day is a calendar date that parses as UTC midnight.
+              timeZone: 'UTC',
             },
           },
         })}
@@ -57,13 +62,12 @@ export function CalendarEventsListGroup({
       <Stack
         aria-labelledby={titleId}
         component="ul"
-        maxWidth={327}
-        mb={2}
-        mt={1}
-        mx="auto"
-        px={2}
+        m={0}
+        mb={1.5}
+        mt={0.75}
+        px={1}
         py={0}
-        spacing={1}
+        spacing={0.75}
       >
         {children}
       </Stack>

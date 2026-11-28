@@ -279,12 +279,14 @@ export function CalendarEventsSurface({
       {view === 'list' ? (
         <Box height="100%" overflow="auto">
           <CalendarEventsList
+            calendars={calendars.data}
             events={filteredEvents}
             onSelectEvent={selectEvent}
           />
         </Box>
       ) : (
         <CalendarEventsCalendar
+          calendars={calendars.data}
           events={filteredEvents}
           filters={filters}
           onSelectEvent={selectEvent}

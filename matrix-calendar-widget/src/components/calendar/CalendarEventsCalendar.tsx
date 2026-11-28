@@ -25,15 +25,16 @@ import {
 import deLocale from '@fullcalendar/core/locales/de';
 import FullCalendar from '@fullcalendar/react';
 import {
+  Calendar,
   CalendarEvent,
   calendarEventTimedDateTimeToDateTime,
   isTimedCalendarEvent,
 } from '@matrix-calendar-widget/calendar';
 import EventRepeatIcon from '@mui/icons-material/EventRepeat';
-import { Box, Stack, Tooltip, Typography } from '@mui/material';
+import { Box, Stack, Tooltip, Typography, useTheme } from '@mui/material';
 import { unstable_useId as useId } from '@mui/utils';
 import { DateTime } from 'luxon';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   CalendarFilters,
@@ -41,6 +42,11 @@ import {
   calendarEventToFullCalendarEvent,
 } from '../../calendar';
 import { CalendarViewType } from '../../lib/utils';
+import {
+  CalendarColorDot,
+  EventCalendarIdentity,
+  eventCalendarIdentities,
+} from './CalendarColorDot';
 import { formatCalendarEventTime } from './CalendarEventDetailsDialog';
 import { FullCalendarThemeProvider } from './FullCalendar/FullCalendarThemeProvider';
 import {
@@ -50,12 +56,14 @@ import {
 } from './FullCalendar/plugins';
 
 export function CalendarEventsCalendar({
+  calendars,
   events,
   filters,
   onSelectEvent,
   onShowMore,
   view,
 }: {
+  calendars?: Calendar[];
   events: CalendarEvent[];
   filters: CalendarFilters;
   onSelectEvent: (event: CalendarEvent) => void;
@@ -75,6 +83,11 @@ export function CalendarEventsCalendar({
   const eventMap = useMemo(
     () => new Map(events.map((event) => [calendarEventKey(event), event])),
     [events],
+  );
+
+  const identities = useMemo(
+    () => eventCalendarIdentities(calendars ?? []),
+    [calendars],
   );
 
   const fullCalendarEvents = useMemo(
@@ -114,13 +127,14 @@ export function CalendarEventsCalendar({
       return (
         <CalendarEventCell
           buttonLabelId={arg.event.extendedProps['buttonLabelId']}
+          calendar={identities.get(event.calendarId)}
           event={event}
           viewerTimezone={viewerTimezone}
           view={view}
         />
       );
     },
-    [eventMap, viewerTimezone, view],
+    [eventMap, identities, viewerTimezone, view],
   );
 
   const handleEventClick = useCallback(
@@ -177,51 +191,100 @@ export function CalendarEventsCalendar({
 
 function CalendarEventCell({
   buttonLabelId,
+  calendar,
   event,
   viewerTimezone,
   view,
 }: {
   buttonLabelId: string;
+  calendar?: EventCalendarIdentity;
   event: CalendarEvent;
   viewerTimezone: string;
   view: CalendarViewType;
 }) {
   const { i18n, t } = useTranslation();
+  const theme = useTheme();
+  const { ref, ...tooltipState } = useEventTooltip();
+  const textLineHeight = `${theme.typography.body2.lineHeight}em`;
   const recurring = Boolean(
     event.recurrence?.rrule ||
     event.recurrence?.rdates?.length ||
     event.recurrence?.recurrenceId,
   );
-  const label = `${event.title}: ${formatCalendarEventTime(
+  const time = formatCalendarEventTime(
     event,
     i18n.language,
     t('calendarEvents.details.allDay', 'All day'),
     viewerTimezone,
-  )}`;
+  );
+  const label = calendar
+    ? `${event.title}: ${time} · ${calendar.name}`
+    : `${event.title}: ${time}`;
+  const title = (
+    <Typography
+      component="span"
+      fontWeight="bold"
+      maxWidth="100%"
+      minWidth={0}
+      noWrap={view === 'month'}
+      variant="body2"
+    >
+      {event.title}
+    </Typography>
+  );
 
   return (
     <>
-      <Tooltip title={<>{label}</>}>
-        <Box height="100%">
+      <Tooltip {...tooltipState} title={<>{label}</>}>
+        <Box height="100%" ref={ref}>
           <Stack flexDirection="row" height="100%">
+            {calendar?.color && (
+              // The height of one text line, so the dot centers on the title.
+              <Box
+                alignItems="center"
+                display="flex"
+                fontSize={theme.typography.body2.fontSize}
+                height={textLineHeight}
+                px="3px"
+              >
+                <CalendarColorDot
+                  color={calendar.color}
+                  ringColor={theme.palette.primary.contrastText}
+                />
+              </Box>
+            )}
             <Box
               flex="1"
               maxWidth="100%"
+              minWidth={0}
               overflow="hidden"
               textOverflow="ellipsis"
               whiteSpace="nowrap"
             >
-              {view === 'month' && isTimedCalendarEvent(event) && (
-                <Typography component="span" variant="body2">
-                  {calendarEventTimedDateTimeToDateTime(
-                    event.timing.start,
-                    viewerTimezone,
-                  ).toLocaleString(DateTime.TIME_SIMPLE)}{' '}
-                </Typography>
+              {view === 'month' ? (
+                // The title comes first and takes the line. The start time
+                // wraps out of sight unless it fits completely after the title.
+                <Box
+                  columnGap={0.5}
+                  display="flex"
+                  flexWrap="wrap"
+                  height={textLineHeight}
+                  overflow="hidden"
+                  fontSize={theme.typography.body2.fontSize}
+                >
+                  {title}
+                  {isTimedCalendarEvent(event) && (
+                    <Typography component="span" variant="body2">
+                      {calendarEventTimedDateTimeToDateTime(
+                        event.timing.start,
+                        viewerTimezone,
+                      ).toLocaleString(DateTime.TIME_SIMPLE)}
+                    </Typography>
+                  )}
+                </Box>
+              ) : (
+                title
               )}
-              <Typography component="span" fontWeight="bold" variant="body2">
-                {event.title}
-              </Typography>
             </Box>
             {recurring && (
               <Box display="flex" marginLeft="auto">
@@ -237,6 +300,43 @@ function CalendarEventCell({
       </Box>
     </>
   );
+}
+
+/**
+ * FullCalendar owns the focusable event element around the cell content, so the
+ * tooltip has to follow that element to show keyboard users the full title.
+ */
+function useEventTooltip() {
+  const [open, setOpen] = useState(false);
+  const [element, ref] = useState<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const eventElement = element?.closest<HTMLElement>('.fc-event');
+    if (!eventElement) {
+      return undefined;
+    }
+
+    const handleFocus = () => {
+      if (eventElement.matches(':focus-visible')) {
+        setOpen(true);
+      }
+    };
+    const handleBlur = () => setOpen(false);
+    eventElement.addEventListener('focus', handleFocus);
+    eventElement.addEventListener('blur', handleBlur);
+
+    return () => {
+      eventElement.removeEventListener('focus', handleFocus);
+      eventElement.removeEventListener('blur', handleBlur);
+    };
+  }, [element]);
+
+  return {
+    ref,
+    open,
+    onOpen: () => setOpen(true),
+    onClose: () => setOpen(false),
+  };
 }
 
 function fullCalendarViewType(view: CalendarViewType): string {

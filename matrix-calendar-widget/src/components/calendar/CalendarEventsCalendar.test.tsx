@@ -15,7 +15,7 @@
  */
 
 import { CalendarEvent } from '@matrix-calendar-widget/calendar';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Settings } from 'luxon';
 import { vi } from 'vitest';
@@ -224,6 +224,73 @@ describe('<CalendarEventsCalendar />', () => {
         zonedButton.compareDocumentPosition(newYorkButton) &
           Node.DOCUMENT_POSITION_FOLLOWING,
       ).toBeTruthy();
+    } finally {
+      offsetHeight.mockRestore();
+      boundingClientRect.mockRestore();
+      Settings.defaultZone = originalZone;
+    }
+  });
+
+  it('puts the title first and names the calendar for keyboard users', async () => {
+    const originalZone = Settings.defaultZone;
+    Settings.defaultZone = 'Europe/Stockholm';
+
+    const offsetHeight = vi
+      .spyOn(HTMLElement.prototype, 'offsetHeight', 'get')
+      .mockImplementation(() => 10);
+    const boundingClientRect = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockReturnValue({
+        bottom: 1,
+        height: 1,
+        left: 1,
+        right: 1,
+        top: 1,
+        width: 1,
+        x: 1,
+        y: 1,
+        toJSON: vi.fn(),
+      });
+
+    try {
+      render(
+        <CalendarEventsCalendar
+          calendars={[{ id: 'team', name: 'Team calendar', color: '#4177d5' }]}
+          events={[floatingEvent]}
+          filters={{
+            startDate: '2026-09-23T00:00:00+02:00',
+            endDate: '2026-09-24T00:00:00+02:00',
+          }}
+          onSelectEvent={vi.fn()}
+          onShowMore={vi.fn()}
+          view="month"
+        />,
+      );
+
+      const eventButton = await screen.findByRole('button', {
+        name: /^Floating planning: September 23, 2026 · 9:00\sAM–10:00\sAM · Team calendar$/,
+      });
+      const title = within(eventButton).getByText('Floating planning');
+      const time = within(eventButton).getByText(/^9:00\sAM$/);
+      expect(
+        title.compareDocumentPosition(time) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      expect(within(eventButton).getByTestId('calendar-color-dot')).toHaveStyle(
+        { backgroundColor: '#4177d5' },
+      );
+
+      await userEvent.tab();
+      expect(eventButton).toHaveFocus();
+
+      expect(await screen.findByRole('tooltip')).toHaveTextContent(
+        /Floating planning: .* · Team calendar/,
+      );
+
+      eventButton.blur();
+
+      await waitFor(() =>
+        expect(screen.queryByRole('tooltip')).not.toBeInTheDocument(),
+      );
     } finally {
       offsetHeight.mockRestore();
       boundingClientRect.mockRestore();

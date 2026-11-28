@@ -14,7 +14,16 @@
  * limitations under the License.
  */
 
-import { styled } from '@mui/material';
+import { darken, getContrastRatio, styled, Theme } from '@mui/material';
+
+/**
+ * The primary color, darkened if the small event text wouldn't be readable on
+ * it, as in Element's dark theme.
+ */
+function eventBackgroundColor({ palette }: Theme): string {
+  const { contrastText, main } = palette.primary;
+  return getContrastRatio(contrastText, main) >= 4.5 ? main : darken(main, 0.2);
+}
 
 export const FullCalendarThemeProvider = styled('div')(({ theme }) => ({
   // fill the outer container
@@ -27,7 +36,7 @@ export const FullCalendarThemeProvider = styled('div')(({ theme }) => ({
   '--fc-page-bg-color': theme.palette.background.default,
   '--fc-border-color': theme.palette.divider,
   '--fc-small-font-size': theme.typography.body2.fontSize,
-  '--fc-event-bg-color': theme.palette.primary.main,
+  '--fc-event-bg-color': eventBackgroundColor(theme),
   '--fc-event-border-color': theme.palette.primary.dark,
   '--fc-event-text-color': theme.palette.primary.contrastText,
   '--fc-event-selected-overlay-color': theme.palette.action.hover,
@@ -43,6 +52,29 @@ export const FullCalendarThemeProvider = styled('div')(({ theme }) => ({
   // Make events visually clickable
   '& .fc a.fc-event': {
     cursor: 'pointer',
+  },
+
+  // Keep keyboard focus visible on events
+  '& .fc a.fc-event:focus-visible': {
+    outline: `2px solid ${theme.palette.text.primary}`,
+    outlineOffset: 1,
+  },
+
+  // Mark today's date with a filled shape in addition to the pale background
+  '& .fc .fc-dayGridMonth-view .fc-day-today .fc-daygrid-day-number': {
+    backgroundColor: theme.palette.text.primary,
+    color: theme.palette.background.default,
+    borderRadius: '1em',
+    fontWeight: theme.typography.fontWeightBold,
+    lineHeight: 1.5,
+    // The vertical margin replaces the padding of other day numbers, so that
+    // events stay aligned across the week
+    margin: '4px 2px',
+    minWidth: '1.75em',
+    padding: '0 0.4em',
+    textAlign: 'center',
+    // Forced colors drop the fill but draw this outline
+    outline: '2px solid transparent',
   },
 
   // Make all events have the same height in the month view
