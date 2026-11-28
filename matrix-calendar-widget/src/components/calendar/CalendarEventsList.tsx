@@ -14,13 +14,7 @@
  * limitations under the License.
  */
 
-import {
-  Calendar,
-  CalendarEvent,
-  calendarEventTimedDateTimeToDateTime,
-  isAllDayCalendarEvent,
-  isTimedCalendarEvent,
-} from '@matrix-calendar-widget/calendar';
+import { Calendar, CalendarEvent } from '@matrix-calendar-widget/calendar';
 import {
   Box,
   Card,
@@ -44,6 +38,7 @@ import {
 import { formatCalendarEventTime } from './CalendarEventDetailsDialog';
 import { CalendarEventsListGroup } from './CalendarEventsList/CalendarEventsListGroup';
 import { useViewerToday } from './CalendarEventsList/useViewerToday';
+import { formatTimeWithinDay } from './calendarEventTimeWithinDay';
 
 export function CalendarEventsList({
   calendars = [],
@@ -149,12 +144,19 @@ export function CalendarEventsList({
 function EventTime({ day, event }: { day: string; event: CalendarEvent }) {
   const { i18n, t } = useTranslation();
   const allDayLabel = t('calendarEvents.details.allDay', 'All day');
-  const fullTime = formatCalendarEventTime(event, i18n.language, allDayLabel);
+  const viewerTimezone = DateTime.local().zoneName ?? 'UTC';
+  const fullTime = formatCalendarEventTime(
+    event,
+    i18n.language,
+    allDayLabel,
+    viewerTimezone,
+  );
   const timeWithinDay = formatTimeWithinDay(
     day,
     event,
     i18n.language,
     allDayLabel,
+    viewerTimezone,
   );
 
   return (
@@ -171,49 +173,6 @@ function EventTime({ day, event }: { day: string; event: CalendarEvent }) {
       )}
     </Typography>
   );
-}
-
-/**
- * The event time without its date, or undefined if the date carries information
- * beyond the day heading: the event spans several days, or its date in its own
- * time zone differs from the viewer's date.
- */
-function formatTimeWithinDay(
-  day: string,
-  event: CalendarEvent,
-  locale: string,
-  allDayLabel: string,
-): string | undefined {
-  if (isAllDayCalendarEvent(event)) {
-    // The end date of an all-day event is exclusive.
-    const nextDay = DateTime.fromISO(day).plus({ days: 1 }).toISODate();
-    return event.timing.endDate === nextDay ? allDayLabel : undefined;
-  }
-
-  if (!isTimedCalendarEvent(event)) {
-    return undefined;
-  }
-
-  const viewerTimezone = DateTime.local().zoneName ?? 'UTC';
-  const [start, end] = [event.timing.start, event.timing.end].map((value) =>
-    calendarEventTimedDateTimeToDateTime(value, viewerTimezone).setLocale(
-      locale,
-    ),
-  );
-  const dates = [
-    start.toISODate(),
-    end.toISODate(),
-    event.timing.start.local.slice(0, 10),
-    event.timing.end.local.slice(0, 10),
-  ];
-
-  if (dates.some((date) => date !== day)) {
-    return undefined;
-  }
-
-  return `${start.toLocaleString(DateTime.TIME_SIMPLE)}–${end.toLocaleString(
-    DateTime.TIME_SIMPLE,
-  )}`;
 }
 
 function EventCalendar({ identity }: { identity?: EventCalendarIdentity }) {

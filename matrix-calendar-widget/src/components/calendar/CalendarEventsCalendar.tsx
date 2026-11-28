@@ -145,6 +145,7 @@ export function CalendarEventsCalendar({
           buttonLabelId={arg.event.extendedProps['buttonLabelId']}
           calendar={identities.get(event.calendarId)}
           event={event}
+          startsHere={arg.isStart}
           viewerTimezone={viewerTimezone}
           view={view}
         />
@@ -228,11 +229,20 @@ export function CalendarEventsCalendar({
       <FullCalendar
         allDaySlot
         dayMaxEventRows={3}
+        eventClassNames={(arg) => {
+          const event = eventMap.get(arg.event.id);
+          return view === 'month' &&
+            event &&
+            isSingleDayTimed(event, viewerTimezone)
+            ? ['mcw-month-timed']
+            : [];
+        }}
         eventClick={handleEventClick}
         eventContent={renderEventContent}
         eventDidMount={handleEventDidMount}
         eventDisplay="block"
         eventInteractive
+        expandRows={view === 'month'}
         eventMinHeight={22}
         events={fullCalendarEvents}
         fixedWeekCount={false}
@@ -258,6 +268,7 @@ export function CalendarEventsCalendar({
           }}
           onSelectEvent={onSelectEvent}
           open={dayList.open && view === 'month'}
+          viewerTimezone={viewerTimezone}
         />
       )}
     </FullCalendarThemeProvider>
@@ -268,12 +279,14 @@ function CalendarEventCell({
   buttonLabelId,
   calendar,
   event,
+  startsHere,
   viewerTimezone,
   view,
 }: {
   buttonLabelId: string;
   calendar?: EventCalendarIdentity;
   event: CalendarEvent;
+  startsHere: boolean;
   viewerTimezone: string;
   view: CalendarViewType;
 }) {
@@ -293,10 +306,12 @@ function CalendarEventCell({
     viewerTimezone,
   );
   const label = eventLabel(event, time, calendar);
+  const lightweight =
+    view === 'month' && isSingleDayTimed(event, viewerTimezone);
   const title = (
     <Typography
       component="span"
-      fontWeight="bold"
+      fontWeight={lightweight ? 600 : 700}
       maxWidth="100%"
       minWidth={0}
       noWrap={view === 'month'}
@@ -311,7 +326,7 @@ function CalendarEventCell({
       <Tooltip {...tooltipState} title={<>{label}</>}>
         <Box height="100%" ref={ref}>
           <Stack flexDirection="row" height="100%">
-            {calendar?.color && (
+            {(calendar?.color || lightweight) && (
               // The height of one text line, so the dot centers on the title.
               <Box
                 alignItems="center"
@@ -321,8 +336,12 @@ function CalendarEventCell({
                 px="3px"
               >
                 <CalendarColorDot
-                  color={calendar.color}
-                  ringColor={theme.palette.primary.contrastText}
+                  color={calendar?.color ?? theme.palette.primary.main}
+                  ringColor={
+                    lightweight
+                      ? theme.palette.background.default
+                      : theme.palette.primary.contrastText
+                  }
                 />
               </Box>
             )}
@@ -335,25 +354,34 @@ function CalendarEventCell({
               whiteSpace="nowrap"
             >
               {view === 'month' ? (
-                // The title comes first and takes the line. The start time
-                // wraps out of sight unless it fits completely after the title.
                 <Box
-                  columnGap={0.5}
                   display="flex"
-                  flexWrap="wrap"
+                  alignItems="center"
+                  gap={0.5}
                   height={textLineHeight}
                   overflow="hidden"
-                  fontSize={theme.typography.body2.fontSize}
+                  minWidth={0}
                 >
-                  {title}
-                  {isTimedCalendarEvent(event) && (
-                    <Typography component="span" variant="body2">
+                  {startsHere && isTimedCalendarEvent(event) && (
+                    <Typography
+                      component="span"
+                      data-testid="month-event-start-time"
+                      variant="caption"
+                      sx={{
+                        color: lightweight ? 'text.secondary' : 'inherit',
+                        flexShrink: 0,
+                        fontVariantNumeric: 'tabular-nums',
+                      }}
+                    >
                       {calendarEventTimedDateTimeToDateTime(
                         event.timing.start,
                         viewerTimezone,
-                      ).toLocaleString(DateTime.TIME_SIMPLE)}
+                      )
+                        .setLocale(i18n.language)
+                        .toLocaleString(DateTime.TIME_SIMPLE)}
                     </Typography>
                   )}
+                  {title}
                 </Box>
               ) : (
                 title
@@ -436,4 +464,11 @@ function fullCalendarViewType(view: CalendarViewType): string {
 
 function normalizeId(input: string): string {
   return input.replace(/[^A-Z0-9_-]/gi, '');
+}
+
+function isSingleDayTimed(event: CalendarEvent, zone: string): boolean {
+  if (!isTimedCalendarEvent(event)) return false;
+  const start = calendarEventTimedDateTimeToDateTime(event.timing.start, zone);
+  const end = calendarEventTimedDateTimeToDateTime(event.timing.end, zone);
+  return start.toISODate() === end.toISODate();
 }

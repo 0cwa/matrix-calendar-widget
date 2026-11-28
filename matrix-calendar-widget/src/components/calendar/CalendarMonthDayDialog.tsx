@@ -33,6 +33,7 @@ import { DateTime } from 'luxon';
 import { useTranslation } from 'react-i18next';
 import { calendarEventKey } from '../../calendar';
 import { CalendarColorDot, EventCalendarIdentity } from './CalendarColorDot';
+import { formatTimeWithinDay } from './calendarEventTimeWithinDay';
 
 export type CalendarMonthDayEntry = {
   event: CalendarEvent;
@@ -55,6 +56,7 @@ export function CalendarMonthDayDialog({
   onOpenDay,
   onSelectEvent,
   open,
+  viewerTimezone,
 }: {
   /** Local midnight of the date, as FullCalendar reports it. */
   date: Date;
@@ -63,25 +65,40 @@ export function CalendarMonthDayDialog({
   onOpenDay: () => void;
   onSelectEvent: (event: CalendarEvent) => void;
   open: boolean;
+  viewerTimezone: string;
 }) {
   const { i18n, t } = useTranslation();
   const theme = useTheme();
-  const title = DateTime.local(
-    date.getFullYear(),
-    date.getMonth() + 1,
-    date.getDate(),
-  )
-    .setLocale(i18n.language)
-    .toLocaleString(DateTime.DATE_HUGE);
+  const day = DateTime.fromObject(
+    {
+      year: date.getFullYear(),
+      month: date.getMonth() + 1,
+      day: date.getDate(),
+    },
+    { zone: viewerTimezone, locale: i18n.language },
+  );
+  const dayDate = day.toISODate() ?? '';
+  const allDayLabel = t('calendarEvents.details.allDay', 'All day');
 
   return (
     <Dialog fullWidth maxWidth="xs" onClose={onClose} open={open}>
-      <DialogTitle>{title}</DialogTitle>
+      <Box sx={{ px: 3, pt: 2, pb: 1.5 }}>
+        <DialogTitle sx={{ p: 0 }}>
+          {day.toLocaleString(DateTime.DATE_HUGE)}
+        </DialogTitle>
+        <Typography color="text.secondary" variant="body2">
+          {t('calendarEvents.monthDay.eventCount', { count: entries.length })}
+        </Typography>
+      </Box>
 
       <DialogContent dividers sx={{ p: 0 }}>
         <List disablePadding>
           {entries.map(({ event, calendar, time, label }, index) => (
-            <ListItem disablePadding key={calendarEventKey(event)}>
+            <ListItem
+              disablePadding
+              divider={index < entries.length - 1}
+              key={calendarEventKey(event)}
+            >
               <ListItemButton
                 aria-label={label}
                 autoFocus={index === 0}
@@ -91,7 +108,13 @@ export function CalendarMonthDayDialog({
                 <Box minWidth={0}>
                   <Typography fontWeight="bold">{event.title}</Typography>
                   <Typography color="text.secondary" variant="body2">
-                    {time}
+                    {formatTimeWithinDay(
+                      dayDate,
+                      event,
+                      i18n.language,
+                      allDayLabel,
+                      viewerTimezone,
+                    ) ?? time}
                   </Typography>
                   {calendar && (
                     <Stack alignItems="center" direction="row" spacing={1}>

@@ -231,7 +231,7 @@ describe('<CalendarEventsCalendar />', () => {
     }
   });
 
-  it('puts the title first and names the calendar for keyboard users', async () => {
+  it('puts the time first and names the calendar for keyboard users', async () => {
     const originalZone = Settings.defaultZone;
     Settings.defaultZone = 'Europe/Stockholm';
 
@@ -273,7 +273,7 @@ describe('<CalendarEventsCalendar />', () => {
       const title = within(eventButton).getByText('Floating planning');
       const time = within(eventButton).getByText(/^9:00\sAM$/);
       expect(
-        title.compareDocumentPosition(time) & Node.DOCUMENT_POSITION_FOLLOWING,
+        time.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING,
       ).toBeTruthy();
       expect(within(eventButton).getByTestId('calendar-color-dot')).toHaveStyle(
         { backgroundColor: '#4177d5' },

@@ -221,6 +221,8 @@
     "loading": "Loading calendar events",
     "mixedCompatibilityNotice": "One or more calendars support additional item types. The widget displays and edits VEVENT entries only.",
     "monthDay": {
+      "eventCount_one": "{{count}} event",
+      "eventCount_other": "{{count}} events",
       "openDay": "Open day"
     },
     "noEvents": {
