@@ -42,6 +42,16 @@ import {
 } from './roomReminderModel';
 import { useRoomReminderRoster } from './useRoomReminderRoster';
 
+type Snapshot = {
+  options: CalendarRoomReminderAlarmOption[];
+  configurations: Record<string, CalendarRoomReminderConfiguration>;
+  orphanedConfigurations: CalendarRoomReminderConfiguration[];
+};
+
+function emptySnapshot(): Snapshot {
+  return { options: [], configurations: {}, orphanedConfigurations: [] };
+}
+
 export function useRoomReminderSettings({
   calendarId,
   eventId,
@@ -74,13 +84,8 @@ export function useRoomReminderSettings({
   const [loading, setLoading] = useState(false);
   const [savingKey, setSavingKey] = useState<string>();
   const [error, setError] = useState(false);
-  const [options, setOptions] = useState<CalendarRoomReminderAlarmOption[]>([]);
-  const [configurations, setConfigurations] = useState<
-    Record<string, CalendarRoomReminderConfiguration>
-  >({});
-  const [orphanedConfigurations, setOrphanedConfigurations] = useState<
-    CalendarRoomReminderConfiguration[]
-  >([]);
+  const [snapshot, setSnapshot] = useState(emptySnapshot);
+  const { options, configurations, orphanedConfigurations } = snapshot;
   const [drafts, setDrafts] = useState<Record<string, ReminderDraft>>({});
   const [memberSearchQueries, setMemberSearchQueries] = useState<
     Record<string, string>
@@ -98,100 +103,151 @@ export function useRoomReminderSettings({
     rosterRequestSequence,
   } = useRoomReminderRoster(reminderRepository, roomId);
   const requestSequence = useRef(0);
+  const expandSequence = useRef(0);
   const lastHandledOpenRequest = useRef(0);
   const eventTimingIdentity = JSON.stringify(eventTiming);
+  const snapshotRef = useRef(snapshot);
+  const statusRef = useRef<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [snapshotStatus, setSnapshotStatus] = useState(statusRef.current);
+  const inFlight = useRef<{
+    version: number;
+    promise: Promise<Snapshot | undefined>;
+  } | null>(null);
+  const updateSnapshot = useCallback((snapshot: Snapshot) => {
+    snapshotRef.current = snapshot;
+    setSnapshot(snapshot);
+  }, []);
+  const updateStatus = useCallback((status: typeof statusRef.current) => {
+    statusRef.current = status;
+    setSnapshotStatus(status);
+  }, []);
+  const ensureSnapshot = useCallback((): Promise<Snapshot | undefined> => {
+    if (!canManageReminders || !reminderRepository)
+      return Promise.resolve(undefined);
+    if (statusRef.current === 'ready')
+      return Promise.resolve(snapshotRef.current);
+    const version = requestSequence.current;
+    if (inFlight.current?.version === version) return inFlight.current.promise;
+    updateStatus('loading');
+    const promise = (async () => {
+      try {
+        const [availableOptions, allConfigurations] = await Promise.all([
+          reminderRepository.listRoomReminderAlarmOptions(calendarId, eventId),
+          reminderRepository.listRoomReminderConfigurations(),
+        ]);
+        const eventOptions = availableOptions.filter(
+          (option) => option.eventUid === eventUid,
+        );
+        const eventConfigurations = allConfigurations.filter(
+          (configuration) => configuration.eventUid === eventUid,
+        );
+        const keys = new Set<string>();
+        const byKey: Record<string, CalendarRoomReminderConfiguration> = {};
+        for (const option of eventOptions) {
+          const key = reminderOptionKey(option);
+          if (keys.has(key)) throw new Error('Ambiguous alarm option');
+          keys.add(key);
+          const matches = eventConfigurations.filter(
+            (configuration) => reminderOptionKey(configuration) === key,
+          );
+          if (matches.length > 1)
+            throw new Error('Ambiguous reminder configuration');
+          if (matches[0]) byKey[key] = matches[0];
+        }
+        const snapshot = {
+          options: eventOptions,
+          configurations: byKey,
+          orphanedConfigurations: eventConfigurations.filter(
+            (configuration) => !keys.has(reminderOptionKey(configuration)),
+          ),
+        };
+        if (requestSequence.current !== version) return undefined;
+        updateSnapshot(snapshot);
+        updateStatus('ready');
+        return snapshot;
+      } catch {
+        if (requestSequence.current === version) updateStatus('error');
+        return undefined;
+      } finally {
+        if (inFlight.current?.version === version) inFlight.current = null;
+      }
+    })();
+    inFlight.current = { version, promise };
+    return promise;
+  }, [
+    calendarId,
+    eventId,
+    eventUid,
+    canManageReminders,
+    reminderRepository,
+    updateSnapshot,
+    updateStatus,
+  ]);
+
   const load = useCallback(async () => {
-    if (!canManageReminders || !reminderRepository) {
-      return;
-    }
-    const requestId = ++requestSequence.current;
+    if (!canManageReminders || !reminderRepository) return;
+    const version = requestSequence.current;
+    const expansion = ++expandSequence.current;
     setOpen(true);
     setLoading(true);
     setError(false);
-    setOptions([]);
-    setConfigurations({});
-    setOrphanedConfigurations([]);
-    setDrafts({});
     setMemberSearchQueries({});
-    setRoomRecipients([]);
-    try {
-      const [availableOptions, allConfigurations, currentMembers] =
-        await Promise.all([
-          reminderRepository.listRoomReminderAlarmOptions(calendarId, eventId),
-          reminderRepository.listRoomReminderConfigurations(),
-          loadRoomRecipients(),
-        ]);
-      if (requestSequence.current !== requestId) return;
-      const membersUnavailable = currentMembers === undefined;
-      const loadedMembers = currentMembers ?? [];
-      const eventOptions = availableOptions.filter(
-        (candidate) => candidate.eventUid === eventUid,
-      );
-      const eventConfigurations = allConfigurations.filter(
-        (configuration) => configuration.eventUid === eventUid,
-      );
-      const optionKeys = new Set<string>();
-      const byKey: Record<string, CalendarRoomReminderConfiguration> = {};
-      const draftByKey: Record<string, ReminderDraft> = {};
-      for (const option of eventOptions) {
+    const [snapshot, currentMembers] = await Promise.all([
+      ensureSnapshot(),
+      loadRoomRecipients(),
+    ]);
+    if (
+      requestSequence.current !== version ||
+      expandSequence.current !== expansion
+    )
+      return;
+    if (!snapshot) {
+      setError(true);
+    } else {
+      const next: Record<string, ReminderDraft> = {};
+      for (const option of snapshot.options) {
         const key = reminderOptionKey(option);
-        if (optionKeys.has(key)) throw new Error('Ambiguous alarm option');
-        optionKeys.add(key);
-        const matches = eventConfigurations.filter(
-          (configuration) => reminderOptionKey(configuration) === key,
-        );
-        if (matches.length > 1) {
-          throw new Error('Ambiguous reminder configuration');
-        }
-        const configuration = matches[0];
-        if (configuration) byKey[key] = configuration;
-        draftByKey[key] = createDraft(
-          configuration,
-          loadedMembers,
+        next[key] = createDraft(
+          snapshot.configurations[key],
+          currentMembers ?? [],
           calendarTimezone,
-          membersUnavailable,
+          currentMembers === undefined,
         );
       }
-      setOptions(eventOptions);
-      setConfigurations(byKey);
-      setOrphanedConfigurations(
-        eventConfigurations.filter(
-          (configuration) => !optionKeys.has(reminderOptionKey(configuration)),
-        ),
-      );
-      setDrafts(draftByKey);
-      setMemberSearchQueries({});
-    } catch {
-      if (requestSequence.current === requestId) setError(true);
-    } finally {
-      if (requestSequence.current === requestId) setLoading(false);
+      setDrafts(next);
     }
+    setLoading(false);
   }, [
-    calendarId,
-    calendarTimezone,
     canManageReminders,
-    eventId,
-    eventUid,
-    loadRoomRecipients,
     reminderRepository,
-    setRoomRecipients,
+    ensureSnapshot,
+    loadRoomRecipients,
+    calendarTimezone,
   ]);
 
   useEffect(() => {
     requestSequence.current += 1;
+    expandSequence.current += 1;
     rosterRequestSequence.current += 1;
+    inFlight.current = null;
     setOpen(false);
     setLoading(false);
     setSavingKey(undefined);
     setError(false);
-    setOptions([]);
-    setConfigurations({});
-    setOrphanedConfigurations([]);
+    updateSnapshot(emptySnapshot());
+    updateStatus(canManageReminders && reminderRepository ? 'loading' : 'idle');
     setDrafts({});
     setMemberSearchQueries({});
     setRoomRecipients([]);
     setRoomMembersUnavailable(false);
     setRoomMembersLoading(false);
+    void ensureSnapshot();
+    return () => {
+      requestSequence.current += 1;
+      expandSequence.current += 1;
+      rosterRequestSequence.current += 1;
+      inFlight.current = null;
+    };
   }, [
     calendarId,
     eventId,
@@ -207,14 +263,11 @@ export function useRoomReminderSettings({
     setRoomMembersLoading,
     setRoomMembersUnavailable,
     setRoomRecipients,
+    ensureSnapshot,
+    reminderRepository,
+    updateSnapshot,
+    updateStatus,
   ]);
-
-  useEffect(
-    () => () => {
-      requestSequence.current += 1;
-    },
-    [],
-  );
 
   useEffect(() => {
     if (
@@ -277,11 +330,9 @@ export function useRoomReminderSettings({
         if (configured)
           await reminderRepository.disableRoomReminder(configured);
         if (requestSequence.current !== requestId) return;
-        setConfigurations((current) => {
-          const next = { ...current };
-          delete next[key];
-          return next;
-        });
+        const next = { ...snapshotRef.current.configurations };
+        delete next[key];
+        updateSnapshot({ ...snapshotRef.current, configurations: next });
         return;
       }
 
@@ -324,7 +375,10 @@ export function useRoomReminderSettings({
       ) {
         throw new Error('Reminder identity changed');
       }
-      setConfigurations((current) => ({ ...current, [key]: saved }));
+      updateSnapshot({
+        ...snapshotRef.current,
+        configurations: { ...snapshotRef.current.configurations, [key]: saved },
+      });
       setDrafts((current) => ({
         ...current,
         [key]: { ...current[key], departedUserIds: [] },
@@ -350,9 +404,13 @@ export function useRoomReminderSettings({
     try {
       await reminderRepository.disableRoomReminder(configuration);
       if (requestSequence.current !== requestId) return;
-      setOrphanedConfigurations((current) =>
-        current.filter((candidate) => reminderOptionKey(candidate) !== key),
-      );
+      updateSnapshot({
+        ...snapshotRef.current,
+        orphanedConfigurations:
+          snapshotRef.current.orphanedConfigurations.filter(
+            (candidate) => reminderOptionKey(candidate) !== key,
+          ),
+      });
     } catch {
       if (requestSequence.current === requestId) setError(true);
     } finally {
@@ -363,7 +421,19 @@ export function useRoomReminderSettings({
   return {
     reminderRepository,
     open,
-    setOpen,
+    setOpen: (value: boolean) => {
+      if (!value) {
+        if (savingKey) return;
+        expandSequence.current += 1;
+        setLoading(false);
+      }
+      setOpen(value);
+    },
+    summaryLoading:
+      canManageReminders &&
+      Boolean(reminderRepository) &&
+      (snapshotStatus === 'idle' || snapshotStatus === 'loading'),
+    summaryError: snapshotStatus === 'error',
     loading,
     savingKey,
     error,

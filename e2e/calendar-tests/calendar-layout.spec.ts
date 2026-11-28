@@ -17,6 +17,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { writeFile } from 'node:fs/promises';
+import { waitForDialogTransitions } from './waitForDialogTransitions';
 
 const viewports = [
   { width: 320, height: 640 },
@@ -582,7 +583,9 @@ test('room manager sees writable event controls at a narrow width', async ({
     .getByRole('button', { name: 'Save room notification', exact: true })
     .click();
   await expect(
-    dialog.getByText('Matrix pings the selected people.', { exact: true }),
+    dialog
+      .getByTestId('room-reminder-status')
+      .filter({ hasText: /^Saved: Matrix pings .+ in this room/ }),
   ).toBeVisible();
   await dialog
     .getByRole('button', {
@@ -599,7 +602,9 @@ test('room manager sees writable event controls at a narrow width', async ({
     ),
   ).toBeVisible();
   await expect(
-    dialog.getByText('Matrix pings the selected people.', { exact: true }),
+    dialog
+      .getByTestId('room-reminder-status')
+      .filter({ hasText: /^Saved: Matrix pings .+ in this room/ }),
   ).toBeVisible();
   await expect(dialog.locator('.MuiAutocomplete-tag')).toHaveText(['Bob']);
   await dialog
@@ -658,29 +663,6 @@ async function tabToEvent(page: Page, event: Locator): Promise<void> {
       return;
     }
   }
-}
-
-async function waitForDialogTransitions(dialog: Locator): Promise<void> {
-  await dialog.evaluate(async (element) => {
-    const dialogRoot = element.closest('.MuiDialog-root');
-    if (!dialogRoot) return;
-
-    await new Promise<void>((resolve) => {
-      window.requestAnimationFrame(() => resolve());
-    });
-    const dialogElements = [
-      dialogRoot,
-      ...Array.from(dialogRoot.querySelectorAll('*')),
-    ];
-    const transitions = dialogElements
-      .flatMap((dialogElement) => dialogElement.getAnimations())
-      .filter((animation) => animation.constructor.name === 'CSSTransition');
-    await Promise.all(
-      transitions.map((transition) =>
-        transition.finished.catch(() => undefined),
-      ),
-    );
-  });
 }
 
 async function readDialogMeasurements(dialogLocator: Locator) {

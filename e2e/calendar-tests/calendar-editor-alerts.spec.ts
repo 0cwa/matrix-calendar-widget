@@ -16,6 +16,7 @@
 
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
+import { waitForDialogTransitions } from './waitForDialogTransitions';
 
 test('the editor keeps its actions visible and explains alert choices', async ({
   page,
@@ -108,6 +109,7 @@ test('the editor displays every saved multi-unit alert value', async ({
 });
 
 async function expectDialogAccessibility(page: Page) {
+  await waitForDialogTransitions(page.getByRole('dialog'));
   const result = await new AxeBuilder({ page })
     .include('.MuiDialog-root')
     .analyze();

@@ -26,7 +26,6 @@ import {
   createFilterOptions,
   Divider,
   FormControl,
-  FormHelperText,
   InputLabel,
   MenuItem,
   Select,
@@ -48,9 +47,12 @@ import {
   isValidRoomReminderTimezone,
   reminderOptionKey,
   sameAllDaySchedule,
+  summarizeRoomReminders,
   validateAllDayDraft,
   type CalendarReminderMember,
   type ReminderDestinationChoice,
+  type ReminderDraft,
+  type RoomReminderSummary,
 } from './roomReminderModel';
 import { useRoomReminderSettings } from './useRoomReminderSettings';
 
@@ -83,6 +85,8 @@ export function CalendarRoomReminderPicker({
     options,
     configurations,
     orphanedConfigurations,
+    summaryLoading,
+    summaryError,
     drafts,
     memberSearchQueries,
     setMemberSearchQueries,
@@ -97,6 +101,13 @@ export function CalendarRoomReminderPicker({
     save,
     removeOrphan,
   } = settings;
+  const summary = summarizeRoomReminders(
+    summaryLoading,
+    summaryError,
+    options,
+    configurations,
+    orphanedConfigurations,
+  );
   const renderOption = (
     option: CalendarRoomReminderAlarmOption,
     index: number,
@@ -116,12 +127,6 @@ export function CalendarRoomReminderPicker({
           ],
     );
     const missingMembers = departedUserIds.size > 0;
-    const targetValue =
-      configuration?.target.kind === 'room'
-        ? 'room'
-        : configuration?.target.kind === 'users'
-          ? 'users'
-          : 'off';
     const selectedRecurringSeries =
       isRecurringSeries && option.recurrenceId === null;
     const now = Date.now();
@@ -146,6 +151,19 @@ export function CalendarRoomReminderPicker({
       i18n.language,
       t,
     );
+    const status = formatNotificationStatus(t, {
+      draft,
+      changed,
+      recipients,
+      eventTiming,
+      allDay: option.requiresAllDaySchedule,
+    });
+    const timingDescription = option.requiresAllDaySchedule
+      ? t(
+          'calendarEvents.roomReminder.allDayTiming',
+          'All-day events use a separate notification day, time, and time zone.',
+        )
+      : formatTimedTiming(eventTiming, t);
     const selectedPeopleUnavailable =
       draft.destination === 'users' &&
       (roomMembersLoading ||
@@ -156,7 +174,7 @@ export function CalendarRoomReminderPicker({
     return (
       <Stack key={key} spacing={1.25} sx={{ py: 1.25 }}>
         <Stack spacing={0.35}>
-          <Typography variant="subtitle2">
+          <Typography component="h3" variant="subtitle2">
             {formatOption(option, index + 1, t)}
           </Typography>
           {!option.supported && (
@@ -164,14 +182,9 @@ export function CalendarRoomReminderPicker({
               {formatUnavailableReason(option.unavailableReason, t)}
             </Typography>
           )}
-          {option.supported && (
+          {option.supported && timingDescription && (
             <Typography color="text.secondary" variant="body2">
-              {option.requiresAllDaySchedule
-                ? t(
-                    'calendarEvents.roomReminder.allDayTiming',
-                    'This event lasts all day, so the room notification has its own day, time and time zone. The alert’s lead time does not set them.',
-                  )
-                : formatTimedTiming(eventTiming, t)}
+              {timingDescription}
             </Typography>
           )}
         </Stack>
@@ -219,12 +232,6 @@ export function CalendarRoomReminderPicker({
                   )}
                 </MenuItem>
               </Select>
-              <FormHelperText>
-                {t(
-                  'calendarEvents.roomReminder.destinationHelp',
-                  'Off keeps the calendar app alert and sends no Matrix room notification.',
-                )}
-              </FormHelperText>
             </FormControl>
 
             {(members.length === 0 || roomMembersUnavailable) && (
@@ -299,7 +306,7 @@ export function CalendarRoomReminderPicker({
                       {...params}
                       helperText={t(
                         'calendarEvents.roomReminder.peopleHelp',
-                        'Only joined room members appear here. Up to 50 people can be pinged. Everyone in the room can still read the message.',
+                        'Only joined room members appear here (up to 50). Everyone in the room can still read the message.',
                       )}
                       label={t(
                         'calendarEvents.roomReminder.selectedPeople',
@@ -329,39 +336,27 @@ export function CalendarRoomReminderPicker({
 
             {option.requiresAllDaySchedule && draft.destination !== 'off' && (
               <AllDayScheduleFields
-                eventTiming={eventTiming}
                 isRecurringSeries={selectedRecurringSeries}
-                now={now}
+                pastSchedule={pastSchedule}
                 popperContainer={popperContainer}
                 onChange={(allDaySchedule) =>
                   updateDraft(key, { allDaySchedule })
                 }
-                recipients={recipients}
                 schedule={draft.allDaySchedule}
                 t={t}
               />
             )}
 
-            {!option.requiresAllDaySchedule && draft.destination !== 'off' && (
-              <Typography color="text.secondary" variant="body2">
-                {recipients === undefined
-                  ? t(
-                      'calendarEvents.roomReminder.previewNoPeople',
-                      'Choose at least one person to preview who Matrix will ping.',
-                    )
-                  : t(
-                      'calendarEvents.roomReminder.timedPreview',
-                      'Preview: Matrix will ping {{destination}} when this alert is due.',
-                      { destination: recipients },
-                    )}
+            <Stack alignItems="flex-start" spacing={1}>
+              <Typography
+                aria-live={changed ? 'off' : 'polite'}
+                color={changed ? 'text.primary' : 'text.secondary'}
+                data-testid="room-reminder-status"
+                sx={{ fontWeight: changed ? 600 : 400 }}
+                variant="body2"
+              >
+                {status}
               </Typography>
-            )}
-
-            <Stack
-              alignItems={{ sm: 'center', xs: 'stretch' }}
-              direction={{ sm: 'row', xs: 'column' }}
-              spacing={1}
-            >
               <Button
                 disabled={
                   !changed ||
@@ -381,19 +376,6 @@ export function CalendarRoomReminderPicker({
                       'Save room notification',
                     )}
               </Button>
-              {targetValue !== 'off' && !changed && (
-                <Typography color="text.secondary" variant="body2">
-                  {targetValue === 'room'
-                    ? t(
-                        'calendarEvents.roomReminder.roomSaved',
-                        'Matrix pings the whole room.',
-                      )
-                    : t(
-                        'calendarEvents.roomReminder.peopleSaved',
-                        'Matrix pings the selected people.',
-                      )}
-                </Typography>
-              )}
             </Stack>
           </Stack>
         ) : (
@@ -427,7 +409,7 @@ export function CalendarRoomReminderPicker({
     const key = reminderOptionKey(configuration);
     return (
       <Stack key={key} spacing={0.75} sx={{ py: 1 }}>
-        <Typography variant="subtitle2">
+        <Typography component="h3" variant="subtitle2">
           {t(
             'calendarEvents.roomReminder.missingCalDavAlarm',
             'Calendar app alert no longer available',
@@ -459,6 +441,7 @@ export function CalendarRoomReminderPicker({
     <Stack spacing={0.75}>
       <Button
         aria-expanded={open}
+        disabled={Boolean(savingKey)}
         onClick={() => (open ? setOpen(false) : void load())}
         size="small"
         sx={{ alignSelf: 'flex-start' }}
@@ -473,12 +456,21 @@ export function CalendarRoomReminderPicker({
               'Matrix room notifications',
             )}
       </Button>
+      {!open && (
+        <Typography
+          color="text.secondary"
+          data-testid="room-reminder-summary"
+          variant="body2"
+        >
+          {formatSummary(summary, t)}
+        </Typography>
+      )}
       {open && (
         <Stack spacing={1}>
           <Typography color="text.secondary" variant="body2">
             {t(
               'calendarEvents.roomReminder.description',
-              'Calendar app alerts are saved with the event for calendar apps. Matrix room notifications are separate messages from the room bot in this room. Delivery also requires current room permissions.',
+              'Calendar app alerts stay on the event. Matrix room notifications are sent separately by the room bot and require current room permissions.',
             )}
           </Typography>
           {loading && (
@@ -538,33 +530,152 @@ export function CalendarRoomReminderPicker({
   );
 }
 
+function formatSummary(summary: RoomReminderSummary, t: TFunction): string {
+  switch (summary.kind) {
+    case 'loading':
+      return t(
+        'calendarEvents.roomReminder.summary.loading',
+        'Checking notification status…',
+      );
+    case 'error':
+      return t(
+        'calendarEvents.roomReminder.summary.error',
+        'Notification status unavailable.',
+      );
+    case 'no-alerts':
+      return t(
+        'calendarEvents.roomReminder.summary.noAlerts',
+        'No calendar app alert yet.',
+      );
+    case 'off':
+      return t('calendarEvents.roomReminder.off', 'Off');
+    case 'whole-room':
+      return t('calendarEvents.roomReminder.wholeRoom', 'Whole room');
+    case 'unsupported':
+      return t(
+        'calendarEvents.roomReminder.summary.unsupported',
+        'Needs attention — alert unsupported',
+      );
+    case 'orphaned':
+      return t(
+        'calendarEvents.roomReminder.summary.orphaned',
+        'Needs cleanup — linked alert removed',
+      );
+    case 'selected-people':
+      return t('calendarEvents.roomReminder.summary.selectedPeople', {
+        count: summary.count,
+        defaultValue_one: '{{count}} selected person',
+        defaultValue_other: '{{count}} selected people',
+      });
+    case 'multiple':
+      return t('calendarEvents.roomReminder.summary.multiple', {
+        count: summary.count,
+        defaultValue_one: '{{count}} active notification',
+        defaultValue_other: '{{count}} active notifications',
+      });
+  }
+}
+
+function formatNotificationStatus(
+  t: TFunction,
+  {
+    draft,
+    recipients,
+    changed,
+    eventTiming,
+    allDay,
+  }: {
+    draft: ReminderDraft;
+    recipients: string | undefined;
+    changed: boolean;
+    eventTiming: CalendarEventTiming;
+    allDay: boolean;
+  },
+): string {
+  if (draft.destination === 'off') {
+    return changed
+      ? t(
+          'calendarEvents.roomReminder.unsavedOff',
+          'Unsaved change: Saving will turn off this Matrix room notification.',
+        )
+      : t(
+          'calendarEvents.roomReminder.savedOff',
+          'Saved: Off — no Matrix room notification will be sent.',
+        );
+  }
+  if (!recipients) {
+    return changed
+      ? t(
+          'calendarEvents.roomReminder.previewNoPeople',
+          'Choose at least one person to preview who Matrix will ping.',
+        )
+      : t(
+          'calendarEvents.roomReminder.savedSelectedPeople',
+          'Saved: This Matrix room notification targets selected people.',
+        );
+  }
+  if (!allDay) {
+    return changed
+      ? t(
+          'calendarEvents.roomReminder.unsavedTimed',
+          'Unsaved change: Matrix will ping {{destination}} when this alert is due.',
+          { destination: recipients },
+        )
+      : t(
+          'calendarEvents.roomReminder.savedTimed',
+          'Saved: Matrix pings {{destination}} when this alert is due.',
+          { destination: recipients },
+        );
+  }
+  const schedule = validateAllDayDraft(draft.allDaySchedule);
+  if (!schedule || eventTiming.type !== 'all-day') {
+    return changed
+      ? t(
+          'calendarEvents.roomReminder.previewUnavailable',
+          'Enter the days before, local time and a valid time zone to preview this room notification.',
+        )
+      : t(
+          'calendarEvents.roomReminder.savedScheduleUnavailable',
+          'Saved: Check the day, time and time zone for this Matrix room notification.',
+        );
+  }
+  const preview = {
+    destination: recipients,
+    date: previewAllDayDate(eventTiming.startDate, schedule.daysBefore),
+    time: schedule.localTime,
+    timezone: schedule.timezone,
+  };
+  return changed
+    ? t(
+        'calendarEvents.roomReminder.unsavedAllDay',
+        'Unsaved change: Matrix will ping {{destination}} on {{date}} at {{time}} ({{timezone}}).',
+        preview,
+      )
+    : t(
+        'calendarEvents.roomReminder.savedAllDay',
+        'Saved: Matrix pings {{destination}} on {{date}} at {{time}} ({{timezone}}).',
+        preview,
+      );
+}
+
 function AllDayScheduleFields({
-  eventTiming,
   isRecurringSeries,
-  now,
   onChange,
   popperContainer,
-  recipients,
+  pastSchedule,
   schedule,
   t,
 }: {
-  eventTiming: CalendarEventTiming;
   isRecurringSeries: boolean;
-  now: number;
   onChange: (schedule: CalendarRoomReminderAllDaySchedule) => void;
   popperContainer?: () => HTMLElement | null;
-  recipients: string | undefined;
+  pastSchedule: 'past' | 'future' | undefined;
   schedule: CalendarRoomReminderAllDaySchedule;
   t: TFunction;
 }) {
-  const preview =
-    eventTiming.type === 'all-day' && validateAllDayDraft(schedule)
-      ? previewAllDayDate(eventTiming.startDate, schedule.daysBefore)
-      : undefined;
-  const pastSchedule = getAllDaySchedulePastState(schedule, eventTiming, now);
   return (
     <Stack spacing={1}>
-      <Typography variant="subtitle2">
+      <Typography component="h4" variant="subtitle2">
         {t(
           'calendarEvents.roomReminder.allDaySchedule',
           'When to notify for this all-day event',
@@ -609,28 +720,6 @@ function AllDayScheduleFields({
         popperContainer={popperContainer}
         value={schedule.timezone}
       />
-      <Typography color="text.secondary" variant="body2">
-        {recipients === undefined
-          ? t(
-              'calendarEvents.roomReminder.previewNoPeople',
-              'Choose at least one person to preview who Matrix will ping.',
-            )
-          : preview
-            ? t(
-                'calendarEvents.roomReminder.preview',
-                'Preview: Matrix will ping {{destination}} on {{date}} at {{time}} ({{timezone}}).',
-                {
-                  destination: recipients,
-                  date: preview,
-                  time: schedule.localTime,
-                  timezone: schedule.timezone,
-                },
-              )
-            : t(
-                'calendarEvents.roomReminder.previewUnavailable',
-                'Enter the days before, local time and a valid time zone to preview this room notification.',
-              )}
-      </Typography>
       {pastSchedule === 'past' && (
         <Alert severity="warning">
           {isRecurringSeries
@@ -737,13 +826,10 @@ function formatTimedTiming(
   return timezone
     ? t(
         'calendarEvents.roomReminder.timedTiming',
-        'Follows this calendar app alert. Event time zone: {{timezone}}.',
+        'Follows this alert ({{timezone}}).',
         { timezone },
       )
-    : t(
-        'calendarEvents.roomReminder.timedTimingNoZone',
-        'Follows this calendar app alert.',
-      );
+    : '';
 }
 
 function formatOption(
