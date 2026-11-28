@@ -16,17 +16,19 @@
 
 import SearchIcon from '@mui/icons-material/Search';
 import { InputAdornment, TextField } from '@mui/material';
-import { ChangeEvent, useCallback } from 'react';
+import { ChangeEvent, Ref, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 
 type CalendarToolbarSearchProps = {
   search: string;
   onSearchChange: (search: string) => void;
+  inputRef?: Ref<HTMLInputElement>;
 };
 
 export const CalendarToolbarSearch = ({
   search,
   onSearchChange,
+  inputRef,
 }: CalendarToolbarSearchProps) => {
   const { t } = useTranslation();
 
@@ -47,6 +49,7 @@ export const CalendarToolbarSearch = ({
         ),
       }}
       fullWidth
+      inputRef={inputRef}
       inputProps={{
         'aria-label': t('meetingsToolbar.filterAriaLabel', 'Search'),
       }}

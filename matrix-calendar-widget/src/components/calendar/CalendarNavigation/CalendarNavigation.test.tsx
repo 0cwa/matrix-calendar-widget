@@ -57,7 +57,7 @@ describe('<CalendarNavigation/>', () => {
     expect(options).toHaveLength(5);
     expect(options[0]).toHaveAccessibleName('List');
     expect(options[1]).toHaveAccessibleName('Day');
-    expect(options[2]).toHaveAccessibleName('Work Week');
+    expect(options[2]).toHaveAccessibleName('Work week');
     expect(options[3]).toHaveAccessibleName('Week');
     expect(options[4]).toHaveAccessibleName('Month');
   });
@@ -137,7 +137,7 @@ describe('<CalendarNavigation/>', () => {
     ).not.toHaveAttribute('aria-disabled');
     expect(
       within(listbox).getByRole('option', {
-        name: 'Work Week Increase widget width',
+        name: 'Work week Increase widget width',
       }),
     ).toHaveAttribute('aria-disabled', 'true');
     expect(

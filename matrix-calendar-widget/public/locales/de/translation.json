@@ -209,8 +209,28 @@
       "yearly": "Jährlich"
     },
     "empty": "Keine Termine gefunden, die den ausgewählten Filtern entsprechen.",
+    "hiddenCalendars": {
+      "show": "Alle Kalender anzeigen",
+      "title": "Keine Termine in den ausgewählten Kalendern"
+    },
+    "list": {
+      "today": "Heute · {{date}}",
+      "tomorrow": "Morgen · {{date}}"
+    },
     "loadError": "Kalendertermine konnten nicht geladen werden.",
+    "loading": "Kalendertermine werden geladen",
     "mixedCompatibilityNotice": "Mindestens ein Kalender unterstützt weitere Elementtypen. Das Widget zeigt und bearbeitet ausschließlich VEVENT-Termine.",
+    "noEvents": {
+      "description": "Mit der Datumsnavigation kannst du andere Tage ansehen.",
+      "incompleteTitle": "Für diesen Zeitraum können keine Termine angezeigt werden",
+      "title": "Keine Termine in diesem Zeitraum"
+    },
+    "noReadableCalendar": "Es gibt keinen Kalender, der angezeigt werden kann.",
+    "noSearchResults": {
+      "clear": "Suche zurücksetzen",
+      "description": "Die Suche prüft Titel, Beschreibungen, Orte und Kategorien im ausgewählten Zeitraum.",
+      "title": "Keine Termine passen zu „{{query}}“"
+    },
     "partialAvailability": "Einige Kalender oder Termine konnten nicht geladen werden. Verfügbare Kalender werden weiterhin angezeigt.",
     "recurrence": {
       "addedDates": "Enthält zusätzliche Termine.",
@@ -239,6 +259,8 @@
       "weekly": "Wiederholt sich wöchentlich am {{days}}.",
       "yearly": "Wiederholt sich jährlich am {{date}}."
     },
+    "refreshing": "Kalendertermine werden aktualisiert",
+    "retry": "Erneut versuchen",
     "roomCalendarUnavailable": "Für diesen Raum ist kein Teamkalender verfügbar. Bitte frag einen Raum-Moderator oder Kalenderadministrator, ob die Einrichtung geprüft werden kann.",
     "roomReminder": {
       "absoluteTrigger": "Dieser Alarm ist auf eine feste UTC-Zeit eingestellt. Eine Matrix-Raumbenachrichtigung kann einer Terminverschiebung daher nicht folgen.",
@@ -462,6 +484,8 @@
   },
   "dateRangePicker": {
     "chooseDate": "Datumsbereich auswählen, ausgewählter Bereich ist {{range, daterange}}",
+    "chooseEnd": "Beginn: {{date, datetime}}. Wähle jetzt ein Enddatum.",
+    "chooseStart": "Wähle ein Startdatum.",
     "dateRange": "{{range, daterange}}"
   },
   "dateTimePickers": {

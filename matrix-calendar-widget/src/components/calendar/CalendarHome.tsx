@@ -17,6 +17,7 @@
 import { useWidgetApi } from '@matrix-widget-toolkit/react';
 import { Box, Stack, Typography } from '@mui/material';
 import { unstable_useId as useId, visuallyHidden } from '@mui/utils';
+import { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CalendarEventsSurface } from './CalendarEventsSurface';
 import { CalendarToolbar } from './CalendarToolbar';
@@ -30,6 +31,8 @@ export function CalendarHome() {
     useCalendarSurfaceState(viewStorageKey);
 
   const filtersId = useId();
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const createButtonRef = useRef<HTMLButtonElement>(null);
 
   return (
     <Stack height="100%">
@@ -39,10 +42,12 @@ export function CalendarHome() {
         </Typography>
         <Box my={1}>
           <CalendarToolbar
+            createButtonRef={createButtonRef}
             filters={filters}
             onRangeChange={setRange}
             onSearchChange={setSearch}
             onViewChange={setView}
+            searchInputRef={searchInputRef}
             view={view}
           />
         </Box>
@@ -51,6 +56,16 @@ export function CalendarHome() {
       <Box flexGrow={1} mb={view === 'list' ? 0 : 1} overflow="hidden">
         <CalendarEventsSurface
           filters={filters}
+          onClearSearch={() => {
+            setSearch('');
+            searchInputRef.current?.focus();
+          }}
+          // Focus the toolbar button first: it stays after the empty state is
+          // gone, so closing the editor returns focus to it.
+          onCreateEvent={() => {
+            createButtonRef.current?.focus();
+            createButtonRef.current?.click();
+          }}
           onShowMore={showDay}
           view={view}
         />

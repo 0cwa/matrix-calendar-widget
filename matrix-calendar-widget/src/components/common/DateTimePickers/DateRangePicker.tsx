@@ -14,13 +14,16 @@
  * limitations under the License.
  */
 
-import { SxProps } from '@mui/material';
+import { Box, SxProps, Typography } from '@mui/material';
 import {
   DatePickerSlotsComponentsProps,
+  DateView,
   PickersDayProps,
+  PickersLayout,
+  PickersLayoutProps,
 } from '@mui/x-date-pickers';
 import { DateTime, Interval } from 'luxon';
-import React, { Dispatch, useCallback, useState } from 'react';
+import React, { ComponentProps, Dispatch, useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ButtonDatePicker } from './ButtonDatePicker';
 import { HighlightedPickersDay } from './HighlightedPickersDay';
@@ -74,8 +77,25 @@ export const DateRangePicker = ({
 
   return (
     <ButtonDatePicker
-      slots={{ day: Day as React.ElementType<PickersDayProps<DateTime>> }}
+      slots={{
+        day: Day as React.ElementType<PickersDayProps<DateTime>>,
+        layout: RangeStepLayout as React.JSXElementConstructor<
+          PickersLayoutProps<DateTime | null, DateTime, DateView>
+        >,
+      }}
       slotProps={{
+        layout: {
+          step: selectedStartDate
+            ? t(
+                'dateRangePicker.chooseEnd',
+                'Start: {{date, datetime}}. Now choose an end date.',
+                {
+                  date: new Date(selectedStartDate),
+                  formatParams: { date: longDateFormat },
+                },
+              )
+            : t('dateRangePicker.chooseStart', 'Choose a start date.'),
+        } as object,
         actionBar: ({ wrapperVariant }) => ({
           actions:
             wrapperVariant === 'mobile'
@@ -137,6 +157,34 @@ export const DateRangePicker = ({
     />
   );
 };
+
+/**
+ * Says which end of the range the next selected day sets. The picker closes
+ * after the end date, so there is no third step.
+ */
+function RangeStepLayout({
+  step,
+  ...props
+}: PickersLayoutProps<DateTime | null, DateTime, DateView> & {
+  step: string;
+}) {
+  return (
+    <Box>
+      <Typography
+        fontWeight="bold"
+        maxWidth={320}
+        mx="auto"
+        px={3}
+        pt={1.5}
+        role="status"
+        variant="body2"
+      >
+        {step}
+      </Typography>
+      <PickersLayout {...(props as ComponentProps<typeof PickersLayout>)} />
+    </Box>
+  );
+}
 
 function Day(
   props: PickersDayProps<DateTime> & {

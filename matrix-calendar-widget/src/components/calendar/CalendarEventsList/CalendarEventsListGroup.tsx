@@ -22,14 +22,37 @@ import { SectionHeadingDivider } from './SectionHeadingDivider';
 
 type CalendarEventsListGroupProps = PropsWithChildren<{
   date: string;
+  relativeDay?: 'today' | 'tomorrow';
 }>;
 
 export function CalendarEventsListGroup({
   date,
+  relativeDay,
   children,
 }: CalendarEventsListGroupProps) {
   const titleId = useId();
   const { t } = useTranslation();
+  const fullDate = t('meetingList.groupTitle', '{{date, datetime}}', {
+    date: new Date(date),
+    formatParams: {
+      date: {
+        weekday: 'long',
+        month: 'long',
+        year: 'numeric',
+        day: 'numeric',
+        // The day is a calendar date that parses as UTC midnight.
+        timeZone: 'UTC',
+      },
+    },
+  });
+  const title =
+    relativeDay === 'today'
+      ? t('calendarEvents.list.today', 'Today · {{date}}', { date: fullDate })
+      : relativeDay === 'tomorrow'
+        ? t('calendarEvents.list.tomorrow', 'Tomorrow · {{date}}', {
+            date: fullDate,
+          })
+        : fullDate;
 
   return (
     <Box
@@ -42,22 +65,7 @@ export function CalendarEventsListGroup({
       sx={{ listStyleType: 'none' }}
       width="100%"
     >
-      <SectionHeadingDivider
-        id={titleId}
-        title={t('meetingList.groupTitle', '{{date, datetime}}', {
-          date: new Date(date),
-          formatParams: {
-            date: {
-              weekday: 'long',
-              month: 'long',
-              year: 'numeric',
-              day: 'numeric',
-              // The day is a calendar date that parses as UTC midnight.
-              timeZone: 'UTC',
-            },
-          },
-        })}
-      />
+      <SectionHeadingDivider id={titleId} title={title} />
 
       <Stack
         aria-labelledby={titleId}
