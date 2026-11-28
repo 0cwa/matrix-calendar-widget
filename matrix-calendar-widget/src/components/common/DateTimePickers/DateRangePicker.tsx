@@ -125,6 +125,14 @@ export const DateRangePicker = ({
           ],
           onSetToday: () => handleDaySelect(DateTime.local()),
         }),
+        desktopPaper: {
+          sx: {
+            width: 'min(320px, calc(100vw - 16px))',
+            '& .MuiPickersLayout-root, & .MuiDateCalendar-root': {
+              maxWidth: '100%',
+            },
+          },
+        },
         popper: {
           sx: {
             '& .MuiDialogActions-root': {

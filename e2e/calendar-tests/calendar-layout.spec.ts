@@ -393,6 +393,7 @@ for (const height of [640, 520]) {
           left,
           right,
           viewport: document.documentElement.clientWidth,
+          contentWidth: document.body.clientWidth,
           client: element.clientWidth,
           scroll: element.scrollWidth,
           documentScroll: document.documentElement.scrollWidth,
@@ -403,7 +404,7 @@ for (const height of [640, 520]) {
         JSON.stringify(bounds, null, 2),
       );
       expect(bounds.left).toBeGreaterThanOrEqual(0);
-      expect(bounds.right).toBeLessThanOrEqual(bounds.viewport);
+      expect(bounds.right).toBeLessThanOrEqual(bounds.contentWidth + 1);
       expect(bounds.scroll).toBeLessThanOrEqual(bounds.client + 1);
       expect(bounds.documentScroll).toBeLessThanOrEqual(bounds.viewport + 1);
     };
@@ -465,8 +466,10 @@ test.describe('mobile date range picker', () => {
   }) => {
     await page.clock.setFixedTime(new Date('2026-10-10T10:00:00.000Z'));
     await page.goto('/browser-tests/index.html?mode=room-manager');
-    const range = page.getByRole('button', { name: /^Choose date range/ });
-    const committed = await range.getAttribute('aria-label');
+    const range = page
+      .getByRole('group', { name: 'Date navigation' })
+      .getByRole('button', { name: /^Choose date(?: range)?, selected/ });
+    const committed = await range.textContent();
     await range.click();
     const picker = page.getByRole('dialog');
     await expect(
@@ -481,7 +484,7 @@ test.describe('mobile date range picker', () => {
     await expect(today).toHaveCount(0);
     await picker.getByRole('button', { name: 'Cancel' }).click();
     await expect(picker).toBeHidden();
-    await expect(range).toHaveAttribute('aria-label', committed!);
+    await expect(range).toHaveText(committed!);
   });
 });
 
