@@ -128,9 +128,7 @@ export function CalendarEventsCalendar({
   }, [filters.startDate, view]);
 
   const handleEventDidMount = useCallback((arg: EventMountArg) => {
-    const buttonLabelId: string = arg.event.extendedProps['buttonLabelId'];
     arg.el.setAttribute('role', 'button');
-    arg.el.setAttribute('aria-labelledby', buttonLabelId);
   }, []);
 
   const renderEventContent = useCallback(
@@ -142,7 +140,6 @@ export function CalendarEventsCalendar({
 
       return (
         <CalendarEventCell
-          buttonLabelId={arg.event.extendedProps['buttonLabelId']}
           calendar={identities.get(event.calendarId)}
           event={event}
           startsHere={arg.isStart}
@@ -274,14 +271,12 @@ export function CalendarEventsCalendar({
 }
 
 function CalendarEventCell({
-  buttonLabelId,
   calendar,
   event,
   startsHere,
   viewerTimezone,
   view,
 }: {
-  buttonLabelId: string;
   calendar?: EventCalendarIdentity;
   event: CalendarEvent;
   startsHere: boolean;
@@ -290,7 +285,13 @@ function CalendarEventCell({
 }) {
   const { i18n, t } = useTranslation();
   const theme = useTheme();
-  const { ref, ...tooltipState } = useEventTooltip();
+  const cellId = useId();
+  const visibleNameId = `${cellId}-visible-name`;
+  const detailNameId = `${cellId}-details`;
+  const month = view === 'month';
+  const { ref, ...tooltipState } = useEventTooltip(
+    month ? `${visibleNameId} ${detailNameId}` : detailNameId,
+  );
   const textLineHeight = `${theme.typography.body2.lineHeight}em`;
   const recurring = Boolean(
     event.recurrence?.rrule ||
@@ -310,7 +311,7 @@ function CalendarEventCell({
           .setLocale(i18n.language)
           .toLocaleString(DateTime.TIME_SIMPLE)
       : undefined;
-  const accessibleLabel = monthStartTime ? `${monthStartTime} ${label}` : label;
+
   const lightweight =
     view === 'month' && isSingleDayTimed(event, viewerTimezone);
   const title = (
@@ -329,7 +330,7 @@ function CalendarEventCell({
   return (
     <>
       <Tooltip {...tooltipState} title={<>{label}</>}>
-        <Box height="100%" ref={ref}>
+        <Box height="100%" id={visibleNameId} ref={ref}>
           <Stack flexDirection="row" height="100%">
             {(calendar?.color || lightweight) && (
               // The height of one text line, so the dot centers on the title.
@@ -372,7 +373,7 @@ function CalendarEventCell({
                         lineHeight: 1.2,
                       }}
                     >
-                      {monthStartTime}
+                      {monthStartTime}{' '}
                     </Typography>
                   )}
                   {title}
@@ -390,8 +391,8 @@ function CalendarEventCell({
         </Box>
       </Tooltip>
 
-      <Box display="none" id={buttonLabelId}>
-        {accessibleLabel}
+      <Box display="none" id={detailNameId}>
+        {month ? (calendar ? `${time} · ${calendar.name}` : time) : label}
       </Box>
     </>
   );
@@ -411,7 +412,7 @@ function eventLabel(
  * FullCalendar owns the focusable event element around the cell content, so the
  * tooltip has to follow that element to show keyboard users the full title.
  */
-function useEventTooltip() {
+function useEventTooltip(labelledBy: string) {
   const [open, setOpen] = useState(false);
   const [element, ref] = useState<HTMLElement | null>(null);
 
@@ -420,6 +421,8 @@ function useEventTooltip() {
     if (!eventElement) {
       return undefined;
     }
+
+    eventElement.setAttribute('aria-labelledby', labelledBy);
 
     const handleFocus = () => {
       if (eventElement.matches(':focus-visible')) {
@@ -434,7 +437,7 @@ function useEventTooltip() {
       eventElement.removeEventListener('focus', handleFocus);
       eventElement.removeEventListener('blur', handleBlur);
     };
-  }, [element]);
+  }, [element, labelledBy]);
 
   return {
     ref,

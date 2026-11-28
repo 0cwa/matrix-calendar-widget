@@ -421,7 +421,7 @@ test('Month columns stay aligned through viewport resizing', async ({
   const first = entries.first();
   await expect(first).toBeFocused();
   await expect(first).toHaveAccessibleName(
-    /9:00\sAM–10:00\sAM · October 1, 2026/,
+    /9:00\sAM–10:00\sAM October 1, 2026/,
   );
   await expect(
     first.getByText(/9:00\sAM–10:00\sAM/, { exact: true }),

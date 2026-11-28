@@ -31,7 +31,7 @@ for (const language of ['en', 'de'] as const) {
       const timed = grid.locator('[role="button"].mcw-month-timed');
       const startTime = grid.getByTestId('month-event-start-time');
       const overnight = grid.getByRole('button', {
-        name: /Overnight maintenance with a long event title:/,
+        name: /Overnight maintenance with a long event title/,
       });
       const allDay = grid.getByRole('button', { name: /^All-day planning:/ });
       await expect(timed).toHaveCount(10);

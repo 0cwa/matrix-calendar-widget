@@ -112,7 +112,7 @@ describe('<CalendarEventsCalendar />', () => {
       );
 
       const eventButton = await screen.findByRole('button', {
-        name: /Floating planning: September 23, 2026 · 9:00\sAM–10:00\sAM/,
+        name: /Floating planning September 23, 2026 · 9:00\sAM–10:00\sAM/,
       });
       expect(eventButton).toHaveAttribute('tabindex', '0');
       eventButton.focus();
@@ -206,14 +206,14 @@ describe('<CalendarEventsCalendar />', () => {
       );
 
       const floatingButton = await screen.findByRole('button', {
-        name: /Floating planning: September 23, 2026 · 9:00\sAM–10:00\sAM/,
+        name: /Floating planning September 23, 2026 · 9:00\sAM–10:00\sAM/,
       });
       expect(within(floatingButton).getByText(/^9:00\sAM\s*$/)).toBeVisible();
       const zonedButton = await screen.findByRole('button', {
-        name: /Zoned planning: September 23, 2026 · 9:00\sAM–10:00\sAM/,
+        name: /Zoned planning September 23, 2026 · 9:00\sAM–10:00\sAM/,
       });
       const newYorkButton = await screen.findByRole('button', {
-        name: /New York planning: September 23, 2026 · 3:00\sPM–4:00\sPM/,
+        name: /New York planning September 23, 2026 · 3:00\sPM–4:00\sPM/,
       });
       expect(within(newYorkButton).getByText(/^3:00\sPM\s*$/)).toBeVisible();
       expect(
@@ -268,7 +268,7 @@ describe('<CalendarEventsCalendar />', () => {
       );
 
       const eventButton = await screen.findByRole('button', {
-        name: /^9:00\sAM Floating planning: September 23, 2026 · 9:00\sAM–10:00\sAM · Team calendar$/,
+        name: /^9:00\sAM Floating planning September 23, 2026 · 9:00\sAM–10:00\sAM · Team calendar$/,
       });
       const title = within(eventButton).getByText('Floating planning');
       const time = within(eventButton).getByText(/^9:00\sAM$/);
