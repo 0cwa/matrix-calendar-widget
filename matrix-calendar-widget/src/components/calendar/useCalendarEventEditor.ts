@@ -270,10 +270,9 @@ export function useCalendarEventEditor({
               ...(field === 'conferenceUrl' && !change.target.value.trim()
                 ? { conferenceLabel: '' }
                 : {}),
-              ...(field === 'start' || field === 'end' || field === 'timezone'
+              ...(field === 'start' || field === 'end'
                 ? { timingChanged: true }
                 : {}),
-              ...(field === 'timezone' ? { timezoneChanged: true } : {}),
               ...(field === 'conferenceUrl' || field === 'conferenceLabel'
                 ? { conferenceChanged: true }
                 : {}),
@@ -285,6 +284,21 @@ export function useCalendarEventEditor({
           : current,
       );
     };
+
+  // Choosing the current zone again is not an edit: marking it changed would
+  // rewrite saved endpoints and block exclusive recurrence-date operations.
+  const handleTimezoneChange = (timezone: string) => {
+    setValues((current) =>
+      current && current.timezone !== timezone
+        ? {
+            ...current,
+            timezone,
+            timingChanged: true,
+            timezoneChanged: true,
+          }
+        : current,
+    );
+  };
 
   const { handleAttachmentOperationChange, handleAttachmentSourceChange } =
     createAttachmentHandlers(setValues);
@@ -663,6 +677,7 @@ export function useCalendarEventEditor({
     hasFloatingEndpoint,
     timingHelpText,
     handleChange,
+    handleTimezoneChange,
     handleAttachmentOperationChange,
     handleAttachmentSourceChange,
     handleCalendarChange,

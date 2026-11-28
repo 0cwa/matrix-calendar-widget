@@ -20,7 +20,13 @@ import {
   CalendarRepositoryError,
   InMemoryCalendarRepository,
 } from '@matrix-calendar-widget/calendar';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DateTime } from 'luxon';
 import { type ComponentProps, PropsWithChildren, useState } from 'react';
@@ -431,7 +437,7 @@ describe('<CalendarEventEditorDialog />', () => {
       },
     });
 
-    const timezone = await screen.findByRole('textbox', { name: /Time zone/ });
+    const timezone = await screen.findByRole('combobox', { name: /Time zone/ });
     await userEvent.clear(timezone);
     await userEvent.type(timezone, 'Nowhere/Invalid');
 
@@ -439,6 +445,150 @@ describe('<CalendarEventEditorDialog />', () => {
     expect(
       screen.getByRole('button', { name: 'Save' }),
     ).toHaveAccessibleDescription('Enter a valid IANA time zone.');
+  });
+
+  it('searches IANA zones by words and saves the chosen identifier', async () => {
+    const { repository } = renderEditorScenario({
+      repositoryOptions: { calendars: [calendar], events: [event] },
+      editorProps: {
+        calendars: [calendar],
+        event,
+        onClose: vi.fn(),
+        open: true,
+        viewerTimezone: 'Europe/Stockholm',
+      },
+    });
+    const updateEvent = vi.spyOn(repository, 'updateEvent');
+
+    const timezone = await screen.findByRole('combobox', { name: /Time zone/ });
+    expect(timezone).toHaveAccessibleDescription(/UTC\+02:00/);
+    await userEvent.clear(timezone);
+    await userEvent.type(timezone, 'new york');
+    await userEvent.click(
+      within(screen.getByRole('listbox')).getByText('America/New_York'),
+    );
+
+    expect(timezone).toHaveValue('America/New_York');
+    expect(timezone).toHaveAccessibleDescription(/UTC-04:00/);
+    expect(screen.getByText(/^Your time \(Europe\/Stockholm\):/)).toBeVisible();
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(updateEvent).toHaveBeenCalled());
+    expect(updateEvent.mock.calls[0][2].timing).toMatchObject({
+      start: { timezone: 'America/New_York' },
+      end: { timezone: 'America/New_York' },
+    });
+  });
+
+  it('warns that following edits cannot use a repeated time', async () => {
+    renderEditorScenario({
+      repositoryOptions: { calendars: [calendar], events: [recurringEvent] },
+      editorProps: {
+        calendars: [calendar],
+        event: recurringEvent,
+        occurrence: {
+          recurrenceId: {
+            type: 'date-time',
+            value: {
+              local: '2026-10-07T09:00:00',
+              timezone: 'Europe/Stockholm',
+            },
+          },
+          event: {
+            ...recurringEvent,
+            timing: {
+              type: 'timed',
+              start: {
+                type: 'zoned',
+                local: '2026-10-07T09:00:00',
+                timezone: 'Europe/Stockholm',
+              },
+              end: {
+                type: 'zoned',
+                local: '2026-10-07T10:00:00',
+                timezone: 'Europe/Stockholm',
+              },
+            },
+          },
+        },
+        onClose: vi.fn(),
+        open: true,
+      },
+    });
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'This and following' }),
+    );
+    fireEvent.change(screen.getByLabelText(/^Start/), {
+      target: { value: '2026-10-25T02:30' },
+    });
+
+    expect(
+      screen.getByText(/This and following edits cannot use it\.$/),
+    ).toBeVisible();
+    expect(
+      screen.queryByText(/The first one is used\.$/),
+    ).not.toBeInTheDocument();
+  });
+
+  it('filters a zone search pasted into the closed picker', async () => {
+    renderEditorScenario({
+      repositoryOptions: { calendars: [calendar], events: [event] },
+      editorProps: {
+        calendars: [calendar],
+        event,
+        onClose: vi.fn(),
+        open: true,
+      },
+    });
+
+    const timezone = await screen.findByRole('combobox', { name: /Time zone/ });
+    fireEvent.focus(timezone);
+    fireEvent.change(timezone, { target: { value: 'new york' } });
+
+    expect(screen.getByRole('listbox')).toHaveTextContent(
+      /^America\/New_York$/,
+    );
+  });
+
+  it('keeps a saved alias and untouched timing when the zone is re-chosen', async () => {
+    const aliased: CalendarEvent = {
+      ...event,
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-09-23T09:00:00',
+          timezone: 'Europe/Kiev',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-09-23T10:00:00',
+          timezone: 'Europe/Kiev',
+        },
+      },
+    };
+    const { repository } = renderEditorScenario({
+      repositoryOptions: { calendars: [calendar], events: [aliased] },
+      editorProps: {
+        calendars: [calendar],
+        event: aliased,
+        onClose: vi.fn(),
+        open: true,
+      },
+    });
+    const updateEvent = vi.spyOn(repository, 'updateEvent');
+
+    const timezone = await screen.findByRole('combobox', { name: /Time zone/ });
+    expect(timezone).toHaveValue('Europe/Kiev');
+    await userEvent.click(timezone);
+    await userEvent.keyboard('{ArrowDown}');
+    await userEvent.click(
+      within(await screen.findByRole('listbox')).getByText('Europe/Kiev'),
+    );
+    expect(timezone).toHaveValue('Europe/Kiev');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(updateEvent).toHaveBeenCalled());
+    expect(updateEvent.mock.calls[0][2]).not.toHaveProperty('timing');
   });
 
   it('creates one attachment link and exposes accessible edit controls', async () => {
