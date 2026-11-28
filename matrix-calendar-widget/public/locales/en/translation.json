@@ -224,6 +224,7 @@
       "openDay": "Open day"
     },
     "noEvents": {
+      "create": "Add an event",
       "description": "Use the date controls to look at other dates.",
       "incompleteTitle": "No events can be shown for these dates",
       "title": "No events in these dates"

@@ -224,6 +224,7 @@
       "openDay": "Tag öffnen"
     },
     "noEvents": {
+      "create": "Termin hinzufügen",
       "description": "Mit der Datumsnavigation kannst du andere Tage ansehen.",
       "incompleteTitle": "Für diesen Zeitraum können keine Termine angezeigt werden",
       "title": "Keine Termine in diesem Zeitraum"

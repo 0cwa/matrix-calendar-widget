@@ -127,7 +127,7 @@ describe('<CalendarEventsSurface /> feedback', () => {
     ).not.toBeInTheDocument();
     expect(await axe(container)).toHaveNoViolations();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Create event' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Add an event' }));
 
     expect(onCreateEvent).toHaveBeenCalledOnce();
   });
@@ -168,7 +168,7 @@ describe('<CalendarEventsSurface /> feedback', () => {
         await screen.findByText('No events match “dentist”'),
       ).toBeInTheDocument();
       expect(
-        screen.queryByRole('button', { name: 'Create event' }),
+        screen.queryByRole('button', { name: 'Add an event' }),
       ).not.toBeInTheDocument();
 
       await userEvent.click(

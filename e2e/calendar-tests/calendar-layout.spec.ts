@@ -271,6 +271,28 @@ test('room visitor sees read-only event controls at a narrow width', async ({
   expect(pageErrors).toEqual([]);
 });
 
+test('empty dates keep the toolbar and the create shortcut distinct', async ({
+  page,
+}) => {
+  await page.clock.setFixedTime(new Date('2026-11-28T12:00:00.000Z'));
+  await page.goto('/browser-tests/index.html?mode=home');
+
+  const create = page.getByRole('button', {
+    name: 'Create event',
+    exact: true,
+  });
+  const add = page.getByRole('button', { name: 'Add an event', exact: true });
+  await expect(create).toBeVisible();
+  await expect(create).toBeEnabled();
+  await add.click();
+
+  const editor = page.getByRole('dialog', { name: 'Create event' });
+  await expect(editor).toBeVisible();
+  await editor.getByRole('button', { name: 'Cancel' }).click();
+  await expect(editor).toBeHidden();
+  await expect(create).toBeFocused();
+});
+
 test('German date range picker fits a 320 px Element dark viewport', async ({
   page,
 }) => {

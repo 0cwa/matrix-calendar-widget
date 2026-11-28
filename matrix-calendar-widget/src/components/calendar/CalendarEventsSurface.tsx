@@ -261,7 +261,7 @@ export function CalendarEventsSurface({
               startIcon={<AddIcon />}
               variant="outlined"
             >
-              {t('calendarEvents.editor.create', 'Create event')}
+              {t('calendarEvents.noEvents.create', 'Add an event')}
             </Button>
           )
         }
