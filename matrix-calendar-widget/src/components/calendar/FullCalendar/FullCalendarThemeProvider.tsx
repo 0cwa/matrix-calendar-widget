@@ -77,9 +77,19 @@ export const FullCalendarThemeProvider = styled('div')(({ theme }) => ({
     outline: '2px solid transparent',
   },
 
-  // Make all events have the same height in the month view
+  // A table cell's height is a floor. FullCalendar expands the rows when space allows.
   '& .fc .fc-dayGridMonth-view td.fc-day': {
-    height: 110,
+    height: 84,
+  },
+
+  '& .fc .fc-dayGridMonth-view .fc-daygrid-event-harness': {
+    margin: '1px 2px',
+  },
+  '& .fc .fc-dayGridMonth-view a.fc-event.mcw-month-timed': {
+    backgroundColor: 'transparent',
+    borderColor: 'transparent',
+    '--fc-event-text-color': theme.palette.text.primary,
+    '&:hover': { backgroundColor: theme.palette.action.hover },
   },
 
   '& .fc .fc-timegrid-event .fc-event-main': {

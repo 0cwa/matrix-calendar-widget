@@ -233,6 +233,8 @@
     "loading": "Loading calendar events",
     "mixedCompatibilityNotice": "One or more calendars support additional item types. The widget displays and edits VEVENT entries only.",
     "monthDay": {
+      "eventCount_one": "{{count}} event",
+      "eventCount_other": "{{count}} events",
       "openDay": "Open day"
     },
     "noEvents": {
@@ -501,6 +503,7 @@
     "copy-to-clipboard": "Copy to clipboard"
   },
   "dateRangePicker": {
+    "changeStart": "Change start",
     "chooseDate": "Choose date range, selected range is {{range, daterange}}",
     "chooseEnd": "Start: {{date, datetime}}. Now choose an end date.",
     "chooseStart": "Choose a start date.",
