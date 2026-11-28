@@ -113,7 +113,7 @@ describe('<CalendarEventsCalendar /> dates with more events', () => {
     expect(rows.map((row) => row.getAttribute('aria-label'))).toEqual(
       ['09', '10', '11', '12', '13'].map((hour) =>
         expect.stringMatching(
-          new RegExp(`^Busy 2026-10-09 at ${hour}: October 9, 2026 · .+–.+$`),
+          new RegExp(`^Busy 2026-10-09 at ${hour} .+–.+ · October 9, 2026$`),
         ),
       ),
     );
@@ -176,7 +176,7 @@ describe('<CalendarEventsCalendar /> dates with more events', () => {
         'All day',
         viewerTimezone,
       );
-      return { event, time, label: `${event.title}: ${time}` };
+      return { event, time };
     });
     render(
       <CalendarMonthDayDialog
@@ -196,7 +196,9 @@ describe('<CalendarEventsCalendar /> dates with more events', () => {
     const [sameDayRow, overnightRow, shiftedRow] =
       within(dialog).getAllByRole('button');
     expect(within(sameDayRow).getByText(/^9:00\sAM–9:30\sAM$/)).toBeVisible();
-    expect(sameDayRow).toHaveAccessibleName(entries[0].label);
+    expect(sameDayRow).toHaveAccessibleName(
+      /9:00\sAM–9:30\sAM · October 9, 2026$/,
+    );
     expect(within(overnightRow).getByText(entries[1].time)).toBeVisible();
     expect(within(shiftedRow).getByText(entries[2].time)).toBeVisible();
   });

@@ -40,8 +40,6 @@ export type CalendarMonthDayEntry = {
   calendar?: EventCalendarIdentity;
   /** The full date and time of the event, in the viewer's time zone. */
   time: string;
-  /** The same accessible name that the event has in the grid. */
-  label: string;
 };
 
 /**
@@ -93,46 +91,57 @@ export function CalendarMonthDayDialog({
 
       <DialogContent dividers sx={{ p: 0 }}>
         <List disablePadding>
-          {entries.map(({ event, calendar, time, label }, index) => (
-            <ListItem
-              disablePadding
-              divider={index < entries.length - 1}
-              key={calendarEventKey(event)}
-            >
-              <ListItemButton
-                aria-label={label}
-                autoFocus={index === 0}
-                onClick={() => onSelectEvent(event)}
-                sx={{ overflowWrap: 'anywhere', px: 3 }}
+          {entries.map(({ event, calendar, time }, index) => {
+            const timeWithinDay = formatTimeWithinDay(
+              dayDate,
+              event,
+              i18n.language,
+              allDayLabel,
+              viewerTimezone,
+            );
+            const displayTime = timeWithinDay ?? time;
+            const visibleLabel = [event.title, displayTime, calendar?.name]
+              .filter(Boolean)
+              .join(' ');
+            const label = timeWithinDay
+              ? `${visibleLabel} · ${day.toLocaleString(DateTime.DATE_FULL)}`
+              : visibleLabel;
+
+            return (
+              <ListItem
+                disablePadding
+                divider={index < entries.length - 1}
+                key={calendarEventKey(event)}
               >
-                <Box minWidth={0}>
-                  <Typography fontWeight="bold">{event.title}</Typography>
-                  <Typography color="text.secondary" variant="body2">
-                    {formatTimeWithinDay(
-                      dayDate,
-                      event,
-                      i18n.language,
-                      allDayLabel,
-                      viewerTimezone,
-                    ) ?? time}
-                  </Typography>
-                  {calendar && (
-                    <Stack alignItems="center" direction="row" spacing={1}>
-                      {calendar.color && (
-                        <CalendarColorDot
-                          color={calendar.color}
-                          ringColor={theme.palette.text.secondary}
-                        />
-                      )}
-                      <Typography color="text.secondary" variant="body2">
-                        {calendar.name}
-                      </Typography>
-                    </Stack>
-                  )}
-                </Box>
-              </ListItemButton>
-            </ListItem>
-          ))}
+                <ListItemButton
+                  aria-label={label}
+                  autoFocus={index === 0}
+                  onClick={() => onSelectEvent(event)}
+                  sx={{ overflowWrap: 'anywhere', px: 3 }}
+                >
+                  <Box minWidth={0}>
+                    <Typography fontWeight="bold">{event.title}</Typography>
+                    <Typography color="text.secondary" variant="body2">
+                      {displayTime}
+                    </Typography>
+                    {calendar && (
+                      <Stack alignItems="center" direction="row" spacing={1}>
+                        {calendar.color && (
+                          <CalendarColorDot
+                            color={calendar.color}
+                            ringColor={theme.palette.text.secondary}
+                          />
+                        )}
+                        <Typography color="text.secondary" variant="body2">
+                          {calendar.name}
+                        </Typography>
+                      </Stack>
+                    )}
+                  </Box>
+                </ListItemButton>
+              </ListItem>
+            );
+          })}
         </List>
       </DialogContent>
 

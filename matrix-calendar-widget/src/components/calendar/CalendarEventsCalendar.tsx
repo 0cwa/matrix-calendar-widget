@@ -219,9 +219,7 @@ export function CalendarEventsCalendar({
       t('calendarEvents.details.allDay', 'All day'),
       viewerTimezone,
     );
-    return [
-      { event, calendar, time, label: eventLabel(event, time, calendar) },
-    ];
+    return [{ event, calendar, time }];
   });
 
   return (
@@ -306,6 +304,13 @@ function CalendarEventCell({
     viewerTimezone,
   );
   const label = eventLabel(event, time, calendar);
+  const monthStartTime =
+    view === 'month' && startsHere && isTimedCalendarEvent(event)
+      ? calendarEventTimedDateTimeToDateTime(event.timing.start, viewerTimezone)
+          .setLocale(i18n.language)
+          .toLocaleString(DateTime.TIME_SIMPLE)
+      : undefined;
+  const accessibleLabel = monthStartTime ? `${monthStartTime} ${label}` : label;
   const lightweight =
     view === 'month' && isSingleDayTimed(event, viewerTimezone);
   const title = (
@@ -355,7 +360,7 @@ function CalendarEventCell({
             >
               {view === 'month' ? (
                 <Box display="flex" alignItems="center" gap={0.5} minWidth={0}>
-                  {startsHere && isTimedCalendarEvent(event) && (
+                  {monthStartTime && (
                     <Typography
                       component="span"
                       data-testid="month-event-start-time"
@@ -367,12 +372,7 @@ function CalendarEventCell({
                         lineHeight: 1.2,
                       }}
                     >
-                      {calendarEventTimedDateTimeToDateTime(
-                        event.timing.start,
-                        viewerTimezone,
-                      )
-                        .setLocale(i18n.language)
-                        .toLocaleString(DateTime.TIME_SIMPLE)}
+                      {monthStartTime}
                     </Typography>
                   )}
                   {title}
@@ -391,7 +391,7 @@ function CalendarEventCell({
       </Tooltip>
 
       <Box display="none" id={buttonLabelId}>
-        {label}
+        {accessibleLabel}
       </Box>
     </>
   );

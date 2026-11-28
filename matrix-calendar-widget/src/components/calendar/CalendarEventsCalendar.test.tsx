@@ -268,7 +268,7 @@ describe('<CalendarEventsCalendar />', () => {
       );
 
       const eventButton = await screen.findByRole('button', {
-        name: /^Floating planning: September 23, 2026 · 9:00\sAM–10:00\sAM · Team calendar$/,
+        name: /^9:00\sAM Floating planning: September 23, 2026 · 9:00\sAM–10:00\sAM · Team calendar$/,
       });
       const title = within(eventButton).getByText('Floating planning');
       const time = within(eventButton).getByText(/^9:00\sAM$/);

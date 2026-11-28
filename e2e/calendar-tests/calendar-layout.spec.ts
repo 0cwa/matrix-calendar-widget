@@ -44,7 +44,7 @@ for (const viewport of viewports) {
           }))
           .toEqual({ pageErrors: [], rendered: true });
         await page.getByRole('button', { name: view, exact: true }).click();
-        const event = page.getByRole('button', { name: /^Synthetic planning/ });
+        const event = page.getByRole('button', { name: /Synthetic planning/ });
         await expect(event).toBeVisible();
         const surface = page.getByTestId('calendar-surface');
         const dimensions = await surface.evaluate((element) => ({
