@@ -211,6 +211,9 @@
     "empty": "No events scheduled that match the selected filters.",
     "loadError": "Calendar events could not be loaded.",
     "mixedCompatibilityNotice": "One or more calendars support additional item types. The widget displays and edits VEVENT entries only.",
+    "monthDay": {
+      "openDay": "Open day"
+    },
     "partialAvailability": "Some calendars or events could not be loaded. Available calendars are still shown.",
     "recurrence": {
       "addedDates": "Includes additional dates.",
