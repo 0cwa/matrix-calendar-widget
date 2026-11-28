@@ -237,13 +237,59 @@ describe('<CalendarRoomReminderControl />', () => {
     await screen.findByRole('combobox', { name: 'Who to notify in this room' });
   });
 
+  it('ignores a delayed summary and expansion after the event changes', async () => {
+    const { repository } = createRepository([timedOption]);
+    let resolveOptions!: (
+      value: readonly CalendarRoomReminderAlarmOption[],
+    ) => void;
+    repository.listRoomReminderAlarmOptions.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveOptions = resolve;
+      }),
+    );
+    const { rerender } = renderControl(repository);
+    expect(screen.getByTestId('room-reminder-summary')).toHaveTextContent(
+      'Checking notification status…',
+    );
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Matrix room notifications' }),
+    );
+    rerender(
+      <CalendarRoomReminderControl
+        calendarId={calendarId}
+        eventId="different-resource"
+        eventUid="different-event@example.test"
+        roomId={roomId}
+        eventTiming={{
+          type: 'all-day',
+          startDate: '2026-10-22',
+          endDate: '2026-10-23',
+        }}
+        isRecurringSeries={false}
+        refreshToken={0}
+        canManageReminders
+        onEditCalendarReminder={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText('No calendar app alert yet.')).toBeVisible();
+    await act(async () => resolveOptions([timedOption]));
+    expect(screen.getByTestId('room-reminder-summary')).toHaveTextContent(
+      'No calendar app alert yet.',
+    );
+    expect(
+      screen.getByRole('button', { name: 'Matrix room notifications' }),
+    ).toHaveAttribute('aria-expanded', 'false');
+    expect(repository.listRoomReminderRecipients).toHaveBeenCalledTimes(1);
+  });
+
   it('retries a failed summary when expanded', async () => {
     const { repository } = createRepository([timedOption]);
     repository.listRoomReminderAlarmOptions.mockRejectedValueOnce(
       new Error('unavailable'),
     );
     renderControl(repository);
-    await act(async () => {});
+    await screen.findByText('Notification status unavailable.');
     await userEvent.click(
       screen.getByRole('button', { name: 'Matrix room notifications' }),
     );

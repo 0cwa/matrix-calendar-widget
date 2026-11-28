@@ -74,8 +74,6 @@ export function CalendarRoomReminderPicker({
   isRecurringSeries: boolean;
   onEditCalendarReminder: () => void;
   popperContainer?: () => HTMLElement | null;
-  summaryLoading?: boolean;
-  summaryError?: boolean;
 }) {
   const { t, i18n } = useTranslation();
   const {
@@ -87,8 +85,8 @@ export function CalendarRoomReminderPicker({
     options,
     configurations,
     orphanedConfigurations,
-    summaryLoading = false,
-    summaryError = false,
+    summaryLoading,
+    summaryError,
     drafts,
     memberSearchQueries,
     setMemberSearchQueries,

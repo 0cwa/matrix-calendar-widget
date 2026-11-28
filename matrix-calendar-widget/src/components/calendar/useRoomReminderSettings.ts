@@ -42,6 +42,16 @@ import {
 } from './roomReminderModel';
 import { useRoomReminderRoster } from './useRoomReminderRoster';
 
+type Snapshot = {
+  options: CalendarRoomReminderAlarmOption[];
+  configurations: Record<string, CalendarRoomReminderConfiguration>;
+  orphanedConfigurations: CalendarRoomReminderConfiguration[];
+};
+
+function emptySnapshot(): Snapshot {
+  return { options: [], configurations: {}, orphanedConfigurations: [] };
+}
+
 export function useRoomReminderSettings({
   calendarId,
   eventId,
@@ -74,13 +84,8 @@ export function useRoomReminderSettings({
   const [loading, setLoading] = useState(false);
   const [savingKey, setSavingKey] = useState<string>();
   const [error, setError] = useState(false);
-  const [options, setOptions] = useState<CalendarRoomReminderAlarmOption[]>([]);
-  const [configurations, setConfigurations] = useState<
-    Record<string, CalendarRoomReminderConfiguration>
-  >({});
-  const [orphanedConfigurations, setOrphanedConfigurations] = useState<
-    CalendarRoomReminderConfiguration[]
-  >([]);
+  const [snapshot, setSnapshot] = useState(emptySnapshot);
+  const { options, configurations, orphanedConfigurations } = snapshot;
   const [drafts, setDrafts] = useState<Record<string, ReminderDraft>>({});
   const [memberSearchQueries, setMemberSearchQueries] = useState<
     Record<string, string>
@@ -101,33 +106,21 @@ export function useRoomReminderSettings({
   const expandSequence = useRef(0);
   const lastHandledOpenRequest = useRef(0);
   const eventTimingIdentity = JSON.stringify(eventTiming);
-  type Snapshot = {
-    options: CalendarRoomReminderAlarmOption[];
-    configurations: Record<string, CalendarRoomReminderConfiguration>;
-    orphanedConfigurations: CalendarRoomReminderConfiguration[];
-  };
-  const emptySnapshot = (): Snapshot => ({
-    options: [],
-    configurations: {},
-    orphanedConfigurations: [],
-  });
-  const snapshotRef = useRef<Snapshot>(emptySnapshot());
+  const snapshotRef = useRef(snapshot);
   const statusRef = useRef<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [snapshotStatus, setSnapshotStatus] = useState(statusRef.current);
   const inFlight = useRef<{
     version: number;
     promise: Promise<Snapshot | undefined>;
   } | null>(null);
-  const updateSnapshot = (snapshot: Snapshot) => {
+  const updateSnapshot = useCallback((snapshot: Snapshot) => {
     snapshotRef.current = snapshot;
-    setOptions(snapshot.options);
-    setConfigurations(snapshot.configurations);
-    setOrphanedConfigurations(snapshot.orphanedConfigurations);
-  };
-  const updateStatus = (status: typeof statusRef.current) => {
+    setSnapshot(snapshot);
+  }, []);
+  const updateStatus = useCallback((status: typeof statusRef.current) => {
     statusRef.current = status;
     setSnapshotStatus(status);
-  };
+  }, []);
   const ensureSnapshot = useCallback((): Promise<Snapshot | undefined> => {
     if (!canManageReminders || !reminderRepository)
       return Promise.resolve(undefined);
@@ -181,7 +174,15 @@ export function useRoomReminderSettings({
     })();
     inFlight.current = { version, promise };
     return promise;
-  }, [calendarId, eventId, eventUid, canManageReminders, reminderRepository]);
+  }, [
+    calendarId,
+    eventId,
+    eventUid,
+    canManageReminders,
+    reminderRepository,
+    updateSnapshot,
+    updateStatus,
+  ]);
 
   const load = useCallback(async () => {
     if (!canManageReminders || !reminderRepository) return;
@@ -264,6 +265,8 @@ export function useRoomReminderSettings({
     setRoomRecipients,
     ensureSnapshot,
     reminderRepository,
+    updateSnapshot,
+    updateStatus,
   ]);
 
   useEffect(() => {
