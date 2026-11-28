@@ -40,10 +40,12 @@ import {
   CalendarRoomReminderAlarmOption,
   CalendarRoomReminderAllDaySchedule,
 } from '../../calendar';
+import { IanaTimezoneAutocomplete } from './IanaTimezoneAutocomplete';
 import {
   canSaveDraft,
   createDraft,
   isSameDraft,
+  isValidRoomReminderTimezone,
   reminderOptionKey,
   sameAllDaySchedule,
   validateAllDayDraft,
@@ -330,6 +332,7 @@ export function CalendarRoomReminderPicker({
                 eventTiming={eventTiming}
                 isRecurringSeries={selectedRecurringSeries}
                 now={now}
+                popperContainer={popperContainer}
                 onChange={(allDaySchedule) =>
                   updateDraft(key, { allDaySchedule })
                 }
@@ -540,6 +543,7 @@ function AllDayScheduleFields({
   isRecurringSeries,
   now,
   onChange,
+  popperContainer,
   recipients,
   schedule,
   t,
@@ -548,6 +552,7 @@ function AllDayScheduleFields({
   isRecurringSeries: boolean;
   now: number;
   onChange: (schedule: CalendarRoomReminderAllDaySchedule) => void;
+  popperContainer?: () => HTMLElement | null;
   recipients: string | undefined;
   schedule: CalendarRoomReminderAllDaySchedule;
   t: TFunction;
@@ -586,22 +591,24 @@ function AllDayScheduleFields({
           type="time"
           value={schedule.localTime}
         />
-        <TextField
-          fullWidth
-          helperText={t(
-            'calendarEvents.roomReminder.timezoneHelp',
-            'Area/city name, for example Europe/Stockholm. The local time is read in this zone.',
-          )}
-          label={t(
-            'calendarEvents.roomReminder.timezone',
-            'Notification time zone',
-          )}
-          onChange={(event) =>
-            onChange({ ...schedule, timezone: event.target.value })
-          }
-          value={schedule.timezone}
-        />
       </Stack>
+      <IanaTimezoneAutocomplete
+        error={
+          schedule.timezone.length > 0 &&
+          !isValidRoomReminderTimezone(schedule.timezone)
+        }
+        helperText={t(
+          'calendarEvents.roomReminder.timezoneHelp',
+          'Area/city name, for example Europe/Stockholm. The local time is read in this zone.',
+        )}
+        label={t(
+          'calendarEvents.roomReminder.timezone',
+          'Notification time zone',
+        )}
+        onChange={(timezone) => onChange({ ...schedule, timezone })}
+        popperContainer={popperContainer}
+        value={schedule.timezone}
+      />
       <Typography color="text.secondary" variant="body2">
         {recipients === undefined
           ? t(

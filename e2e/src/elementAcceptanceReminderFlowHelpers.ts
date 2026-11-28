@@ -1458,9 +1458,11 @@ export function createReminderAcceptanceHelpers(
           .getByRole('spinbutton', { name: 'Days before event' })
           .fill(String(schedule.daysBefore));
         await details.getByLabel('Local time').fill(schedule.localTime);
-        await details
-          .getByRole('textbox', { name: 'Notification time zone' })
-          .fill(schedule.timezone);
+        const timezoneInput = details.getByRole('combobox', {
+          name: 'Notification time zone',
+        });
+        await timezoneInput.fill(schedule.timezone);
+        await timezoneInput.press('Tab');
       }
 
       observation.reminderStep = 'put-response';
