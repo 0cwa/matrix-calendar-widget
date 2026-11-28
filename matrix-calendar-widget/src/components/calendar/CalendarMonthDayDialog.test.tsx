@@ -18,7 +18,6 @@ import { CalendarEvent } from '@matrix-calendar-widget/calendar';
 import { Dialog, DialogTitle } from '@mui/material';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { Settings } from 'luxon';
 import { ComponentProps, useState } from 'react';
 import { afterEach, beforeEach, vi } from 'vitest';
 import { axe } from 'vitest-axe';
@@ -148,35 +147,6 @@ describe('<CalendarEventsCalendar /> dates with more events', () => {
     expect(onShowMore).toHaveBeenCalledWith(new Date(2026, 9, 9));
     await waitFor(() => expect(list).not.toBeInTheDocument());
   });
-
-  it.each(['America/New_York', 'Asia/Tokyo'])(
-    'names and opens the clicked date in %s',
-    async (zone) => {
-      const processZone = process.env.TZ;
-      const luxonZone = Settings.defaultZone;
-      process.env.TZ = zone;
-      Settings.defaultZone = zone;
-      const onShowMore = vi.fn();
-
-      try {
-        render(<Harness onShowMore={onShowMore} />);
-
-        await waitFor(() => expect(moreLink('2026-10-09')).toBeTruthy());
-        await userEvent.click(moreLink('2026-10-09'));
-        const list = await screen.findByRole('dialog', {
-          name: 'Friday, October 9, 2026',
-        });
-        await userEvent.click(
-          within(list).getByRole('button', { name: 'Open day' }),
-        );
-
-        expect(onShowMore).toHaveBeenCalledWith(new Date(2026, 9, 9));
-      } finally {
-        process.env.TZ = processZone;
-        Settings.defaultZone = luxonZone;
-      }
-    },
-  );
 
   it('keeps the month when the date belongs to the month before', async () => {
     render(<Harness />);

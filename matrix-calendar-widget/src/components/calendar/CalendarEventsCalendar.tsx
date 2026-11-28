@@ -174,7 +174,8 @@ export function CalendarEventsCalendar({
 
   const handleMoreLinkClick = useCallback(
     (arg: MoreLinkArg): MoreLinkSimpleAction => {
-      // The date is a marker that holds the calendar date in its UTC fields.
+      // FullCalendar 6.1 passes the calendar day as a UTC marker to moreLinkClick.
+      // Convert it to local midnight before handing it to the date controls.
       const date = new Date(
         arg.date.getUTCFullYear(),
         arg.date.getUTCMonth(),

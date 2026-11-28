@@ -49,6 +49,32 @@ declare global {
   }
 }
 
+for (const timezoneId of ['America/New_York', 'Asia/Tokyo']) {
+  test.describe(`Month overflow in ${timezoneId}`, () => {
+    test.use({ timezoneId, viewport });
+
+    test('opens the date selected in the month grid', async ({ page }) => {
+      await page.goto(
+        '/browser-tests/index.html?mode=large-calendar&view=month',
+      );
+      const more = page.locator(
+        '[data-date="2026-10-01"] .fc-daygrid-more-link',
+      );
+      await more.press('Enter');
+
+      const dialog = page.getByRole('dialog', {
+        name: 'Thursday, October 1, 2026',
+      });
+      await expect(dialog).toBeVisible();
+      await expect(
+        dialog.getByRole('button', { name: /^Synthetic capacity event 0001:/ }),
+      ).toBeFocused();
+      await page.keyboard.press('Escape');
+      await expect(more).toBeFocused();
+    });
+  });
+}
+
 for (const view of ['list', 'month'] as const) {
   test(`1,000 event ${view} render measurements`, async ({
     page,
