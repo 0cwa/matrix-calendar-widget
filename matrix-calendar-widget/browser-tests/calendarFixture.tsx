@@ -125,6 +125,7 @@ declare global {
   interface Window {
     __updateSyntheticRoomMember: (event: StateEvent) => void;
     __syntheticRoomReminderTarget?: CalendarRoomReminderTarget;
+    __syntheticRoomReminderSchedule?: CalendarRoomReminderAllDaySchedule;
   }
 }
 window.__updateSyntheticRoomMember = (event) => {
@@ -352,6 +353,7 @@ function CalendarFixture({
 }) {
   const query = new URLSearchParams(window.location.search);
   const roomMode = query.get('mode');
+  const allDayReminder = query.get('all-day') === '1';
   const initialView: CalendarSurfaceView =
     query.get('view') === 'month' ? 'month' : 'list';
   const [view, setView] = useState<CalendarSurfaceView>(initialView);
@@ -380,10 +382,24 @@ function CalendarFixture({
             roomMode !== 'room-read-only',
             galleryMode
               ? { calendars: [galleryCalendar], events: galleryEvents }
-              : undefined,
+              : allDayReminder
+                ? {
+                    calendars: [roomCalendar],
+                    events: [
+                      {
+                        ...roomEvent,
+                        timing: {
+                          type: 'all-day',
+                          startDate: '2026-10-05',
+                          endDate: '2026-10-06',
+                        },
+                      },
+                    ],
+                  }
+                : undefined,
           )
         : undefined,
-    [galleryMode, roomMode],
+    [allDayReminder, galleryMode, roomMode],
   );
   const activeRepository =
     roomRepository ?? (largeCalendarMode ? largeCalendarRepository : undefined);
@@ -560,7 +576,19 @@ class SyntheticRoomCalendarRepository
     eventId: string,
   ): Promise<CalendarRoomReminderAlarmOption[]> {
     const event = await super.getEvent(calendarId, eventId);
-    return event.uid === roomAlarmOption.eventUid ? [roomAlarmOption] : [];
+    if (event.uid !== roomAlarmOption.eventUid) {
+      return [];
+    }
+    if (event.timing.type === 'all-day') {
+      return [
+        {
+          ...roomAlarmOption,
+          timingType: 'all-day',
+          requiresAllDaySchedule: true,
+        },
+      ];
+    }
+    return [roomAlarmOption];
   }
 
   async listRoomReminderRecipients(): Promise<CalendarRoomReminderRecipient[]> {
@@ -608,6 +636,7 @@ class SyntheticRoomCalendarRepository
     };
     this.reminderConfigurations.set(alarmUid, configuration);
     window.__syntheticRoomReminderTarget = target;
+    window.__syntheticRoomReminderSchedule = allDaySchedule ?? undefined;
     return configuration;
   }
 

@@ -133,3 +133,58 @@ declare global {
       { kind: 'room' } | { kind: 'users'; userIds: string[] } | null;
   }
 }
+
+test('all-day notification time zones are searchable inside Event Details', async ({
+  page,
+}) => {
+  await page.clock.setFixedTime(new Date('2026-10-01T10:00:00.000Z'));
+  await page.setViewportSize({ width: 420, height: 740 });
+  await page.goto(
+    '/browser-tests/index.html?mode=room-manager&all-day=1&theme=dark&meetings_bot_user_id=%40calendar-bot%3Aexample.test',
+  );
+  await page.getByRole('button', { name: /Synthetic room planning/ }).click();
+  const dialog = page.getByRole('dialog', { name: 'Synthetic room planning' });
+  await dialog
+    .getByRole('button', { name: 'Matrix room notifications', exact: true })
+    .click();
+  await dialog
+    .getByRole('combobox', { name: 'Who to notify in this room' })
+    .click();
+  await page.getByRole('option', { name: 'Whole room', exact: true }).click();
+  const timezone = dialog.getByRole('combobox', {
+    name: 'Notification time zone',
+  });
+  await timezone.fill('berlin');
+  const modalRoot = page.locator('.MuiDialog-root').last();
+  const listbox = modalRoot.getByRole('listbox');
+  await expect(
+    listbox.getByRole('option', { name: 'Europe/Berlin', exact: true }),
+  ).toBeVisible();
+  await timezone.press('ArrowDown');
+  await timezone.press('Enter');
+  await expect(timezone).toHaveValue('Europe/Berlin');
+  await expect(listbox).toBeHidden();
+
+  await timezone.fill('new york');
+  await expect(
+    listbox.getByRole('option', { name: 'America/New_York', exact: true }),
+  ).toBeVisible();
+  await timezone.press('ArrowDown');
+  await timezone.press('Enter');
+  await expect(timezone).toHaveValue('America/New_York');
+  await dialog
+    .getByRole('button', { name: 'Save room notification', exact: true })
+    .click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as Window & {
+              __syntheticRoomReminderSchedule?: { timezone: string };
+            }
+          ).__syntheticRoomReminderSchedule?.timezone,
+      ),
+    )
+    .toBe('America/New_York');
+});
