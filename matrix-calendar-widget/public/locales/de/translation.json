@@ -381,6 +381,7 @@
     "capacity": "Dieser Kalender hat die Höchstzahl an App-Zugriffen erreicht. Widerrufe einen nicht mehr verwendeten Zugang und versuche es erneut.",
     "cleanupFailed": "Der am {{date}} für „{{calendar}}“ erstellte App-Zugriff ist möglicherweise noch aktiv. Öffne die App-Zugriffseinstellungen dieses Kalenders, prüfe den Eintrag mit diesem Erstellungsdatum und widerrufe ihn, falls er noch vorhanden ist.",
     "confirmRevoke": "Zugriff widerrufen",
+    "connectionTitle": "Kalender-App-Verbindung",
     "copied": "Kopiert",
     "copyFailed": "Kopieren fehlgeschlagen. Markiere und kopiere den Wert oben.",
     "copyPassword": "Passwort kopieren",

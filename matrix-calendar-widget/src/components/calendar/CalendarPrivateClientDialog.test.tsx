@@ -100,6 +100,25 @@ function contextualDialog(
 }
 
 describe('<CalendarPrivateClientDialog />', () => {
+  it('summarizes the sole calendar instead of presenting a redundant selector', async () => {
+    const repository = Object.assign(
+      new InMemoryCalendarRepository({ calendars: [calendars[0]] }),
+      {
+        listPrivateCalendarClients: vi.fn().mockResolvedValue([]),
+        createPrivateCalendarClient: vi.fn(),
+        revokePrivateCalendarClient: vi.fn(),
+      },
+    );
+    render(<ControlledDialog calendars={[calendars[0]]} />, {
+      wrapper: createWrapper(repository),
+    });
+    expect(await screen.findByText('Personal calendar')).toBeInTheDocument();
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Create app access' }),
+    ).toBeEnabled();
+  });
+
   it('shows one-time credentials only after creation and clears them on calendar switch and close', async () => {
     const firstSecret = 'first-one-time-secret-value';
     const secondSecret = 'second-one-time-secret-value';
@@ -139,6 +158,22 @@ describe('<CalendarPrivateClientDialog />', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Create app access' }));
     expect(await screen.findByDisplayValue(firstSecret)).toBeInTheDocument();
+    expect(screen.getByText('Access created')).toBeInTheDocument();
+    expect(
+      screen.getByRole('combobox', { name: 'Calendar' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Create app-specific access for a calendar app/),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Copy URL' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Copy username' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Copy password' }),
+    ).toBeInTheDocument();
     expect(
       screen.getByDisplayValue(
         `https://widget-api.example.test/${firstAppId}/calendar/`,
@@ -177,6 +212,37 @@ describe('<CalendarPrivateClientDialog />', () => {
     );
     await waitFor(() => expect(listClients).toHaveBeenCalledTimes(3));
     expect(screen.queryByDisplayValue(secondSecret)).not.toBeInTheDocument();
+  });
+
+  it('keeps credential values selectable and offers an actionable clipboard error', async () => {
+    const appId = `mcwpc~${'g'.repeat(48)}`;
+    const secret = 'synthetic-clipboard-error-secret';
+    const repository = Object.assign(
+      new InMemoryCalendarRepository({ calendars: [calendars[0]] }),
+      {
+        listPrivateCalendarClients: vi.fn().mockResolvedValue([]),
+        createPrivateCalendarClient: vi.fn().mockResolvedValue({
+          client: activeClient(appId, 'personal-one'),
+          secret,
+          calendarUrl: `https://widget-api.example.test/${appId}/calendar/`,
+        }),
+        revokePrivateCalendarClient: vi.fn(),
+      },
+    );
+    const clipboardWrite = vi.mocked(navigator.clipboard.writeText);
+    clipboardWrite.mockRejectedValueOnce(new Error('clipboard unavailable'));
+    render(<ControlledDialog calendars={[calendars[0]]} />, {
+      wrapper: createWrapper(repository),
+    });
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Create app access' }),
+    );
+    expect(await screen.findByDisplayValue(secret)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Copy password' }));
+    expect(
+      await screen.findByText('Copy failed. Select and copy the value above.'),
+    ).toBeInTheDocument();
+    expect(screen.getByDisplayValue(secret)).toHaveAttribute('readonly');
   });
 
   it('lists own access by creation time and confirms revoke without exposing native errors', async () => {
