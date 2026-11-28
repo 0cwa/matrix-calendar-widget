@@ -479,6 +479,34 @@ describe('<CalendarEventEditorDialog />', () => {
     });
   });
 
+  it.each([
+    ['spring clock change', '2026-03-29T01:30', '2026-03-29T04:30'],
+    ['autumn clock change', '2026-10-25T01:30', '2026-10-25T04:30'],
+  ])('shows the viewer time across the %s', async (_, start, end) => {
+    const transitionEvent: CalendarEvent = {
+      ...event,
+      timing: {
+        type: 'timed',
+        start: { type: 'zoned', local: start, timezone: 'Europe/Stockholm' },
+        end: { type: 'zoned', local: end, timezone: 'Europe/Stockholm' },
+      },
+    };
+    renderEditorScenario({
+      repositoryOptions: { calendars: [calendar], events: [transitionEvent] },
+      editorProps: {
+        calendars: [calendar],
+        event: transitionEvent,
+        onClose: vi.fn(),
+        open: true,
+        viewerTimezone: 'Africa/Lagos',
+      },
+    });
+
+    expect(
+      await screen.findByText(/^Your time \(Africa\/Lagos\):/),
+    ).toBeVisible();
+  });
+
   it('warns that following edits cannot use a repeated time', async () => {
     renderEditorScenario({
       repositoryOptions: { calendars: [calendar], events: [recurringEvent] },

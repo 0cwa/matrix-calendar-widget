@@ -209,9 +209,8 @@ function formatViewerRange(
     DateTime.fromMillis(millis, { zone: viewerTimezone }),
   );
   if (
-    viewer.some(
-      (time) => !time.isValid || time.setZone(timezone).offset === time.offset,
-    )
+    viewer.some((time) => !time.isValid) ||
+    viewer.every((time) => time.setZone(timezone).offset === time.offset)
   ) {
     return undefined;
   }
