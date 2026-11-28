@@ -220,6 +220,9 @@
     "loadError": "Kalendertermine konnten nicht geladen werden.",
     "loading": "Kalendertermine werden geladen",
     "mixedCompatibilityNotice": "Mindestens ein Kalender unterstützt weitere Elementtypen. Das Widget zeigt und bearbeitet ausschließlich VEVENT-Termine.",
+    "monthDay": {
+      "openDay": "Tag öffnen"
+    },
     "noEvents": {
       "description": "Mit der Datumsnavigation kannst du andere Tage ansehen.",
       "incompleteTitle": "Für diesen Zeitraum können keine Termine angezeigt werden",

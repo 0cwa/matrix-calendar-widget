@@ -220,6 +220,9 @@
     "loadError": "Calendar events could not be loaded.",
     "loading": "Loading calendar events",
     "mixedCompatibilityNotice": "One or more calendars support additional item types. The widget displays and edits VEVENT entries only.",
+    "monthDay": {
+      "openDay": "Open day"
+    },
     "noEvents": {
       "description": "Use the date controls to look at other dates.",
       "incompleteTitle": "No events can be shown for these dates",

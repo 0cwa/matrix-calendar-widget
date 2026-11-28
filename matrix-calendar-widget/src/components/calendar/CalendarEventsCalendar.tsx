@@ -48,6 +48,7 @@ import {
   eventCalendarIdentities,
 } from './CalendarColorDot';
 import { formatCalendarEventTime } from './CalendarEventDetailsDialog';
+import { CalendarMonthDayDialog } from './CalendarMonthDayDialog';
 import { FullCalendarThemeProvider } from './FullCalendar/FullCalendarThemeProvider';
 import {
   dayGridPlugin,
@@ -70,7 +71,7 @@ export function CalendarEventsCalendar({
   onShowMore: (date: Date) => void;
   view: CalendarViewType;
 }) {
-  const { i18n } = useTranslation();
+  const { i18n, t } = useTranslation();
   const language = i18n.languages?.[0];
   const locale =
     language && new Intl.Locale(language).language === 'de'
@@ -101,6 +102,21 @@ export function CalendarEventsCalendar({
       ),
     [buttonsId, events, viewerTimezone],
   );
+
+  // The Month date whose full event list was requested last.
+  const [dayList, setDayList] = useState<{
+    date: Date;
+    eventKeys: string[];
+    open: boolean;
+  }>();
+  const closeDayList = useCallback(
+    () => setDayList((current) => current && { ...current, open: false }),
+    [],
+  );
+
+  useEffect(() => {
+    closeDayList();
+  }, [closeDayList, filters.startDate, view]);
 
   useEffect(() => {
     const fullCalendar = ref.current;
@@ -151,15 +167,61 @@ export function CalendarEventsCalendar({
     arg.el.setAttribute('role', 'button');
     arg.el.removeAttribute('aria-controls');
     arg.el.removeAttribute('aria-expanded');
+    if (arg.view.type === 'dayGridMonth') {
+      arg.el.setAttribute('aria-haspopup', 'dialog');
+    }
   }, []);
 
   const handleMoreLinkClick = useCallback(
     (arg: MoreLinkArg): MoreLinkSimpleAction => {
-      onShowMore(arg.date);
-      return 'stop';
+      // FullCalendar 6.1 passes the calendar day as a UTC marker to moreLinkClick.
+      // Convert it to local midnight before handing it to the date controls.
+      const date = new Date(
+        arg.date.getUTCFullYear(),
+        arg.date.getUTCMonth(),
+        arg.date.getUTCDate(),
+      );
+
+      if (arg.view.type !== 'dayGridMonth') {
+        onShowMore(date);
+        return 'stop';
+      }
+
+      // Not every browser focuses a clicked link, and the list returns focus
+      // to whatever had it when it opened.
+      (arg.jsEvent.target as Element)
+        .closest<HTMLElement>('.fc-daygrid-more-link')
+        ?.focus();
+      setDayList({
+        date,
+        eventKeys: arg.allSegs.map((segment) => segment.event.id),
+        open: true,
+      });
+      // FullCalendar opens its own popover for a falsy result and moves to the
+      // clicked date for any string, which can change the month. Any other
+      // value leaves the grid as it is, but the type doesn't offer one.
+      return true as unknown as MoreLinkSimpleAction;
     },
     [onShowMore],
   );
+
+  const dayListEntries = (dayList?.eventKeys ?? []).flatMap((key) => {
+    const event = eventMap.get(key);
+    if (!event) {
+      return [];
+    }
+
+    const calendar = identities.get(event.calendarId);
+    const time = formatCalendarEventTime(
+      event,
+      i18n.language,
+      t('calendarEvents.details.allDay', 'All day'),
+      viewerTimezone,
+    );
+    return [
+      { event, calendar, time, label: eventLabel(event, time, calendar) },
+    ];
+  });
 
   return (
     <FullCalendarThemeProvider>
@@ -185,6 +247,19 @@ export function CalendarEventsCalendar({
         slotEventOverlap={false}
         weekends={view !== 'workWeek'}
       />
+      {dayList && (
+        <CalendarMonthDayDialog
+          date={dayList.date}
+          entries={dayListEntries}
+          onClose={closeDayList}
+          onOpenDay={() => {
+            closeDayList();
+            onShowMore(dayList.date);
+          }}
+          onSelectEvent={onSelectEvent}
+          open={dayList.open && view === 'month'}
+        />
+      )}
     </FullCalendarThemeProvider>
   );
 }
@@ -217,9 +292,7 @@ function CalendarEventCell({
     t('calendarEvents.details.allDay', 'All day'),
     viewerTimezone,
   );
-  const label = calendar
-    ? `${event.title}: ${time} · ${calendar.name}`
-    : `${event.title}: ${time}`;
+  const label = eventLabel(event, time, calendar);
   const title = (
     <Typography
       component="span"
@@ -300,6 +373,16 @@ function CalendarEventCell({
       </Box>
     </>
   );
+}
+
+function eventLabel(
+  event: CalendarEvent,
+  time: string,
+  calendar?: EventCalendarIdentity,
+): string {
+  return calendar
+    ? `${event.title}: ${time} · ${calendar.name}`
+    : `${event.title}: ${time}`;
 }
 
 /**
