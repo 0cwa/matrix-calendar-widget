@@ -211,6 +211,9 @@
     "empty": "Keine Termine gefunden, die den ausgewählten Filtern entsprechen.",
     "loadError": "Kalendertermine konnten nicht geladen werden.",
     "mixedCompatibilityNotice": "Mindestens ein Kalender unterstützt weitere Elementtypen. Das Widget zeigt und bearbeitet ausschließlich VEVENT-Termine.",
+    "monthDay": {
+      "openDay": "Tag öffnen"
+    },
     "partialAvailability": "Einige Kalender oder Termine konnten nicht geladen werden. Verfügbare Kalender werden weiterhin angezeigt.",
     "recurrence": {
       "addedDates": "Enthält zusätzliche Termine.",
