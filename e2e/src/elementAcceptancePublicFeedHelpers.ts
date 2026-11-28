@@ -155,7 +155,7 @@ export function createPublicFeedAcceptanceHelpers(
         .getByRole('button', { name: 'Calendar options', exact: true })
         .click();
       const publicFeedItem = frame.getByRole('menuitem', {
-        name: 'Public feed',
+        name: 'Public read-only subscription',
         exact: true,
       });
       await expect(publicFeedItem).toBeVisible();
@@ -166,7 +166,7 @@ export function createPublicFeedAcceptanceHelpers(
       );
       await publicFeedItem.click();
       dialog = frame.getByRole('dialog', {
-        name: 'Public calendar feed',
+        name: 'Public read-only subscription',
       });
       await expect(dialog).toBeVisible();
       const settingsResponse = await initialSettingsResponse;

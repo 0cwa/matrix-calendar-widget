@@ -143,7 +143,7 @@ export async function runElementPrivateAcceptanceJourney(
       exact: true,
     });
     const privateClientItemA = frameA.getByRole('menuitem', {
-      name: 'Calendar app access',
+      name: 'Private calendar app access',
       exact: true,
     });
     await checkpoint.run('private-ui-access-button-visible', () =>
@@ -477,7 +477,7 @@ export async function runElementPrivateAcceptanceJourney(
         .click();
       await memberBFrame
         .getByRole('menuitem', {
-          name: 'Calendar app access',
+          name: 'Private calendar app access',
           exact: true,
         })
         .click();

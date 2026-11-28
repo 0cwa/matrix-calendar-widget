@@ -71,7 +71,7 @@ export function CalendarRoomReminderPicker({
   onEditCalendarReminder: () => void;
   popperContainer?: () => HTMLElement | null;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const {
     open,
     setOpen,
@@ -134,6 +134,16 @@ export function CalendarRoomReminderPicker({
       !selectedRecurringSeries &&
       draft.destination !== 'off' &&
       (configuration === undefined || scheduleChanged);
+    const recipients = describeRecipients(
+      draft.destination,
+      roomMembersUnavailable
+        ? draft.userIds
+        : draft.userIds.filter((userId) => joinedMemberIds.has(userId)),
+      memberById,
+      members,
+      i18n.language,
+      t,
+    );
     const selectedPeopleUnavailable =
       draft.destination === 'users' &&
       (roomMembersLoading ||
@@ -154,10 +164,12 @@ export function CalendarRoomReminderPicker({
           )}
           {option.supported && (
             <Typography color="text.secondary" variant="body2">
-              {t(
-                'calendarEvents.roomReminder.channels',
-                'CalDAV keeps the calendar alert. Matrix controls who gets pinged in this room.',
-              )}
+              {option.requiresAllDaySchedule
+                ? t(
+                    'calendarEvents.roomReminder.allDayTiming',
+                    'This event lasts all day, so the room notification has its own day, time and time zone. The alert’s lead time does not set them.',
+                  )
+                : formatTimedTiming(eventTiming, t)}
             </Typography>
           )}
         </Stack>
@@ -168,13 +180,13 @@ export function CalendarRoomReminderPicker({
               <InputLabel id={`${controlId}-destination-label`}>
                 {t(
                   'calendarEvents.roomReminder.destination',
-                  'Matrix destination',
+                  'Who to notify in this room',
                 )}
               </InputLabel>
               <Select
                 label={t(
                   'calendarEvents.roomReminder.destination',
-                  'Matrix destination',
+                  'Who to notify in this room',
                 )}
                 labelId={`${controlId}-destination-label`}
                 onChange={(event) =>
@@ -208,24 +220,19 @@ export function CalendarRoomReminderPicker({
               <FormHelperText>
                 {t(
                   'calendarEvents.roomReminder.destinationHelp',
-                  'Off leaves the CalDAV alert in place and stops Matrix pings.',
+                  'Off keeps the calendar app alert and sends no Matrix room notification.',
                 )}
               </FormHelperText>
             </FormControl>
 
             {(members.length === 0 || roomMembersUnavailable) && (
               <Alert severity="info">
-                <Stack
-                  alignItems="center"
-                  direction="row"
-                  justifyContent="space-between"
-                  spacing={1}
-                >
+                <Stack alignItems="flex-start" spacing={1}>
                   <span>
                     {roomMembersUnavailable
                       ? t(
                           'calendarEvents.roomReminder.membersUnavailable',
-                          'The calendar server could not load joined room members.',
+                          'The calendar server could not load joined room members. Selected people cannot be saved until it can; Whole room and Off still work.',
                         )
                       : t(
                           'calendarEvents.roomReminder.noMembers',
@@ -252,7 +259,7 @@ export function CalendarRoomReminderPicker({
               <>
                 <Autocomplete
                   filterOptions={filterMemberOptions}
-                  getOptionLabel={(member) => member.displayName}
+                  getOptionLabel={(member) => memberName(member, members)}
                   isOptionEqualToValue={(left, right) =>
                     left.userId === right.userId
                   }
@@ -290,7 +297,7 @@ export function CalendarRoomReminderPicker({
                       {...params}
                       helperText={t(
                         'calendarEvents.roomReminder.peopleHelp',
-                        'Only joined room members appear here. Up to 50 people can be pinged.',
+                        'Only joined room members appear here. Up to 50 people can be pinged. Everyone in the room can still read the message.',
                       )}
                       label={t(
                         'calendarEvents.roomReminder.selectedPeople',
@@ -310,7 +317,7 @@ export function CalendarRoomReminderPicker({
                   <Alert severity="warning">
                     {t(
                       'calendarEvents.roomReminder.departedPeople',
-                      '{{count}} saved recipient(s) are no longer joined. They will not be pinged. Save to remove them from this reminder.',
+                      '{{count}} saved recipient(s) are no longer joined. They will not be pinged. Save to remove them from this room notification.',
                       { count: departedUserIds.size },
                     )}
                   </Alert>
@@ -320,16 +327,31 @@ export function CalendarRoomReminderPicker({
 
             {option.requiresAllDaySchedule && draft.destination !== 'off' && (
               <AllDayScheduleFields
-                destination={draft.destination}
                 eventTiming={eventTiming}
                 isRecurringSeries={selectedRecurringSeries}
                 now={now}
                 onChange={(allDaySchedule) =>
                   updateDraft(key, { allDaySchedule })
                 }
+                recipients={recipients}
                 schedule={draft.allDaySchedule}
                 t={t}
               />
+            )}
+
+            {!option.requiresAllDaySchedule && draft.destination !== 'off' && (
+              <Typography color="text.secondary" variant="body2">
+                {recipients === undefined
+                  ? t(
+                      'calendarEvents.roomReminder.previewNoPeople',
+                      'Choose at least one person to preview who Matrix will ping.',
+                    )
+                  : t(
+                      'calendarEvents.roomReminder.timedPreview',
+                      'Preview: Matrix will ping {{destination}} when this alert is due.',
+                      { destination: recipients },
+                    )}
+              </Typography>
             )}
 
             <Stack
@@ -353,7 +375,7 @@ export function CalendarRoomReminderPicker({
                   ? t('calendarEvents.roomReminder.saving', 'Saving…')
                   : t(
                       'calendarEvents.roomReminder.save',
-                      'Save Matrix destination',
+                      'Save room notification',
                     )}
               </Button>
               {targetValue !== 'off' && !changed && (
@@ -377,7 +399,7 @@ export function CalendarRoomReminderPicker({
               <Alert severity="warning">
                 {t(
                   'calendarEvents.roomReminder.savedUnsupported',
-                  'This saved Matrix reminder cannot be delivered with the current CalDAV alarm. Update or remove the calendar alarm, then configure Matrix again.',
+                  'This saved Matrix room notification cannot be delivered with the current calendar app alert. Update or remove the alert, then set up the notification again.',
                 )}
               </Alert>
             )}
@@ -388,7 +410,7 @@ export function CalendarRoomReminderPicker({
             >
               {t(
                 'calendarEvents.roomReminder.editCalDavAlarm',
-                'Edit CalDAV reminder',
+                'Edit calendar app alert',
               )}
             </Button>
           </Stack>
@@ -405,13 +427,13 @@ export function CalendarRoomReminderPicker({
         <Typography variant="subtitle2">
           {t(
             'calendarEvents.roomReminder.missingCalDavAlarm',
-            'CalDAV alarm no longer available',
+            'Calendar app alert no longer available',
           )}
         </Typography>
         <Typography color="text.secondary" variant="body2">
           {t(
             'calendarEvents.roomReminder.orphaned',
-            'This Matrix destination refers to an alarm that is no longer in the event.',
+            'This Matrix room notification refers to an alert that is no longer on the event.',
           )}
         </Typography>
         <Button
@@ -422,7 +444,7 @@ export function CalendarRoomReminderPicker({
         >
           {t(
             'calendarEvents.roomReminder.removeMatrixDestination',
-            'Remove Matrix destination',
+            'Remove room notification',
           )}
         </Button>
         {index < orphanedConfigurations.length - 1 && <Divider />}
@@ -439,15 +461,21 @@ export function CalendarRoomReminderPicker({
         sx={{ alignSelf: 'flex-start' }}
       >
         {open
-          ? t('calendarEvents.roomReminder.close', 'Close reminder settings')
-          : t('calendarEvents.roomReminder.action', 'Reminder settings')}
+          ? t(
+              'calendarEvents.roomReminder.close',
+              'Close Matrix room notifications',
+            )
+          : t(
+              'calendarEvents.roomReminder.action',
+              'Matrix room notifications',
+            )}
       </Button>
       {open && (
         <Stack spacing={1}>
           <Typography color="text.secondary" variant="body2">
             {t(
               'calendarEvents.roomReminder.description',
-              'CalDAV alerts are saved in the event for calendar apps. Matrix destinations control who this room bot pings. Reminder delivery also requires current room permissions.',
+              'Calendar app alerts are saved with the event for calendar apps. Matrix room notifications are separate messages from the room bot in this room. Delivery also requires current room permissions.',
             )}
           </Typography>
           {loading && (
@@ -466,7 +494,7 @@ export function CalendarRoomReminderPicker({
             <Alert severity="info">
               {t(
                 'calendarEvents.roomReminder.noCalDavAlarms',
-                'There is no CalDAV reminder in this event yet. Add one first, then choose who Matrix should ping.',
+                'There is no calendar app alert on this event yet. Add one first, then choose who Matrix should ping.',
               )}
             </Alert>
           )}
@@ -480,7 +508,7 @@ export function CalendarRoomReminderPicker({
             >
               {t(
                 'calendarEvents.roomReminder.editCalDavAlarm',
-                'Edit CalDAV reminder',
+                'Edit calendar app alert',
               )}
             </Button>
           )}
@@ -497,7 +525,7 @@ export function CalendarRoomReminderPicker({
             <Alert severity="error">
               {t(
                 'calendarEvents.roomReminder.saveError',
-                'Matrix reminder settings were not saved. The CalDAV alert is unchanged. Check the selected people and time zone, and choose a future reminder time, then retry.',
+                'Matrix room notification settings were not saved. The calendar app alert is unchanged. Check the selected people and time zone, and choose a future notification time, then retry.',
               )}
             </Alert>
           )}
@@ -508,40 +536,33 @@ export function CalendarRoomReminderPicker({
 }
 
 function AllDayScheduleFields({
-  destination,
   eventTiming,
   isRecurringSeries,
   now,
   onChange,
+  recipients,
   schedule,
   t,
 }: {
-  destination: ReminderDestinationChoice;
   eventTiming: CalendarEventTiming;
   isRecurringSeries: boolean;
   now: number;
   onChange: (schedule: CalendarRoomReminderAllDaySchedule) => void;
+  recipients: string | undefined;
   schedule: CalendarRoomReminderAllDaySchedule;
   t: TFunction;
 }) {
   const preview =
-    eventTiming.type === 'all-day'
+    eventTiming.type === 'all-day' && validateAllDayDraft(schedule)
       ? previewAllDayDate(eventTiming.startDate, schedule.daysBefore)
       : undefined;
   const pastSchedule = getAllDaySchedulePastState(schedule, eventTiming, now);
-  const destinationLabel =
-    destination === 'room'
-      ? t('calendarEvents.roomReminder.wholeRoomPreview', 'the whole room')
-      : t(
-          'calendarEvents.roomReminder.selectedPeoplePreview',
-          'the selected people',
-        );
   return (
     <Stack spacing={1}>
       <Typography variant="subtitle2">
         {t(
           'calendarEvents.roomReminder.allDaySchedule',
-          'Matrix reminder time for this all-day event',
+          'When to notify for this all-day event',
         )}
       </Typography>
       <Stack direction={{ sm: 'row', xs: 'column' }} spacing={1}>
@@ -569,9 +590,12 @@ function AllDayScheduleFields({
           fullWidth
           helperText={t(
             'calendarEvents.roomReminder.timezoneHelp',
-            'Enter an IANA time zone, for example Europe/Stockholm. This visible choice is saved with the Matrix schedule.',
+            'Area/city name, for example Europe/Stockholm. The local time is read in this zone.',
           )}
-          label={t('calendarEvents.roomReminder.timezone', 'Time zone (IANA)')}
+          label={t(
+            'calendarEvents.roomReminder.timezone',
+            'Notification time zone',
+          )}
           onChange={(event) =>
             onChange({ ...schedule, timezone: event.target.value })
           }
@@ -579,37 +603,37 @@ function AllDayScheduleFields({
         />
       </Stack>
       <Typography color="text.secondary" variant="body2">
-        {preview
+        {recipients === undefined
           ? t(
-              'calendarEvents.roomReminder.preview',
-              'Preview: Matrix will ping {{destination}} on {{date}} at {{time}} ({{timezone}}).',
-              {
-                destination: destinationLabel,
-                date: preview,
-                time: schedule.localTime || '09:00',
-                timezone:
-                  schedule.timezone ||
-                  t(
-                    'calendarEvents.roomReminder.chooseTimezone',
-                    'choose a time zone',
-                  ),
-              },
+              'calendarEvents.roomReminder.previewNoPeople',
+              'Choose at least one person to preview who Matrix will ping.',
             )
-          : t(
-              'calendarEvents.roomReminder.previewUnavailable',
-              'Choose the local time and IANA time zone for this Matrix reminder.',
-            )}
+          : preview
+            ? t(
+                'calendarEvents.roomReminder.preview',
+                'Preview: Matrix will ping {{destination}} on {{date}} at {{time}} ({{timezone}}).',
+                {
+                  destination: recipients,
+                  date: preview,
+                  time: schedule.localTime,
+                  timezone: schedule.timezone,
+                },
+              )
+            : t(
+                'calendarEvents.roomReminder.previewUnavailable',
+                'Enter the days before, local time and a valid time zone to preview this room notification.',
+              )}
       </Typography>
       {pastSchedule === 'past' && (
         <Alert severity="warning">
           {isRecurringSeries
             ? t(
                 'calendarEvents.roomReminder.pastRecurring',
-                'This time has passed for the selected occurrence. Matrix does not send past reminders. The schedule applies to any future occurrences that remain in this series; if none remain, no reminder will be sent.',
+                'This time has passed for the selected occurrence. Matrix does not send past notifications. The schedule applies to any future occurrences that remain in this series; if none remain, no notification will be sent.',
               )
             : t(
                 'calendarEvents.roomReminder.pastOneTime',
-                'This reminder time has already passed. Matrix does not send past reminders. Choose a future time before saving.',
+                'This notification time has already passed. Matrix does not send past notifications. Choose a future time before saving.',
               )}
         </Alert>
       )}
@@ -651,6 +675,70 @@ function previewAllDayDate(startDate: string, daysBefore: number): string {
     .slice(0, 10);
 }
 
+/** Names who a draft would ping. Undefined while no person is selected. */
+function describeRecipients(
+  destination: ReminderDestinationChoice,
+  userIds: readonly string[],
+  memberById: ReadonlyMap<string, CalendarReminderMember>,
+  members: readonly CalendarReminderMember[],
+  language: string,
+  t: TFunction,
+): string | undefined {
+  if (destination === 'room') {
+    return t(
+      'calendarEvents.roomReminder.wholeRoomPreview',
+      'everyone in this room',
+    );
+  }
+  if (destination !== 'users' || userIds.length === 0) return undefined;
+  const names = new Intl.ListFormat(language, { type: 'conjunction' }).format(
+    userIds.map((userId) => {
+      const member = memberById.get(userId);
+      return member ? memberName(member, members) : userId;
+    }),
+  );
+  return t(
+    'calendarEvents.roomReminder.selectedPeoplePreview',
+    '{{names}} in this room',
+    { names },
+  );
+}
+
+/** Adds the Matrix ID when two joined people share a display name. */
+function memberName(
+  member: CalendarReminderMember,
+  members: readonly CalendarReminderMember[],
+): string {
+  const shared = members.some(
+    (other) =>
+      other.userId !== member.userId &&
+      other.displayName === member.displayName,
+  );
+  return shared
+    ? `${member.displayName} (${member.userId})`
+    : member.displayName;
+}
+
+function formatTimedTiming(
+  eventTiming: CalendarEventTiming,
+  t: TFunction,
+): string {
+  const timezone =
+    eventTiming.type === 'timed' && eventTiming.start.type === 'zoned'
+      ? eventTiming.start.timezone
+      : undefined;
+  return timezone
+    ? t(
+        'calendarEvents.roomReminder.timedTiming',
+        'Follows this calendar app alert. Event time zone: {{timezone}}.',
+        { timezone },
+      )
+    : t(
+        'calendarEvents.roomReminder.timedTimingNoZone',
+        'Follows this calendar app alert.',
+      );
+}
+
 function formatOption(
   option: CalendarRoomReminderAlarmOption,
   index: number,
@@ -659,23 +747,11 @@ function formatOption(
   if (!option.trigger || !option.relatedTo) {
     return t(
       'calendarEvents.roomReminder.optionUnavailableLabel',
-      'Alarm {{index}} from CalDAV',
+      'Calendar app alert {{index}}',
       { index },
     );
   }
-  const duration = formatDuration(option.trigger);
-  const relative =
-    option.relatedTo === 'start'
-      ? t(
-          'calendarEvents.roomReminder.relativeToStart',
-          '{{duration}} relative to event start',
-          { duration },
-        )
-      : t(
-          'calendarEvents.roomReminder.relativeToEnd',
-          '{{duration}} relative to event end',
-          { duration },
-        );
+  const relative = formatTrigger(option.trigger, option.relatedTo, t);
   const timing = !option.repeat
     ? relative
     : t(
@@ -684,17 +760,55 @@ function formatOption(
         {
           timing: relative,
           count: option.repeat.count,
-          interval: formatDuration(option.repeat.interval),
+          interval: formatDuration(option.repeat.interval, t),
         },
       );
   return t(
     'calendarEvents.roomReminder.optionLabel',
-    'Alarm {{index}}: {{timing}}',
+    'Calendar app alert {{index}}: {{timing}}',
     {
       index,
       timing,
     },
   );
+}
+
+function formatTrigger(
+  trigger: CalendarEventDuration,
+  relatedTo: 'start' | 'end',
+  t: TFunction,
+): string {
+  const { weeks, days, hours, minutes, seconds } = trigger;
+  if (!(weeks || days || hours || minutes || seconds)) {
+    return relatedTo === 'start'
+      ? t('calendarEvents.roomReminder.atStart', 'when the event starts')
+      : t('calendarEvents.roomReminder.atEnd', 'when the event ends');
+  }
+  const duration = formatDuration(trigger, t);
+  if (trigger.isNegative) {
+    return relatedTo === 'start'
+      ? t(
+          'calendarEvents.roomReminder.beforeStart',
+          '{{duration}} before the event starts',
+          { duration },
+        )
+      : t(
+          'calendarEvents.roomReminder.beforeEnd',
+          '{{duration}} before the event ends',
+          { duration },
+        );
+  }
+  return relatedTo === 'start'
+    ? t(
+        'calendarEvents.roomReminder.afterStart',
+        '{{duration}} after the event starts',
+        { duration },
+      )
+    : t(
+        'calendarEvents.roomReminder.afterEnd',
+        '{{duration}} after the event ends',
+        { duration },
+      );
 }
 
 function formatUnavailableReason(
@@ -705,39 +819,66 @@ function formatUnavailableReason(
     case 'unsupported-timezone':
       return t(
         'calendarEvents.roomReminder.unsupportedTimezone',
-        'The event uses time-zone rules this reminder service cannot resolve.',
+        'Matrix room notifications cannot resolve the time-zone rules this event uses.',
       );
     case 'unsupported-event-timing':
       return t(
         'calendarEvents.roomReminder.unsupportedEventTiming',
-        'The event time is floating or otherwise unsupported for Matrix delivery.',
+        'Matrix room notifications need a supported event time with a time zone.',
       );
     case 'absolute-trigger':
       return t(
         'calendarEvents.roomReminder.absoluteTrigger',
-        'This alarm fires at an exact UTC time, so Matrix cannot follow the event if it moves.',
+        'This alert is set to an exact UTC time, so a Matrix room notification cannot follow the event if it moves.',
       );
     case 'unsupported-trigger':
       return t(
         'calendarEvents.roomReminder.unsupportedTrigger',
-        'This alarm uses a trigger or repeat pattern Matrix delivery cannot schedule.',
+        'Matrix room notifications cannot schedule the timing or repeat pattern of this alert.',
       );
     default:
       return t(
         'calendarEvents.roomReminder.unsupportedTrigger',
-        'This alarm uses a trigger or repeat pattern Matrix delivery cannot schedule.',
+        'Matrix room notifications cannot schedule the timing or repeat pattern of this alert.',
       );
   }
 }
 
-function formatDuration(duration: CalendarEventDuration): string {
-  const parts = [
-    duration.weeks > 0 ? `${duration.weeks}w` : undefined,
-    duration.days > 0 ? `${duration.days}d` : undefined,
-    duration.hours > 0 ? `${duration.hours}h` : undefined,
-    duration.minutes > 0 ? `${duration.minutes}m` : undefined,
-    duration.seconds > 0 ? `${duration.seconds}s` : undefined,
-  ].filter((part): part is string => part !== undefined);
-  const value = parts.length > 0 ? parts.join(' ') : '0s';
-  return duration.isNegative ? `−${value}` : value;
+function formatDuration(duration: CalendarEventDuration, t: TFunction): string {
+  const { weeks, days, hours, minutes, seconds } = duration;
+  const parts: string[] = [];
+  if (weeks > 0) {
+    parts.push(
+      t('calendarEvents.roomReminder.weeks', '{{count}} weeks', {
+        count: weeks,
+      }),
+    );
+  }
+  if (days > 0) {
+    parts.push(
+      t('calendarEvents.roomReminder.days', '{{count}} days', { count: days }),
+    );
+  }
+  if (hours > 0) {
+    parts.push(
+      t('calendarEvents.roomReminder.hours', '{{count}} hours', {
+        count: hours,
+      }),
+    );
+  }
+  if (minutes > 0) {
+    parts.push(
+      t('calendarEvents.roomReminder.minutes', '{{count}} minutes', {
+        count: minutes,
+      }),
+    );
+  }
+  if (seconds > 0 || parts.length === 0) {
+    parts.push(
+      t('calendarEvents.roomReminder.seconds', '{{count}} seconds', {
+        count: seconds,
+      }),
+    );
+  }
+  return parts.join(' ');
 }

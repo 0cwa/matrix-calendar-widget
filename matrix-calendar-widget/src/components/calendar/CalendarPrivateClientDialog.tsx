@@ -308,14 +308,14 @@ export function CalendarPrivateClientDialog({
       open={open}
     >
       <DialogTitle>
-        {t('calendarPrivateClient.title', 'Calendar app access')}
+        {t('calendarPrivateClient.title', 'Private calendar app access')}
       </DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ pt: 1 }}>
           <Typography color="text.secondary" variant="body2">
             {t(
               'calendarPrivateClient.intro',
-              'Create app-specific access for a calendar app to read and edit this calendar.',
+              'Create app-specific access for a calendar app to read and edit this calendar. For a room calendar, this needs calendar management permission; ask a room moderator or your server administrator about it.',
             )}
           </Typography>
 

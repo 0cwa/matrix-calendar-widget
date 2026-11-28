@@ -29,13 +29,17 @@ test('room manager can search and save an exact Matrix reminder recipient while 
     name: 'Synthetic room planning',
   });
   await dialog
-    .getByRole('button', { name: 'Reminder settings', exact: true })
+    .getByRole('button', { name: 'Matrix room notifications', exact: true })
     .click();
   await expect(
-    dialog.getByText('Alarm 1: −15m relative to event start'),
+    dialog.getByText(
+      'Calendar app alert 1: 15 minutes before the event starts',
+    ),
   ).toBeVisible();
 
-  await dialog.getByRole('combobox', { name: 'Matrix destination' }).click();
+  await dialog
+    .getByRole('combobox', { name: 'Who to notify in this room' })
+    .click();
   await page.getByRole('option', { name: 'Selected people' }).click();
   const recipients = dialog.getByRole('combobox', {
     name: 'Selected people',
@@ -110,7 +114,7 @@ test('room manager can search and save an exact Matrix reminder recipient while 
   ).toBeVisible();
   await recipients.press('Escape');
   await dialog
-    .getByRole('button', { name: 'Save Matrix destination', exact: true })
+    .getByRole('button', { name: 'Save room notification', exact: true })
     .click();
   await expect(
     dialog.getByText('Matrix pings the selected people.', { exact: true }),

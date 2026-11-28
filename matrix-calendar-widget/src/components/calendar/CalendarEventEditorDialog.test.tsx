@@ -263,7 +263,7 @@ describe('<CalendarEventEditorDialog />', () => {
     );
     await userEvent.click(
       screen.getByRole('button', {
-        name: 'Save and configure Matrix reminders',
+        name: 'Save and set up room notifications',
       }),
     );
 
@@ -329,7 +329,7 @@ describe('<CalendarEventEditorDialog />', () => {
       screen.getByRole('textbox', { name: 'Description' }),
     );
     expect(optional).toContainElement(
-      screen.getByRole('checkbox', { name: 'CalDAV reminder' }),
+      screen.getByRole('checkbox', { name: 'Calendar app alert' }),
     );
   });
 
@@ -2869,7 +2869,7 @@ describe('<CalendarEventEditorDialog />', () => {
       await screen.findByRole('textbox', { name: /Title/i }),
       'Alarm event',
     );
-    await userEvent.click(screen.getByLabelText('CalDAV reminder'));
+    await userEvent.click(screen.getByLabelText('Calendar app alert'));
     fireEvent.change(screen.getByLabelText('Minutes before'), {
       target: { value: '25' },
     });
@@ -2882,7 +2882,7 @@ describe('<CalendarEventEditorDialog />', () => {
     });
 
     view.rerender(<CalendarEventEditorDialog {...props} event={created} />);
-    expect(await screen.findByLabelText('CalDAV reminder')).toBeChecked();
+    expect(await screen.findByLabelText('Calendar app alert')).toBeChecked();
     expect(screen.getByLabelText('Minutes before')).toHaveValue(25);
     fireEvent.change(screen.getByLabelText('Minutes before'), {
       target: { value: '40' },
@@ -2899,7 +2899,7 @@ describe('<CalendarEventEditorDialog />', () => {
     });
 
     view.rerender(<CalendarEventEditorDialog {...props} event={updated} />);
-    await userEvent.click(await screen.findByLabelText('CalDAV reminder'));
+    await userEvent.click(await screen.findByLabelText('Calendar app alert'));
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
     await expect(
       repository.getEvent('team', 'alarm-event'),
@@ -2925,7 +2925,7 @@ describe('<CalendarEventEditorDialog />', () => {
       await screen.findByRole('textbox', { name: /Title/i }),
       'Absolute alarm event',
     );
-    await userEvent.click(screen.getByLabelText('CalDAV reminder'));
+    await userEvent.click(screen.getByLabelText('Calendar app alert'));
     await userEvent.click(
       await screen.findByRole('radio', { name: 'At an exact UTC time' }),
     );
@@ -2946,7 +2946,7 @@ describe('<CalendarEventEditorDialog />', () => {
     );
     expect(
       screen.getByText(
-        'This absolute alarm is saved to the calendar and cannot be delivered as a Matrix room reminder.',
+        'Calendar apps receive this alert at the exact time. A Matrix room notification cannot use it. To notify the room too, choose “Before the event”.',
       ),
     ).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Create event' }));
@@ -2977,7 +2977,7 @@ describe('<CalendarEventEditorDialog />', () => {
     });
 
     view.rerender(<CalendarEventEditorDialog {...props} event={updated} />);
-    await userEvent.click(await screen.findByLabelText('CalDAV reminder'));
+    await userEvent.click(await screen.findByLabelText('Calendar app alert'));
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
     await expect(
       repository.getEvent('team', 'absolute-alarm-event'),
@@ -3002,10 +3002,10 @@ describe('<CalendarEventEditorDialog />', () => {
 
     expect(
       await screen.findByText(
-        'This event contains alarm data this editor cannot safely change. Other event edits will preserve it.',
+        'This event has calendar app alert data this editor cannot safely change. Other event edits will preserve it.',
       ),
     ).toBeInTheDocument();
-    expect(screen.getByLabelText('CalDAV reminder')).toBeDisabled();
+    expect(screen.getByLabelText('Calendar app alert')).toBeDisabled();
     const title = screen.getByRole('textbox', { name: /Title/i });
     expect(title).toBeEnabled();
     await userEvent.clear(title);
