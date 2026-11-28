@@ -456,9 +456,11 @@
       "loading": "Loading calendars…",
       "managersOnly": "Only calendar managers can change or delete these calendars.",
       "noCalendars": "No calendar is available here. Ask a room moderator or your server administrator.",
+      "readOnlyRoomCalendar": "You can’t create events or change the room calendar here. Ask a room moderator or your server administrator about your permissions.",
       "roomCalendar": "The room calendar can’t be renamed, restyled or deleted here. Ask your server administrator."
     },
     "options": "Calendar options",
+    "readOnlyCue": "Read-only",
     "rename": {
       "action": "Rename calendar",
       "calendar": "Calendar",

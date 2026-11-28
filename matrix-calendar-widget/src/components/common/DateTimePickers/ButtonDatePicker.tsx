@@ -16,7 +16,7 @@
 
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import { Button, SxProps } from '@mui/material';
+import { Box, Button, SxProps } from '@mui/material';
 import {
   BaseSingleInputFieldProps,
   DatePicker,
@@ -61,7 +61,17 @@ function ButtonField(props: ButtonFieldProps) {
       onClick={() => (open ? onClose?.() : onOpen?.())}
       sx={sx}
     >
-      {label}
+      <Box
+        component="span"
+        sx={{
+          minWidth: 0,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {label}
+      </Box>
     </Button>
   );
 }

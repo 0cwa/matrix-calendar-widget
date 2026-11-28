@@ -30,7 +30,7 @@ type CalendarToolbarButtonsProps = {
   onRangeChange: (startDate: string, endDate: string) => void;
 };
 
-const stepButtonSx = { width: 40, height: 40 };
+const stepButtonSx = { width: 40, height: 40, flexShrink: 0 };
 
 export const CalendarToolbarButtons = ({
   view,

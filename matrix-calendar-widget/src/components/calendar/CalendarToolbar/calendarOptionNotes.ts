@@ -47,8 +47,23 @@ export function calendarOptionNotes(
   }
 
   const notes: string[] = [];
+  const readOnly = calendars.data.every(
+    (calendar) => calendar.readOnly !== false,
+  );
+  const collections = calendars.data.filter(
+    (calendar) => calendar.operatorManaged !== true,
+  );
 
-  if (calendars.data.every((calendar) => calendar.readOnly !== false)) {
+  if (readOnly && collections.length === 0) {
+    return [
+      t(
+        'calendars.optionNotes.readOnlyRoomCalendar',
+        'You can’t create events or change the room calendar here. Ask a room moderator or your server administrator about your permissions.',
+      ),
+    ];
+  }
+
+  if (readOnly) {
     notes.push(
       t(
         'calendars.optionNotes.cannotCreateEvents',
@@ -56,10 +71,6 @@ export function calendarOptionNotes(
       ),
     );
   }
-
-  const collections = calendars.data.filter(
-    (calendar) => calendar.operatorManaged !== true,
-  );
 
   if (collections.every((calendar) => calendar.readOnly !== false)) {
     notes.push(

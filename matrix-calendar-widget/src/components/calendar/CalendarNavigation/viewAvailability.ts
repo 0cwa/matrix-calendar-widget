@@ -18,10 +18,13 @@ import { useMediaQuery } from '@mui/material';
 import type { CalendarSurfaceView } from './CalendarNavigation';
 
 const narrowViews: readonly CalendarSurfaceView[] = ['list', 'day'];
+export const WIDE_CALENDAR_MIN_WIDTH_PX = 800;
 
 /** Whether the widget is wide enough for work week, week and month. */
 export function useIsWideCalendar(): boolean {
-  return useMediaQuery('(min-width:800px)', { noSsr: true });
+  return useMediaQuery(`(min-width:${WIDE_CALENDAR_MIN_WIDTH_PX}px)`, {
+    noSsr: true,
+  });
 }
 
 /** Whether a view can be shown in a narrow widget. */

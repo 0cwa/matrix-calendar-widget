@@ -16,13 +16,19 @@
 
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
 import {
   Button,
   Divider,
+  IconButton,
   ListItemIcon,
   ListItemText,
-  Menu,
   MenuItem,
+  MenuList,
+  Popover,
+  Stack,
+  Tooltip,
+  Typography,
 } from '@mui/material';
 import { unstable_useId as useId } from '@mui/utils';
 import { ReactElement, useRef, useState } from 'react';
@@ -43,15 +49,18 @@ export type CalendarOption = {
 export function CalendarOptionsMenu({
   groups,
   notes,
+  compact = false,
 }: {
   groups: CalendarOption[][];
   notes: string[];
+  compact?: boolean;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const buttonId = useId();
   const menuId = useId();
+  const notesId = useId();
   const shownGroups = groups.filter((group) => group.length > 0);
 
   const select = (option: CalendarOption) => {
@@ -64,67 +73,114 @@ export function CalendarOptionsMenu({
 
   return (
     <>
-      <Button
-        aria-controls={open ? menuId : undefined}
-        aria-expanded={open}
-        aria-haspopup="menu"
-        endIcon={open ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-        id={buttonId}
-        onClick={() => setOpen(true)}
-        ref={buttonRef}
-        variant="outlined"
-      >
-        {t('calendars.options', 'Calendar options')}
-      </Button>
-      <Menu
-        MenuListProps={{ 'aria-labelledby': buttonId }}
+      <Tooltip title={t('calendars.options', 'Calendar options')}>
+        {compact ? (
+          <IconButton
+            aria-label={t('calendars.options', 'Calendar options')}
+            aria-controls={open ? menuId : undefined}
+            aria-expanded={open}
+            aria-haspopup={shownGroups.length ? 'menu' : 'dialog'}
+            id={buttonId}
+            onClick={() => setOpen(true)}
+            ref={buttonRef}
+            sx={{
+              border: 1,
+              borderColor: 'divider',
+              borderRadius: 1,
+              width: 40,
+              height: 40,
+            }}
+          >
+            <MoreVertIcon />
+          </IconButton>
+        ) : (
+          <Button
+            aria-controls={open ? menuId : undefined}
+            aria-expanded={open}
+            aria-haspopup={shownGroups.length ? 'menu' : 'dialog'}
+            endIcon={open ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+            id={buttonId}
+            onClick={() => setOpen(true)}
+            ref={buttonRef}
+            variant="outlined"
+          >
+            {t('calendars.options', 'Calendar options')}
+          </Button>
+        )}
+      </Tooltip>
+      <Popover
         anchorEl={() => buttonRef.current!}
         anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
-        id={menuId}
         onClose={() => setOpen(false)}
         open={open}
         transformOrigin={{ horizontal: 'right', vertical: 'top' }}
+        PaperProps={
+          shownGroups.length
+            ? undefined
+            : {
+                id: menuId,
+                role: 'dialog',
+                'aria-labelledby': buttonId,
+                'aria-describedby': notes.length > 0 ? notesId : undefined,
+                'aria-modal': true,
+                tabIndex: -1,
+              }
+        }
       >
-        {shownGroups.flatMap((group, index) => [
-          ...(index > 0
-            ? [<Divider component="li" key={`divider-${index}`} />]
-            : []),
-          ...group.map((option) => (
-            <MenuItem
-              key={option.label}
-              onClick={() => select(option)}
-              sx={{
-                color: option.destructive ? 'error.main' : undefined,
-                whiteSpace: 'normal',
-              }}
-            >
-              <ListItemIcon sx={{ color: 'inherit' }}>
-                {option.icon}
-              </ListItemIcon>
-              <ListItemText>{option.label}</ListItemText>
-            </MenuItem>
-          )),
-        ])}
-        {notes.length > 0 && shownGroups.length > 0 && (
-          <Divider component="li" />
-        )}
-        {notes.map((note) => (
-          <MenuItem
-            aria-disabled="true"
-            disableRipple
-            key={note}
-            sx={{
-              color: 'text.secondary',
-              cursor: 'default',
-              maxWidth: 320,
-              typography: 'body2',
-              whiteSpace: 'normal',
+        {shownGroups.length > 0 && (
+          <MenuList
+            aria-describedby={notes.length > 0 ? notesId : undefined}
+            aria-labelledby={buttonId}
+            autoFocusItem={open}
+            id={menuId}
+            onKeyDown={(event) => {
+              if (event.key === 'Tab') {
+                event.preventDefault();
+                setOpen(false);
+              }
             }}
           >
-            {note}
-          </MenuItem>
-        ))}
-      </Menu>
+            {shownGroups.flatMap((group, index) => [
+              ...(index > 0
+                ? [<Divider component="li" key={`divider-${index}`} />]
+                : []),
+              ...group.map((option) => (
+                <MenuItem
+                  key={option.label}
+                  onClick={() => select(option)}
+                  sx={{
+                    color: option.destructive ? 'error.main' : undefined,
+                    whiteSpace: 'normal',
+                  }}
+                >
+                  <ListItemIcon sx={{ color: 'inherit' }}>
+                    {option.icon}
+                  </ListItemIcon>
+                  <ListItemText>{option.label}</ListItemText>
+                </MenuItem>
+              )),
+            ])}
+          </MenuList>
+        )}
+        {notes.length > 0 && shownGroups.length > 0 && <Divider />}
+        {notes.length > 0 && (
+          <Stack
+            id={notesId}
+            spacing={0.75}
+            sx={{ color: 'text.secondary', maxWidth: 320, px: 2, py: 1.25 }}
+          >
+            {notes.map((note) => (
+              <Typography
+                key={note}
+                variant="body2"
+                sx={{ overflowWrap: 'anywhere' }}
+              >
+                {note}
+              </Typography>
+            ))}
+          </Stack>
+        )}
+      </Popover>
     </>
   );
 }

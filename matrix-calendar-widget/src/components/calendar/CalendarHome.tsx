@@ -40,7 +40,7 @@ export function CalendarHome() {
         <Typography id={filtersId} sx={visuallyHidden} variant="h3">
           {t('calendarHome.filtersTitle', 'Calendar controls')}
         </Typography>
-        <Box my={1}>
+        <Box my={0.75}>
           <CalendarToolbar
             createButtonRef={createButtonRef}
             filters={filters}

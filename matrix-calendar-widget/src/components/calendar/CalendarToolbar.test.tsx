@@ -733,14 +733,10 @@ describe('<CalendarToolbar />', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Calendar options' }));
 
-    const menu = screen.getByRole('menu', { name: 'Calendar options' });
     expect(
-      within(menu)
-        .getAllByRole('menuitem')
-        .map((item) => item.textContent),
-    ).toEqual([
-      'The room calendar can’t be renamed, restyled or deleted here. Ask your server administrator.',
-    ]);
+      screen.getByRole('dialog', { name: 'Calendar options' }),
+    ).toHaveTextContent('The room calendar can’t be renamed');
+    expect(screen.queryByRole('menuitem')).toBeNull();
   });
 
   it('groups management and sharing actions and separates deletion last', async () => {
@@ -800,6 +796,11 @@ describe('<CalendarToolbar />', () => {
     expect(options).toHaveFocus();
 
     await userEvent.keyboard('{Enter}');
+    await userEvent.keyboard('{Tab}');
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+    expect(options).toHaveFocus();
+
+    await userEvent.keyboard('{Enter}');
     await userEvent.keyboard('{ArrowDown}{ArrowDown}{Enter}');
     const dialog = await screen.findByRole('dialog', {
       name: 'Edit calendar description',
@@ -822,22 +823,20 @@ describe('<CalendarToolbar />', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Calendar options' }));
 
     expect(
-      await screen.findByRole('menuitem', {
-        name: /You can’t create events here/,
-      }),
-    ).toHaveAttribute('aria-disabled', 'true');
+      await screen.findByText(/You can’t create events here/),
+    ).toBeInTheDocument();
     expect(
-      screen.getByRole('menuitem', {
-        name: 'Only calendar managers can change or delete these calendars.',
-      }),
-    ).toHaveAttribute('aria-disabled', 'true');
+      screen.getByText(
+        'Only calendar managers can change or delete these calendars.',
+      ),
+    ).toBeInTheDocument();
     expect(
       screen.queryByRole('menuitem', {
         name: /^(Rename|Edit|Delete) calendar/,
       }),
     ).toBeNull();
     expect(
-      screen.getByRole('button', { hidden: true, name: 'Create event' }),
-    ).toBeDisabled();
+      screen.queryByRole('button', { hidden: true, name: 'Create event' }),
+    ).toBeNull();
   });
 });

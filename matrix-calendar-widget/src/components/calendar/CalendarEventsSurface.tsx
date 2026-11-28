@@ -183,6 +183,7 @@ export function CalendarEventsSurface({
   );
   const searchEmptyState = searchHidesEverything && (
     <CalendarEventsEmptyState
+      compact={view !== 'list'}
       action={
         onClearSearch && (
           <Button onClick={onClearSearch} variant="outlined">
@@ -190,10 +191,14 @@ export function CalendarEventsSurface({
           </Button>
         )
       }
-      description={t(
-        'calendarEvents.noSearchResults.description',
-        'Search checks titles, descriptions, locations and categories in the selected dates.',
-      )}
+      description={
+        view === 'list'
+          ? t(
+              'calendarEvents.noSearchResults.description',
+              'Search checks titles, descriptions, locations and categories in the selected dates.',
+            )
+          : undefined
+      }
       title={t(
         'calendarEvents.noSearchResults.title',
         'No events match “{{query}}”',
@@ -206,6 +211,7 @@ export function CalendarEventsSurface({
       // A setup or availability notice already explains why.
       return roomCalendarUnavailable || partiallyAvailable ? null : (
         <CalendarEventsEmptyState
+          compact={view !== 'list'}
           title={t(
             'calendarEvents.noReadableCalendar',
             'There is no calendar to show.',
@@ -225,6 +231,7 @@ export function CalendarEventsSurface({
     ) {
       return (
         <CalendarEventsEmptyState
+          compact={view !== 'list'}
           action={
             <Button
               onClick={() => {
@@ -252,7 +259,9 @@ export function CalendarEventsSurface({
 
     return (
       <CalendarEventsEmptyState
+        compact={view !== 'list'}
         action={
+          view === 'list' &&
           onCreateEvent &&
           calendars.data.some(({ readOnly }) => readOnly === false) && (
             <Button
@@ -265,10 +274,14 @@ export function CalendarEventsSurface({
             </Button>
           )
         }
-        description={t(
-          'calendarEvents.noEvents.description',
-          'Use the date controls to look at other dates.',
-        )}
+        description={
+          view === 'list'
+            ? t(
+                'calendarEvents.noEvents.description',
+                'Use the date controls to look at other dates.',
+              )
+            : undefined
+        }
         title={
           incomplete
             ? t(

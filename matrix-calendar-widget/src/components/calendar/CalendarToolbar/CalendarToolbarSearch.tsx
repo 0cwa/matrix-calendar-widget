@@ -57,7 +57,8 @@ export const CalendarToolbarSearch = ({
       placeholder={t('meetingsToolbar.filterPlaceholder', 'Search…')}
       size="small"
       sx={{
-        minWidth: '10rem',
+        minWidth: 0,
+        flex: '1 1 7.5rem',
         maxWidth: '35rem',
       }}
       value={search}
