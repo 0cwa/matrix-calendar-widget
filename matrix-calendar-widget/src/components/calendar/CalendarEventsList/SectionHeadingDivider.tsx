@@ -15,7 +15,6 @@
  */
 
 import { Box, Divider, Typography } from '@mui/material';
-import { ellipsis } from '../../../lib/ellipsis';
 
 type SectionHeadingDividerProps = {
   id?: string;
@@ -37,11 +36,11 @@ export function SectionHeadingDivider({
     >
       <Typography
         component="h4"
+        fontWeight="bold"
         id={id}
-        mb={1}
-        sx={ellipsis}
-        textAlign="center"
-        variant="h5"
+        mb={0.5}
+        sx={{ fontSize: (theme) => theme.typography.pxToRem(14) }}
+        variant="body2"
       >
         {title}
       </Typography>

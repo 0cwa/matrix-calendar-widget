@@ -21,11 +21,13 @@ import {
 } from '@matrix-calendar-widget/calendar';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import i18next from 'i18next';
 import { Settings } from 'luxon';
 import { PropsWithChildren, useState } from 'react';
 import { vi } from 'vitest';
 import { axe } from 'vitest-axe';
 import { CalendarRepositoryProvider } from '../../calendar';
+import { mockDateTimeFormatTimeZone } from '../../testing';
 import { CalendarEventDetailsDialog } from './CalendarEventDetailsDialog';
 import { CalendarEventsList } from './CalendarEventsList';
 
@@ -110,6 +112,165 @@ describe('<CalendarEventsList />', () => {
     } finally {
       Settings.defaultZone = originalZone;
     }
+  });
+
+  it('leaves the date to the day heading but keeps it in the accessible name', () => {
+    const originalZone = Settings.defaultZone;
+    Settings.defaultZone = 'Europe/Stockholm';
+
+    try {
+      render(<CalendarEventsList events={[event]} onSelectEvent={vi.fn()} />);
+
+      expect(
+        screen.getByRole('heading', { name: 'Wednesday, September 23, 2026' }),
+      ).toBeInTheDocument();
+      expect(screen.getByText(/^9:00\sAM–10:00\sAM$/)).toHaveAttribute(
+        'aria-hidden',
+        'true',
+      );
+      expect(
+        screen.getByRole('button', {
+          name: /Team planning.*September 23, 2026 · 9:00\sAM–10:00\sAM.*Room 3/,
+        }),
+      ).toBeInTheDocument();
+    } finally {
+      Settings.defaultZone = originalZone;
+    }
+  });
+
+  it('shows only "All day" for a single all-day event', () => {
+    render(
+      <CalendarEventsList
+        events={[
+          {
+            ...event,
+            timing: {
+              type: 'all-day',
+              startDate: '2026-09-23',
+              endDate: '2026-09-24',
+            },
+          },
+        ]}
+        onSelectEvent={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('All day')).toHaveAttribute('aria-hidden', 'true');
+    expect(
+      screen.getByText('September 23, 2026 · All day'),
+    ).toBeInTheDocument();
+  });
+
+  it.each<[string, CalendarEvent['timing'], RegExp]>([
+    [
+      'an all-day event spans several days',
+      { type: 'all-day', startDate: '2026-09-23', endDate: '2026-09-26' },
+      /^September 23, 2026 – September 25, 2026 · All day$/,
+    ],
+    [
+      'a timed event ends on another day',
+      {
+        type: 'timed',
+        start: { type: 'floating', local: '2026-09-23T23:00:00' },
+        end: { type: 'floating', local: '2026-09-24T01:00:00' },
+      },
+      /^Sep 23, 2026, 11:00\sPM – Sep 24, 2026, 1:00\sAM$/,
+    ],
+    [
+      "the date differs in the event's own time zone",
+      {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-09-22T20:00:00',
+          timezone: 'America/New_York',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-09-22T21:00:00',
+          timezone: 'America/New_York',
+        },
+      },
+      /^September 23, 2026 · 2:00\sAM–3:00\sAM$/,
+    ],
+  ])('keeps the visible date if %s', (_, timing, text) => {
+    const originalZone = Settings.defaultZone;
+    Settings.defaultZone = 'Europe/Stockholm';
+
+    try {
+      render(
+        <CalendarEventsList
+          events={[{ ...event, timing }]}
+          onSelectEvent={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByText(text)).not.toHaveAttribute('aria-hidden');
+    } finally {
+      Settings.defaultZone = originalZone;
+    }
+  });
+
+  it('heads a day with its own date for viewers west of UTC', async () => {
+    const originalZone = Settings.defaultZone;
+    Settings.defaultZone = 'America/New_York';
+    mockDateTimeFormatTimeZone('America/New_York');
+    // i18next caches formatters per language, so use one that no other test in
+    // this file has formatted with another default time zone.
+    await i18next.changeLanguage('de');
+
+    try {
+      render(
+        <CalendarEventsList events={[floatingEvent]} onSelectEvent={vi.fn()} />,
+      );
+
+      expect(
+        screen.getByRole('heading', { name: 'Mittwoch, 23. September 2026' }),
+      ).toBeInTheDocument();
+    } finally {
+      Settings.defaultZone = originalZone;
+      await i18next.changeLanguage('en');
+    }
+  });
+
+  it('names the calendar next to its configured color', () => {
+    render(
+      <CalendarEventsList
+        calendars={[{ ...calendar, color: '#4177d5ff' }]}
+        events={[event]}
+        onSelectEvent={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByRole('button', { name: /Team planning.*Team calendar/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId('calendar-color-dot')).toHaveStyle({
+      backgroundColor: '#4177d5',
+    });
+  });
+
+  it('names calendars without a color only when there are several', () => {
+    const { rerender } = render(
+      <CalendarEventsList
+        calendars={[calendar]}
+        events={[event]}
+        onSelectEvent={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText('Team calendar')).not.toBeInTheDocument();
+
+    rerender(
+      <CalendarEventsList
+        calendars={[calendar, { id: 'other', name: 'Other calendar' }]}
+        events={[event]}
+        onSelectEvent={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Team calendar')).toBeInTheDocument();
+    expect(screen.queryByTestId('calendar-color-dot')).not.toBeInTheDocument();
   });
 
   it('renders domain events and selects them without a Meeting adapter', async () => {
