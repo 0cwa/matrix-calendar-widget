@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { Box, SxProps, Typography } from '@mui/material';
+import { Box, Button, Stack, SxProps, Typography } from '@mui/material';
 import {
   DatePickerSlotsComponentsProps,
   DateView,
@@ -23,7 +23,13 @@ import {
   PickersLayoutProps,
 } from '@mui/x-date-pickers';
 import { DateTime, Interval } from 'luxon';
-import React, { ComponentProps, Dispatch, useCallback, useState } from 'react';
+import React, {
+  ComponentProps,
+  Dispatch,
+  useCallback,
+  useRef,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import { ButtonDatePicker } from './ButtonDatePicker';
 import { HighlightedPickersDay } from './HighlightedPickersDay';
@@ -45,34 +51,48 @@ export const DateRangePicker = ({
 }: DateRangePickerProps) => {
   const { t } = useTranslation();
 
-  const [selectedStartDate, setSelectedStartDate] = useState<
-    string | undefined
-  >();
+  const [selection, setSelection] = useState<{
+    date: string;
+    choosingEnd: boolean;
+  }>();
   const [open, setOpen] = useState(false);
+  const selectedStartDate = selection?.choosingEnd ? selection.date : undefined;
+  const minimumEnd = selectedStartDate
+    ? DateTime.fromISO(selectedStartDate)
+    : undefined;
+  const canChooseToday =
+    !minimumEnd || DateTime.local().startOf('day') >= minimumEnd;
 
   const handleChange = useCallback(() => {
-    // Nothing to do
+    // The custom day and Today actions both choose a range boundary directly.
+  }, []);
+  const onOpen = useCallback(() => setOpen(true), []);
+  const onClose = useCallback(() => {
+    setOpen(false);
+    setSelection(undefined);
   }, []);
 
   const handleDaySelect = useCallback(
     (value: DateTime | null) => {
-      if (value?.isValid) {
-        if (!selectedStartDate) {
-          setSelectedStartDate(value.startOf('day').toISO());
-        } else {
-          onRangeChange(selectedStartDate, value.endOf('day').toISO());
-          setSelectedStartDate(undefined);
-          setOpen(false);
-        }
+      if (!value?.isValid) {
+        return;
+      }
+      const day = value.startOf('day');
+      if (!selectedStartDate) {
+        setSelection({ date: day.toISO(), choosingEnd: true });
+        return;
+      }
+      if (day >= DateTime.fromISO(selectedStartDate)) {
+        onRangeChange(selectedStartDate, day.endOf('day').toISO());
+        onClose();
       }
     },
-    [onRangeChange, selectedStartDate],
+    [onClose, onRangeChange, selectedStartDate],
   );
 
-  const onOpen = useCallback(() => setOpen(true), []);
-  const onClose = useCallback(() => {
-    setOpen(false);
-    setSelectedStartDate(undefined);
+  const handleResetStart = useCallback(() => {
+    // Keep the visible month on the day the user just rejected.
+    setSelection((current) => current && { ...current, choosingEnd: false });
   }, []);
 
   return (
@@ -95,12 +115,15 @@ export const DateRangePicker = ({
                 },
               )
             : t('dateRangePicker.chooseStart', 'Choose a start date.'),
+          onResetStart: selectedStartDate ? handleResetStart : undefined,
         } as object,
         actionBar: ({ wrapperVariant }) => ({
-          actions:
-            wrapperVariant === 'mobile'
-              ? ['today', 'cancel', 'accept']
-              : ['today'],
+          actions: [
+            ...(canChooseToday ? (['today'] as const) : []),
+            'cancel',
+            ...(wrapperVariant === 'mobile' ? (['accept'] as const) : []),
+          ],
+          onSetToday: () => handleDaySelect(DateTime.local()),
         }),
         popper: {
           sx: {
@@ -136,9 +159,7 @@ export const DateRangePicker = ({
         },
       }}
       closeOnSelect={false}
-      minDate={
-        selectedStartDate ? DateTime.fromISO(selectedStartDate) : undefined
-      }
+      minDate={minimumEnd}
       onChange={handleChange}
       onClose={onClose}
       onOpen={onOpen}
@@ -146,7 +167,7 @@ export const DateRangePicker = ({
       sx={sx}
       reduceAnimations={isReduceAnimations()}
       showDaysOutsideCurrentMonth
-      value={DateTime.fromISO(selectedStartDate ?? startDate)}
+      value={DateTime.fromISO(selection?.date ?? startDate)}
       views={['year', 'month', 'day']}
       label={t('dateRangePicker.dateRange', '{{range, daterange}}', {
         range: [new Date(startDate), new Date(endDate)],
@@ -164,23 +185,55 @@ export const DateRangePicker = ({
  */
 function RangeStepLayout({
   step,
+  onResetStart,
   ...props
 }: PickersLayoutProps<DateTime | null, DateTime, DateView> & {
   step: string;
+  onResetStart?: () => void;
 }) {
+  const { t } = useTranslation();
+  const layout = useRef<HTMLDivElement>(null);
   return (
-    <Box>
-      <Typography
-        fontWeight="bold"
+    <Box ref={layout}>
+      <Stack
+        alignItems="center"
+        direction="row"
+        flexWrap="wrap"
+        gap={1}
+        justifyContent="space-between"
         maxWidth={320}
         mx="auto"
-        px={3}
+        px={2}
         pt={1.5}
-        role="status"
-        variant="body2"
       >
-        {step}
-      </Typography>
+        <Typography
+          fontWeight="bold"
+          role="status"
+          sx={{ flex: '1 1 auto', minWidth: 0 }}
+          variant="body2"
+        >
+          {step}
+        </Typography>
+        {onResetStart && (
+          <Button
+            onClick={() => {
+              onResetStart();
+              requestAnimationFrame(() => {
+                layout.current
+                  ?.querySelector<HTMLElement>(
+                    '[role="grid"] [role="gridcell"][tabindex="0"]',
+                  )
+                  ?.focus();
+              });
+            }}
+            size="small"
+            sx={{ flexShrink: 0 }}
+            variant="text"
+          >
+            {t('dateRangePicker.changeStart', 'Change start')}
+          </Button>
+        )}
+      </Stack>
       <PickersLayout {...(props as ComponentProps<typeof PickersLayout>)} />
     </Box>
   );
