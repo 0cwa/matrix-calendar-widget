@@ -2867,10 +2867,9 @@ describe('<CalendarEventEditorDialog />', () => {
       wrapper: createWrapper(repository),
     });
 
-    await userEvent.type(
-      await screen.findByRole('textbox', { name: /Title/i }),
-      'Alarm event',
-    );
+    fireEvent.change(await screen.findByRole('textbox', { name: /Title/i }), {
+      target: { value: 'Alarm event' },
+    });
     await userEvent.click(screen.getByLabelText('Calendar app alert'));
     expect(screen.getByRole('button', { name: '15 min' })).toHaveAttribute(
       'aria-pressed',
@@ -2878,16 +2877,16 @@ describe('<CalendarEventEditorDialog />', () => {
     );
     for (const preset of ['1 hour', '1 day', '15 min']) {
       const button = screen.getByRole('button', { name: preset, exact: true });
-      await userEvent.click(button);
+      fireEvent.click(button);
       expect(button).toHaveAttribute('aria-pressed', 'true');
     }
     await userEvent.click(screen.getByRole('button', { name: 'Custom' }));
     const unit = screen.getByRole('combobox', { name: 'Unit' });
     const leadTime = screen.getByLabelText('Lead time');
-    await userEvent.selectOptions(unit, 'alarmHours');
+    fireEvent.change(unit, { target: { value: 'alarmHours' } });
     fireEvent.change(leadTime, { target: { value: '' } });
     expect(unit).toHaveValue('alarmHours');
-    await userEvent.selectOptions(unit, 'alarmMinutes');
+    fireEvent.change(unit, { target: { value: 'alarmMinutes' } });
     fireEvent.change(leadTime, {
       target: { value: '25' },
     });
@@ -2991,10 +2990,9 @@ describe('<CalendarEventEditorDialog />', () => {
       wrapper: createWrapper(repository),
     });
 
-    await userEvent.type(
-      await screen.findByRole('textbox', { name: /Title/i }),
-      'Absolute alarm event',
-    );
+    fireEvent.change(await screen.findByRole('textbox', { name: /Title/i }), {
+      target: { value: 'Absolute alarm event' },
+    });
     await userEvent.click(screen.getByLabelText('Calendar app alert'));
     await userEvent.click(
       await screen.findByRole('radio', { name: 'At an exact UTC time' }),
@@ -3017,11 +3015,9 @@ describe('<CalendarEventEditorDialog />', () => {
         'Calendar apps receive this alert at the exact time. A Matrix room notification cannot use it. To notify the room too, choose “Before the event”.',
       ),
     ).toBeInTheDocument();
-    await userEvent.click(
-      screen.getByRole('radio', { name: 'Before the event' }),
-    );
-    await userEvent.click(screen.getByRole('button', { name: '1 hour' }));
-    await userEvent.click(
+    fireEvent.click(screen.getByRole('radio', { name: 'Before the event' }));
+    fireEvent.click(screen.getByRole('button', { name: '1 hour' }));
+    fireEvent.click(
       screen.getByRole('radio', { name: 'At an exact UTC time' }),
     );
     expect(screen.getByLabelText('Exact time (UTC)')).toHaveValue(

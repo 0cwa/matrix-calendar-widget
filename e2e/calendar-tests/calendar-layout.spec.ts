@@ -16,6 +16,7 @@
 
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { writeFile } from 'node:fs/promises';
 
 const viewports = [
   { width: 320, height: 640 },
@@ -44,7 +45,7 @@ for (const viewport of viewports) {
           }))
           .toEqual({ pageErrors: [], rendered: true });
         await page.getByRole('button', { name: view, exact: true }).click();
-        const event = page.getByRole('button', { name: /^Synthetic planning/ });
+        const event = page.getByRole('button', { name: /Synthetic planning/ });
         await expect(event).toBeVisible();
         const surface = page.getByTestId('calendar-surface');
         const dimensions = await surface.evaluate((element) => ({
@@ -361,41 +362,143 @@ test('empty Month dates keep guidance and the grid in view', async ({
   expect(bounds.bottom).toBeLessThanOrEqual(bounds.height);
 });
 
-test('German date range picker fits a 320 px Element dark viewport', async ({
-  page,
-}) => {
-  await page.setViewportSize({ width: 320, height: 640 });
-  await page.goto(
-    '/browser-tests/index.html?mode=room-manager&theme=dark&lng=de',
-  );
+for (const height of [640, 520]) {
+  test(`German date range recovery fits a 320 by ${height} Element dark viewport`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width: 320, height });
+    await page.goto(
+      '/browser-tests/index.html?mode=room-manager&theme=dark&lng=de',
+    );
+    if (height === 520) {
+      await page.addStyleTag({
+        content: 'html { overflow-y: scroll; scrollbar-gutter: stable; }',
+      });
+    }
 
-  const range = page.getByRole('button', { name: /^Datumsbereich auswählen/ });
-  await range.click();
-  const picker = page.getByRole('dialog');
-  const prompt = picker.getByRole('status');
-  await expect(prompt).toHaveText('Wähle ein Startdatum.');
+    const range = page.getByRole('button', {
+      name: /^Datumsbereich auswählen/,
+    });
+    const picker = page.getByRole('dialog');
+    const prompt = picker.getByRole('status');
+    const chooseStart = 'Wähle ein Startdatum.';
+    const day = (number: string) =>
+      picker
+        .getByRole('gridcell', { name: number, exact: true })
+        .and(picker.locator('button:not(.MuiPickersDay-dayOutsideMonth)'));
+    const readBounds = async (step: string) => {
+      const bounds = await picker.evaluate((element) => {
+        const { left, right } = element.getBoundingClientRect();
+        return {
+          left,
+          right,
+          viewport: document.documentElement.clientWidth,
+          contentWidth: document.body.clientWidth,
+          client: element.clientWidth,
+          scroll: element.scrollWidth,
+          documentScroll: document.documentElement.scrollWidth,
+        };
+      });
+      await writeFile(
+        testInfo.outputPath(step + '-picker-bounds.json'),
+        JSON.stringify(bounds, null, 2),
+      );
+      expect(bounds.left).toBeGreaterThanOrEqual(0);
+      expect(bounds.right).toBeLessThanOrEqual(bounds.contentWidth + 1);
+      expect(bounds.scroll).toBeLessThanOrEqual(bounds.client + 1);
+      expect(bounds.documentScroll).toBeLessThanOrEqual(bounds.viewport + 1);
+    };
 
-  const bounds = await picker.evaluate((element) => {
-    const { left, right } = element.getBoundingClientRect();
-    return { left, right, viewport: document.documentElement.clientWidth };
+    await range.click();
+    await expect(prompt).toHaveText(chooseStart);
+    await expect(
+      picker.getByRole('button', { name: 'Abbrechen' }),
+    ).toBeVisible();
+    const recover = picker.getByRole('button', { name: 'Start ändern' });
+    await expect(recover).toHaveCount(0);
+    await readBounds('start');
+
+    await day('15').click();
+    await expect(prompt).toHaveText(/Wähle jetzt ein Enddatum\./);
+    await expect(day('14')).toBeDisabled();
+    await expect(recover).toBeVisible();
+    await readBounds('end');
+    const daysFit = await picker.getByRole('gridcell').evaluateAll((cells) => {
+      const paper = cells[0]
+        ?.closest('.MuiPickersPopper-paper')
+        ?.getBoundingClientRect();
+      return (
+        Boolean(paper) &&
+        cells.every((cell) => {
+          const day = cell.getBoundingClientRect();
+          return day.left >= paper!.left - 1 && day.right <= paper!.right + 1;
+        })
+      );
+    });
+    expect(daysFit).toBe(true);
+    const accessibility = await new AxeBuilder({ page })
+      .include('[role="dialog"]')
+      .analyze();
+    expect(accessibility.violations).toEqual([]);
+
+    await recover.press('Enter');
+    await expect(prompt).toHaveText(chooseStart);
+    await expect(day('14')).toBeEnabled();
+    await expect(
+      picker.locator('[role="grid"] [role="gridcell"]:focus'),
+    ).toHaveCount(1);
+    await day('14').click();
+    await day('16').click();
+    await expect(picker).toBeHidden();
+    await expect(range).toBeFocused();
+    const committedRange = await range.getAttribute('aria-label');
+
+    await range.click();
+    await day('15').click();
+    await picker.getByRole('button', { name: 'Abbrechen' }).click();
+    await expect(picker).toBeHidden();
+    await expect(range).toBeFocused();
+    await expect(range).toHaveAttribute('aria-label', committedRange!);
+
+    await range.click();
+    await expect(prompt).toHaveText(chooseStart);
+    await day('15').press('Enter');
+    await expect(recover).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(picker).toBeHidden();
+    await expect(range).toBeFocused();
+    await expect(range).toHaveAttribute('aria-label', committedRange!);
   });
-  expect(bounds.left).toBeGreaterThanOrEqual(0);
-  expect(bounds.right).toBeLessThanOrEqual(bounds.viewport);
+}
 
-  const currentMonthDays = picker.locator(
-    'button:not(.MuiPickersDay-dayOutsideMonth)',
-  );
-  await picker
-    .getByRole('gridcell', { name: '1', exact: true })
-    .and(currentMonthDays)
-    .click();
-  await expect(prompt).toHaveText(/Wähle jetzt ein Enddatum\./);
-  await picker
-    .getByRole('gridcell', { name: '2', exact: true })
-    .and(currentMonthDays)
-    .click();
-  await expect(picker).toBeHidden();
-  await expect(range).toBeFocused();
+test.describe('mobile date range picker', () => {
+  test.use({ hasTouch: true, viewport: { width: 390, height: 740 } });
+
+  test('keeps mobile actions and only offers Today for a valid boundary', async ({
+    page,
+  }) => {
+    await page.clock.setFixedTime(new Date('2026-10-10T10:00:00.000Z'));
+    await page.goto('/browser-tests/index.html?mode=room-manager');
+    const range = page
+      .getByRole('group', { name: 'Date navigation' })
+      .getByRole('button', { name: /^Choose date(?: range)?, selected/ });
+    const committed = await range.textContent();
+    await range.click();
+    const picker = page.getByRole('dialog');
+    await expect(
+      picker.getByRole('button', { name: 'OK', exact: true }),
+    ).toBeVisible();
+    const today = picker.getByRole('button', { name: 'Today', exact: true });
+    await expect(today).toBeVisible();
+    await picker.getByRole('gridcell', { name: '15', exact: true }).click();
+    await expect(
+      picker.getByRole('button', { name: 'Change start' }),
+    ).toBeVisible();
+    await expect(today).toHaveCount(0);
+    await picker.getByRole('button', { name: 'Cancel' }).click();
+    await expect(picker).toBeHidden();
+    await expect(range).toHaveText(committed!);
+  });
 });
 
 test('room manager sees writable event controls at a narrow width', async ({

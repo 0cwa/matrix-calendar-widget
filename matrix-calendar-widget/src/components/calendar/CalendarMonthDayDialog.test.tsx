@@ -21,7 +21,9 @@ import userEvent from '@testing-library/user-event';
 import { ComponentProps, useState } from 'react';
 import { afterEach, beforeEach, vi } from 'vitest';
 import { axe } from 'vitest-axe';
+import { formatCalendarEventTime } from './CalendarEventDetailsDialog';
 import { CalendarEventsCalendar } from './CalendarEventsCalendar';
+import { CalendarMonthDayDialog } from './CalendarMonthDayDialog';
 
 function busyDay(date: string): CalendarEvent[] {
   return ['09', '10', '11', '12', '13'].map((hour) => ({
@@ -106,14 +108,13 @@ describe('<CalendarEventsCalendar /> dates with more events', () => {
     const list = await screen.findByRole('dialog', {
       name: 'Friday, October 9, 2026',
     });
+    expect(within(list).getByText('5 events')).toBeInTheDocument();
     const rows = within(list).getAllByRole('button', { name: /^Busy / });
-    expect(rows.map((row) => row.getAttribute('aria-label'))).toEqual(
-      ['09', '10', '11', '12', '13'].map((hour) =>
-        expect.stringMatching(
-          new RegExp(`^Busy 2026-10-09 at ${hour}: October 9, 2026 · .+–.+$`),
-        ),
-      ),
-    );
+    for (const [index, hour] of ['09', '10', '11', '12', '13'].entries()) {
+      expect(rows[index]).toHaveAccessibleName(
+        new RegExp(`^Busy 2026-10-09 at ${hour} .+–.+ October 9, 2026$`),
+      );
+    }
     expect(rows[0]).toHaveFocus();
     expect(onShowMore).not.toHaveBeenCalled();
 
@@ -131,6 +132,73 @@ describe('<CalendarEventsCalendar /> dates with more events', () => {
     await userEvent.keyboard('{Escape}');
     await waitFor(() => expect(list).not.toBeInTheDocument());
     expect(moreLink('2026-10-09')).toHaveFocus();
+  });
+
+  it('shows dates in overflow rows when the event spans days or its original date differs', () => {
+    const sameDay = busyDay('2026-10-09')[0];
+    const crossMidnight: CalendarEvent = {
+      ...sameDay,
+      id: 'overnight',
+      uid: 'overnight@example.test',
+      title: 'Overnight maintenance',
+      timing: {
+        type: 'timed',
+        start: { type: 'floating', local: '2026-10-09T23:30:00' },
+        end: { type: 'floating', local: '2026-10-10T00:30:00' },
+      },
+    };
+    const shifted: CalendarEvent = {
+      ...sameDay,
+      id: 'shifted',
+      uid: 'shifted@example.test',
+      title: 'New York planning',
+      timing: {
+        type: 'timed',
+        start: {
+          type: 'zoned',
+          local: '2026-10-08T21:00:00',
+          timezone: 'America/New_York',
+        },
+        end: {
+          type: 'zoned',
+          local: '2026-10-08T22:00:00',
+          timezone: 'America/New_York',
+        },
+      },
+    };
+    const viewerTimezone = 'Europe/Stockholm';
+    const entries = [sameDay, crossMidnight, shifted].map((event) => {
+      const time = formatCalendarEventTime(
+        event,
+        'en',
+        'All day',
+        viewerTimezone,
+      );
+      return { event, time };
+    });
+    render(
+      <CalendarMonthDayDialog
+        date={new Date(2026, 9, 9)}
+        entries={entries}
+        onClose={vi.fn()}
+        onOpenDay={vi.fn()}
+        onSelectEvent={vi.fn()}
+        open
+        viewerTimezone={viewerTimezone}
+      />,
+    );
+
+    const dialog = screen.getByRole('dialog', {
+      name: 'Friday, October 9, 2026',
+    });
+    const [sameDayRow, overnightRow, shiftedRow] =
+      within(dialog).getAllByRole('button');
+    expect(within(sameDayRow).getByText(/^9:00\sAM–9:30\sAM$/)).toBeVisible();
+    expect(sameDayRow).toHaveAccessibleName(
+      /9:00\sAM–9:30\sAM October 9, 2026$/,
+    );
+    expect(within(overnightRow).getByText(entries[1].time)).toBeVisible();
+    expect(within(shiftedRow).getByText(entries[2].time)).toBeVisible();
   });
 
   it('offers the day view for the date', async () => {

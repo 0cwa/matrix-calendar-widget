@@ -233,6 +233,8 @@
     "loading": "Kalendertermine werden geladen",
     "mixedCompatibilityNotice": "Mindestens ein Kalender unterstützt weitere Elementtypen. Das Widget zeigt und bearbeitet ausschließlich VEVENT-Termine.",
     "monthDay": {
+      "eventCount_one": "{{count}} Termin",
+      "eventCount_other": "{{count}} Termine",
       "openDay": "Tag öffnen"
     },
     "noEvents": {
@@ -514,6 +516,7 @@
     "copy-to-clipboard": "In die Zwischenablage kopieren"
   },
   "dateRangePicker": {
+    "changeStart": "Start ändern",
     "chooseDate": "Datumsbereich auswählen, ausgewählter Bereich ist {{range, daterange}}",
     "chooseEnd": "Beginn: {{date, datetime}}. Wähle jetzt ein Enddatum.",
     "chooseStart": "Wähle ein Startdatum.",

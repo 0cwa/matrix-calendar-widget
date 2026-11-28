@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { writeFile } from 'node:fs/promises';
 
@@ -67,7 +68,7 @@ for (const timezoneId of ['America/New_York', 'Asia/Tokyo']) {
       });
       await expect(dialog).toBeVisible();
       await expect(
-        dialog.getByRole('button', { name: /^Synthetic capacity event 0001:/ }),
+        dialog.getByRole('button', { name: /^Synthetic capacity event 0001 / }),
       ).toBeFocused();
       await page.keyboard.press('Escape');
       await expect(more).toBeFocused();
@@ -352,3 +353,96 @@ async function readAndCheckExactEventTitles(page: Page): Promise<string[]> {
   expect([...titles].sort()).toEqual(expectedEventTitles);
   return titles;
 }
+
+test('Month columns stay aligned through viewport resizing', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/browser-tests/index.html?mode=large-calendar&view=month');
+  await expect(page.locator('.fc-daygrid-more-link').first()).toBeVisible();
+  for (const size of [viewport, { width: 850, height: 640 }, viewport]) {
+    await page.setViewportSize(size);
+    const grid = page.locator('.fc-dayGridMonth-view');
+    await expect
+      .poll(() =>
+        grid.evaluate((element) => {
+          const columnEdges = (selector: string) =>
+            Array.from(element.querySelectorAll(selector))
+              .slice(0, 7)
+              .map((cell) => cell.getBoundingClientRect().right);
+          const headers = columnEdges('th.fc-col-header-cell');
+          const cells = columnEdges('td.fc-day');
+          const gridRight = element.getBoundingClientRect().right;
+          return {
+            headerCount: headers.length,
+            cellCount: cells.length,
+            aligned: headers.every(
+              (right, index) => Math.abs(right - cells[index]) <= 2,
+            ),
+            inside: cells.every((right) => right <= gridRight + 1),
+            fillsGrid: Math.abs(cells[6] - gridRight) <= 18,
+          };
+        }),
+      )
+      .toEqual({
+        headerCount: 7,
+        cellCount: 7,
+        aligned: true,
+        inside: true,
+        fillsGrid: true,
+      });
+    const clippedLinks = await page
+      .locator('.fc-daygrid-more-link')
+      .evaluateAll(
+        (links) =>
+          links.filter((link) => {
+            const linkBounds = link.getBoundingClientRect();
+            const dayBounds = link
+              .closest('td.fc-day')!
+              .getBoundingClientRect();
+            return (
+              linkBounds.top < dayBounds.top ||
+              linkBounds.bottom > dayBounds.bottom + 1
+            );
+          }).length,
+      );
+    expect(clippedLinks).toBe(0);
+  }
+  const more = page.locator('[data-date="2026-10-01"] .fc-daygrid-more-link');
+  await more.press('Enter');
+  const dialog = page.getByRole('dialog', {
+    name: 'Thursday, October 1, 2026',
+  });
+  await expect(dialog.getByText('33 events', { exact: true })).toBeVisible();
+  const entries = dialog.getByRole('button', {
+    name: /^Synthetic capacity event /,
+  });
+  await expect(entries).toHaveCount(33);
+  const first = entries.first();
+  await expect(first).toBeFocused();
+  await expect(first).toHaveAccessibleName(
+    /9:00\sAM–10:00\sAM October 1, 2026/,
+  );
+  await expect(
+    first.getByText(/9:00\sAM–10:00\sAM/, { exact: true }),
+  ).toBeVisible();
+  const border = await first.evaluate(
+    (button) => getComputedStyle(button.closest('li')!).borderBottomWidth,
+  );
+  expect(border).toBe('1px');
+  const accessibility = await new AxeBuilder({ page })
+    .include('[role="dialog"]')
+    .analyze();
+  expect(accessibility.violations).toEqual([]);
+
+  await page.keyboard.press('Enter');
+  const details = page.getByRole('dialog', {
+    name: 'Synthetic capacity event 0001',
+  });
+  await expect(details).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(details).toBeHidden();
+  await expect(first).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(more).toBeFocused();
+});

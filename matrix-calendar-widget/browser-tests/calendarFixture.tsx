@@ -296,6 +296,32 @@ const galleryEvents: CalendarEvent[] = [
   }),
 );
 
+const monthLayoutEvents: CalendarEvent[] = [
+  ...galleryEvents,
+  {
+    id: 'month-one-day',
+    uid: 'month-one-day@example.test',
+    calendarId: galleryCalendar.id,
+    title: 'All-day planning',
+    timing: {
+      type: 'all-day',
+      startDate: '2026-10-06',
+      endDate: '2026-10-07',
+    },
+  },
+  {
+    id: 'month-two-days',
+    uid: 'month-two-days@example.test',
+    calendarId: galleryCalendar.id,
+    title: 'Overnight maintenance with a long event title',
+    timing: {
+      type: 'timed',
+      start: { type: 'floating', local: '2026-10-10T21:30:00' },
+      end: { type: 'floating', local: '2026-10-11T03:00:00' },
+    },
+  },
+];
+
 const roomAlarmOption: CalendarRoomReminderAlarmOption = {
   eventUid: roomEvent.uid,
   recurrenceId: null,
@@ -360,7 +386,8 @@ function CalendarFixture({
   const [view, setView] = useState<CalendarSurfaceView>(initialView);
   const [selected, setSelected] = useState<CalendarEvent>();
   const largeCalendarMode = roomMode === 'large-calendar';
-  const galleryMode = roomMode === 'gallery';
+  const monthLayoutMode = roomMode === 'month-layout';
+  const galleryMode = roomMode === 'gallery' || monthLayoutMode;
   // The real home screen with a calendar the viewer may manage.
   const homeRepository = useMemo(
     () =>
@@ -374,53 +401,46 @@ function CalendarFixture({
         : undefined,
     [roomMode],
   );
-  const roomRepository = useMemo(
-    () =>
-      roomMode === 'room-read-only' ||
-      roomMode === 'room-manager' ||
-      galleryMode
-        ? new SyntheticRoomCalendarRepository(
-            roomMode !== 'room-read-only',
-            galleryMode
-              ? { calendars: [galleryCalendar], events: galleryEvents }
-              : allDayReminder
-                ? {
-                    calendars: [roomCalendar],
-                    events: [
-                      {
-                        ...roomEvent,
-                        timing: {
-                          type: 'all-day',
-                          startDate: '2026-10-05',
-                          endDate: '2026-10-06',
-                        },
-                      },
-                    ],
-                  }
-                : multiUnitAlert
-                  ? {
-                      calendars: [roomCalendar],
-                      events: [
-                        {
-                          ...roomEvent,
-                          alarm: {
-                            action: 'display',
-                            trigger: {
-                              weeks: 0,
-                              days: 1,
-                              hours: 2,
-                              minutes: 30,
-                              seconds: 0,
-                            },
-                          },
-                        },
-                      ],
-                    }
-                  : undefined,
-          )
-        : undefined,
-    [allDayReminder, galleryMode, multiUnitAlert, roomMode],
-  );
+  const roomRepository = useMemo(() => {
+    if (
+      roomMode !== 'room-read-only' &&
+      roomMode !== 'room-manager' &&
+      !galleryMode
+    ) {
+      return undefined;
+    }
+    const manager = roomMode !== 'room-read-only';
+    if (galleryMode) {
+      return new SyntheticRoomCalendarRepository(manager, {
+        calendars: [galleryCalendar],
+        events: monthLayoutMode ? monthLayoutEvents : galleryEvents,
+      });
+    }
+
+    let fixtureEvent = roomEvent;
+    if (allDayReminder) {
+      fixtureEvent = {
+        ...roomEvent,
+        timing: {
+          type: 'all-day',
+          startDate: '2026-10-05',
+          endDate: '2026-10-06',
+        },
+      };
+    } else if (multiUnitAlert) {
+      fixtureEvent = {
+        ...roomEvent,
+        alarm: {
+          action: 'display',
+          trigger: { weeks: 0, days: 1, hours: 2, minutes: 30, seconds: 0 },
+        },
+      };
+    }
+    return new SyntheticRoomCalendarRepository(manager, {
+      calendars: [roomCalendar],
+      events: [fixtureEvent],
+    });
+  }, [allDayReminder, galleryMode, monthLayoutMode, multiUnitAlert, roomMode]);
   const activeRepository =
     roomRepository ?? (largeCalendarMode ? largeCalendarRepository : undefined);
   const [filters, setFilters] = useState({
@@ -764,7 +784,7 @@ async function start() {
   );
   createRoot(document.getElementById('root')!).render(
     <WidgetApiMockProvider value={syntheticRoomWidgetApi}>
-      {query.get('mode') === 'room-manager' ? (
+      {['room-manager', 'month-layout'].includes(query.get('mode') ?? '') ? (
         <CalendarMuiThemeProvider>{fixture}</CalendarMuiThemeProvider>
       ) : (
         <ThemeProvider theme={theme}>
