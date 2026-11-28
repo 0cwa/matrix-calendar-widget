@@ -349,6 +349,15 @@
       "submit": "Beschreibung speichern",
       "title": "Kalenderbeschreibung bearbeiten"
     },
+    "optionNotes": {
+      "cannotCreateEvents": "Du kannst hier keine Termine erstellen. Frage die Raummoderation oder die Serveradministration nach deiner Berechtigung.",
+      "loadFailed": "Die Kalender konnten nicht geladen werden. Öffne das Widget erneut, um es noch einmal zu versuchen.",
+      "loading": "Kalender werden geladen…",
+      "managersOnly": "Nur Personen mit Verwaltungsrechten können diese Kalender ändern oder löschen.",
+      "noCalendars": "Hier ist kein Kalender verfügbar. Frage die Raummoderation oder die Serveradministration.",
+      "roomCalendar": "Der Raumkalender kann hier weder umbenannt noch farblich geändert oder gelöscht werden. Frage die Serveradministration."
+    },
+    "options": "Kalenderoptionen",
     "rename": {
       "action": "Kalender umbenennen",
       "calendar": "Kalender",
@@ -420,6 +429,7 @@
     }
   },
   "meetingsToolbar": {
+    "dateNavigation": "Datumsnavigation",
     "filterAriaLabel": "Suche",
     "filterPlaceholder": "Suche…",
     "next": {

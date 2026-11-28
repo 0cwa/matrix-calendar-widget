@@ -103,5 +103,6 @@ export {
 } from './useCalendarQueries';
 export type {
   CalendarEventsQueryState,
+  CalendarListQueryState,
   CalendarQueryState,
 } from './useCalendarQueries';

@@ -152,16 +152,16 @@ describe('<CalendarNavigation/>', () => {
     ).toHaveAttribute('aria-disabled', 'true');
   });
 
-  it('should switch to the day view if the screen becomes to small', () => {
+  it('leaves the chosen view alone on a small screen', () => {
     const onViewChange = vi.fn();
 
     vi.mocked(useMediaQuery).mockReturnValue(false);
 
-    render(<CalendarNavigation onViewChange={onViewChange} view="week" />, {
+    render(<CalendarNavigation onViewChange={onViewChange} view="day" />, {
       wrapper: Wrapper,
     });
 
     expect(useMediaQuery).toBeCalledWith('(min-width:800px)', { noSsr: true });
-    expect(onViewChange).toHaveBeenLastCalledWith('day');
+    expect(onViewChange).not.toHaveBeenCalled();
   });
 });

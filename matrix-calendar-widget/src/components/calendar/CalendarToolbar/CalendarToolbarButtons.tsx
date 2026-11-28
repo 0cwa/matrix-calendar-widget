@@ -30,6 +30,8 @@ type CalendarToolbarButtonsProps = {
   onRangeChange: (startDate: string, endDate: string) => void;
 };
 
+const stepButtonSx = { width: 40, height: 40 };
+
 export const CalendarToolbarButtons = ({
   view,
   startDate,
@@ -55,14 +57,19 @@ export const CalendarToolbarButtons = ({
 
   return (
     <>
-      <Button onClick={showToday}>{t('meetingsToolbar.today', 'Today')}</Button>
       <Tooltip title={getTitle(view, t).previous}>
-        <IconButton onClick={goToPrevDates}>
+        <IconButton onClick={goToPrevDates} sx={stepButtonSx}>
           <ArrowBackIosNewIcon fontSize="small" />
         </IconButton>
       </Tooltip>
+      <Button
+        onClick={showToday}
+        sx={{ flexShrink: 0, minWidth: 0, minHeight: 40, px: 1 }}
+      >
+        {t('meetingsToolbar.today', 'Today')}
+      </Button>
       <Tooltip title={getTitle(view, t).next}>
-        <IconButton onClick={goToNextDates}>
+        <IconButton onClick={goToNextDates} sx={stepButtonSx}>
           <ArrowForwardIosIcon fontSize="small" />
         </IconButton>
       </Tooltip>

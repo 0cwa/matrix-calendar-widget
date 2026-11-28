@@ -151,17 +151,20 @@ export function createPublicFeedAcceptanceHelpers(
     let dialog: Locator | undefined;
     let publicationCreated = false;
     try {
-      const publicFeedButton = frame.getByRole('button', {
+      await frame
+        .getByRole('button', { name: 'Calendar options', exact: true })
+        .click();
+      const publicFeedItem = frame.getByRole('menuitem', {
         name: 'Public feed',
         exact: true,
       });
-      await expect(publicFeedButton).toBeVisible();
+      await expect(publicFeedItem).toBeVisible();
       observation.publicFeedLifecycleStep = 'loading-settings';
       const initialSettingsResponse = waitForPublicFeedPublicationResponse(
         page,
         'GET',
       );
-      await publicFeedButton.click();
+      await publicFeedItem.click();
       dialog = frame.getByRole('dialog', {
         name: 'Public calendar feed',
       });

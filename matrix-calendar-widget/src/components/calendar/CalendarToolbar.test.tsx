@@ -28,6 +28,7 @@ import {
   waitFor,
   within,
 } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { PropsWithChildren, useState } from 'react';
 import { CalendarRepositoryProvider } from '../../calendar';
 import { CalendarToolbar } from './CalendarToolbar';
@@ -64,6 +65,35 @@ function createWrapper(repository: InMemoryCalendarRepository) {
       </CalendarRepositoryProvider>
     );
   };
+}
+
+async function chooseCalendarOption(name: string) {
+  fireEvent.click(screen.getByRole('button', { name: 'Calendar options' }));
+  fireEvent.click(await screen.findByRole('menuitem', { name }));
+}
+
+function renderToolbar(repository: InMemoryCalendarRepository) {
+  return render(
+    <CalendarToolbar
+      filters={{
+        startDate: '2026-09-01T00:00:00Z',
+        endDate: '2026-10-01T00:00:00Z',
+      }}
+      onRangeChange={vi.fn()}
+      onSearchChange={vi.fn()}
+      onViewChange={vi.fn()}
+      view="month"
+    />,
+    { wrapper: createWrapper(repository) },
+  );
+}
+
+function expectInOrder(...elements: HTMLElement[]) {
+  elements.slice(1).forEach((element, index) => {
+    expect(elements[index].compareDocumentPosition(element)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
 }
 
 function ContextSwitchingToolbar({
@@ -129,11 +159,7 @@ describe('<CalendarToolbar />', () => {
     );
 
     expect(listClients).not.toHaveBeenCalled();
-    const accessButton = screen.getByRole('button', {
-      name: 'Calendar app access',
-    });
-    await waitFor(() => expect(accessButton).toBeEnabled());
-    fireEvent.click(accessButton);
+    await chooseCalendarOption('Calendar app access');
     expect(
       await screen.findByText(
         'Calendar app access is not available on this server.',
@@ -205,9 +231,7 @@ describe('<CalendarToolbar />', () => {
       />,
     );
 
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Calendar app access' }),
-    );
+    await chooseCalendarOption('Calendar app access');
     expect(
       await screen.findByText(/No calendar app access has been created/),
     ).toBeInTheDocument();
@@ -284,7 +308,7 @@ describe('<CalendarToolbar />', () => {
       { wrapper: createWrapper(repository) },
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Public feed' }));
+    await chooseCalendarOption('Public feed');
     expect(
       await screen.findByText(/Anyone with the link can read every event/i),
     ).toBeInTheDocument();
@@ -352,7 +376,7 @@ describe('<CalendarToolbar />', () => {
       { wrapper: createWrapper(repository) },
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Public feed' }));
+    await chooseCalendarOption('Public feed');
     const confirmation = await screen.findByRole('checkbox', {
       name: 'I understand that anyone with the link can read this calendar.',
     });
@@ -405,7 +429,7 @@ describe('<CalendarToolbar />', () => {
       { wrapper: createWrapper(repository) },
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Public feed' }));
+    await chooseCalendarOption('Public feed');
     expect(
       await screen.findByText(/server cannot provide its public URL/i),
     ).toBeInTheDocument();
@@ -459,7 +483,7 @@ describe('<CalendarToolbar />', () => {
       { wrapper: createWrapper(repository) },
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Public feed' }));
+    await chooseCalendarOption('Public feed');
     expect(
       await screen.findByText(
         'Could not load public feed settings. Check your connection and your permission to manage this calendar, then try again.',
@@ -514,7 +538,7 @@ describe('<CalendarToolbar />', () => {
       { wrapper: createWrapper(repository) },
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Public feed' }));
+    await chooseCalendarOption('Public feed');
     expect(
       await screen.findByText(/reports component types beyond VEVENT/i),
     ).toBeInTheDocument();
@@ -547,14 +571,7 @@ describe('<CalendarToolbar />', () => {
       { wrapper: createWrapper(repository) },
     );
 
-    await waitFor(() => {
-      expect(
-        screen.getByRole('button', { name: 'Edit calendar description' }),
-      ).toBeEnabled();
-    });
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Edit calendar description' }),
-    );
+    await chooseCalendarOption('Edit calendar description');
 
     expect(
       await screen.findByRole('heading', { name: 'Edit calendar description' }),
@@ -578,14 +595,7 @@ describe('<CalendarToolbar />', () => {
       { wrapper: createWrapper(repository) },
     );
 
-    await waitFor(() => {
-      expect(
-        screen.getByRole('button', { name: 'Edit calendar color' }),
-      ).toBeEnabled();
-    });
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Edit calendar color' }),
-    );
+    await chooseCalendarOption('Edit calendar color');
 
     expect(
       await screen.findByRole('heading', { name: 'Edit calendar color' }),
@@ -623,11 +633,12 @@ describe('<CalendarToolbar />', () => {
       { wrapper: createWrapper(repository) },
     );
 
+    fireEvent.click(screen.getByRole('button', { name: 'Calendar options' }));
     expect(
-      await screen.findByRole('button', { name: 'Create calendar' }),
+      await screen.findByRole('menuitem', { name: 'Create calendar' }),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole('button', { name: 'CalDAV collection URLs' }),
+      screen.queryByRole('menuitem', { name: 'CalDAV collection URLs' }),
     ).toBeNull();
     expect(screen.queryByText(internalCollectionUrl)).toBeNull();
     expect(repository.getCalendarDiagnostics).not.toHaveBeenCalled();
@@ -650,12 +661,7 @@ describe('<CalendarToolbar />', () => {
       { wrapper: createWrapper(repository) },
     );
 
-    await waitFor(() => {
-      expect(
-        screen.getByRole('button', { name: 'Delete calendar' }),
-      ).toBeEnabled();
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Delete calendar' }));
+    await chooseCalendarOption('Delete calendar');
 
     const calendarSelect = screen.getByRole('combobox', { name: 'Calendar' });
     const options = within(calendarSelect).getAllByRole('option');
@@ -714,23 +720,118 @@ describe('<CalendarToolbar />', () => {
       { wrapper: createWrapper(repository) },
     );
 
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Create event' }),
+      ).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Calendar options' }));
+
+    const menu = screen.getByRole('menu', { name: 'Calendar options' });
     expect(
-      await screen.findByRole('button', { name: 'Create event' }),
-    ).toBeEnabled();
+      within(menu)
+        .getAllByRole('menuitem')
+        .map((item) => item.textContent),
+    ).toEqual([
+      'The room calendar can’t be renamed, restyled or deleted here. Ask your server administrator.',
+    ]);
+  });
+
+  it('groups management and sharing actions and separates deletion last', async () => {
+    const repository = Object.assign(
+      new InMemoryCalendarRepository({ calendars }),
+      {
+        getPublicCalendarFeedPublication: vi.fn(),
+        publishPublicCalendarFeed: vi.fn(),
+        unpublishPublicCalendarFeed: vi.fn(),
+        listPrivateCalendarClients: vi.fn(),
+        createPrivateCalendarClient: vi.fn(),
+        revokePrivateCalendarClient: vi.fn(),
+      },
+    );
+    renderToolbar(repository);
+
     expect(
-      screen.queryByRole('button', { name: 'Create calendar' }),
+      screen.queryByRole('button', { name: 'Delete calendar' }),
+    ).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Calendar options' }));
+    await screen.findByRole('menuitem', { name: 'Delete calendar' });
+
+    const menu = screen.getByRole('menu', { name: 'Calendar options' });
+    const items = within(menu).getAllByRole('menuitem');
+    expect(items.map((item) => item.textContent)).toEqual([
+      'Create calendar',
+      'Rename calendar',
+      'Edit calendar description',
+      'Edit calendar color',
+      'Public feed',
+      'Calendar app access',
+      'Delete calendar',
+    ]);
+    // One separator before sharing, and one before the destructive action.
+    const separators = within(menu).getAllByRole('separator');
+    expect(separators).toHaveLength(2);
+    expectInOrder(items[3], separators[0], items[4]);
+    expectInOrder(items[5], separators[1], items[6]);
+  });
+
+  it('opens the options from the keyboard and returns focus to the button', async () => {
+    renderToolbar(new InMemoryCalendarRepository({ calendars }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Create event' }),
+      ).toBeEnabled(),
+    );
+    const options = screen.getByRole('button', { name: 'Calendar options' });
+
+    options.focus();
+    await userEvent.keyboard('{Enter}');
+    expect(
+      screen.getByRole('menuitem', { name: 'Create calendar' }),
+    ).toHaveFocus();
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+    expect(options).toHaveFocus();
+
+    await userEvent.keyboard('{Enter}');
+    await userEvent.keyboard('{ArrowDown}{ArrowDown}{Enter}');
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Edit calendar description',
+    });
+    await userEvent.click(
+      within(dialog).getByRole('button', { name: 'Cancel' }),
+    );
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(options).toHaveFocus());
+  });
+
+  it('tells a reader why creating and changing calendars is unavailable', async () => {
+    renderToolbar(
+      new InMemoryCalendarRepository({
+        calendars: [
+          { id: 'read-only', name: 'Read-only calendar', readOnly: true },
+        ],
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Calendar options' }));
+
+    expect(
+      await screen.findByRole('menuitem', {
+        name: /You can’t create events here/,
+      }),
+    ).toHaveAttribute('aria-disabled', 'true');
+    expect(
+      screen.getByRole('menuitem', {
+        name: 'Only calendar managers can change or delete these calendars.',
+      }),
+    ).toHaveAttribute('aria-disabled', 'true');
+    expect(
+      screen.queryByRole('menuitem', {
+        name: /^(Rename|Edit|Delete) calendar/,
+      }),
     ).toBeNull();
     expect(
-      screen.getByRole('button', { name: 'Delete calendar' }),
-    ).toBeDisabled();
-    expect(
-      screen.getByRole('button', { name: 'Rename calendar' }),
-    ).toBeDisabled();
-    expect(
-      screen.getByRole('button', { name: 'Edit calendar description' }),
-    ).toBeDisabled();
-    expect(
-      screen.getByRole('button', { name: 'Edit calendar color' }),
+      screen.getByRole('button', { hidden: true, name: 'Create event' }),
     ).toBeDisabled();
   });
 });

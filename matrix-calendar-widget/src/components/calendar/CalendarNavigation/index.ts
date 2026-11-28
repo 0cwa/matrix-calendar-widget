@@ -16,3 +16,4 @@
 
 export { CalendarNavigation } from './CalendarNavigation';
 export type { CalendarSurfaceView } from './CalendarNavigation';
+export { isNarrowCalendarView, useIsWideCalendar } from './viewAvailability';

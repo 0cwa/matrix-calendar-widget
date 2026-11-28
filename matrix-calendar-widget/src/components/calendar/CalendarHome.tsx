@@ -17,74 +17,17 @@
 import { useWidgetApi } from '@matrix-widget-toolkit/react';
 import { Box, Stack, Typography } from '@mui/material';
 import { unstable_useId as useId, visuallyHidden } from '@mui/utils';
-import { DateTime } from 'luxon';
-import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CalendarFilters } from '../../calendar';
-import { generateFilterRange } from '../../lib/utils';
 import { CalendarEventsSurface } from './CalendarEventsSurface';
-import type { CalendarSurfaceView } from './CalendarNavigation';
 import { CalendarToolbar } from './CalendarToolbar';
-
-const viewTypes: readonly CalendarSurfaceView[] = [
-  'list',
-  'day',
-  'workWeek',
-  'week',
-  'month',
-];
+import { useCalendarSurfaceState } from './useCalendarSurfaceState';
 
 export function CalendarHome() {
   const widgetApi = useWidgetApi();
   const { t } = useTranslation();
   const viewStorageKey = `meeting_view_${widgetApi.widgetParameters.roomId}_${widgetApi.widgetParameters.userId}`;
-  const [view, setViewInternal] = useState<CalendarSurfaceView>(
-    () => readLastCalendarSurfaceView(viewStorageKey) ?? 'list',
-  );
-  const [filters, setFilters] = useState<CalendarFilters>({
-    startDate: DateTime.now().startOf('day').toISO(),
-    endDate: DateTime.now().plus({ days: 6 }).endOf('day').toISO(),
-    filterText: '',
-  });
-
-  const setView = useCallback(
-    (newView: CalendarSurfaceView) => {
-      const previousView = view !== 'list' ? view : undefined;
-      setViewInternal(newView);
-      saveLastCalendarSurfaceView(viewStorageKey, newView);
-
-      if (newView !== 'list') {
-        setFilters((oldFilters) => ({
-          ...oldFilters,
-          ...generateFilterRange(newView, oldFilters.startDate, previousView),
-        }));
-      }
-    },
-    [view, viewStorageKey],
-  );
-
-  const handleOnRangeChange = useCallback(
-    (startDate: string, endDate: string) =>
-      setFilters((oldFilters) => ({ ...oldFilters, startDate, endDate })),
-    [],
-  );
-
-  const handleOnSearchChange = useCallback(
-    (filterText: string) =>
-      setFilters((oldFilters) => ({ ...oldFilters, filterText })),
-    [],
-  );
-
-  const handleShowMore = useCallback(
-    (date: Date) => {
-      setView('day');
-      setFilters((oldFilters) => ({
-        ...oldFilters,
-        ...generateFilterRange('day', date.toISOString()),
-      }));
-    },
-    [setView],
-  );
+  const { view, filters, setView, setRange, setSearch, showDay } =
+    useCalendarSurfaceState(viewStorageKey);
 
   const filtersId = useId();
 
@@ -97,8 +40,8 @@ export function CalendarHome() {
         <Box my={1}>
           <CalendarToolbar
             filters={filters}
-            onRangeChange={handleOnRangeChange}
-            onSearchChange={handleOnSearchChange}
+            onRangeChange={setRange}
+            onSearchChange={setSearch}
             onViewChange={setView}
             view={view}
           />
@@ -108,38 +51,10 @@ export function CalendarHome() {
       <Box flexGrow={1} mb={view === 'list' ? 0 : 1} overflow="hidden">
         <CalendarEventsSurface
           filters={filters}
-          onShowMore={handleShowMore}
+          onShowMore={showDay}
           view={view}
         />
       </Box>
     </Stack>
   );
-}
-
-function readLastCalendarSurfaceView(
-  storageKey: string,
-): CalendarSurfaceView | undefined {
-  try {
-    const storedView = window.localStorage.getItem(storageKey);
-    return storedView && isCalendarSurfaceView(storedView)
-      ? storedView
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function saveLastCalendarSurfaceView(
-  storageKey: string,
-  view: CalendarSurfaceView,
-): void {
-  try {
-    window.localStorage.setItem(storageKey, view);
-  } catch {
-    // The current view remains usable when browser storage is unavailable.
-  }
-}
-
-function isCalendarSurfaceView(value: string): value is CalendarSurfaceView {
-  return viewTypes.includes(value as CalendarSurfaceView);
 }

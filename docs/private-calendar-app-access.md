@@ -14,7 +14,8 @@ The widget lets a user create a separate CalDAV credential for one personal or
 room calendar. It does not reveal or store the user's Matrix password. When
 the feature is available in your installation:
 
-1. Open **Calendar app access** beside **Public feed** in the calendar toolbar.
+1. Open **Calendar options** in the calendar toolbar and choose **Calendar app
+   access**.
 2. Select a calendar and choose **Create app access**.
 3. In the calendar app, choose CalDAV and enter the displayed URL, username,
    and app password. Save the app password in the operating system's

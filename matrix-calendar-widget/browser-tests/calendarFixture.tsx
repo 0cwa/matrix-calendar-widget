@@ -39,6 +39,7 @@ import { useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { I18nextProvider, initReactI18next } from 'react-i18next';
 import { Subject } from 'rxjs';
+import de from '../public/locales/de/translation.json';
 import en from '../public/locales/en/translation.json';
 import type {
   CalendarRoomCapabilities,
@@ -56,6 +57,7 @@ import { CalendarEventDetailsDialog } from '../src/components/calendar/CalendarE
 import { CalendarEventsCalendar } from '../src/components/calendar/CalendarEventsCalendar';
 import { CalendarEventsList } from '../src/components/calendar/CalendarEventsList';
 import { CalendarEventsSurface } from '../src/components/calendar/CalendarEventsSurface';
+import { CalendarHome } from '../src/components/calendar/CalendarHome';
 import type { CalendarSurfaceView } from '../src/components/calendar/CalendarNavigation';
 import { CalendarToolbar } from '../src/components/calendar/CalendarToolbar';
 import { CalendarMuiThemeProvider } from '../src/components/common/CalendarMuiThemeProvider';
@@ -143,6 +145,10 @@ window.__updateSyntheticRoomMember = (event) => {
   syntheticRoomMemberUpdates.next(event);
 };
 const syntheticRoomWidgetApi = {
+  widgetParameters: {
+    roomId: syntheticRoomId,
+    userId: '@alice:example.test',
+  },
   receiveStateEvents: async () => [],
   observeStateEvents: () => syntheticRoomMemberUpdates.asObservable(),
 } as unknown as WidgetApi;
@@ -352,6 +358,19 @@ function CalendarFixture({
   const [selected, setSelected] = useState<CalendarEvent>();
   const largeCalendarMode = roomMode === 'large-calendar';
   const galleryMode = roomMode === 'gallery';
+  // The real home screen with a calendar the viewer may manage.
+  const homeRepository = useMemo(
+    () =>
+      roomMode === 'home'
+        ? new InMemoryCalendarRepository({
+            calendars: [
+              { ...galleryCalendar, operatorManaged: false, readOnly: false },
+            ],
+            events: galleryEvents,
+          })
+        : undefined,
+    [roomMode],
+  );
   const roomRepository = useMemo(
     () =>
       roomMode === 'room-read-only' ||
@@ -373,6 +392,16 @@ function CalendarFixture({
     endDate: '2026-11-01T00:00:00+01:00',
     filterText: '',
   });
+
+  if (homeRepository) {
+    return (
+      <CalendarRepositoryProvider repository={homeRepository}>
+        <main data-testid="home-root" style={{ height: '100vh' }}>
+          <CalendarHome />
+        </main>
+      </CalendarRepositoryProvider>
+    );
+  }
 
   if (activeRepository) {
     return (
@@ -647,15 +676,15 @@ function observeLargeCalendarRender(view: 'list' | 'month'): void {
 }
 
 async function start() {
+  const query = new URLSearchParams(window.location.search);
   await i18next.use(initReactI18next).init({
-    lng: 'en',
+    lng: query.get('lng') === 'de' ? 'de' : 'en',
     fallbackLng: 'en',
     interpolation: { escapeValue: false },
-    resources: { en: { translation: en } },
+    resources: { de: { translation: de }, en: { translation: en } },
   });
   registerDateRangeFormatter(i18next);
   setLocale(i18next.language);
-  const query = new URLSearchParams(window.location.search);
   const largeCalendarMode = query.get('mode') === 'large-calendar';
   // The gallery can render both palettes without changing other browser tests.
   const theme = createTheme({

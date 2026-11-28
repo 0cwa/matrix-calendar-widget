@@ -142,6 +142,64 @@ for (const viewport of viewports) {
   }
 }
 
+for (const width of [360, 420, 850]) {
+  for (const language of ['en', 'de'] as const) {
+    test(
+      'date controls share a row at ' + width + ' CSS pixels in ' + language,
+      async ({ page }) => {
+        await page.setViewportSize({ width, height: 740 });
+        await page.goto(
+          '/browser-tests/index.html?mode=gallery&lng=' + language,
+        );
+        const navigation = page.getByRole('group', {
+          name: language === 'de' ? 'Datumsnavigation' : 'Date navigation',
+        });
+        const controls = navigation.getByRole('button');
+        await expect(controls).toHaveCount(4);
+        const boxes = await controls.evaluateAll((elements) =>
+          elements.map((element) => {
+            const box = element.getBoundingClientRect();
+            return { middle: box.y + box.height / 2, right: box.right };
+          }),
+        );
+        for (const box of boxes) {
+          expect(Math.abs(box.middle - boxes[0].middle)).toBeLessThan(2);
+          expect(box.right).toBeLessThanOrEqual(width);
+        }
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth),
+        ).toBeLessThanOrEqual(width);
+      },
+    );
+  }
+}
+
+test('a narrow day view gives way to the chosen month again', async ({
+  page,
+}) => {
+  await page.clock.setFixedTime(new Date('2026-10-21T10:00:00.000Z'));
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/browser-tests/index.html?mode=home');
+  const view = page.getByRole('combobox', { name: 'View' });
+  await view.click();
+  await page.getByRole('option', { name: 'Month' }).click();
+  await page.getByRole('button', { name: 'Previous month' }).click();
+  const month = page.getByRole('button', {
+    name: 'Choose month, selected month is September 2026',
+  });
+  await expect(month).toBeVisible();
+
+  await page.setViewportSize({ width: 420, height: 740 });
+  await expect(view).toContainText('Day');
+  await expect(
+    page.getByRole('button', { name: 'Previous day' }),
+  ).toBeVisible();
+
+  await page.setViewportSize({ width: 850, height: 740 });
+  await expect(view).toContainText('Month');
+  await expect(month).toBeVisible();
+});
+
 test('room visitor sees read-only event controls at a narrow width', async ({
   page,
 }) => {
@@ -157,12 +215,10 @@ test('room visitor sees read-only event controls at a narrow width', async ({
 
   const createEvent = page.getByRole('button', { name: 'Create event' });
   await expect(createEvent).toBeDisabled();
-  await expect(
-    page.getByRole('button', { name: 'Create calendar' }),
-  ).toHaveCount(0);
-  await expect(
-    page.getByRole('button', { name: 'Delete calendar' }),
-  ).toBeDisabled();
+  await expectRoomCalendarOptions(page, [
+    /You can’t create events here/,
+    /The room calendar can’t be renamed/,
+  ]);
 
   const event = page.getByRole('button', { name: /Synthetic room planning/ });
   await expect(event).toBeVisible();
@@ -229,12 +285,7 @@ test('room manager sees writable event controls at a narrow width', async ({
 
   const createEvent = page.getByRole('button', { name: 'Create event' });
   await expect(createEvent).toBeEnabled();
-  await expect(
-    page.getByRole('button', { name: 'Create calendar' }),
-  ).toHaveCount(0);
-  await expect(
-    page.getByRole('button', { name: 'Delete calendar' }),
-  ).toBeDisabled();
+  await expectRoomCalendarOptions(page, [/The room calendar can’t be renamed/]);
 
   await createEvent.click();
   const editor = page.getByRole('dialog', { name: 'Create event' });
@@ -336,6 +387,27 @@ test('room manager sees writable event controls at a narrow width', async ({
   await expect(event).toBeFocused();
   expect(pageErrors).toEqual([]);
 });
+
+/** A room calendar offers no management actions, only the reasons why. */
+async function expectRoomCalendarOptions(
+  page: Page,
+  notes: RegExp[],
+): Promise<void> {
+  const options = page.getByRole('button', { name: 'Calendar options' });
+  await options.click();
+  const items = page
+    .getByRole('menu', { name: 'Calendar options' })
+    .getByRole('menuitem');
+  await expect(items).toHaveText(notes);
+  // Scan the menu itself: MUI renders it outside the page landmarks.
+  const accessibility = await new AxeBuilder({ page })
+    .include('[role="menu"]')
+    .analyze();
+  expect(accessibility.violations).toEqual([]);
+  await page.keyboard.press('Escape');
+  await expect(items).toHaveCount(0);
+  await expect(options).toBeFocused();
+}
 
 async function tabToEvent(page: Page, event: Locator): Promise<void> {
   for (let tab = 0; tab < 64; tab += 1) {
