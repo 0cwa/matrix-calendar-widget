@@ -293,6 +293,25 @@ test('empty dates keep the toolbar and the create shortcut distinct', async ({
   await expect(create).toBeFocused();
 });
 
+test('empty Month dates keep guidance and the grid in view', async ({
+  page,
+}) => {
+  await page.clock.setFixedTime(new Date('2026-11-28T12:00:00.000Z'));
+  await page.setViewportSize({ width: 850, height: 640 });
+  await page.goto('/browser-tests/index.html?mode=home');
+  await page.getByRole('combobox', { name: 'View' }).click();
+  await page.getByRole('option', { name: 'Month' }).click();
+
+  await expect(page.getByText('No events in these dates')).toBeVisible();
+  const grid = page.locator('.fc-dayGridMonth-view');
+  await expect(grid).toBeVisible();
+  const bounds = await grid.evaluate((element) => ({
+    bottom: element.getBoundingClientRect().bottom,
+    height: window.innerHeight,
+  }));
+  expect(bounds.bottom).toBeLessThanOrEqual(bounds.height);
+});
+
 test('German date range picker fits a 320 px Element dark viewport', async ({
   page,
 }) => {

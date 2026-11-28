@@ -22,7 +22,7 @@ import {
 } from '@matrix-calendar-widget/calendar';
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { PropsWithChildren } from 'react';
+import { ComponentProps, PropsWithChildren } from 'react';
 import { vi } from 'vitest';
 import { axe } from 'vitest-axe';
 import {
@@ -69,12 +69,12 @@ function renderSurface(
     onClearSearch,
     onCreateEvent,
     initialFilters = filters,
-    view = 'list' as const,
+    view = 'list',
   }: {
     onClearSearch?: () => void;
     onCreateEvent?: () => void;
     initialFilters?: CalendarFilters;
-    view?: 'list' | 'day';
+    view?: ComponentProps<typeof CalendarEventsSurface>['view'];
   } = {},
 ) {
   let invalidate: () => void = () => undefined;
@@ -131,6 +131,25 @@ describe('<CalendarEventsSurface /> feedback', () => {
 
     expect(onCreateEvent).toHaveBeenCalledOnce();
   });
+
+  it.each(['day', 'week', 'workWeek', 'month'] as const)(
+    'explains an empty %s grid and offers a writer the create shortcut',
+    async (view) => {
+      const onCreateEvent = vi.fn();
+      renderSurface(
+        new InMemoryCalendarRepository({ calendars: [calendar], events: [] }),
+        { onCreateEvent, view },
+      );
+
+      expect(
+        await screen.findByText('No events in these dates'),
+      ).toBeInTheDocument();
+      await userEvent.click(
+        screen.getByRole('button', { name: 'Add an event' }),
+      );
+      expect(onCreateEvent).toHaveBeenCalledOnce();
+    },
+  );
 
   it('does not offer event creation to a viewer', async () => {
     renderSurface(

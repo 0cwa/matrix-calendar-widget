@@ -201,7 +201,7 @@ export function CalendarEventsSurface({
       )}
     />
   );
-  const listEmptyState = () => {
+  const renderEmptyState = () => {
     if (calendars.data.length === 0) {
       // A setup or availability notice already explains why.
       return roomCalendarUnavailable || partiallyAvailable ? null : (
@@ -298,6 +298,8 @@ export function CalendarEventsSurface({
     if (!calendars.hasCurrentData || !events.hasCurrentData) {
       return <CalendarEventsLoading />;
     }
+
+    const emptyState = filteredEvents.length === 0 ? renderEmptyState() : null;
 
     return (
       <>
@@ -422,21 +424,23 @@ export function CalendarEventsSurface({
         {view === 'list' ? (
           <CalendarEventsList
             calendars={calendars.data}
-            emptyState={filteredEvents.length === 0 && listEmptyState()}
+            emptyState={emptyState}
             events={filteredEvents}
             onSelectEvent={selectEvent}
           />
         ) : (
           <>
-            {searchEmptyState}
-            <CalendarEventsCalendar
-              calendars={calendars.data}
-              events={filteredEvents}
-              filters={filters}
-              onSelectEvent={selectEvent}
-              onShowMore={onShowMore}
-              view={view}
-            />
+            {emptyState}
+            <Box flex={1} minHeight={0}>
+              <CalendarEventsCalendar
+                calendars={calendars.data}
+                events={filteredEvents}
+                filters={filters}
+                onSelectEvent={selectEvent}
+                onShowMore={onShowMore}
+                view={view}
+              />
+            </Box>
           </>
         )}
 
@@ -479,11 +483,13 @@ export function CalendarEventsSurface({
   };
 
   return (
-    // The list scrolls together with the notices above it, so a short or zoomed
-    // widget can still reach its last event.
+    // The list and its notices scroll together. In grid views the grid fills
+    // the space left after the notices.
     <Box
+      display={view === 'list' ? undefined : 'flex'}
+      flexDirection="column"
       height="100%"
-      overflow={view === 'list' ? 'auto' : undefined}
+      overflow="auto"
       ref={surfaceRef}
       tabIndex={-1}
     >
