@@ -283,6 +283,98 @@ describe('<CalendarRoomReminderControl />', () => {
     expect(repository.listRoomReminderRecipients).toHaveBeenCalledTimes(1);
   });
 
+  it('reopens from the saved snapshot while the previous roster request is pending', async () => {
+    const { repository } = createRepository([timedOption]);
+    let resolveRoster!: (value: typeof members) => void;
+    repository.listRoomReminderRecipients.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveRoster = resolve;
+      }),
+    );
+    renderControl(repository);
+    await screen.findByText('Off', {
+      selector: '[data-testid="room-reminder-summary"]',
+    });
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Matrix room notifications' }),
+    );
+    await screen.findByText('Loading reminder settings…');
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Close Matrix room notifications' }),
+    );
+    expect(screen.getByTestId('room-reminder-summary')).toHaveTextContent(
+      'Off',
+    );
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Matrix room notifications' }),
+    );
+    await screen.findByRole('combobox', { name: 'Who to notify in this room' });
+    await act(async () =>
+      resolveRoster([{ userId: '@stale:example.test', displayName: 'Stale' }]),
+    );
+    await chooseDestination('users', 'Selected people');
+    await userEvent.click(
+      screen.getByRole('combobox', { name: 'Selected people' }),
+    );
+    expect(await screen.findByRole('option', { name: 'Alice' })).toBeVisible();
+    expect(
+      screen.queryByRole('option', { name: 'Stale' }),
+    ).not.toBeInTheDocument();
+    expect(repository.listRoomReminderAlarmOptions).toHaveBeenCalledTimes(1);
+    expect(repository.listRoomReminderRecipients).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores an old save that resolves after changing events', async () => {
+    const { repository, enableRoomReminder } = createRepository([timedOption]);
+    let resolveSave!: (value: CalendarRoomReminderConfiguration) => void;
+    enableRoomReminder.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveSave = resolve;
+      }),
+    );
+    const { rerender } = renderControl(repository);
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Matrix room notifications' }),
+    );
+    await screen.findByRole('combobox', { name: 'Who to notify in this room' });
+    await chooseDestination('room', 'Whole room');
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Save room notification' }),
+    );
+    expect(
+      screen.getByRole('button', { name: 'Close Matrix room notifications' }),
+    ).toBeDisabled();
+
+    rerender(
+      <CalendarRoomReminderControl
+        calendarId={calendarId}
+        eventId="different-resource"
+        eventUid="different-event@example.test"
+        roomId={roomId}
+        eventTiming={{
+          type: 'all-day',
+          startDate: '2026-10-22',
+          endDate: '2026-10-23',
+        }}
+        isRecurringSeries={false}
+        refreshToken={0}
+        canManageReminders
+        onEditCalendarReminder={vi.fn()}
+      />,
+    );
+    expect(await screen.findByText('No calendar app alert yet.')).toBeVisible();
+    await act(async () => resolveSave(createConfiguration(timedOption)));
+    expect(screen.getByTestId('room-reminder-summary')).toHaveTextContent(
+      'No calendar app alert yet.',
+    );
+    expect(
+      screen.getByRole('button', { name: 'Matrix room notifications' }),
+    ).toBeEnabled();
+    expect(screen.queryByText('Whole room')).not.toBeInTheDocument();
+  });
+
   it('retries a failed summary when expanded', async () => {
     const { repository } = createRepository([timedOption]);
     repository.listRoomReminderAlarmOptions.mockRejectedValueOnce(
