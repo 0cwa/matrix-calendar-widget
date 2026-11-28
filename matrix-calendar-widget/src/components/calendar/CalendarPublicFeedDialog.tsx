@@ -195,10 +195,17 @@ export function CalendarPublicFeedDialog({
       open={open}
     >
       <DialogTitle>
-        {t('calendarPublicFeed.title', 'Public calendar feed')}
+        {t('calendarPublicFeed.title', 'Public read-only subscription')}
       </DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ pt: 1 }}>
+          <Typography color="text.secondary" variant="body2">
+            {t(
+              'calendarPublicFeed.intro',
+              'Publish a link that calendar apps can subscribe to. Subscribers can read events but cannot change them. For a room calendar, publishing needs calendar management permission; ask a room moderator or your server administrator about it.',
+            )}
+          </Typography>
+
           <FormControl fullWidth>
             <InputLabel id="public-feed-calendar-label">
               {t('calendarPublicFeed.calendar', 'Calendar')}

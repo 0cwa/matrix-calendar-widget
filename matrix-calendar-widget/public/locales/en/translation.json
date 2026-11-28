@@ -248,7 +248,7 @@
     "label": "{{date, datetime}}"
   },
   "calendarPrivateClient": {
-    "action": "Calendar app access",
+    "action": "Private calendar app access",
     "calendar": "Calendar",
     "calendarHelp": "Each app access entry works with one calendar.",
     "capacity": "This calendar has reached its app access limit. Revoke an unused entry and try again.",
@@ -267,7 +267,7 @@
     "empty": "No calendar app access has been created for this calendar.",
     "expiresLabel": "Expires {{date}}",
     "hideSetupDetails": "Hide setup details",
-    "intro": "Create app-specific access for a calendar app to read and edit this calendar.",
+    "intro": "Create app-specific access for a calendar app to read and edit this calendar. For a room calendar, this needs calendar management permission; ask a room moderator or your server administrator about it.",
     "loadFailed": "Could not load calendar app access. Check your connection and permissions, then try again.",
     "loading": "Loading app access…",
     "oneTimeWarning": "Save these app-specific details now. The password is shown only once. Store it in your calendar app’s credential manager; never use your Matrix password.",
@@ -284,14 +284,14 @@
       "revoked": "Revoked"
     },
     "statusLabel": "Status: {{status}}",
-    "title": "Calendar app access",
+    "title": "Private calendar app access",
     "unavailable": "Calendar app access is not available on this server.",
     "unknownCalendar": "the selected calendar",
     "url": "CalDAV URL",
     "username": "Username"
   },
   "calendarPublicFeed": {
-    "action": "Public feed",
+    "action": "Public read-only subscription",
     "additionalComponents": "This calendar reports component types beyond VEVENT, such as tasks or journal entries, or does not advertise VEVENT support. Public feeds require VEVENT-only content; the server checks the feed before publishing and on every read.",
     "calendar": "Calendar",
     "confirm": "I understand that anyone with the link can read this calendar.",
@@ -299,6 +299,7 @@
     "copy": "Copy URL",
     "copyFailed": "Copy failed. Select and copy the feed URL above.",
     "disabled": "Public feeds are not enabled by this server.",
+    "intro": "Publish a link that calendar apps can subscribe to. Subscribers can read events but cannot change them. For a room calendar, publishing needs calendar management permission; ask a room moderator or your server administrator about it.",
     "loadFailed": "Could not load public feed settings. Check your connection and your permission to manage this calendar, then try again.",
     "loading": "Loading feed settings…",
     "publicWarning": "Anyone with the link can read every event in this calendar. The feed is not limited to Matrix room members. Unpublishing blocks future requests but cannot retract copies already downloaded.",
@@ -306,7 +307,7 @@
     "publishFailed": "Could not publish this calendar. Check your permissions and try again.",
     "retry": "Try again",
     "subscribe": "Subscribe in a calendar app",
-    "title": "Public calendar feed",
+    "title": "Public read-only subscription",
     "unpublish": "Unpublish",
     "unpublishFailed": "Could not unpublish this calendar. Check your permissions and try again.",
     "unsupportedComponents": "This calendar contains components other than events. Public feeds require a VEVENT-only calendar, so the server refused to publish it.",

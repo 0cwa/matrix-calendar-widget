@@ -159,12 +159,15 @@ describe('<CalendarToolbar />', () => {
     );
 
     expect(listClients).not.toHaveBeenCalled();
-    await chooseCalendarOption('Calendar app access');
+    await chooseCalendarOption('Private calendar app access');
     expect(
       await screen.findByText(
         'Calendar app access is not available on this server.',
       ),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole('dialog', { name: 'Private calendar app access' }),
+    ).toHaveTextContent(/read and edit this calendar.*management permission/);
     expect(listClients).toHaveBeenCalledTimes(1);
     expect(listClients).toHaveBeenCalledWith('writable');
     expect(
@@ -231,7 +234,7 @@ describe('<CalendarToolbar />', () => {
       />,
     );
 
-    await chooseCalendarOption('Calendar app access');
+    await chooseCalendarOption('Private calendar app access');
     expect(
       await screen.findByText(/No calendar app access has been created/),
     ).toBeInTheDocument();
@@ -308,10 +311,13 @@ describe('<CalendarToolbar />', () => {
       { wrapper: createWrapper(repository) },
     );
 
-    await chooseCalendarOption('Public feed');
+    await chooseCalendarOption('Public read-only subscription');
     expect(
       await screen.findByText(/Anyone with the link can read every event/i),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole('dialog', { name: 'Public read-only subscription' }),
+    ).toHaveTextContent(/cannot change them.*management permission/);
     expect(getPublication).toHaveBeenCalledWith('writable');
 
     const publishButton = screen.getByRole('button', { name: 'Publish feed' });
@@ -376,7 +382,7 @@ describe('<CalendarToolbar />', () => {
       { wrapper: createWrapper(repository) },
     );
 
-    await chooseCalendarOption('Public feed');
+    await chooseCalendarOption('Public read-only subscription');
     const confirmation = await screen.findByRole('checkbox', {
       name: 'I understand that anyone with the link can read this calendar.',
     });
@@ -429,7 +435,7 @@ describe('<CalendarToolbar />', () => {
       { wrapper: createWrapper(repository) },
     );
 
-    await chooseCalendarOption('Public feed');
+    await chooseCalendarOption('Public read-only subscription');
     expect(
       await screen.findByText(/server cannot provide its public URL/i),
     ).toBeInTheDocument();
@@ -483,7 +489,7 @@ describe('<CalendarToolbar />', () => {
       { wrapper: createWrapper(repository) },
     );
 
-    await chooseCalendarOption('Public feed');
+    await chooseCalendarOption('Public read-only subscription');
     expect(
       await screen.findByText(
         'Could not load public feed settings. Check your connection and your permission to manage this calendar, then try again.',
@@ -538,7 +544,7 @@ describe('<CalendarToolbar />', () => {
       { wrapper: createWrapper(repository) },
     );
 
-    await chooseCalendarOption('Public feed');
+    await chooseCalendarOption('Public read-only subscription');
     expect(
       await screen.findByText(/reports component types beyond VEVENT/i),
     ).toBeInTheDocument();
@@ -764,8 +770,8 @@ describe('<CalendarToolbar />', () => {
       'Rename calendar',
       'Edit calendar description',
       'Edit calendar color',
-      'Public feed',
-      'Calendar app access',
+      'Public read-only subscription',
+      'Private calendar app access',
       'Delete calendar',
     ]);
     // One separator before sharing, and one before the destructive action.

@@ -248,7 +248,7 @@
     "label": "{{date, datetime}}"
   },
   "calendarPrivateClient": {
-    "action": "Kalender-App-Zugriff",
+    "action": "Privater Kalender-App-Zugriff",
     "calendar": "Kalender",
     "calendarHelp": "Jeder App-Zugriff gilt für einen Kalender.",
     "capacity": "Dieser Kalender hat die Höchstzahl an App-Zugriffen erreicht. Widerrufe einen nicht mehr verwendeten Zugang und versuche es erneut.",
@@ -267,7 +267,7 @@
     "empty": "Für diesen Kalender wurde noch kein Zugriff für eine Kalender-App erstellt.",
     "expiresLabel": "Läuft ab {{date}}",
     "hideSetupDetails": "Einrichtungsdaten ausblenden",
-    "intro": "Erstelle einen App-spezifischen Zugang, damit eine Kalender-App diesen Kalender lesen und bearbeiten kann.",
+    "intro": "Erstelle einen App-spezifischen Zugang, damit eine Kalender-App diesen Kalender lesen und bearbeiten kann. Bei einem Raumkalender braucht das die Berechtigung zur Kalenderverwaltung; frage dazu die Raummoderation oder die Serveradministration.",
     "loadFailed": "Die Kalender-App-Zugriffe konnten nicht geladen werden. Prüfe deine Verbindung und Berechtigungen und versuche es erneut.",
     "loading": "App-Zugriffe werden geladen…",
     "oneTimeWarning": "Speichere diese App-spezifischen Angaben jetzt. Das Passwort wird nur einmal angezeigt. Speichere es im Anmeldedatenmanager deiner Kalender-App; verwende niemals dein Matrix-Passwort.",
@@ -284,14 +284,14 @@
       "revoked": "Widerrufen"
     },
     "statusLabel": "Status: {{status}}",
-    "title": "Kalender-App-Zugriff",
+    "title": "Privater Kalender-App-Zugriff",
     "unavailable": "Kalender-App-Zugriff ist auf diesem Server nicht verfügbar.",
     "unknownCalendar": "der ausgewählte Kalender",
     "url": "CalDAV-URL",
     "username": "Benutzername"
   },
   "calendarPublicFeed": {
-    "action": "Öffentlicher Feed",
+    "action": "Öffentliches Nur-Lese-Abo",
     "additionalComponents": "Dieser Kalender enthält weitere Komponententypen als VEVENT, etwa Aufgaben oder Journaleinträge, oder gibt die VEVENT-Unterstützung nicht an. Öffentliche Feeds setzen ausschließlich VEVENT-Inhalte voraus; der Server prüft den Feed vor der Veröffentlichung und bei jedem Abruf.",
     "calendar": "Kalender",
     "confirm": "Ich verstehe, dass alle Personen mit dem Link diesen Kalender lesen können.",
@@ -299,6 +299,7 @@
     "copy": "URL kopieren",
     "copyFailed": "Kopieren fehlgeschlagen. Markiere und kopiere die Feed-URL oben.",
     "disabled": "Öffentliche Feeds sind auf diesem Server nicht aktiviert.",
+    "intro": "Veröffentliche einen Link, den Kalender-Apps abonnieren können. Abonnierende können Termine lesen, aber nicht ändern. Bei einem Raumkalender braucht das Veröffentlichen die Berechtigung zur Kalenderverwaltung; frage dazu die Raummoderation oder die Serveradministration.",
     "loadFailed": "Die Einstellungen für den öffentlichen Feed konnten nicht geladen werden. Prüfe deine Verbindung und deine Berechtigung, diesen Kalender zu verwalten, und versuche es erneut.",
     "loading": "Feed-Einstellungen werden geladen…",
     "publicWarning": "Alle, die den Link haben, können alle Termine in diesem Kalender lesen. Der Feed ist nicht auf Mitglieder des Matrix-Raums beschränkt. Das Aufheben der Veröffentlichung blockiert zukünftige Abrufe, kann aber bereits heruntergeladene Kopien nicht zurückrufen.",
@@ -306,7 +307,7 @@
     "publishFailed": "Dieser Kalender konnte nicht veröffentlicht werden. Prüfe deine Berechtigungen und versuche es erneut.",
     "retry": "Erneut versuchen",
     "subscribe": "In einer Kalender-App abonnieren",
-    "title": "Öffentlicher Kalender-Feed",
+    "title": "Öffentliches Nur-Lese-Abo",
     "unpublish": "Veröffentlichung aufheben",
     "unpublishFailed": "Die Veröffentlichung dieses Kalenders konnte nicht aufgehoben werden. Prüfe deine Berechtigungen und versuche es erneut.",
     "unsupportedComponents": "Dieser Kalender enthält andere Komponenten als Termine. Öffentliche Feeds setzen ausschließlich VEVENT-Einträge voraus. Der Server hat die Veröffentlichung abgelehnt.",

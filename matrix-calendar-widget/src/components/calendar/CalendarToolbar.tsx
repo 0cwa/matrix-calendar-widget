@@ -207,7 +207,10 @@ export function CalendarToolbar({
                 ...(canShareCalendars && supportsPublicFeeds
                   ? [
                       {
-                        label: t('calendarPublicFeed.action', 'Public feed'),
+                        label: t(
+                          'calendarPublicFeed.action',
+                          'Public read-only subscription',
+                        ),
                         icon: <RssFeedIcon />,
                         onSelect: () => setPublicFeedOpen(true),
                       },
@@ -218,7 +221,7 @@ export function CalendarToolbar({
                       {
                         label: t(
                           'calendarPrivateClient.action',
-                          'Calendar app access',
+                          'Private calendar app access',
                         ),
                         icon: <PhonelinkLockIcon />,
                         onSelect: () => setPrivateClientOpen(true),
