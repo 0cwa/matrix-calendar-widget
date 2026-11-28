@@ -29,18 +29,18 @@ import {
   Typography,
   useTheme,
 } from '@mui/material';
+import { visuallyHidden } from '@mui/utils';
 import { DateTime } from 'luxon';
 import { useTranslation } from 'react-i18next';
 import { calendarEventKey } from '../../calendar';
 import { CalendarColorDot, EventCalendarIdentity } from './CalendarColorDot';
+import { formatTimeWithinDay } from './calendarEventTimeWithinDay';
 
 export type CalendarMonthDayEntry = {
   event: CalendarEvent;
   calendar?: EventCalendarIdentity;
   /** The full date and time of the event, in the viewer's time zone. */
   time: string;
-  /** The same accessible name that the event has in the grid. */
-  label: string;
 };
 
 /**
@@ -55,6 +55,7 @@ export function CalendarMonthDayDialog({
   onOpenDay,
   onSelectEvent,
   open,
+  viewerTimezone,
 }: {
   /** Local midnight of the date, as FullCalendar reports it. */
   date: Date;
@@ -63,53 +64,83 @@ export function CalendarMonthDayDialog({
   onOpenDay: () => void;
   onSelectEvent: (event: CalendarEvent) => void;
   open: boolean;
+  viewerTimezone: string;
 }) {
   const { i18n, t } = useTranslation();
   const theme = useTheme();
-  const title = DateTime.local(
-    date.getFullYear(),
-    date.getMonth() + 1,
-    date.getDate(),
-  )
-    .setLocale(i18n.language)
-    .toLocaleString(DateTime.DATE_HUGE);
+  const day = DateTime.fromObject(
+    {
+      year: date.getFullYear(),
+      month: date.getMonth() + 1,
+      day: date.getDate(),
+    },
+    { zone: viewerTimezone, locale: i18n.language },
+  );
+  const dayDate = day.toISODate() ?? '';
+  const allDayLabel = t('calendarEvents.details.allDay', 'All day');
 
   return (
     <Dialog fullWidth maxWidth="xs" onClose={onClose} open={open}>
-      <DialogTitle>{title}</DialogTitle>
+      <Box sx={{ px: 3, pt: 2, pb: 1.5 }}>
+        <DialogTitle sx={{ p: 0 }}>
+          {day.toLocaleString(DateTime.DATE_HUGE)}
+        </DialogTitle>
+        <Typography color="text.secondary" variant="body2">
+          {t('calendarEvents.monthDay.eventCount', { count: entries.length })}
+        </Typography>
+      </Box>
 
       <DialogContent dividers sx={{ p: 0 }}>
         <List disablePadding>
-          {entries.map(({ event, calendar, time, label }, index) => (
-            <ListItem disablePadding key={calendarEventKey(event)}>
-              <ListItemButton
-                aria-label={label}
-                autoFocus={index === 0}
-                onClick={() => onSelectEvent(event)}
-                sx={{ overflowWrap: 'anywhere', px: 3 }}
+          {entries.map(({ event, calendar, time }, index) => {
+            const timeWithinDay = formatTimeWithinDay(
+              dayDate,
+              event,
+              i18n.language,
+              allDayLabel,
+              viewerTimezone,
+            );
+            const displayTime = timeWithinDay ?? time;
+            return (
+              <ListItem
+                disablePadding
+                divider={index < entries.length - 1}
+                key={calendarEventKey(event)}
               >
-                <Box minWidth={0}>
-                  <Typography fontWeight="bold">{event.title}</Typography>
-                  <Typography color="text.secondary" variant="body2">
-                    {time}
-                  </Typography>
-                  {calendar && (
-                    <Stack alignItems="center" direction="row" spacing={1}>
-                      {calendar.color && (
-                        <CalendarColorDot
-                          color={calendar.color}
-                          ringColor={theme.palette.text.secondary}
-                        />
-                      )}
-                      <Typography color="text.secondary" variant="body2">
-                        {calendar.name}
-                      </Typography>
-                    </Stack>
-                  )}
-                </Box>
-              </ListItemButton>
-            </ListItem>
-          ))}
+                <ListItemButton
+                  autoFocus={index === 0}
+                  onClick={() => onSelectEvent(event)}
+                  sx={{ overflowWrap: 'anywhere', px: 3 }}
+                >
+                  <Box minWidth={0}>
+                    <Typography fontWeight="bold">{event.title}</Typography>
+                    <Typography color="text.secondary" variant="body2">
+                      {displayTime}
+                    </Typography>
+                    {calendar && (
+                      <Stack alignItems="center" direction="row" spacing={1}>
+                        {calendar.color && (
+                          <CalendarColorDot
+                            color={calendar.color}
+                            ringColor={theme.palette.text.secondary}
+                          />
+                        )}
+                        <Typography color="text.secondary" variant="body2">
+                          {calendar.name}
+                        </Typography>
+                      </Stack>
+                    )}
+                    {timeWithinDay && (
+                      <Box component="span" sx={visuallyHidden}>
+                        {' '}
+                        {day.toLocaleString(DateTime.DATE_FULL)}
+                      </Box>
+                    )}
+                  </Box>
+                </ListItemButton>
+              </ListItem>
+            );
+          })}
         </List>
       </DialogContent>
 

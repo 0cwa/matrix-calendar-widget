@@ -295,6 +295,32 @@ const galleryEvents: CalendarEvent[] = [
   }),
 );
 
+const monthLayoutEvents: CalendarEvent[] = [
+  ...galleryEvents,
+  {
+    id: 'month-one-day',
+    uid: 'month-one-day@example.test',
+    calendarId: galleryCalendar.id,
+    title: 'All-day planning',
+    timing: {
+      type: 'all-day',
+      startDate: '2026-10-06',
+      endDate: '2026-10-07',
+    },
+  },
+  {
+    id: 'month-two-days',
+    uid: 'month-two-days@example.test',
+    calendarId: galleryCalendar.id,
+    title: 'Overnight maintenance with a long event title',
+    timing: {
+      type: 'timed',
+      start: { type: 'floating', local: '2026-10-10T21:30:00' },
+      end: { type: 'floating', local: '2026-10-11T03:00:00' },
+    },
+  },
+];
+
 const roomAlarmOption: CalendarRoomReminderAlarmOption = {
   eventUid: roomEvent.uid,
   recurrenceId: null,
@@ -357,7 +383,8 @@ function CalendarFixture({
   const [view, setView] = useState<CalendarSurfaceView>(initialView);
   const [selected, setSelected] = useState<CalendarEvent>();
   const largeCalendarMode = roomMode === 'large-calendar';
-  const galleryMode = roomMode === 'gallery';
+  const monthLayoutMode = roomMode === 'month-layout';
+  const galleryMode = roomMode === 'gallery' || monthLayoutMode;
   // The real home screen with a calendar the viewer may manage.
   const homeRepository = useMemo(
     () =>
@@ -379,11 +406,14 @@ function CalendarFixture({
         ? new SyntheticRoomCalendarRepository(
             roomMode !== 'room-read-only',
             galleryMode
-              ? { calendars: [galleryCalendar], events: galleryEvents }
+              ? {
+                  calendars: [galleryCalendar],
+                  events: monthLayoutMode ? monthLayoutEvents : galleryEvents,
+                }
               : undefined,
           )
         : undefined,
-    [galleryMode, roomMode],
+    [galleryMode, monthLayoutMode, roomMode],
   );
   const activeRepository =
     roomRepository ?? (largeCalendarMode ? largeCalendarRepository : undefined);
@@ -715,7 +745,7 @@ async function start() {
   );
   createRoot(document.getElementById('root')!).render(
     <WidgetApiMockProvider value={syntheticRoomWidgetApi}>
-      {query.get('mode') === 'room-manager' ? (
+      {['room-manager', 'month-layout'].includes(query.get('mode') ?? '') ? (
         <CalendarMuiThemeProvider>{fixture}</CalendarMuiThemeProvider>
       ) : (
         <ThemeProvider theme={theme}>
