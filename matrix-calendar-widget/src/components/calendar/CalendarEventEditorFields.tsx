@@ -43,9 +43,6 @@ export function CalendarEventEditorFields({
     initialCalendar,
     values,
     saving,
-    error,
-    conflict,
-    missingOccurrence,
     readOnly,
     chooseScope,
     editingOccurrence,
@@ -54,45 +51,19 @@ export function CalendarEventEditorFields({
     followingSupported,
     handleChange,
     handleCalendarChange,
-    validationError,
-    handleReloadLatest,
     chooseOccurrenceScope,
     handleOccurrenceTextModeChange,
     chooseFollowingScope,
     chooseSeriesScope,
     calendars,
     event,
-    onClose,
   } = model;
   if (!values || !initialCalendar) {
     return null;
   }
 
   return (
-    <DialogContent>
-      {error && (
-        <Alert
-          action={
-            conflict ? (
-              <Button
-                color="inherit"
-                disabled={saving}
-                onClick={handleReloadLatest}
-                size="small"
-              >
-                {t('calendarEvents.editor.reloadLatest', 'Reload latest')}
-              </Button>
-            ) : missingOccurrence ? (
-              <Button color="inherit" onClick={onClose} size="small">
-                {t('calendarEvents.details.close', 'Close')}
-              </Button>
-            ) : undefined
-          }
-          severity="error"
-        >
-          {error.message}
-        </Alert>
-      )}
+    <DialogContent data-testid="calendar-event-editor-fields" dividers>
       {chooseScope ? (
         <Stack mt={1} spacing={2}>
           <Typography>
@@ -211,17 +182,6 @@ export function CalendarEventEditorFields({
               );
             })}
           <CalendarEventTimingFields model={model} occurrence />
-          {validationError && (
-            <Alert severity="warning">{validationError}</Alert>
-          )}
-          {readOnly && (
-            <Alert severity="warning">
-              {t(
-                'calendarEvents.editor.readOnly',
-                'This calendar is read-only.',
-              )}
-            </Alert>
-          )}
         </Stack>
       ) : (
         <Stack mt={1} spacing={2}>
@@ -300,18 +260,6 @@ export function CalendarEventEditorFields({
           <CalendarEventAlarmFields model={model} />
 
           <CalendarEventRecurrenceFields model={model} />
-
-          {validationError && (
-            <Alert severity="warning">{validationError}</Alert>
-          )}
-          {readOnly && (
-            <Alert severity="warning">
-              {t(
-                'calendarEvents.editor.readOnly',
-                'This calendar is read-only.',
-              )}
-            </Alert>
-          )}
         </Stack>
       )}
     </DialogContent>

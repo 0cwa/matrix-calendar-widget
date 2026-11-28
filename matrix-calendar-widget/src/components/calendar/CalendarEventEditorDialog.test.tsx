@@ -265,6 +265,69 @@ describe('<CalendarEventEditorDialog />', () => {
     reportValidity.mockRestore();
   });
 
+  it('keeps actions and blocking reasons outside the scrolling fields', async () => {
+    renderEditorScenario({
+      repositoryOptions: { calendars: [calendar] },
+      editorProps: { calendars: [calendar], onClose: vi.fn(), open: true },
+    });
+
+    const content = await screen.findByTestId('calendar-event-editor-fields');
+    const create = screen.getByRole('button', { name: 'Create event' });
+
+    // The form must be a shrinkable column, or the whole dialog scrolls and
+    // carries the actions out of view.
+    expect(screen.getByRole('form', { name: 'Create event' })).toHaveStyle({
+      display: 'flex',
+      flexDirection: 'column',
+      minHeight: '0',
+    });
+
+    expect(content).not.toContainElement(create);
+    expect(content).not.toContainElement(
+      screen.getByRole('button', { name: 'Cancel' }),
+    );
+    expect(content).not.toContainElement(screen.getByRole('alert'));
+    expect(create).toBeDisabled();
+    expect(create).toHaveAccessibleDescription('A title is required.');
+  });
+
+  it('submits the form with Enter from a field', async () => {
+    const onClose = vi.fn();
+    const { repository } = renderEditorScenario({
+      repositoryOptions: { calendars: [calendar] },
+      editorProps: { calendars: [calendar], onClose, open: true },
+    });
+    const createEvent = vi.spyOn(repository, 'createEvent');
+
+    const title = await screen.findByRole('textbox', { name: /Title/i });
+    expect(title).toHaveFocus();
+    await userEvent.type(title, 'Entered{Enter}');
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(createEvent).toHaveBeenCalledOnce();
+  });
+
+  it('marks the field behind a blocking time zone error', async () => {
+    renderEditorScenario({
+      repositoryOptions: { calendars: [calendar], events: [event] },
+      editorProps: {
+        calendars: [calendar],
+        event,
+        onClose: vi.fn(),
+        open: true,
+      },
+    });
+
+    const timezone = await screen.findByRole('textbox', { name: /Time zone/ });
+    await userEvent.clear(timezone);
+    await userEvent.type(timezone, 'Nowhere/Invalid');
+
+    expect(timezone).toHaveAttribute('aria-invalid', 'true');
+    expect(
+      screen.getByRole('button', { name: 'Save' }),
+    ).toHaveAccessibleDescription('Enter a valid IANA time zone.');
+  });
+
   it('creates one attachment link and exposes accessible edit controls', async () => {
     const repository = new InMemoryCalendarRepository({
       calendars: [calendar],
