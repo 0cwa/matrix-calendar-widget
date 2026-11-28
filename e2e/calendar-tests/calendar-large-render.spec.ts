@@ -362,21 +362,34 @@ test('Month columns stay aligned through viewport resizing', async ({
   await expect(page.locator('.fc-daygrid-more-link').first()).toBeVisible();
   for (const size of [viewport, { width: 850, height: 640 }, viewport]) {
     await page.setViewportSize(size);
-    const columns = await page
-      .locator('.fc-dayGridMonth-view')
-      .evaluate((grid) => {
-        const bounds = (selector: string) =>
-          Array.from(grid.querySelectorAll(selector))
-            .slice(0, 7)
-            .map((element) => {
-              const rect = element.getBoundingClientRect();
-              return { left: rect.left, right: rect.right };
-            });
-        return {
-          headers: bounds('th.fc-col-header-cell'),
-          cells: bounds('td.fc-day'),
-          right: grid.getBoundingClientRect().right,
-        };
+    const grid = page.locator('.fc-dayGridMonth-view');
+    await expect
+      .poll(() =>
+        grid.evaluate((element) => {
+          const columnEdges = (selector: string) =>
+            Array.from(element.querySelectorAll(selector))
+              .slice(0, 7)
+              .map((cell) => cell.getBoundingClientRect().right);
+          const headers = columnEdges('th.fc-col-header-cell');
+          const cells = columnEdges('td.fc-day');
+          const gridRight = element.getBoundingClientRect().right;
+          return {
+            headerCount: headers.length,
+            cellCount: cells.length,
+            aligned: headers.every(
+              (right, index) => Math.abs(right - cells[index]) <= 2,
+            ),
+            inside: cells.every((right) => right <= gridRight + 1),
+            fillsGrid: Math.abs(cells[6] - gridRight) <= 18,
+          };
+        }),
+      )
+      .toEqual({
+        headerCount: 7,
+        cellCount: 7,
+        aligned: true,
+        inside: true,
+        fillsGrid: true,
       });
     const clippedLinks = await page
       .locator('.fc-daygrid-more-link')
@@ -394,14 +407,6 @@ test('Month columns stay aligned through viewport resizing', async ({
           }).length,
       );
     expect(clippedLinks).toBe(0);
-    expect(columns.headers).toHaveLength(7);
-    expect(columns.cells).toHaveLength(7);
-    for (let index = 0; index < 7; index += 1) {
-      expect(
-        Math.abs(columns.headers[index].right - columns.cells[index].right),
-      ).toBeLessThanOrEqual(2);
-      expect(columns.cells[index].right).toBeLessThanOrEqual(columns.right + 1);
-    }
   }
   const more = page.locator('[data-date="2026-10-01"] .fc-daygrid-more-link');
   await more.press('Enter');

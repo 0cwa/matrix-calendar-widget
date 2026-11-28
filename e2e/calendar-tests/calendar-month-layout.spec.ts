@@ -83,32 +83,43 @@ for (const language of ['en', 'de'] as const) {
         const geometry = await readMonthGeometry(grid);
         const timeBounds = await startTime.evaluateAll((elements) =>
           elements.map((element) => {
-            const time = element.getBoundingClientRect();
+            const text = document.createRange();
+            text.selectNodeContents(element);
+            const time = text.getBoundingClientRect();
+            const label = element.getBoundingClientRect();
             const event = element.closest('.fc-event')!.getBoundingClientRect();
             return {
+              label: element.textContent,
               width: time.width,
-              clipped:
-                time.left < event.left ||
-                time.right > event.right ||
-                time.top < event.top ||
-                time.bottom > event.bottom,
+              height: time.height,
+              clippedBy: Math.max(
+                0,
+                event.left - time.left,
+                time.right - event.right,
+                event.top - time.top,
+                time.bottom - event.bottom,
+                time.right - label.right,
+              ),
             };
           }),
         );
+        measurements.push({ width, height, geometry, timeBounds });
+        await writeFile(
+          testInfo.outputPath('month-layout.json'),
+          JSON.stringify(measurements, null, 2),
+        );
         expect(timeBounds).toHaveLength(11);
         expect(
-          timeBounds.every(({ width, clipped }) => width > 0 && !clipped),
-        ).toBe(true);
-        measurements.push({ width, height, geometry, timeBounds });
+          timeBounds.filter(
+            ({ width, height, clippedBy }) =>
+              width <= 0 || height <= 0 || clippedBy > 1,
+          ),
+        ).toEqual([]);
       }
       const accessibility = await new AxeBuilder({ page })
         .include('.fc-dayGridMonth-view')
         .analyze();
       expect(accessibility.violations).toEqual([]);
-      await writeFile(
-        testInfo.outputPath('month-layout.json'),
-        JSON.stringify(measurements, null, 2),
-      );
     });
   }
 }

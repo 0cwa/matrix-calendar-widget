@@ -354,14 +354,7 @@ function CalendarEventCell({
               whiteSpace="nowrap"
             >
               {view === 'month' ? (
-                <Box
-                  display="flex"
-                  alignItems="center"
-                  gap={0.5}
-                  height={textLineHeight}
-                  overflow="hidden"
-                  minWidth={0}
-                >
+                <Box display="flex" alignItems="center" gap={0.5} minWidth={0}>
                   {startsHere && isTimedCalendarEvent(event) && (
                     <Typography
                       component="span"
@@ -371,6 +364,7 @@ function CalendarEventCell({
                         color: lightweight ? 'text.secondary' : 'inherit',
                         flexShrink: 0,
                         fontVariantNumeric: 'tabular-nums',
+                        lineHeight: 1.2,
                       }}
                     >
                       {calendarEventTimedDateTimeToDateTime(
