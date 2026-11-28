@@ -32,7 +32,7 @@ import {
 } from '@matrix-calendar-widget/calendar';
 import EventRepeatIcon from '@mui/icons-material/EventRepeat';
 import { Box, Stack, Tooltip, Typography, useTheme } from '@mui/material';
-import { unstable_useId as useId } from '@mui/utils';
+import { unstable_useId as useId, visuallyHidden } from '@mui/utils';
 import { DateTime } from 'luxon';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -286,11 +286,10 @@ function CalendarEventCell({
   const { i18n, t } = useTranslation();
   const theme = useTheme();
   const cellId = useId();
-  const visibleNameId = `${cellId}-visible-name`;
   const detailNameId = `${cellId}-details`;
   const month = view === 'month';
   const { ref, ...tooltipState } = useEventTooltip(
-    month ? `${visibleNameId} ${detailNameId}` : detailNameId,
+    month ? undefined : detailNameId,
   );
   const textLineHeight = `${theme.typography.body2.lineHeight}em`;
   const recurring = Boolean(
@@ -330,7 +329,7 @@ function CalendarEventCell({
   return (
     <>
       <Tooltip {...tooltipState} title={<>{label}</>}>
-        <Box height="100%" id={visibleNameId} ref={ref}>
+        <Box height="100%" ref={ref}>
           <Stack flexDirection="row" height="100%">
             {(calendar?.color || lightweight) && (
               // The height of one text line, so the dot centers on the title.
@@ -391,9 +390,17 @@ function CalendarEventCell({
         </Box>
       </Tooltip>
 
-      <Box display="none" id={detailNameId}>
-        {month ? (calendar ? `${time} · ${calendar.name}` : time) : label}
-      </Box>
+      {month ? (
+        <Box component="span" sx={visuallyHidden}>
+          {' '}
+          {time}
+          {calendar ? ` · ${calendar.name}` : ''}
+        </Box>
+      ) : (
+        <Box display="none" id={detailNameId}>
+          {label}
+        </Box>
+      )}
     </>
   );
 }
@@ -412,7 +419,7 @@ function eventLabel(
  * FullCalendar owns the focusable event element around the cell content, so the
  * tooltip has to follow that element to show keyboard users the full title.
  */
-function useEventTooltip(labelledBy: string) {
+function useEventTooltip(labelledBy: string | undefined) {
   const [open, setOpen] = useState(false);
   const [element, ref] = useState<HTMLElement | null>(null);
 
@@ -422,7 +429,11 @@ function useEventTooltip(labelledBy: string) {
       return undefined;
     }
 
-    eventElement.setAttribute('aria-labelledby', labelledBy);
+    if (labelledBy) {
+      eventElement.setAttribute('aria-labelledby', labelledBy);
+    } else {
+      eventElement.removeAttribute('aria-labelledby');
+    }
 
     const handleFocus = () => {
       if (eventElement.matches(':focus-visible')) {

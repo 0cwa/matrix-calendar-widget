@@ -33,7 +33,7 @@ for (const language of ['en', 'de'] as const) {
       const overnight = grid.getByRole('button', {
         name: /Overnight maintenance with a long event title/,
       });
-      const allDay = grid.getByRole('button', { name: /^All-day planning:/ });
+      const allDay = grid.getByRole('button', { name: /^All-day planning/ });
       await expect(timed).toHaveCount(10);
       await expect(startTime).toHaveCount(11);
       await expect(timed.first()).toHaveCSS(

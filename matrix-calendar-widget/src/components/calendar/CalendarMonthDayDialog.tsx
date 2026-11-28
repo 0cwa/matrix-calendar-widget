@@ -29,8 +29,8 @@ import {
   Typography,
   useTheme,
 } from '@mui/material';
+import { visuallyHidden } from '@mui/utils';
 import { DateTime } from 'luxon';
-import { useId } from 'react';
 import { useTranslation } from 'react-i18next';
 import { calendarEventKey } from '../../calendar';
 import { CalendarColorDot, EventCalendarIdentity } from './CalendarColorDot';
@@ -78,7 +78,6 @@ export function CalendarMonthDayDialog({
   );
   const dayDate = day.toISODate() ?? '';
   const allDayLabel = t('calendarEvents.details.allDay', 'All day');
-  const dayLabelId = useId();
 
   return (
     <Dialog fullWidth maxWidth="xs" onClose={onClose} open={open}>
@@ -92,9 +91,6 @@ export function CalendarMonthDayDialog({
       </Box>
 
       <DialogContent dividers sx={{ p: 0 }}>
-        <Box display="none" id={dayLabelId}>
-          {day.toLocaleString(DateTime.DATE_FULL)}
-        </Box>
         <List disablePadding>
           {entries.map(({ event, calendar, time }, index) => {
             const timeWithinDay = formatTimeWithinDay(
@@ -105,11 +101,6 @@ export function CalendarMonthDayDialog({
               viewerTimezone,
             );
             const displayTime = timeWithinDay ?? time;
-            const rowLabelId = `${dayLabelId}-event-${index}`;
-            const label = timeWithinDay
-              ? `${rowLabelId} ${dayLabelId}`
-              : rowLabelId;
-
             return (
               <ListItem
                 disablePadding
@@ -117,12 +108,11 @@ export function CalendarMonthDayDialog({
                 key={calendarEventKey(event)}
               >
                 <ListItemButton
-                  aria-labelledby={label}
                   autoFocus={index === 0}
                   onClick={() => onSelectEvent(event)}
                   sx={{ overflowWrap: 'anywhere', px: 3 }}
                 >
-                  <Box id={rowLabelId} minWidth={0}>
+                  <Box minWidth={0}>
                     <Typography fontWeight="bold">{event.title}</Typography>
                     <Typography color="text.secondary" variant="body2">
                       {displayTime}
@@ -139,6 +129,12 @@ export function CalendarMonthDayDialog({
                           {calendar.name}
                         </Typography>
                       </Stack>
+                    )}
+                    {timeWithinDay && (
+                      <Box component="span" sx={visuallyHidden}>
+                        {' '}
+                        {day.toLocaleString(DateTime.DATE_FULL)}
+                      </Box>
                     )}
                   </Box>
                 </ListItemButton>
