@@ -271,6 +271,34 @@ test('room visitor sees read-only event controls at a narrow width', async ({
   expect(pageErrors).toEqual([]);
 });
 
+test('German date range picker fits a 320 px Element dark viewport', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 640 });
+  await page.goto(
+    '/browser-tests/index.html?mode=room-manager&theme=dark&lng=de',
+  );
+
+  const range = page.getByRole('button', { name: /^Datumsbereich auswählen/ });
+  await range.click();
+  const picker = page.getByRole('dialog');
+  const prompt = picker.getByRole('status');
+  await expect(prompt).toHaveText('Wähle ein Startdatum.');
+
+  const bounds = await picker.evaluate((element) => {
+    const { left, right } = element.getBoundingClientRect();
+    return { left, right, viewport: document.documentElement.clientWidth };
+  });
+  expect(bounds.left).toBeGreaterThanOrEqual(0);
+  expect(bounds.right).toBeLessThanOrEqual(bounds.viewport);
+
+  await picker.getByRole('gridcell', { name: '1', exact: true }).click();
+  await expect(prompt).toHaveText(/Wähle jetzt ein Enddatum\./);
+  await picker.getByRole('gridcell', { name: '2', exact: true }).click();
+  await expect(picker).toBeHidden();
+  await expect(range).toBeFocused();
+});
+
 test('room manager sees writable event controls at a narrow width', async ({
   page,
 }) => {

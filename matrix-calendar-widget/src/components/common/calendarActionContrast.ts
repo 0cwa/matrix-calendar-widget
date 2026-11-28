@@ -116,7 +116,8 @@ export function calendarActionContrast(theme: Theme): ThemeOptions {
                 backgroundImage: 'none',
               }),
               ...(ownerState.elevation === 8 && {
-                border: `1px solid ${divider}`,
+                // Keep the visual edge inside fixed-width picker surfaces.
+                boxShadow: `inset 0 0 0 1px ${divider}, ${theme.shadows[8]}`,
               }),
             }),
           },
