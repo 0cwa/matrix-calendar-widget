@@ -28,17 +28,15 @@ import {
   Select,
   SelectChangeEvent,
   SxProps,
-  useMediaQuery,
 } from '@mui/material';
 import { unstable_useId as useId, visuallyHidden } from '@mui/utils';
 import { TFunction } from 'i18next';
-import { Dispatch, ReactElement, useCallback, useEffect } from 'react';
+import { Dispatch, ReactElement, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CalendarViewType } from '../../../lib/utils';
+import { isNarrowCalendarView, useIsWideCalendar } from './viewAvailability';
 
 export type CalendarSurfaceView = 'list' | CalendarViewType;
-
-const smallDeviceViews: CalendarSurfaceView[] = ['list', 'day'];
 
 type CalendarNavigationProps = {
   view: CalendarSurfaceView;
@@ -52,19 +50,12 @@ export const CalendarNavigation = ({
   sx,
 }: CalendarNavigationProps) => {
   const { t } = useTranslation();
-  const isBigDevice = useMediaQuery('(min-width:800px)', { noSsr: true });
-
-  // switch to the day view if the viewport is too narrow
-  useEffect(() => {
-    if (!smallDeviceViews.includes(view) && !isBigDevice) {
-      onViewChange('day');
-    }
-  }, [isBigDevice, onViewChange, view]);
+  const isBigDevice = useIsWideCalendar();
 
   const handleOnChangeChangeView = useCallback(
     (event: SelectChangeEvent) => {
       const value = event.target.value as CalendarSurfaceView;
-      if (smallDeviceViews.includes(value) || isBigDevice) {
+      if (isNarrowCalendarView(value) || isBigDevice) {
         onViewChange(value);
       }
     },
@@ -128,7 +119,7 @@ const renderMenuItem = (
   isBigDevice: boolean,
   t: TFunction,
 ) => {
-  const disabled = !smallDeviceViews.includes(view) && !isBigDevice;
+  const disabled = !isNarrowCalendarView(view) && !isBigDevice;
   return (
     <MenuItem disabled={disabled} key={view} value={view}>
       <ListItemIcon>{itemIcon(view)}</ListItemIcon>

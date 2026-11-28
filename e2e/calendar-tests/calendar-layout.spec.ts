@@ -174,6 +174,32 @@ for (const width of [360, 420, 850]) {
   }
 }
 
+test('a narrow day view gives way to the chosen month again', async ({
+  page,
+}) => {
+  await page.clock.setFixedTime(new Date('2026-10-21T10:00:00.000Z'));
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/browser-tests/index.html?mode=home');
+  const view = page.getByRole('combobox', { name: 'View' });
+  await view.click();
+  await page.getByRole('option', { name: 'Month' }).click();
+  await page.getByRole('button', { name: 'Previous month' }).click();
+  const month = page.getByRole('button', {
+    name: 'Choose month, selected month is September 2026',
+  });
+  await expect(month).toBeVisible();
+
+  await page.setViewportSize({ width: 420, height: 740 });
+  await expect(view).toContainText('Day');
+  await expect(
+    page.getByRole('button', { name: 'Previous day' }),
+  ).toBeVisible();
+
+  await page.setViewportSize({ width: 850, height: 740 });
+  await expect(view).toContainText('Month');
+  await expect(month).toBeVisible();
+});
+
 test('room visitor sees read-only event controls at a narrow width', async ({
   page,
 }) => {

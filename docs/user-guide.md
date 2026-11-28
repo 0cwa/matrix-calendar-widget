@@ -12,7 +12,7 @@ A room needs an enabled calendar service and a room-to-calendar binding. If the 
 
 ## Browse calendars and events
 
-Use the date controls to move through the calendar: previous, **Today**, next, and the date range stay together at every width. Narrow room panels offer list and day views; work-week, week, and month become available when the widget viewport is at least 800 CSS pixels wide. List view is useful in the standard narrow side panel. Calendar visibility controls choose which available calendars are shown; hiding a calendar does not delete it.
+Use the date controls to move through the calendar: previous, **Today**, next, and the date range stay together at every width. Narrow room panels offer list and day views; work-week, week, and month become available when the widget viewport is at least 800 CSS pixels wide. A narrow panel shows one day in place of a chosen wide view, and the wide view returns when there is room. List view is useful in the standard narrow side panel. Calendar visibility controls choose which available calendars are shown; hiding a calendar does not delete it.
 
 Open an event to see its time, title, description, location, and other supported fields. Timed events and all-day events have different calendar semantics. All-day event end dates are exclusive in iCalendar; the UI handles the date range for display.
 

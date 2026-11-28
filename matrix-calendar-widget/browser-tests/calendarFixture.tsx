@@ -57,6 +57,7 @@ import { CalendarEventDetailsDialog } from '../src/components/calendar/CalendarE
 import { CalendarEventsCalendar } from '../src/components/calendar/CalendarEventsCalendar';
 import { CalendarEventsList } from '../src/components/calendar/CalendarEventsList';
 import { CalendarEventsSurface } from '../src/components/calendar/CalendarEventsSurface';
+import { CalendarHome } from '../src/components/calendar/CalendarHome';
 import type { CalendarSurfaceView } from '../src/components/calendar/CalendarNavigation';
 import { CalendarToolbar } from '../src/components/calendar/CalendarToolbar';
 import { CalendarMuiThemeProvider } from '../src/components/common/CalendarMuiThemeProvider';
@@ -144,6 +145,10 @@ window.__updateSyntheticRoomMember = (event) => {
   syntheticRoomMemberUpdates.next(event);
 };
 const syntheticRoomWidgetApi = {
+  widgetParameters: {
+    roomId: syntheticRoomId,
+    userId: '@alice:example.test',
+  },
   receiveStateEvents: async () => [],
   observeStateEvents: () => syntheticRoomMemberUpdates.asObservable(),
 } as unknown as WidgetApi;
@@ -353,6 +358,19 @@ function CalendarFixture({
   const [selected, setSelected] = useState<CalendarEvent>();
   const largeCalendarMode = roomMode === 'large-calendar';
   const galleryMode = roomMode === 'gallery';
+  // The real home screen with a calendar the viewer may manage.
+  const homeRepository = useMemo(
+    () =>
+      roomMode === 'home'
+        ? new InMemoryCalendarRepository({
+            calendars: [
+              { ...galleryCalendar, operatorManaged: false, readOnly: false },
+            ],
+            events: galleryEvents,
+          })
+        : undefined,
+    [roomMode],
+  );
   const roomRepository = useMemo(
     () =>
       roomMode === 'room-read-only' ||
@@ -374,6 +392,16 @@ function CalendarFixture({
     endDate: '2026-11-01T00:00:00+01:00',
     filterText: '',
   });
+
+  if (homeRepository) {
+    return (
+      <CalendarRepositoryProvider repository={homeRepository}>
+        <main data-testid="home-root" style={{ height: '100vh' }}>
+          <CalendarHome />
+        </main>
+      </CalendarRepositoryProvider>
+    );
+  }
 
   if (activeRepository) {
     return (
