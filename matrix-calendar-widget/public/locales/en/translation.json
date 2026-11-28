@@ -404,6 +404,7 @@
     "revoke": "Revoke",
     "revokeConfirm": "Revoke access created {{date}} for “{{calendar}}”? This app will stop receiving future changes. Copies already downloaded to the app cannot be removed.",
     "revokeFailed": "Could not revoke app access. Check your permissions and try again.",
+    "revoking": "Revoking app access…",
     "setupHelp": "In your calendar app, choose CalDAV and enter the URL, username, and password below. Access expires after 90 days.",
     "status": {
       "active": "Active",

@@ -293,6 +293,35 @@ describe('<CalendarPrivateClientDialog />', () => {
     expect(revokeClient).toHaveBeenCalledTimes(2);
   });
 
+  it('announces revocation progress as revocation, not creation', async () => {
+    const appId = `mcwpc~${'r'.repeat(48)}`;
+    const client = activeClient(appId, 'personal-one');
+    const request = deferred<typeof client>();
+    const repository = Object.assign(
+      new InMemoryCalendarRepository({ calendars }),
+      {
+        listPrivateCalendarClients: vi.fn().mockResolvedValue([client]),
+        createPrivateCalendarClient: vi.fn(),
+        revokePrivateCalendarClient: vi.fn().mockReturnValue(request.promise),
+      },
+    );
+    render(<ControlledDialog />, { wrapper: createWrapper(repository) });
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Revoke', exact: true }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Revoke access' }));
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Revoking app access…',
+    );
+    expect(screen.queryByText('Creating app access…')).not.toBeInTheDocument();
+    await act(async () => {
+      request.resolve({ ...client, state: 'revoked', mapState: 'removed' });
+      await request.promise;
+    });
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.getByText('Status: Revoked')).toBeInTheDocument();
+  });
+
   it('revokes a late create through its original repository and reports nonsecret recovery if cleanup fails', async () => {
     const appId = `mcwpc~${'e'.repeat(48)}`;
     const secret = 'late-secret-that-must-not-be-shown';

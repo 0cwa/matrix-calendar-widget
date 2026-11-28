@@ -88,7 +88,10 @@ export function CalendarPrivateClientDialog({
     password: string;
   }>();
   const [loading, setLoading] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState<'create' | 'revoke' | null>(
+    null,
+  );
+  const busy = busyAction !== null;
   const [error, setError] = useState<PrivateClientError>();
   const [confirmationAppId, setConfirmationAppId] = useState<string>();
   const [copiedField, setCopiedField] = useState<CopiedCredentialField>();
@@ -112,7 +115,7 @@ export function CalendarPrivateClientDialog({
 
   useLayoutEffect(() => {
     operationGeneration.current += 1;
-    setBusy(false);
+    setBusyAction(null);
     setLoading(false);
     setClients(undefined);
     setError(undefined);
@@ -205,7 +208,7 @@ export function CalendarPrivateClientDialog({
     const requestRepository = clientRepository;
     const requestCalendarId = calendarId;
     const requestCalendarName = selectedCalendar?.name ?? '';
-    setBusy(true);
+    setBusyAction('create');
     setError(undefined);
     clearOneTimeDetails();
     try {
@@ -254,7 +257,7 @@ export function CalendarPrivateClientDialog({
       }
     } finally {
       if (operationGeneration.current === requestGeneration) {
-        setBusy(false);
+        setBusyAction(null);
       }
     }
   };
@@ -263,7 +266,7 @@ export function CalendarPrivateClientDialog({
     if (!clientRepository || busy) return;
     const requestGeneration = operationGeneration.current;
     const requestRepository = clientRepository;
-    setBusy(true);
+    setBusyAction('revoke');
     setError(undefined);
     try {
       const revoked =
@@ -281,7 +284,7 @@ export function CalendarPrivateClientDialog({
       }
     } finally {
       if (operationGeneration.current === requestGeneration) {
-        setBusy(false);
+        setBusyAction(null);
       }
     }
   };
@@ -374,7 +377,9 @@ export function CalendarPrivateClientDialog({
 
           {busy && (
             <Typography aria-live="polite" role="status">
-              {t('calendarPrivateClient.creating', 'Creating app access…')}
+              {busyAction === 'revoke'
+                ? t('calendarPrivateClient.revoking', 'Revoking app access…')
+                : t('calendarPrivateClient.creating', 'Creating app access…')}
             </Typography>
           )}
 

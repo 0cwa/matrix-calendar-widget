@@ -404,6 +404,7 @@
     "revoke": "Widerrufen",
     "revokeConfirm": "Den am {{date}} für „{{calendar}}“ erstellten Zugriff widerrufen? Diese App erhält keine künftigen Änderungen mehr. Bereits heruntergeladene Kopien können nicht aus der App entfernt werden.",
     "revokeFailed": "Der App-Zugriff konnte nicht widerrufen werden. Prüfe deine Berechtigungen und versuche es erneut.",
+    "revoking": "App-Zugriff wird widerrufen…",
     "setupHelp": "Wähle in deiner Kalender-App CalDAV und gib die URL, den Benutzernamen und das Passwort unten ein. Der Zugriff läuft nach 90 Tagen ab.",
     "status": {
       "active": "Aktiv",
