@@ -381,6 +381,7 @@
     "capacity": "This calendar has reached its app access limit. Revoke an unused entry and try again.",
     "cleanupFailed": "App access created for “{{calendar}}” on {{date}} may still be active. Open that calendar’s app access settings and check for an entry created then; revoke it if present.",
     "confirmRevoke": "Revoke access",
+    "connectionTitle": "Calendar app connection",
     "copied": "Copied",
     "copyFailed": "Copy failed. Select and copy the value above.",
     "copyPassword": "Copy password",
@@ -403,6 +404,7 @@
     "revoke": "Revoke",
     "revokeConfirm": "Revoke access created {{date}} for “{{calendar}}”? This app will stop receiving future changes. Copies already downloaded to the app cannot be removed.",
     "revokeFailed": "Could not revoke app access. Check your permissions and try again.",
+    "revoking": "Revoking app access…",
     "setupHelp": "In your calendar app, choose CalDAV and enter the URL, username, and password below. Access expires after 90 days.",
     "status": {
       "active": "Active",

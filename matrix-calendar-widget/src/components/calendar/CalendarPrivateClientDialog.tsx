@@ -88,7 +88,10 @@ export function CalendarPrivateClientDialog({
     password: string;
   }>();
   const [loading, setLoading] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState<'create' | 'revoke' | null>(
+    null,
+  );
+  const busy = busyAction !== null;
   const [error, setError] = useState<PrivateClientError>();
   const [confirmationAppId, setConfirmationAppId] = useState<string>();
   const [copiedField, setCopiedField] = useState<CopiedCredentialField>();
@@ -112,7 +115,7 @@ export function CalendarPrivateClientDialog({
 
   useLayoutEffect(() => {
     operationGeneration.current += 1;
-    setBusy(false);
+    setBusyAction(null);
     setLoading(false);
     setClients(undefined);
     setError(undefined);
@@ -205,7 +208,7 @@ export function CalendarPrivateClientDialog({
     const requestRepository = clientRepository;
     const requestCalendarId = calendarId;
     const requestCalendarName = selectedCalendar?.name ?? '';
-    setBusy(true);
+    setBusyAction('create');
     setError(undefined);
     clearOneTimeDetails();
     try {
@@ -254,7 +257,7 @@ export function CalendarPrivateClientDialog({
       }
     } finally {
       if (operationGeneration.current === requestGeneration) {
-        setBusy(false);
+        setBusyAction(null);
       }
     }
   };
@@ -263,7 +266,7 @@ export function CalendarPrivateClientDialog({
     if (!clientRepository || busy) return;
     const requestGeneration = operationGeneration.current;
     const requestRepository = clientRepository;
-    setBusy(true);
+    setBusyAction('revoke');
     setError(undefined);
     try {
       const revoked =
@@ -281,7 +284,7 @@ export function CalendarPrivateClientDialog({
       }
     } finally {
       if (operationGeneration.current === requestGeneration) {
-        setBusy(false);
+        setBusyAction(null);
       }
     }
   };
@@ -312,39 +315,57 @@ export function CalendarPrivateClientDialog({
       </DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ pt: 1 }}>
-          <Typography color="text.secondary" variant="body2">
-            {t(
-              'calendarPrivateClient.intro',
-              'Create app-specific access for a calendar app to read and edit this calendar. For a room calendar, this needs calendar management permission; ask a room moderator or your server administrator about it.',
-            )}
-          </Typography>
-
-          <FormControl fullWidth>
-            <InputLabel id="private-client-calendar-label">
-              {t('calendarPrivateClient.calendar', 'Calendar')}
-            </InputLabel>
-            <Select
-              disabled={loading || busy || calendars.length === 0}
-              label={t('calendarPrivateClient.calendar', 'Calendar')}
-              labelId="private-client-calendar-label"
-              onChange={(event) =>
-                selectCalendar(event.target.value as CalendarId)
-              }
-              value={calendarId}
-            >
-              {calendars.map((calendar) => (
-                <MenuItem key={calendar.id} value={calendar.id}>
-                  {calendar.name}
-                </MenuItem>
-              ))}
-            </Select>
-            <FormHelperText>
+          {!createdClient && (
+            <Typography color="text.secondary" variant="body2">
               {t(
-                'calendarPrivateClient.calendarHelp',
-                'Each app access entry works with one calendar.',
+                'calendarPrivateClient.intro',
+                'Create app-specific access for a calendar app to read and edit this calendar. For a room calendar, this needs calendar management permission; ask a room moderator or your server administrator about it.',
               )}
-            </FormHelperText>
-          </FormControl>
+            </Typography>
+          )}
+
+          {createdClient && calendars.length === 1 ? (
+            <Stack spacing={0.25}>
+              <Typography color="text.secondary" variant="caption">
+                {t('calendarPrivateClient.calendar', 'Calendar')}
+              </Typography>
+              <Typography variant="body1">{selectedCalendar?.name}</Typography>
+            </Stack>
+          ) : calendars.length === 1 ? (
+            <Stack spacing={0.25}>
+              <Typography color="text.secondary" variant="caption">
+                {t('calendarPrivateClient.calendar', 'Calendar')}
+              </Typography>
+              <Typography variant="body1">{calendars[0].name}</Typography>
+            </Stack>
+          ) : (
+            <FormControl fullWidth>
+              <InputLabel id="private-client-calendar-label">
+                {t('calendarPrivateClient.calendar', 'Calendar')}
+              </InputLabel>
+              <Select
+                disabled={loading || busy || calendars.length === 0}
+                label={t('calendarPrivateClient.calendar', 'Calendar')}
+                labelId="private-client-calendar-label"
+                onChange={(event) =>
+                  selectCalendar(event.target.value as CalendarId)
+                }
+                value={calendarId}
+              >
+                {calendars.map((calendar) => (
+                  <MenuItem key={calendar.id} value={calendar.id}>
+                    {calendar.name}
+                  </MenuItem>
+                ))}
+              </Select>
+              <FormHelperText>
+                {t(
+                  'calendarPrivateClient.calendarHelp',
+                  'Each app access entry works with one calendar.',
+                )}
+              </FormHelperText>
+            </FormControl>
+          )}
 
           {error && (
             <Alert
@@ -352,6 +373,14 @@ export function CalendarPrivateClientDialog({
             >
               {privateClientErrorMessage(t, error)}
             </Alert>
+          )}
+
+          {busy && (
+            <Typography aria-live="polite" role="status">
+              {busyAction === 'revoke'
+                ? t('calendarPrivateClient.revoking', 'Revoking app access…')
+                : t('calendarPrivateClient.creating', 'Creating app access…')}
+            </Typography>
           )}
 
           {loading && (
@@ -375,7 +404,7 @@ export function CalendarPrivateClientDialog({
               <Typography component="h2" variant="subtitle1">
                 {t('calendarPrivateClient.createdTitle', 'Access created')}
               </Typography>
-              <Alert severity="warning">
+              <Alert severity="warning" role="note">
                 {t(
                   'calendarPrivateClient.oneTimeWarning',
                   'Save these app-specific details now. The password is shown only once. Store it in your calendar app’s credential manager; never use your Matrix password.',
@@ -466,6 +495,12 @@ export function CalendarPrivateClientDialog({
                   <Paper key={client.appId} variant="outlined" sx={{ p: 1.5 }}>
                     <Stack spacing={1}>
                       <Typography component="h3" variant="subtitle2">
+                        {t(
+                          'calendarPrivateClient.connectionTitle',
+                          'Calendar app connection',
+                        )}
+                      </Typography>
+                      <Typography color="text.secondary" variant="body2">
                         {t('calendarPrivateClient.createdLabel', {
                           date: formatPrivateClientDate(client.createdAt),
                           defaultValue: 'Access created {{date}}',
@@ -596,14 +631,19 @@ function CredentialField({
         label={label}
         value={value}
       />
-      <Button
-        onClick={onCopy}
-        size="small"
-        sx={{ alignSelf: 'flex-start' }}
-        variant="outlined"
+      <Stack
+        direction="row"
+        alignItems="center"
+        justifyContent="space-between"
+        gap={1}
       >
-        {copied ? t('calendarPrivateClient.copied', 'Copied') : copyLabel}
-      </Button>
+        <Typography variant="caption" color="text.secondary" aria-live="polite">
+          {copied ? t('calendarPrivateClient.copied', 'Copied') : ''}
+        </Typography>
+        <Button onClick={onCopy} size="small" variant="outlined">
+          {copied ? t('calendarPrivateClient.copied', 'Copied') : copyLabel}
+        </Button>
+      </Stack>
     </Stack>
   );
 }
