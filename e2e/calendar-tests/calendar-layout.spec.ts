@@ -479,7 +479,9 @@ test('room manager sees writable event controls at a narrow width', async ({
     .getByRole('button', { name: 'Save room notification', exact: true })
     .click();
   await expect(
-    dialog.getByText('Matrix pings the selected people.', { exact: true }),
+    dialog
+      .getByTestId('room-reminder-status')
+      .filter({ hasText: /^Saved: Matrix pings .+ in this room/ }),
   ).toBeVisible();
   await dialog
     .getByRole('button', {
@@ -496,7 +498,9 @@ test('room manager sees writable event controls at a narrow width', async ({
     ),
   ).toBeVisible();
   await expect(
-    dialog.getByText('Matrix pings the selected people.', { exact: true }),
+    dialog
+      .getByTestId('room-reminder-status')
+      .filter({ hasText: /^Saved: Matrix pings .+ in this room/ }),
   ).toBeVisible();
   await expect(dialog.locator('.MuiAutocomplete-tag')).toHaveText(['Bob']);
   await dialog

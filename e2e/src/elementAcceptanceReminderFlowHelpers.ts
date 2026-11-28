@@ -1530,12 +1530,13 @@ export function createReminderAcceptanceHelpers(
       const savedTargetMatches =
         savedDestination === expectedDestination &&
         (await details
-          .getByText(
-            plan.recipient === 'room'
-              ? 'Matrix pings the whole room.'
-              : 'Matrix pings the selected people.',
-            { exact: true },
-          )
+          .getByTestId('room-reminder-status')
+          .filter({
+            hasText:
+              plan.recipient === 'room'
+                ? /^Saved: Matrix pings everyone in this room/
+                : /^Saved: Matrix pings .+ in this room/,
+          })
           .isVisible()
           .catch(() => false));
       const savedScheduleFields = await readReminderAllDayScheduleFields(
@@ -1720,12 +1721,13 @@ export function createReminderAcceptanceHelpers(
       plan.recipient === 'room' ? 'Whole room' : 'Selected people';
     const targetMatches = destinationLabel === expectedDestination;
     const savedState = await details
-      .getByText(
-        plan.recipient === 'room'
-          ? 'Matrix pings the whole room.'
-          : 'Matrix pings the selected people.',
-        { exact: true },
-      )
+      .getByTestId('room-reminder-status')
+      .filter({
+        hasText:
+          plan.recipient === 'room'
+            ? /^Saved: Matrix pings everyone in this room/
+            : /^Saved: Matrix pings .+ in this room/,
+      })
       .isVisible()
       .catch(() => false);
     const scheduleFields = await readReminderAllDayScheduleFields(

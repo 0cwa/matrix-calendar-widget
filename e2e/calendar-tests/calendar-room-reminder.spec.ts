@@ -28,6 +28,7 @@ test('room manager can search and save an exact Matrix reminder recipient while 
   const dialog = page.getByRole('dialog', {
     name: 'Synthetic room planning',
   });
+  await expect(dialog.getByTestId('room-reminder-summary')).toHaveText('Off');
   await dialog
     .getByRole('button', { name: 'Matrix room notifications', exact: true })
     .click();
@@ -117,13 +118,22 @@ test('room manager can search and save an exact Matrix reminder recipient while 
     .getByRole('button', { name: 'Save room notification', exact: true })
     .click();
   await expect(
-    dialog.getByText('Matrix pings the selected people.', { exact: true }),
+    dialog
+      .getByTestId('room-reminder-status')
+      .filter({ hasText: /^Saved: Matrix pings .+ in this room/ }),
   ).toBeVisible();
   await expect
     .poll(() =>
       page.evaluate(() => window.__syntheticRoomReminderTarget ?? null),
     )
     .toEqual({ kind: 'users', userIds: ['@alice:example.test'] });
+  await expect(dialog.getByTestId('room-reminder-status')).toHaveCount(1);
+  await dialog
+    .getByRole('button', { name: 'Close Matrix room notifications' })
+    .click();
+  await expect(dialog.getByTestId('room-reminder-summary')).toHaveText(
+    '1 selected person',
+  );
 });
 
 declare global {

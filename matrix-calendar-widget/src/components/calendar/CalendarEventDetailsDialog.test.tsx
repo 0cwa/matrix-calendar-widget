@@ -489,7 +489,7 @@ describe('<CalendarEventDetailsDialog />', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        'Calendar app alerts are saved with the event for calendar apps. Matrix room notifications are separate messages from the room bot in this room. Delivery also requires current room permissions.',
+        'Calendar app alerts stay on the event. Matrix room notifications are sent separately by the room bot and require current room permissions.',
       ),
     ).toBeInTheDocument();
     expect(repository.listRoomReminderAlarmOptions).toHaveBeenCalledTimes(2);

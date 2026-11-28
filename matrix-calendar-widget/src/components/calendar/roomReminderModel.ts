@@ -28,6 +28,46 @@ export type CalendarReminderMember = Readonly<{
 
 export type ReminderDestinationChoice = 'off' | 'room' | 'users';
 
+export type RoomReminderSummary =
+  | {
+      kind:
+        | 'loading'
+        | 'error'
+        | 'no-alerts'
+        | 'off'
+        | 'whole-room'
+        | 'unsupported'
+        | 'orphaned';
+    }
+  | { kind: 'selected-people' | 'multiple'; count: number };
+
+export function summarizeRoomReminders(
+  summaryLoading: boolean,
+  summaryError: boolean,
+  options: readonly CalendarRoomReminderAlarmOption[],
+  configurations: Readonly<Record<string, CalendarRoomReminderConfiguration>>,
+  orphanedConfigurations: readonly CalendarRoomReminderConfiguration[],
+): RoomReminderSummary {
+  if (summaryLoading) return { kind: 'loading' };
+  if (summaryError) return { kind: 'error' };
+  if (options.length === 0 && orphanedConfigurations.length === 0)
+    return { kind: 'no-alerts' };
+  const active = options.flatMap((option) => {
+    const configuration = configurations[reminderOptionKey(option)];
+    return configuration ? [{ option, configuration }] : [];
+  });
+  if (active.length === 0)
+    return { kind: orphanedConfigurations.length ? 'orphaned' : 'off' };
+  if (active.length > 1) return { kind: 'multiple', count: active.length };
+  if (!active[0].option.supported) return { kind: 'unsupported' };
+  if (active[0].configuration.target.kind === 'room')
+    return { kind: 'whole-room' };
+  return {
+    kind: 'selected-people',
+    count: active[0].configuration.target.userIds.length,
+  };
+}
+
 export type ReminderDraft = Readonly<{
   destination: ReminderDestinationChoice;
   userIds: readonly string[];

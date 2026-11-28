@@ -231,13 +231,11 @@ describe('<CalendarRoomReminderControl />', () => {
       ),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(
-        /Follows this calendar app alert\. Event time zone: Europe\/Stockholm\./,
-      ),
+      screen.getByText(/Follows this alert \(Europe\/Stockholm\)\./),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        /Calendar app alerts are saved with the event for calendar apps\. Matrix room notifications are separate messages from the room bot in this room/,
+        /Calendar app alerts stay on the event\. Matrix room notifications are sent separately by the room bot/,
       ),
     ).toBeInTheDocument();
     expect(
@@ -258,15 +256,16 @@ describe('<CalendarRoomReminderControl />', () => {
 
     // An alert without a room notification pings nobody.
     expect(
-      screen.queryByText(/Preview: Matrix will ping/),
+      screen.queryByText(/Unsaved change: Matrix will ping/),
     ).not.toBeInTheDocument();
 
+    expect(screen.getByTestId('room-reminder-status')).toHaveTextContent(
+      'Saved: Off — no Matrix room notification will be sent.',
+    );
     await chooseDestination('room', 'Whole room');
-    expect(
-      screen.getByText(
-        'Preview: Matrix will ping everyone in this room when this alert is due.',
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId('room-reminder-status')).toHaveTextContent(
+      'Unsaved change: Matrix will ping everyone in this room when this alert is due.',
+    );
     await userEvent.click(
       screen.getByRole('button', { name: 'Save room notification' }),
     );
@@ -279,6 +278,11 @@ describe('<CalendarRoomReminderControl />', () => {
       null,
       { kind: 'room' },
       null,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('room-reminder-status')).toHaveTextContent(
+        'Saved: Matrix pings everyone in this room when this alert is due.',
+      ),
     );
     expect(onEditCalendarReminder).not.toHaveBeenCalled();
   });
@@ -443,7 +447,7 @@ describe('<CalendarRoomReminderControl />', () => {
     await userEvent.keyboard('{ArrowDown}{Enter}');
     expect(
       screen.getByText(
-        'Preview: Matrix will ping Alice and Bob in this room when this alert is due.',
+        'Unsaved change: Matrix will ping Alice and Bob in this room when this alert is due.',
       ),
     ).toBeInTheDocument();
     await userEvent.click(
@@ -488,9 +492,9 @@ describe('<CalendarRoomReminderControl />', () => {
         /This notification time has already passed\. Matrix does not send past notifications\./,
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Preview: Matrix will ping/)).toHaveTextContent(
-      'on 2026-10-21 at 09:00 (Europe/Stockholm)',
-    );
+    expect(
+      screen.getByText(/Unsaved change: Matrix will ping/),
+    ).toHaveTextContent('on 2026-10-21 at 09:00 (Europe/Stockholm)');
 
     expect(
       screen.getByRole('button', { name: 'Save room notification' }),
@@ -589,7 +593,7 @@ describe('<CalendarRoomReminderControl />', () => {
     ).not.toBeInTheDocument();
     expect(
       screen.getByText(
-        'Preview: Matrix will ping @alice:example.test in this room when this alert is due.',
+        'Saved: Matrix pings @alice:example.test in this room when this alert is due.',
       ),
     ).toBeInTheDocument();
     expect(
@@ -648,7 +652,7 @@ describe('<CalendarRoomReminderControl />', () => {
     });
     expect(
       screen.getByText(
-        'Preview: Matrix will ping Alice in this room on 2026-10-20 at 08:30 (Europe/Stockholm).',
+        'Unsaved change: Matrix will ping Alice in this room on 2026-10-20 at 08:30 (Europe/Stockholm).',
       ),
     ).toBeInTheDocument();
     const timezone = screen.getByRole('combobox', {
@@ -656,7 +660,7 @@ describe('<CalendarRoomReminderControl />', () => {
     });
     await userEvent.clear(timezone);
     expect(
-      screen.queryByText(/Preview: Matrix will ping/),
+      screen.queryByText(/Unsaved change: Matrix will ping/),
     ).not.toBeInTheDocument();
     expect(
       screen.getByText(
@@ -792,7 +796,7 @@ describe('<CalendarRoomReminderControl />', () => {
 
     expect(
       screen.getByText(
-        'Preview: Matrix will ping Alex (@alex:two.test) in this room when this alert is due.',
+        'Unsaved change: Matrix will ping Alex (@alex:two.test) in this room when this alert is due.',
       ),
     ).toBeInTheDocument();
   });
