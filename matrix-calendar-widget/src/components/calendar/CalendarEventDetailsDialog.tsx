@@ -58,6 +58,7 @@ import {
   useUpdateCalendarEvent,
 } from '../../calendar';
 import { ConfirmDeleteDialog } from '../common/ConfirmDeleteDialog';
+import { CalendarColorDot, eventCalendarIdentities } from './CalendarColorDot';
 import { CalendarEventDetailsSchedule } from './CalendarEventDetailsSchedule';
 import { CalendarEventEditorDialog } from './CalendarEventEditorDialog';
 import { CalendarRoomReminderControl } from './CalendarRoomReminderControl';
@@ -217,6 +218,9 @@ export function CalendarEventDetailsDialog({
     ? calendars.data.find(
         (calendar) => calendar.id === currentSourceEvent.calendarId,
       )
+    : undefined;
+  const calendarColor = eventCalendar
+    ? eventCalendarIdentities(calendars.data).get(eventCalendar.id)?.color
     : undefined;
   const canManageRoomReminders = Boolean(
     currentSourceEvent &&
@@ -498,7 +502,15 @@ export function CalendarEventDetailsDialog({
                     <DetailField
                       label={t('calendarEvents.details.calendar', 'Calendar')}
                     >
-                      <Typography>{eventCalendar.name}</Typography>
+                      <Stack alignItems="center" direction="row" spacing={1}>
+                        {calendarColor && (
+                          <CalendarColorDot
+                            color={calendarColor}
+                            ringColor="currentColor"
+                          />
+                        )}
+                        <Typography>{eventCalendar.name}</Typography>
+                      </Stack>
                     </DetailField>
                   )}
 

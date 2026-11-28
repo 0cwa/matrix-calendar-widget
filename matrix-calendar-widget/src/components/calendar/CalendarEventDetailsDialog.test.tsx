@@ -204,6 +204,27 @@ function createRoomCalendarRepository(
 }
 
 describe('<CalendarEventDetailsDialog />', () => {
+  it.each([
+    ['#123456ff', true],
+    [undefined, false],
+    ['invalid', false],
+  ])(
+    'shows a color dot for a single calendar with color %s',
+    async (color, expected) => {
+      const repository = new InMemoryCalendarRepository({
+        calendars: [{ ...calendar, color }],
+        events: [event],
+      });
+      render(<CalendarEventDetailsDialog event={event} onClose={vi.fn()} />, {
+        wrapper: createWrapper(repository),
+      });
+      await screen.findByText('Team calendar');
+      expect(Boolean(screen.queryByTestId('calendar-color-dot'))).toBe(
+        expected,
+      );
+    },
+  );
+
   it('keeps the room reminder autocomplete popup accessible with the widget modal portal', async () => {
     const { repository, roomEvent } = createRoomCalendarRepository({
       calendarId: 'room-calendar',
