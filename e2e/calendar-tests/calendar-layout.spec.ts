@@ -292,9 +292,18 @@ test('German date range picker fits a 320 px Element dark viewport', async ({
   expect(bounds.left).toBeGreaterThanOrEqual(0);
   expect(bounds.right).toBeLessThanOrEqual(bounds.viewport);
 
-  await picker.getByRole('gridcell', { name: '1', exact: true }).click();
+  const currentMonthDays = picker.locator(
+    'button:not(.MuiPickersDay-dayOutsideMonth)',
+  );
+  await picker
+    .getByRole('gridcell', { name: '1', exact: true })
+    .and(currentMonthDays)
+    .click();
   await expect(prompt).toHaveText(/Wähle jetzt ein Enddatum\./);
-  await picker.getByRole('gridcell', { name: '2', exact: true }).click();
+  await picker
+    .getByRole('gridcell', { name: '2', exact: true })
+    .and(currentMonthDays)
+    .click();
   await expect(picker).toBeHidden();
   await expect(range).toBeFocused();
 });
