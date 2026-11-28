@@ -112,6 +112,7 @@ describe('calendar repository hooks', () => {
     expect(result.current).toEqual({
       data: [],
       loading: true,
+      hasCurrentData: false,
       error: undefined,
       partialAvailability: false,
       canManageCalendarCollections: false,
@@ -122,6 +123,7 @@ describe('calendar repository hooks', () => {
     expect(result.current).toEqual({
       data: [calendar],
       loading: false,
+      hasCurrentData: true,
       error: undefined,
       partialAvailability: false,
       canManageCalendarCollections: true,
@@ -142,6 +144,7 @@ describe('calendar repository hooks', () => {
     expect(result.current).toEqual({
       data: [],
       loading: false,
+      hasCurrentData: false,
       error: expect.objectContaining({ message: 'calendar failure' }),
       partialAvailability: false,
       canManageCalendarCollections: false,
@@ -196,6 +199,7 @@ describe('calendar repository hooks', () => {
       data: [event],
       diagnostics: [],
       loading: false,
+      hasCurrentData: true,
       error: undefined,
       partialAvailability: false,
     });
@@ -237,6 +241,7 @@ describe('calendar repository hooks', () => {
         },
       ],
       loading: false,
+      hasCurrentData: true,
       error: undefined,
       partialAvailability: false,
     });

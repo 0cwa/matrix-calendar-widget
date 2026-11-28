@@ -22,7 +22,7 @@ import PaletteIcon from '@mui/icons-material/Palette';
 import PhonelinkLockIcon from '@mui/icons-material/PhonelinkLock';
 import RssFeedIcon from '@mui/icons-material/RssFeed';
 import { Alert, Box, Button, Snackbar, Stack } from '@mui/material';
-import { useCallback, useState } from 'react';
+import { Ref, useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   CalendarFilters,
@@ -52,6 +52,8 @@ type CalendarToolbarProps = {
   onRangeChange: (startDate: string, endDate: string) => void;
   onSearchChange: (search: string) => void;
   onViewChange: (view: CalendarSurfaceView) => void;
+  createButtonRef?: Ref<HTMLButtonElement>;
+  searchInputRef?: Ref<HTMLInputElement>;
 };
 
 type StalePrivateClientRecovery = {
@@ -65,6 +67,8 @@ export function CalendarToolbar({
   onRangeChange,
   onSearchChange,
   onViewChange,
+  createButtonRef,
+  searchInputRef,
 }: CalendarToolbarProps) {
   const { t } = useTranslation();
   const calendars = useCalendars();
@@ -142,6 +146,7 @@ export function CalendarToolbar({
 
         <Box flex="1 1 10rem" minWidth={0}>
           <CalendarToolbarSearch
+            inputRef={searchInputRef}
             onSearchChange={onSearchChange}
             search={filters.filterText ?? ''}
           />
@@ -158,6 +163,7 @@ export function CalendarToolbar({
           <Button
             disabled={calendars.loading || writableCalendars.length === 0}
             onClick={() => setCreateOpen(true)}
+            ref={createButtonRef}
             startIcon={<AddIcon />}
             sx={{ flexGrow: 1, minHeight: 40 }}
             variant="contained"

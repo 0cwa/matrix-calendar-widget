@@ -157,7 +157,7 @@ function itemText(calendarView: CalendarSurfaceView, t: TFunction): string {
     case 'day':
       return t('meetingsNavigation.views.day', 'Day');
     case 'workWeek':
-      return t('meetingsNavigation.views.workWeek', 'Work Week');
+      return t('meetingsNavigation.views.workWeek', 'Work week');
     case 'week':
       return t('meetingsNavigation.views.week', 'Week');
     case 'month':

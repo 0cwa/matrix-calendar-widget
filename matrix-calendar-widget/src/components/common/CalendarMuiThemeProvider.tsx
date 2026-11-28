@@ -15,8 +15,9 @@
  */
 
 import { MuiThemeProvider as ElementMuiThemeProvider } from '@matrix-widget-toolkit/mui';
-import { createTheme, ThemeProvider } from '@mui/material/styles';
+import { createTheme, Theme, ThemeProvider } from '@mui/material/styles';
 import { PropsWithChildren } from 'react';
+import { calendarActionContrast } from './calendarActionContrast';
 
 /**
  * Return an overlay container inside the body, including when the document
@@ -37,41 +38,39 @@ export function getCalendarOverlayContainer(): HTMLElement {
   return fullscreenElement as HTMLElement;
 }
 
+function createCalendarTheme(outerTheme: Theme): Theme {
+  return createTheme(outerTheme, calendarActionContrast(outerTheme), {
+    components: {
+      MuiDialog: {
+        defaultProps: { container: getCalendarOverlayContainer },
+      },
+      MuiMenu: {
+        defaultProps: { container: getCalendarOverlayContainer },
+      },
+      MuiPopover: {
+        defaultProps: {
+          container: getCalendarOverlayContainer,
+          slotProps: {
+            root: { container: getCalendarOverlayContainer },
+          },
+        },
+      },
+      MuiTooltip: {
+        defaultProps: {
+          slotProps: {
+            popper: { container: getCalendarOverlayContainer },
+          },
+          PopperProps: { container: getCalendarOverlayContainer },
+        },
+      },
+    },
+  });
+}
+
 export function CalendarMuiThemeProvider({ children }: PropsWithChildren<{}>) {
   return (
     <ElementMuiThemeProvider>
-      <ThemeProvider
-        theme={(outerTheme) =>
-          createTheme(outerTheme, {
-            components: {
-              MuiDialog: {
-                defaultProps: { container: getCalendarOverlayContainer },
-              },
-              MuiMenu: {
-                defaultProps: { container: getCalendarOverlayContainer },
-              },
-              MuiPopover: {
-                defaultProps: {
-                  container: getCalendarOverlayContainer,
-                  slotProps: {
-                    root: { container: getCalendarOverlayContainer },
-                  },
-                },
-              },
-              MuiTooltip: {
-                defaultProps: {
-                  slotProps: {
-                    popper: { container: getCalendarOverlayContainer },
-                  },
-                  PopperProps: { container: getCalendarOverlayContainer },
-                },
-              },
-            },
-          })
-        }
-      >
-        {children}
-      </ThemeProvider>
+      <ThemeProvider theme={createCalendarTheme}>{children}</ThemeProvider>
     </ElementMuiThemeProvider>
   );
 }

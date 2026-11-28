@@ -271,6 +271,84 @@ test('room visitor sees read-only event controls at a narrow width', async ({
   expect(pageErrors).toEqual([]);
 });
 
+test('empty dates keep the toolbar and the create shortcut distinct', async ({
+  page,
+}) => {
+  await page.clock.setFixedTime(new Date('2026-11-28T12:00:00.000Z'));
+  await page.goto('/browser-tests/index.html?mode=home');
+
+  const create = page.getByRole('button', {
+    name: 'Create event',
+    exact: true,
+  });
+  const add = page.getByRole('button', { name: 'Add an event', exact: true });
+  await expect(create).toBeVisible();
+  await expect(create).toBeEnabled();
+  await add.click();
+
+  const editor = page.getByRole('dialog', { name: 'Create event' });
+  await expect(editor).toBeVisible();
+  await editor.getByRole('button', { name: 'Cancel' }).click();
+  await expect(editor).toBeHidden();
+  await expect(create).toBeFocused();
+});
+
+test('empty Month dates keep guidance and the grid in view', async ({
+  page,
+}) => {
+  await page.clock.setFixedTime(new Date('2026-11-28T12:00:00.000Z'));
+  await page.setViewportSize({ width: 850, height: 640 });
+  await page.goto('/browser-tests/index.html?mode=home');
+  await page.getByRole('combobox', { name: 'View' }).click();
+  await page.getByRole('option', { name: 'Month' }).click();
+
+  await expect(page.getByText('No events in these dates')).toBeVisible();
+  const grid = page.locator('.fc-dayGridMonth-view');
+  await expect(grid).toBeVisible();
+  const bounds = await grid.evaluate((element) => ({
+    bottom: element.getBoundingClientRect().bottom,
+    height: window.innerHeight,
+  }));
+  expect(bounds.bottom).toBeLessThanOrEqual(bounds.height);
+});
+
+test('German date range picker fits a 320 px Element dark viewport', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 640 });
+  await page.goto(
+    '/browser-tests/index.html?mode=room-manager&theme=dark&lng=de',
+  );
+
+  const range = page.getByRole('button', { name: /^Datumsbereich auswählen/ });
+  await range.click();
+  const picker = page.getByRole('dialog');
+  const prompt = picker.getByRole('status');
+  await expect(prompt).toHaveText('Wähle ein Startdatum.');
+
+  const bounds = await picker.evaluate((element) => {
+    const { left, right } = element.getBoundingClientRect();
+    return { left, right, viewport: document.documentElement.clientWidth };
+  });
+  expect(bounds.left).toBeGreaterThanOrEqual(0);
+  expect(bounds.right).toBeLessThanOrEqual(bounds.viewport);
+
+  const currentMonthDays = picker.locator(
+    'button:not(.MuiPickersDay-dayOutsideMonth)',
+  );
+  await picker
+    .getByRole('gridcell', { name: '1', exact: true })
+    .and(currentMonthDays)
+    .click();
+  await expect(prompt).toHaveText(/Wähle jetzt ein Enddatum\./);
+  await picker
+    .getByRole('gridcell', { name: '2', exact: true })
+    .and(currentMonthDays)
+    .click();
+  await expect(picker).toBeHidden();
+  await expect(range).toBeFocused();
+});
+
 test('room manager sees writable event controls at a narrow width', async ({
   page,
 }) => {

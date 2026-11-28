@@ -209,10 +209,31 @@
       "yearly": "Yearly"
     },
     "empty": "No events scheduled that match the selected filters.",
+    "hiddenCalendars": {
+      "show": "Show all calendars",
+      "title": "No events in the selected calendars"
+    },
+    "list": {
+      "today": "Today · {{date}}",
+      "tomorrow": "Tomorrow · {{date}}"
+    },
     "loadError": "Calendar events could not be loaded.",
+    "loading": "Loading calendar events",
     "mixedCompatibilityNotice": "One or more calendars support additional item types. The widget displays and edits VEVENT entries only.",
     "monthDay": {
       "openDay": "Open day"
+    },
+    "noEvents": {
+      "create": "Add an event",
+      "description": "Use the date controls to look at other dates.",
+      "incompleteTitle": "No events can be shown for these dates",
+      "title": "No events in these dates"
+    },
+    "noReadableCalendar": "There is no calendar to show.",
+    "noSearchResults": {
+      "clear": "Clear search",
+      "description": "Search checks titles, descriptions, locations and categories in the selected dates.",
+      "title": "No events match “{{query}}”"
     },
     "partialAvailability": "Some calendars or events could not be loaded. Available calendars are still shown.",
     "recurrence": {
@@ -242,6 +263,8 @@
       "weekly": "Repeats weekly on {{days}}.",
       "yearly": "Repeats yearly on {{date}}."
     },
+    "refreshing": "Refreshing calendar events",
+    "retry": "Retry",
     "roomCalendarUnavailable": "A team calendar isn’t available in this room. Ask a room moderator or calendar administrator to check setup.",
     "roomReminder": {
       "absoluteTrigger": "This alert is set to an exact UTC time, so a Matrix room notification cannot follow the event if it moves.",
@@ -465,6 +488,8 @@
   },
   "dateRangePicker": {
     "chooseDate": "Choose date range, selected range is {{range, daterange}}",
+    "chooseEnd": "Start: {{date, datetime}}. Now choose an end date.",
+    "chooseStart": "Choose a start date.",
     "dateRange": "{{range, daterange}}"
   },
   "dateTimePickers": {
@@ -503,7 +528,7 @@
       "list": "List",
       "month": "Month",
       "week": "Week",
-      "workWeek": "Work Week"
+      "workWeek": "Work week"
     }
   },
   "meetingsToolbar": {

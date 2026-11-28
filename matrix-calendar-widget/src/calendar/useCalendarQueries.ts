@@ -21,6 +21,7 @@ import {
   CalendarEventListDiagnostic,
   CalendarEventListResult,
   CalendarId,
+  CalendarRepository,
   CalendarTimeRange,
 } from '@matrix-calendar-widget/calendar';
 import { useEffect, useState } from 'react';
@@ -40,6 +41,15 @@ export type CalendarQueryState<T> = {
   error?: Error;
 };
 
+/**
+ * Tells a surface whether `data` answers the query it is asking now. It stays
+ * true while the same query refreshes, so the loaded content can remain on
+ * screen, and turns false as soon as the query itself changes.
+ */
+type CurrentQueryData = {
+  hasCurrentData: boolean;
+};
+
 export type CalendarListQueryState = CalendarQueryState<Calendar[]> & {
   partialAvailability: boolean;
   canManageCalendarCollections: boolean;
@@ -55,10 +65,12 @@ function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
 
-export function useCalendars(): CalendarListQueryState {
+export function useCalendars(): CalendarListQueryState & CurrentQueryData {
   const repository = useCalendarRepository();
   const revision = useCalendarRepositoryRevision();
-  const [state, setState] = useState<CalendarListQueryState>({
+  const [state, setState] = useState<
+    CalendarListQueryState & { source?: CalendarRepository }
+  >({
     data: [],
     loading: true,
     partialAvailability: false,
@@ -86,6 +98,7 @@ export function useCalendars(): CalendarListQueryState {
             partialAvailability: result.partialAvailability,
             canManageCalendarCollections: result.canManageCalendarCollections,
             roomCapabilities: result.roomCapabilities,
+            source: repository,
           });
         }
       } catch (error: unknown) {
@@ -109,17 +122,24 @@ export function useCalendars(): CalendarListQueryState {
     };
   }, [repository, revision]);
 
-  return state;
+  const { source, ...result } = state;
+
+  return { ...result, hasCurrentData: source === repository };
 }
 
 export function useCalendarEvents(
   calendarIds: CalendarId[],
   range: CalendarTimeRange,
-): CalendarEventsQueryState {
+): CalendarEventsQueryState & CurrentQueryData {
   const repository = useCalendarRepository();
   const revision = useCalendarRepositoryRevision();
   const calendarIdsKey = JSON.stringify(calendarIds);
-  const [state, setState] = useState<CalendarEventsQueryState>({
+  const queryKey = JSON.stringify([calendarIds, range.start, range.end]);
+  const [state, setState] = useState<
+    CalendarEventsQueryState & {
+      source?: { repository: CalendarRepository; queryKey: string };
+    }
+  >({
     data: [],
     diagnostics: [],
     loading: true,
@@ -132,6 +152,14 @@ export function useCalendarEvents(
     const requestedRange: CalendarTimeRange = {
       start: range.start,
       end: range.end,
+    };
+    const source = {
+      repository,
+      queryKey: JSON.stringify([
+        requestedCalendarIds,
+        requestedRange.start,
+        requestedRange.end,
+      ]),
     };
 
     setState((current) => ({ ...current, loading: true, error: undefined }));
@@ -167,6 +195,7 @@ export function useCalendarEvents(
             diagnostics: result.diagnostics,
             loading: false,
             partialAvailability: result.partialAvailability,
+            source,
           });
         }
       } catch (error: unknown) {
@@ -189,7 +218,13 @@ export function useCalendarEvents(
     };
   }, [calendarIdsKey, range.end, range.start, repository, revision]);
 
-  return state;
+  const { source, ...result } = state;
+
+  return {
+    ...result,
+    hasCurrentData:
+      source?.repository === repository && source.queryKey === queryKey,
+  };
 }
 
 export function useCalendarEvent(
