@@ -1519,14 +1519,15 @@ export async function runElementG6AcceptanceJourney(
     let closeActionFocused = false;
     let escapeAttempted = false;
     if (editActionFocused) {
-      await pageA.keyboard.press('Tab');
-      detailsActionTabCount += 1;
-      deleteActionFocused = await deleteAction
-        .evaluate((element) => element === document.activeElement)
-        .catch(() => false);
-      await pageA.keyboard.press('Tab');
+      // Footer order is Delete, Close, Edit.
+      await pageA.keyboard.press('Shift+Tab');
       detailsActionTabCount += 1;
       closeActionFocused = await closeAction
+        .evaluate((element) => element === document.activeElement)
+        .catch(() => false);
+      await pageA.keyboard.press('Shift+Tab');
+      detailsActionTabCount += 1;
+      deleteActionFocused = await deleteAction
         .evaluate((element) => element === document.activeElement)
         .catch(() => false);
       escapeAttempted = true;

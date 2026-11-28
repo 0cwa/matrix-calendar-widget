@@ -15,6 +15,7 @@
  */
 
 import { FormControlLabel, Switch, TextField, Typography } from '@mui/material';
+import { CalendarEventTimezoneField } from './CalendarEventTimezoneField';
 import type { CalendarEventEditorModel } from './useCalendarEventEditor';
 
 export function CalendarEventTimingFields({
@@ -55,13 +56,7 @@ export function CalendarEventTimingFields({
       />
       {values.timingType === 'timed' &&
         (values.timedKind ?? 'zoned') === 'zoned' && (
-          <TextField
-            error={validationErrorCode === 'invalid-timezone'}
-            label={t('calendarEvents.editor.timezone', 'Time zone')}
-            onChange={handleChange('timezone')}
-            required
-            value={values.timezone}
-          />
+          <CalendarEventTimezoneField model={model} />
         )}
       {timingHelpText && (
         <Typography color="text.secondary" variant="body2">
@@ -110,13 +105,7 @@ export function CalendarEventTimingFields({
 
       {values.timingType === 'timed' &&
         (values.timedKind ?? 'zoned') === 'zoned' && (
-          <TextField
-            error={validationErrorCode === 'invalid-timezone'}
-            label={t('calendarEvents.editor.timezone', 'Time zone')}
-            onChange={handleChange('timezone')}
-            required
-            value={values.timezone}
-          />
+          <CalendarEventTimezoneField model={model} />
         )}
       {values.timingType === 'timed' && timingHelpText && (
         <Typography color="text.secondary" variant="body2">

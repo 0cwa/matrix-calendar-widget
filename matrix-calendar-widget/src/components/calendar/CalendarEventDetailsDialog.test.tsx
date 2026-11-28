@@ -877,7 +877,9 @@ describe('<CalendarEventDetailsDialog />', () => {
         screen.getByRole('heading', { name: 'Latest removed planning' }),
       ).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Edit' })).toBeDisabled();
-      expect(screen.getByRole('button', { name: 'Delete' })).toBeDisabled();
+      expect(
+        screen.getByRole('button', { name: 'Delete series' }),
+      ).toBeDisabled();
       expect(
         screen.queryByRole('button', { name: 'Skip this occurrence' }),
       ).toBeNull();
@@ -1089,6 +1091,160 @@ describe('<CalendarEventDetailsDialog />', () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled());
 
     expect(repository.deleteEvent).toHaveBeenCalledTimes(2);
+  });
+
+  it('separates delete from the safe actions and returns focus after cancelling', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [event],
+    });
+
+    render(<CalendarEventDetailsDialog event={event} onClose={vi.fn()} />, {
+      wrapper: createWrapper(repository),
+    });
+
+    const edit = screen.getByRole('button', { name: 'Edit' });
+    await waitFor(() => expect(edit).toBeEnabled());
+    const remove = screen.getByRole('button', { name: 'Delete' });
+    const close = screen.getByRole('button', { name: 'Close' });
+    expect(remove.compareDocumentPosition(close)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(close.compareDocumentPosition(edit)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(remove).toHaveStyle({ marginRight: 'auto' });
+    expect(edit).toHaveClass('MuiButton-contained');
+    expect(close).not.toHaveClass('MuiButton-contained');
+
+    await userEvent.click(remove);
+    await userEvent.click(
+      within(screen.getByRole('dialog', { name: 'Delete event' })).getByRole(
+        'button',
+        { name: 'Cancel' },
+      ),
+    );
+    await waitFor(() => expect(remove).toHaveFocus());
+  });
+
+  it('shows the calendar and both clocks when the viewer zone differs', async () => {
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [event],
+    });
+
+    render(
+      <CalendarEventDetailsDialog
+        event={event}
+        onClose={vi.fn()}
+        viewerTimezone="America/New_York"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    expect(await screen.findByText('Team calendar')).toBeVisible();
+    const dialog = screen.getByRole('dialog', { name: 'Planning' });
+    const text = (dialog.textContent ?? '').replace(/\u202f/g, ' ');
+    expect(text).toContain(
+      'September 23, 2026 · 3:00 AM–4:00 AMYour time: America/New_York (UTC-04:00)',
+    );
+    expect(text).toContain(
+      'September 23, 2026 · 9:00 AM–10:00 AMEvent time zone: Europe/Stockholm (UTC+02:00)',
+    );
+    expect(screen.queryByText('Repeats')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    {
+      name: 'a plain occurrence',
+      source: {},
+      expected:
+        'Edit can change this occurrence, this and following, or the entire series.',
+    },
+    {
+      name: 'an endless series',
+      source: { recurrence: { rrule: 'FREQ=WEEKLY' } },
+      expected: 'Edit can change this occurrence or the entire series.',
+    },
+    {
+      name: 'a series with a reminder',
+      source: {
+        alarm: {
+          action: 'display' as const,
+          trigger: {
+            weeks: 0,
+            days: 0,
+            hours: 0,
+            minutes: 15,
+            seconds: 0,
+          },
+        },
+      },
+      expected:
+        'Edit changes the entire series because it contains reminder data.',
+    },
+  ])('words the edit scopes for $name', async ({ source, expected }) => {
+    const series: CalendarEvent = {
+      ...event,
+      recurrence: { rrule: 'FREQ=WEEKLY;COUNT=3' },
+      ...source,
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [calendar],
+      events: [series],
+    });
+
+    render(
+      <CalendarEventDetailsDialog
+        event={{ ...series, id: 'planning::occurrence' }}
+        onClose={vi.fn()}
+        recurrenceId={{
+          type: 'date-time',
+          value: {
+            local: '2026-09-30T09:00:00',
+            timezone: 'Europe/Stockholm',
+          },
+        }}
+        sourceEvent={series}
+        viewerTimezone="Europe/Stockholm"
+      />,
+      { wrapper: createWrapper(repository) },
+    );
+
+    const dialog = screen.getByRole('dialog', { name: 'Planning' });
+    await waitFor(() => expect(dialog).toHaveTextContent(expected));
+    expect(dialog).toHaveTextContent('Repeats weekly on Wednesday.');
+    expect(dialog).toHaveTextContent('Skip removes only this date.');
+    expect(screen.getByRole('button', { name: 'Delete series' })).toBeEnabled();
+    expect(await axe(document.body)).toHaveNoViolations();
+  });
+
+  it('promises no actions on a read-only series and makes Close primary', async () => {
+    const series: CalendarEvent = {
+      ...event,
+      recurrence: { rrule: 'FREQ=WEEKLY;COUNT=3' },
+    };
+    const repository = new InMemoryCalendarRepository({
+      calendars: [{ ...calendar, readOnly: true }],
+      events: [series],
+    });
+
+    render(<CalendarEventDetailsDialog event={series} onClose={vi.fn()} />, {
+      wrapper: createWrapper(repository),
+    });
+
+    await screen.findByText('This calendar is read-only.');
+    const dialog = screen.getByRole('dialog', { name: 'Planning' });
+    expect(dialog).toHaveTextContent('Repeats weekly on Wednesday.');
+    expect(dialog).not.toHaveTextContent('removes every occurrence');
+    expect(dialog).not.toHaveTextContent('Edit changes');
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Delete series' }),
+    ).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Close' })).toHaveClass(
+      'MuiButton-contained',
+    );
   });
 
   it('disables edit and delete for a read-only calendar', async () => {

@@ -70,6 +70,7 @@ export {
   calendarUnixMillisToLocalDateTime,
   isCalendarLocalDateTimeUnambiguous,
   isCalendarTimezoneSupported,
+  listCalendarTimezones,
 } from './calendarEventTimezone';
 export * from './calendarUtils';
 export { formatICalDate, parseICalDate, toISOString } from './dateTimeUtils';

@@ -492,7 +492,7 @@ describe('<CalendarEventsSurface />', () => {
     const details = screen.getByRole('dialog');
     expect(details).toHaveTextContent('September 26, 2026 · All day');
     expect(details).toHaveTextContent(
-      'This is one occurrence of a recurring series. Editing or deleting applies to the whole series.',
+      'This is one occurrence of a recurring series. Edit can change this occurrence, this and following, or the entire series. Skip removes only this date. Delete series removes every occurrence.',
     );
 
     await userEvent.click(
@@ -528,15 +528,15 @@ describe('<CalendarEventsSurface />', () => {
 
     await userEvent.click(
       within(screen.getByRole('dialog')).getByRole('button', {
-        name: 'Delete',
+        name: 'Delete series',
       }),
     );
-    const confirmation = screen.getByRole('dialog', { name: 'Delete event' });
+    const confirmation = screen.getByRole('dialog', { name: 'Delete series' });
     expect(confirmation).toHaveTextContent(
       'This removes the entire recurring series, including every occurrence.',
     );
     await userEvent.click(
-      within(confirmation).getByRole('button', { name: 'Delete' }),
+      within(confirmation).getByRole('button', { name: 'Delete series' }),
     );
 
     await waitFor(() =>
