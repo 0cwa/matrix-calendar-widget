@@ -27,7 +27,10 @@ import {
   waitFor,
 } from '@testing-library/react';
 import { useState } from 'react';
-import { CalendarRepositoryProvider } from '../../calendar';
+import {
+  CalendarRepositoryProvider,
+  type PrivateCalendarClientMetadata,
+} from '../../calendar';
 import { CalendarPrivateClientDialog } from './CalendarPrivateClientDialog';
 
 const calendars: Calendar[] = [
@@ -247,7 +250,10 @@ describe('<CalendarPrivateClientDialog />', () => {
 
   it('lists own access by creation time and confirms revoke without exposing native errors', async () => {
     const appId = `mcwpc~${'c'.repeat(48)}`;
-    const client = activeClient(appId, 'personal-one');
+    const client: PrivateCalendarClientMetadata = activeClient(
+      appId,
+      'personal-one',
+    );
     const revokeClient = vi
       .fn()
       .mockRejectedValueOnce(new Error('native private path and credential'))
@@ -295,7 +301,10 @@ describe('<CalendarPrivateClientDialog />', () => {
 
   it('announces revocation progress as revocation, not creation', async () => {
     const appId = `mcwpc~${'r'.repeat(48)}`;
-    const client = activeClient(appId, 'personal-one');
+    const client: PrivateCalendarClientMetadata = activeClient(
+      appId,
+      'personal-one',
+    );
     const request = deferred<typeof client>();
     const repository = Object.assign(
       new InMemoryCalendarRepository({ calendars }),
