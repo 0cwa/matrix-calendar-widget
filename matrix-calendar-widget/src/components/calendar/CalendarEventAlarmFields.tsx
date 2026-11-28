@@ -372,7 +372,7 @@ export function CalendarEventAlarmFields({
       {onSaveAndConfigureRoomReminders && (
         <Alert severity="info">
           <Stack spacing={1}>
-            <Typography variant="subtitle2">
+            <Typography component="h3" variant="subtitle2">
               {t(
                 'calendarEvents.editor.matrixReminderHeading',
                 'Matrix room notifications',
