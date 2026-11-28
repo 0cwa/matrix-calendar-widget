@@ -21,7 +21,15 @@ import NotesIcon from '@mui/icons-material/Notes';
 import PaletteIcon from '@mui/icons-material/Palette';
 import PhonelinkLockIcon from '@mui/icons-material/PhonelinkLock';
 import RssFeedIcon from '@mui/icons-material/RssFeed';
-import { Alert, Box, Button, Snackbar, Stack } from '@mui/material';
+import {
+  Alert,
+  Box,
+  Button,
+  Snackbar,
+  Stack,
+  Typography,
+  useMediaQuery,
+} from '@mui/material';
 import { Ref, useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -37,6 +45,7 @@ import { CalendarDeleteDialog } from './CalendarDeleteDialog';
 import { CalendarDescriptionDialog } from './CalendarDescriptionDialog';
 import { CalendarEventEditorDialog } from './CalendarEventEditorDialog';
 import { CalendarNavigation, CalendarSurfaceView } from './CalendarNavigation';
+import { useIsWideCalendar } from './CalendarNavigation/viewAvailability';
 import { CalendarPrivateClientDialog } from './CalendarPrivateClientDialog';
 import { CalendarPublicFeedDialog } from './CalendarPublicFeedDialog';
 import { CalendarRenameDialog } from './CalendarRenameDialog';
@@ -71,6 +80,8 @@ export function CalendarToolbar({
   searchInputRef,
 }: CalendarToolbarProps) {
   const { t } = useTranslation();
+  const compactActions = useMediaQuery('(max-width:479.95px)');
+  const wide = useIsWideCalendar();
   const calendars = useCalendars();
   const calendarRepository = useCalendarRepository();
   const supportsPublicFeeds =
@@ -110,17 +121,24 @@ export function CalendarToolbar({
   const canChangeCalendars =
     !calendars.loading && writableCollectionCalendars.length > 0;
   const canShareCalendars = !calendars.loading && calendars.data.length > 0;
+  const showCreate = calendars.loading || writableCalendars.length > 0;
+  const showReadOnly = !showCreate && calendars.data.length > 0;
 
   return (
     <>
-      <Stack alignItems="center" direction="row" flexWrap="wrap" gap={1}>
+      <Stack
+        alignItems="center"
+        direction="row"
+        flexWrap={wide ? 'nowrap' : 'wrap'}
+        gap={0.75}
+      >
         <Box
           aria-label={t('meetingsToolbar.dateNavigation', 'Date navigation')}
           display="flex"
           alignItems="center"
-          flexWrap="wrap"
+          flexWrap="nowrap"
           role="group"
-          sx={{ flex: { xs: '1 1 100%', md: '0 0 auto' }, minWidth: 0 }}
+          sx={{ flex: wide ? '0 1 auto' : '1 1 100%', minWidth: 0 }}
         >
           <CalendarToolbarButtons
             endDate={filters.endDate}
@@ -133,7 +151,7 @@ export function CalendarToolbar({
             onRangeChange={onRangeChange}
             startDate={filters.startDate}
             sx={{
-              flex: '1 1 8rem',
+              flex: wide ? '0 1 auto' : '1 1 auto',
               justifyContent: 'flex-start',
               minHeight: 40,
               minWidth: 0,
@@ -144,7 +162,7 @@ export function CalendarToolbar({
 
         <CalendarNavigation onViewChange={onViewChange} view={view} />
 
-        <Box flex="1 1 10rem" minWidth={0}>
+        <Box flex="1 1 7.5rem" minWidth={wide ? '7.5rem' : 0}>
           <CalendarToolbarSearch
             inputRef={searchInputRef}
             onSearchChange={onSearchChange}
@@ -154,22 +172,46 @@ export function CalendarToolbar({
 
         <Box
           display="flex"
-          flexWrap="wrap"
-          gap={1}
-          justifyContent="flex-end"
+          flexWrap="nowrap"
+          gap={0.75}
+          alignItems="center"
+          justifyContent={!wide && showReadOnly ? 'space-between' : 'flex-end'}
           ml="auto"
-          sx={{ flex: { xs: '1 1 100%', sm: '0 0 auto' } }}
+          sx={{ flex: wide ? '0 0 auto' : '1 1 100%' }}
         >
-          <Button
-            disabled={calendars.loading || writableCalendars.length === 0}
-            onClick={() => setCreateOpen(true)}
-            ref={createButtonRef}
-            startIcon={<AddIcon />}
-            sx={{ flexGrow: 1, minHeight: 40 }}
-            variant="contained"
-          >
-            {t('calendarEvents.editor.create', 'Create event')}
-          </Button>
+          {showCreate ? (
+            <Button
+              disabled={calendars.loading}
+              onClick={() => setCreateOpen(true)}
+              ref={createButtonRef}
+              startIcon={<AddIcon />}
+              sx={{
+                flexGrow: wide ? 0 : 1,
+                minHeight: 40,
+                whiteSpace: 'nowrap',
+              }}
+              variant="contained"
+            >
+              {t('calendarEvents.editor.create', 'Create event')}
+            </Button>
+          ) : showReadOnly ? (
+            <Typography
+              component="span"
+              variant="caption"
+              sx={{
+                border: 1,
+                borderColor: 'divider',
+                borderRadius: 1,
+                color: 'text.secondary',
+                fontWeight: 500,
+                px: 1,
+                py: 0.75,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {t('calendars.readOnlyCue', 'Read-only')}
+            </Typography>
+          ) : null}
 
           <CalendarOptionsMenu
             groups={[
@@ -247,6 +289,7 @@ export function CalendarToolbar({
                 : [],
             ]}
             notes={calendarOptionNotes(calendars, t)}
+            compact={compactActions && showCreate}
           />
         </Box>
       </Stack>

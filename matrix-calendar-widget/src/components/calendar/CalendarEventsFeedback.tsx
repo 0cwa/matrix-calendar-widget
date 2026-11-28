@@ -30,11 +30,42 @@ export function CalendarEventsEmptyState({
   title,
   description,
   action,
+  compact = false,
 }: {
   title: string;
   description?: string;
   action?: ReactNode;
+  compact?: boolean;
 }) {
+  if (compact) {
+    return (
+      <Box
+        alignItems="center"
+        display="flex"
+        flexWrap="wrap"
+        gap={1}
+        justifyContent="space-between"
+        px={1.5}
+        py={0.75}
+        sx={{
+          borderBottom: 1,
+          borderColor: 'divider',
+          overflowWrap: 'anywhere',
+        }}
+      >
+        <Box role="status" sx={{ minWidth: 0 }}>
+          <Typography
+            color="text.secondary"
+            variant="body2"
+            fontWeight="medium"
+          >
+            {title}
+          </Typography>
+        </Box>
+        {action}
+      </Box>
+    );
+  }
   return (
     <Box
       alignItems="center"
