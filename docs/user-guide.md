@@ -12,7 +12,7 @@ A room needs an enabled calendar service and a room-to-calendar binding. If the 
 
 ## Browse calendars and events
 
-Use the date controls to move through the calendar. Narrow room panels offer list and day views; work-week, week, and month become available when the widget viewport is at least 800 CSS pixels wide. List view is useful in the standard narrow side panel. Calendar visibility controls choose which available calendars are shown; hiding a calendar does not delete it.
+Use the date controls to move through the calendar: previous, **Today**, next, and the date range stay together at every width. Narrow room panels offer list and day views; work-week, week, and month become available when the widget viewport is at least 800 CSS pixels wide. List view is useful in the standard narrow side panel. Calendar visibility controls choose which available calendars are shown; hiding a calendar does not delete it.
 
 Open an event to see its time, title, description, location, and other supported fields. Timed events and all-day events have different calendar semantics. All-day event end dates are exclusive in iCalendar; the UI handles the date range for display.
 
@@ -36,7 +36,7 @@ Arbitrary recurrence rules, general series splitting, and every possible occurre
 
 ## Manage calendars
 
-Where the server and your permissions allow it, create an event-only calendar, change its name, description, or color, or delete it with the required safeguards. Collection timezone editing remains deferred.
+Where the server and your permissions allow it, open **Calendar options** to create an event-only calendar, change its name, description, or color, or delete it with the required safeguards. When these actions are not offered, the menu says why. Collection timezone editing remains deferred.
 
 Existing calendars containing both events and tasks or journal entries can expose their event subset, but the application must retain the other components. Task-only and journal-only collections are hidden from the main calendar UI.
 
@@ -56,7 +56,7 @@ Post-success notices about room-calendar event edits are also independent of sch
 
 ## Publish a public subscription
 
-Public feeds are optional and disabled by default on the server. Publishing a personal calendar requires its owner; publishing a room calendar requires current calendar-management permission. When enabled, choose **Public feed** to open the **Public calendar feed** dialog, choose an eligible event-only calendar, read the disclosure, and confirm before selecting **Publish feed**. The dialog offers **Copy URL**, **Subscribe in a calendar app**, and **Unpublish**.
+Public feeds are optional and disabled by default on the server. Publishing a personal calendar requires its owner; publishing a room calendar requires current calendar-management permission. When enabled, open **Calendar options** and choose **Public feed** to open the **Public calendar feed** dialog, choose an eligible event-only calendar, read the disclosure, and confirm before selecting **Publish feed**. The dialog offers **Copy URL**, **Subscribe in a calendar app**, and **Unpublish**.
 
 Anyone who has the link can read every event in that calendar, including sensitive details present in the canonical calendar. The feed is not restricted to Matrix room members, and it is not limited to the widget's visible date range. It is read-only; it does not give an external calendar application permission to edit events.
 
@@ -64,7 +64,7 @@ Unpublishing blocks future requests but cannot retract calendar data already dow
 
 ## Connect a private calendar app
 
-Private CalDAV app access is optional and disabled by default. Ask the operator whether it has been enabled and accepted for this installation. If **Calendar app access** is available in the toolbar, select one calendar and choose **Create app access**. Enter its displayed CalDAV URL, username, and app password in the calendar app. The password is shown once; save it in the app's credential manager. Each credential expires after 90 days. The source implementation and recorded client profiles are qualified; that evidence does not establish this installation's configuration or acceptance. See the [validation record](./private-calendar-app-access-validation.md).
+Private CalDAV app access is optional and disabled by default. Ask the operator whether it has been enabled and accepted for this installation. If **Calendar app access** is available under **Calendar options**, choose it, select one calendar and choose **Create app access**. Enter its displayed CalDAV URL, username, and app password in the calendar app. The password is shown once; save it in the app's credential manager. Each credential expires after 90 days. The source implementation and recorded client profiles are qualified; that evidence does not establish this installation's configuration or acceptance. See the [validation record](./private-calendar-app-access-validation.md).
 
 The widget lists each credential's status and expiry. To replace one, create a new credential, update the calendar app, then revoke the old credential. Revocation blocks future access, but cannot remove copies already downloaded by the app. A lost one-time password cannot be recovered; create a replacement. Never enter your Matrix password into a CalDAV application. See [private calendar app access](./private-calendar-app-access.md) for the setup details and current limits.
 

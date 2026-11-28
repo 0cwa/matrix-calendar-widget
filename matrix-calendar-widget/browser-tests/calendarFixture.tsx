@@ -39,6 +39,7 @@ import { useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { I18nextProvider, initReactI18next } from 'react-i18next';
 import { Subject } from 'rxjs';
+import de from '../public/locales/de/translation.json';
 import en from '../public/locales/en/translation.json';
 import type {
   CalendarRoomCapabilities,
@@ -647,15 +648,15 @@ function observeLargeCalendarRender(view: 'list' | 'month'): void {
 }
 
 async function start() {
+  const query = new URLSearchParams(window.location.search);
   await i18next.use(initReactI18next).init({
-    lng: 'en',
+    lng: query.get('lng') === 'de' ? 'de' : 'en',
     fallbackLng: 'en',
     interpolation: { escapeValue: false },
-    resources: { en: { translation: en } },
+    resources: { de: { translation: de }, en: { translation: en } },
   });
   registerDateRangeFormatter(i18next);
   setLocale(i18next.language);
-  const query = new URLSearchParams(window.location.search);
   const largeCalendarMode = query.get('mode') === 'large-calendar';
   // The gallery can render both palettes without changing other browser tests.
   const theme = createTheme({

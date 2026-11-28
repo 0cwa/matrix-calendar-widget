@@ -349,6 +349,15 @@
       "submit": "Save description",
       "title": "Edit calendar description"
     },
+    "optionNotes": {
+      "cannotCreateEvents": "You can’t create events here. Ask a room moderator or your server administrator about your permission.",
+      "loadFailed": "Calendars could not be loaded. Reopen the widget to try again.",
+      "loading": "Loading calendars…",
+      "managersOnly": "Only calendar managers can change or delete these calendars.",
+      "noCalendars": "No calendar is available here. Ask a room moderator or your server administrator.",
+      "roomCalendar": "The room calendar can’t be renamed, restyled or deleted here. Ask your server administrator."
+    },
+    "options": "Calendar options",
     "rename": {
       "action": "Rename calendar",
       "calendar": "Calendar",
@@ -420,6 +429,7 @@
     }
   },
   "meetingsToolbar": {
+    "dateNavigation": "Date navigation",
     "filterAriaLabel": "Search",
     "filterPlaceholder": "Search…",
     "next": {

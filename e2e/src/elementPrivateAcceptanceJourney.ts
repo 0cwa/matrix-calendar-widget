@@ -138,22 +138,28 @@ export async function runElementPrivateAcceptanceJourney(
           expectWidgetWarning: false,
         }),
     );
-    const privateClientButtonA = frameA.getByRole('button', {
+    const calendarOptionsA = frameA.getByRole('button', {
+      name: 'Calendar options',
+      exact: true,
+    });
+    const privateClientItemA = frameA.getByRole('menuitem', {
       name: 'Calendar app access',
       exact: true,
     });
     await checkpoint.run('private-ui-access-button-visible', () =>
-      expect(privateClientButtonA).toBeVisible(),
+      expect(calendarOptionsA).toBeVisible(),
     );
-    await checkpoint.run('private-ui-access-button-enabled', () =>
-      expect(privateClientButtonA).toBeEnabled(),
-    );
+    // The menu offers app access only after the calendars have loaded.
+    await checkpoint.run('private-ui-access-button-enabled', async () => {
+      await calendarOptionsA.click();
+      await expect(privateClientItemA).toBeVisible();
+    });
     calendarListRequestObserver.recordSnapshot((observations) =>
       checkpoint.recordCalendarListTransport(observations),
     );
     const initialListResponse = waitForPrivateClientResponse(pageA, 'GET');
     await checkpoint.run('private-ui-access-button-click', () =>
-      privateClientButtonA.click(),
+      privateClientItemA.click(),
     );
     const dialogA = frameA.getByRole('dialog').last();
     await checkpoint.run('private-ui-dialog-visible', () =>
@@ -255,7 +261,8 @@ export async function runElementPrivateAcceptanceJourney(
           .getByRole('button', { name: 'Close', exact: true })
           .click();
         const listedAfterReopen = waitForPrivateClientResponse(pageA, 'GET');
-        await privateClientButtonA.click();
+        await calendarOptionsA.click();
+        await privateClientItemA.click();
         const dialog = frameA.getByRole('dialog').last();
         expect((await listedAfterReopen).status()).toBe(200);
         expect(await privateSetupDetailsAbsent(dialog)).toBe(true);
@@ -466,7 +473,10 @@ export async function runElementPrivateAcceptanceJourney(
         'GET',
       );
       await memberBFrame
-        .getByRole('button', {
+        .getByRole('button', { name: 'Calendar options', exact: true })
+        .click();
+      await memberBFrame
+        .getByRole('menuitem', {
           name: 'Calendar app access',
           exact: true,
         })

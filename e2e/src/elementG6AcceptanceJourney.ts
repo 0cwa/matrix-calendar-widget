@@ -640,14 +640,14 @@ async function observeG6SidePanelToolbar(
   frame: FrameLocator,
 ): Promise<G6SidePanelToolbarObservation> {
   try {
-    const deleteCalendarButton = frame.getByRole('button', {
-      name: 'Delete calendar',
+    const calendarOptionsButton = frame.getByRole('button', {
+      name: 'Calendar options',
       exact: true,
       includeHidden: true,
     });
     const managementToolbarNav = frame
       .locator('nav')
-      .filter({ has: deleteCalendarButton });
+      .filter({ has: calendarOptionsButton });
     const createEventButton = frame.getByRole('button', {
       name: 'Create event',
       exact: true,
