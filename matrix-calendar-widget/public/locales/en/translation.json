@@ -489,6 +489,7 @@
     "copy-to-clipboard": "Copy to clipboard"
   },
   "dateRangePicker": {
+    "changeStart": "Change start",
     "chooseDate": "Choose date range, selected range is {{range, daterange}}",
     "chooseEnd": "Start: {{date, datetime}}. Now choose an end date.",
     "chooseStart": "Choose a start date.",
